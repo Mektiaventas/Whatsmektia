@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% block title %}Configuración – {{ active|capitalize }}{% endblock %}
+{% block content %}
+  <div class="config-header">
+    <h2>Configuración: {{ active|capitalize }}</h2>
+    {% if guardado %}
+      <div class="alert success">¡Guardado correctamente!</div>
+    {% endif %}
+  </div>
+
+  <!-- Pestañas -->
+  <ul class="tabs">
+    {% for tab in tabs %}
+      <li class="tab-{{ tab }} {{ 'active' if tab == active else '' }}">
+        <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
+      </li>
+    {% endfor %}
+  </ul>
+
+  <!-- Contenido de la subpestaña -->
+  {% if active == 'negocio' %}
+    <form class="config-form" method="POST">
+      <div class="form-card">
+        <label>Nombre de tu IA personalizada</label>
+        <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
+      </div>
+      <div class="form-card">
+        <label>Nombre de tu Negocio</label>
+        <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
+      </div>
+      <div class="form-card">
+        <label>Descripción del Negocio</label>
+        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
+      </div>
+      <div class="form-row">
+        <div class="form-card">
+          <label>URL del Negocio</label>
+          <input type="url" name="url" value="{{ datos.url or '' }}">
+        </div>
+        <div class="form-card">
+          <label>Dirección</label>
+          <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-card">
+          <label>Teléfono</label>
+          <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
+        </div>
+        <div class="form-card">
+          <label>Correo de contacto</label>
+          <input type="email" name="correo" value="{{ datos.correo or '' }}">
+        </div>
+      </div>
+      <div class="form-card">
+        <label>¿Qué quieres que haga tu IA?</label>
+        <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
+      </div>
+      <button type="submit" class="btn-primary">Guardar Negocio</button>
+    </form>
+
+  {% elif active == 'personalizacion' %}
+    <form class="config-form" method="POST">
+      <div class="form-card">
+        <label>Tono de la IA</label>
+        <input type="text" name="tono" value="{{ datos.tono or '' }}" required>
+      </div>
+      <div class="form-card">
+        <label>Lenguaje preferido</label>
+        <input type="text" name="lenguaje" value="{{ datos.lenguaje or '' }}" required>
+      </div>
+      <button type="submit" class="btn-primary">Guardar Personalización</button>
+    </form>
+  {% endif %}
+{% endblock %}

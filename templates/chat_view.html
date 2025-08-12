@@ -1,0 +1,36 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Chat con {{ chat[2] or chat[1] }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="sidebar">
+        <a href="{{ url_for('chats') }}">← Volver</a>
+    </div>
+    <div class="chatbox">
+        <h2>{{ chat[2] or chat[1] }} <span style="font-size: 12px;">({{ chat[1] }})</span></h2>
+        <button onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
+        <form method="POST" action="{{ url_for('guardar_nota', telefono=chat[1]) }}">
+            <textarea name="nota" placeholder="Añadir nota..." maxlength="600">{{ chat[4] }}</textarea>
+            <button type="submit">Guardar Nota</button>
+        </form>
+        <div class="mensajes">
+            {% for msg in mensajes %}
+                <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}">{{ msg[2] }}</div>
+            {% endfor %}
+        </div>
+    </div>
+<script>
+function toggleIA() {
+    fetch("/toggle_ia/{{ chat[1] }}", { method: "POST" })
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
+        });
+}
+</script>
+</body>
+</html>

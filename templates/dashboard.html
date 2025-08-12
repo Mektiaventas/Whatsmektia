@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Dashboard General{% endblock %}
+
+{% block content %}
+  <style>
+    .tabs a {
+      padding: 10px 20px;
+      text-decoration: none;
+      border-radius: 20px;
+      border: 2px solid #1f4e79;
+      color: #1f4e79;
+      margin-right: 10px;
+    }
+    .tabs a.active {
+      background-color: #1f4e79;
+      color: white;
+    }
+    .stats {
+      margin-top: 20px;
+      display: flex;
+      gap: 2rem;
+    }
+    .chart-container {
+      margin-top: 40px;
+      height: 600px;
+    }
+  </style>
+
+  <h1 style="color:#1f4e79;">Dashboard General</h1>
+
+  <div class="tabs" style="margin-bottom: 20px;">
+    <a href="/home?period=week" class="{{ 'active' if period == 'week' else '' }}">Últimos 7 días</a>
+    <a href="/home?period=month" class="{{ 'active' if period == 'month' else '' }}">Últimos 30 días</a>
+  </div>
+
+  <div class="stats">
+    <div><strong>Chats distintos:</strong> {{ chat_counts }}</div>
+    <div><strong>Respuestas enviadas:</strong> {{ total_responded }}</div>
+  </div>
+
+  <div class="chart-container">
+    <canvas id="barChart" width="1000" height="600"></canvas>
+  </div>
+
+  <!-- Chart.js y plugin datalabels -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
+<script>
+  const ctx = document.getElementById('barChart').getContext('2d');
+  const rawValues = {{ values|safe }};
+
+  // Calculamos el valor máximo con 10% extra como margen
+  const maxValor = Math.max(...rawValues);
+  const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5; // redondeado al siguiente múltiplo de 5
+
+  const data = {
+    labels: {{ labels|safe }},
+    datasets: [{
+      label: 'Mensajes por número',
+      data: rawValues,
+      backgroundColor: '#1f4e79'
+    }]
+  };
+
+  new Chart(ctx, {
+    type: 'bar',
+    data: data,
+    options: {
+      responsive: false,
+      animation: false,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        datalabels: {
+          anchor: 'end',
+          align: 'end',
+          color: '#fff',
+          font: {
+            weight: 'bold',
+            size: 14
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          suggestedMax: maxAuto
+        }
+      }
+    },
+    plugins: [ChartDataLabels]
+  });
+</script>
+{% endblock %}

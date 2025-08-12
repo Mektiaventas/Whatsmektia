@@ -1,0 +1,130 @@
+{% extends 'base.html' %}
+{% block title %}Configuración – Precios{% endblock %}
+
+{% block content %}
+  <div class="config-header">
+    <h2>Configuración: Precios</h2>
+    {% if guardado %}
+      <div class="alert success">¡Guardado correctamente!</div>
+    {% endif %}
+  </div>
+
+  <!-- Navegación de subpestañas -->
+  <ul class="tabs">
+    {% for tab in tabs %}
+      <li class="{% if tab == active %}active{% endif %}">
+        {% if tab == 'precios' %}
+          <a href="{{ url_for('configuracion_precios') }}">{{ tab|capitalize }}</a>
+        {% else %}
+          <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+
+  <!-- Contenido principal: dos columnas -->
+  <div class="config-content grid grid-cols-2 gap-6">
+
+    <!-- Tarjeta: Lista de precios -->
+    <div class="card">
+      <div class="card-header">
+        <h3>Servicios y Tarifas</h3>
+      </div>
+      <div class="card-body">
+        <div class="table-responsive">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Servicio</th>
+                <th>Descripción</th>
+                <th>Precio</th>
+                <th>Moneda</th>
+                <th>Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for precio in precios %}
+                <tr>
+                  <td>{{ precio.id }}</td>
+                  <td>{{ precio.servicio }}</td>
+                  <td>{{ precio.descripcion or '-' }}</td>
+                  <td>{{ "{:,.2f}".format(precio.precio) }}</td>
+                  <td>{{ precio.moneda }}</td>
+                  <td>
+                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                       class="btn small">Editar</a>
+                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
+                          method="post" class="inline-form">
+                      <button type="submit"
+                              class="btn small danger"
+                              onclick="return confirm('¿Eliminar servicio {{ precio.servicio }}?');">
+                        Borrar
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="6">No hay servicios registrados.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tarjeta: Formulario alta/edición -->
+    <div class="card">
+      <div class="card-header">
+        <h3>{{ precio_edit and 'Editar Servicio' or 'Agregar Servicio' }}</h3>
+      </div>
+      <div class="card-body">
+        <form action="{{ url_for('configuracion_precio_guardar') }}" method="post">
+          {% if precio_edit %}
+            <input type="hidden" name="id" value="{{ precio_edit.id }}">
+          {% endif %}
+
+          <div class="form-group">
+            <label for="servicio">Servicio *</label>
+            <input type="text" id="servicio" name="servicio" class="input" required
+                   value="{{ precio_edit.servicio if precio_edit else '' }}">
+          </div>
+
+          <div class="form-group">
+            <label for="descripcion">Descripción</label>
+            <textarea id="descripcion" name="descripcion" class="textarea" rows="2">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
+          </div>
+
+          <div class="form-group">
+            <label for="precio">Precio *</label>
+            <input type="number" step="0.01" min="0" id="precio" name="precio" class="input" required
+                   value="{{ precio_edit.precio if precio_edit else '' }}">
+          </div>
+
+          <div class="form-group">
+            <label for="moneda">Moneda *</label>
+            <select id="moneda" name="moneda" class="select" required>
+              {% for m in ['MXN','USD','EUR'] %}
+                <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
+                  {{ m }}
+                </option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="form-actions flex justify-end gap-2">
+            <button type="submit" class="btn primary">
+              {{ precio_edit and 'Actualizar' or 'Guardar' }}
+            </button>
+            <a href="{{ url_for('configuracion_precios') }}" class="btn secondary">
+              Cancelar
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+  </div>
+{% endblock %}

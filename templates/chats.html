@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+{% block title %}Conversaciones{% endblock %}
+
+{% block content %}
+<div class="chat-list-header">
+  <h2>Conversaciones</h2>
+</div>
+
+<div class="chat-layout-v2">
+  <!-- Lado izquierdo: Lista -->
+  <aside class="chat-list-v2">
+    <div class="chat-list-tools">
+      <button class="add-contact-btn">+ Agregar Contacto</button>
+      <input type="text" placeholder="Buscar chats..." class="search-input">
+    </div>
+
+    <div class="chat-items">
+      {% for chat in chats %}
+      <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
+        <div class="chat-avatar">
+          <img 
+            src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
+            alt="Avatar"
+            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
+            width="40" height="40">
+        </div>
+        <div class="chat-info">
+          <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
+            <span class="alias-view">
+              {{ chat.alias or chat.nombre or chat.numero }}
+            </span>
+            <span class="alias-edit" style="display:none;">
+              <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+            </span>
+            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+              ✏️
+            </button>
+          </div>
+          {% if chat.alias or chat.nombre %}
+            <div class="chat-num" style="font-size:11px;color:#888;">
+              {{ chat.numero }}
+            </div>
+          {% endif %}
+          <div class="chat-preview">
+            {% if chat.ultimo_mensaje %}
+              {{ chat.ultimo_mensaje[:35] }}...
+            {% else %}
+              Sin mensajes
+            {% endif %}
+          </div>
+        </div>
+        <div class="chat-meta">
+          {% if chat.ultima_fecha %}
+            {{ chat.ultima_fecha.strftime("%d/%m/%Y") }}
+          {% endif %}
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+  </aside>
+
+  <!-- Centro: Mensajes -->
+  <section class="chat-panel-v2">
+    <div class="chat-panel-header" data-num="{{ selected }}">
+      {% if selected %}
+        <span class="alias-view">
+          {{ (chats | selectattr("numero", "equalto", selected) | first).alias
+            or (chats | selectattr("numero", "equalto", selected) | first).nombre
+            or selected }}
+        </span>
+        <span class="alias-edit" style="display:none;">
+          <input type="text" value="{{ (chats | selectattr("numero", "equalto", selected) | first).alias
+            or (chats | selectattr("numero", "equalto", selected) | first).nombre
+            or '' }}" data-num="{{ selected }}" maxlength="100" style="width: 110px;">
+        </span>
+        <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+          ✏️
+        </button>
+        <span style="margin-left:8px; color:#888;">{{ selected }}</span>
+      {% else %}
+        Selecciona un chat
+      {% endif %}
+    </div>
+
+    <div class="msgs-wrap-v2" id="msgs">
+      {% if mensajes %}
+        {% for msg in mensajes %}
+          {% if msg.respuesta %}
+            <div class="msg-box msg-user">
+              {{ msg.mensaje }}
+              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
+            </div>
+            <div class="msg-box msg-ai">
+              {{ msg.respuesta }}
+              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
+            </div>
+          {% else %}
+            <div class="msg-box msg-user">
+              {{ msg.mensaje }}
+              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      {% else %}
+        <p style="padding:1rem;">Selecciona un chat para ver mensajes.</p>
+      {% endif %}
+    </div>
+
+    {% if selected %}
+    <form method="POST" action="/send-manual" class="reply-form">
+      <input type="hidden" name="numero" value="{{ selected }}">
+      <div class="input-group">
+        <button type="button" class="emoji-btn">😊</button>
+        <input type="text" name="texto" placeholder="Escribe un mensaje..." class="reply-input-line" autocomplete="off" />
+        <button type="submit" class="send-btn">Enviar</button>
+      </div>
+    </form>
+    {% endif %}
+  </section>
+
+  <!-- Lado derecho -->
+  <aside class="sidebar-right">
+    {% if selected %}
+      <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Eliminar este chat?')">
+        <button type="submit" class="delete-btn">🗑️ Eliminar Chat</button>
+      </form>
+      <form action="/toggle_ai/{{ selected }}" method="POST">
+        <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, True) else 'off' }}">
+          IA {{ 'ON' if IA_ESTADOS.get(selected, True) else 'OFF' }}
+        </button>
+      </form>
+    {% endif %}
+  </aside>
+</div>
+
+<script>
+  // Función para activar edición de alias
+  function activarEdicionAlias(parent) {
+    parent.querySelector('.alias-view').style.display = 'none';
+    parent.querySelector('.alias-edit').style.display = '';
+    const input = parent.querySelector('input[type=text]');
+    input.focus();
+    input.select();
+
+    function terminarEdicion() {
+      fetch(`/contactos/${input.dataset.num}/alias`, {
+        method: 'POST',
+        body: new URLSearchParams({alias: input.value}),
+        headers: {'Content-Type':'application/x-www-form-urlencoded'}
+      }).then(() => {
+        parent.querySelector('.alias-edit').style.display = 'none';
+        parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
+        parent.querySelector('.alias-view').style.display = '';
+
+        // ACTUALIZA EN LISTA TAMBIÉN (si cambiaste en header)
+        // Busca en la lista de contactos y actualiza el alias ahí
+        document.querySelectorAll('.chat-name').forEach(function(chatName) {
+          if(chatName.dataset.num === input.dataset.num) {
+            chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
+          }
+        });
+      });
+    }
+
+    input.onblur = terminarEdicion;
+    input.onkeydown = function(e) {
+      if (e.key === 'Enter') { terminarEdicion(); }
+      if (e.key === 'Escape') {
+        parent.querySelector('.alias-edit').style.display = 'none';
+        parent.querySelector('.alias-view').style.display = '';
+      }
+    };
+  }
+
+  // Activar edición en todos los botones ✏️, tanto lista como header
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const parent = btn.closest('.chat-name, .chat-panel-header');
+        activarEdicionAlias(parent);
+      });
+    });
+  });
+
+  // Scroll to bottom mensajes
+  const msgs = document.getElementById('msgs');
+  if (msgs) {
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+</script>
+{% endblock %}

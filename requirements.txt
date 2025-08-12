@@ -1,0 +1,7 @@
+pytz
+flask
+requests
+openai
+python-dotenv
+mysql-connector-python
+gunicorn               # si despliegas con Gunicorn
