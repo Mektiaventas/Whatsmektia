@@ -1,19 +1,57 @@
 #!/bin/bash
+
 DOMAIN="mektia.com"
 
 echo "==== 1️⃣ Comprobando DNS ===="
-dig +short $DOMAIN
-dig +short www.$DOMAIN
+DNS_MAIN=$(dig +short $DOMAIN)
+DNS_WWW=$(dig +short www.$DOMAIN)
+
+echo "mektia.com → $DNS_MAIN"
+echo "www.mektia.com → $DNS_WWW"
+
+if [[ -z "$DNS_MAIN" || -z "$DNS_WWW" ]]; then
+    echo "❌ Error: DNS no resuelve correctamente."
+else
+    echo "✅ DNS resuelve correctamente."
+fi
 
 echo -e "\n==== 2️⃣ Probando puertos TCP (80 y 443) ===="
-nc -zv $DOMAIN 80
-nc -zv $DOMAIN 443
+check_port() {
+    local PORT=$1
+    timeout 3 bash -c "echo > /dev/tcp/$DOMAIN/$PORT" &>/dev/null
+    if [[ $? -eq 0 ]]; then
+        echo "✅ Puerto $PORT abierto"
+    else
+        echo "❌ Puerto $PORT cerrado o filtrado (firewall / proveedor ISP)"
+    fi
+}
+
+check_port 80
+check_port 443
 
 echo -e "\n==== 3️⃣ Probando HTTP/HTTPS ===="
-echo "HTTP:"
-curl -I http://$DOMAIN
-echo -e "\nHTTPS:"
-curl -I https://$DOMAIN
+check_http() {
+    local PROTO=$1
+    RESPONSE=$(curl -Is --max-time 5 $PROTO://$DOMAIN | head -n 1)
+    if [[ $RESPONSE == *"200"* || $RESPONSE == *"301"* || $RESPONSE == *"302"* ]]; then
+        echo "✅ $PROTO funciona: $RESPONSE"
+    else
+        echo "❌ $PROTO no responde o hay error: $RESPONSE"
+    fi
+}
+
+check_http http
+check_http https
 
 echo -e "\n==== 4️⃣ Comprobando Nginx status ===="
-sudo systemctl status nginx | grep Active
+NGINX_STATUS=$(systemctl is-active nginx)
+if [[ "$NGINX_STATUS" == "active" ]]; then
+    echo "✅ Nginx activo"
+else
+    echo "❌ Nginx inactivo o con error"
+fi
+
+echo -e "\n==== 5️⃣ Comprobación final ===="
+echo "DNS: $DNS_MAIN / $DNS_WWW"
+echo "Nginx: $NGINX_STATUS"
+echo "Puertos 80 y 443: revisa los mensajes anteriores"
