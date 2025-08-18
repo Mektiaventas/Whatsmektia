@@ -2,7 +2,7 @@
 
 DOMAIN="mektia.com"
 
-echo "==== 1️⃣ Comprobando DNS ===="
+echo "==== 1 ️⃣  Comprobando DNS ===="
 DNS_MAIN=$(dig +short $DOMAIN)
 DNS_WWW=$(dig +short www.$DOMAIN)
 
@@ -15,7 +15,7 @@ else
     echo "✅ DNS resuelve correctamente."
 fi
 
-echo -e "\n==== 2️⃣ Probando puertos TCP (80 y 443) ===="
+echo -e "\n==== 2 ️⃣ Probando puertos TCP (80 y 443) ===="
 check_port() {
     local PORT=$1
     timeout 3 bash -c "echo > /dev/tcp/$DOMAIN/$PORT" &>/dev/null
@@ -29,7 +29,7 @@ check_port() {
 check_port 80
 check_port 443
 
-echo -e "\n==== 3️⃣ Probando HTTP/HTTPS ===="
+echo -e "\n==== 3 ️⃣ Probando HTTP/HTTPS ===="
 check_http() {
     local PROTO=$1
     RESPONSE=$(curl -Is --max-time 5 $PROTO://$DOMAIN | head -n 1)
@@ -43,7 +43,7 @@ check_http() {
 check_http http
 check_http https
 
-echo -e "\n==== 4️⃣ Comprobando Nginx status ===="
+echo -e "\n==== 4 ️⃣ Comprobando Nginx status ===="
 NGINX_STATUS=$(systemctl is-active nginx)
 if [[ "$NGINX_STATUS" == "active" ]]; then
     echo "✅ Nginx activo"
