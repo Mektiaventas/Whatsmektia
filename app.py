@@ -670,18 +670,19 @@ def ver_chat(numero):
     cursor = conn.cursor(dictionary=True)
     # 1. Traer TODOS los chats para la lista de la izquierda (con alias y nombre)
     cursor.execute("""
-        SELECT
-          c.numero,
-          MAX(c.timestamp) AS ultima_fecha,
-          cont.imagen_url,
-          cont.nombre,
-          cont.alias,
-          (SELECT mensaje FROM conversaciones cc WHERE cc.numero = c.numero ORDER BY cc.timestamp DESC LIMIT 1) AS ultimo_mensaje
-        FROM conversaciones c
-        LEFT JOIN contactos cont ON cont.numero_telefono = c.numero
-        GROUP BY c.numero
-        ORDER BY ultima_fecha DESC;
-    """)
+        SELECT 
+          conv.numero, 
+          conv.mensaje, 
+          conv.respuesta, 
+          conv.timestamp, 
+          cont.imagen_url, 
+          cont.nombre
+        FROM conversaciones conv
+        LEFT JOIN contactos cont 
+          ON conv.numero = cont.numero_telefono
+        WHERE conv.numero = %s
+        ORDER BY conv.timestamp ASC
+    """, (numero_chat,))
     chats = cursor.fetchall()
 
     # 2. Traer todos los mensajes de este chat
