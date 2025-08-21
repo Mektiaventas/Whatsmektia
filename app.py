@@ -682,7 +682,7 @@ def ver_chat(numero):
           ON conv.numero = cont.numero_telefono
         WHERE conv.numero = %s
         ORDER BY conv.timestamp ASC
-    """, (numero_chat,))
+    """, (numero,))
     chats = cursor.fetchall()
 
     # 2. Traer todos los mensajes de este chat
