@@ -644,17 +644,16 @@ def ver_chats():
     conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
-        SELECT
-          c.numero,
-          MAX(c.timestamp) AS ultima_fecha,
-          cont.imagen_url,
-          cont.alias,
-          cont.nombre,
-          (SELECT mensaje FROM conversaciones cc WHERE cc.numero = c.numero ORDER BY cc.timestamp DESC LIMIT 1) AS ultimo_mensaje
-        FROM conversaciones c
-        LEFT JOIN contactos cont ON cont.numero_telefono = c.numero
-        GROUP BY c.numero
-        ORDER BY ultima_fecha DESC;
+        SELECT 
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          cont.nombre
+        FROM conversaciones conv
+        JOIN contactos cont 
+          ON conv.numero = cont.numero_telefono
+        GROUP BY conv.numero, cont.imagen_url, cont.nombre
+        ORDER BY MAX(conv.timestamp) DESC
     """)
     chats = cursor.fetchall()
     cursor.close()
