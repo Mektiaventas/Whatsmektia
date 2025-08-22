@@ -518,6 +518,15 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        payload = request.get_json()
+        print("📥 Payload recibido:", json.dumps(payload, indent=2))
+        # aquí va tu código actual de procesamiento
+        return "OK", 200
+    except Exception as e:
+        print("🔴 Error en webhook:", str(e))
+        return "Error interno", 500
 def recibir_mensaje():
     payload = request.get_json()
     app.logger.info(f"📥 Payload: {payload}")
