@@ -3,24 +3,15 @@ import pytz
 import os
 import logging
 import requests
-# --- Avatar desde WhatsApp Web ---
 import json
 import base64
-from playwright.sync_api import sync_playwright
-from pathlib import Path
-# --- -------------------
-
-from flask import Flask
-import re
 import mysql.connector
-from flask import (
-    Flask, request, render_template,
-    redirect, url_for, abort, flash
-)
+from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
 from openai import OpenAI
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
+
 tz_mx = pytz.timezone('America/Mexico_City')
 
 load_dotenv()
@@ -29,172 +20,26 @@ app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
 
 # ——— Env vars ———
-VERIFY_TOKEN   = os.getenv("VERIFY_TOKEN")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-DB_HOST        = os.getenv("DB_HOST")
-DB_USER        = os.getenv("DB_USER")
-DB_PASSWORD    = os.getenv("DB_PASSWORD")
-DB_NAME        = os.getenv("DB_NAME")
-MI_NUMERO_BOT  = os.getenv("MI_NUMERO_BOT")
-ALERT_NUMBER   = os.getenv("ALERT_NUMBER", "524491182201")
+DB_HOST = os.getenv("DB_HOST")
+DB_USER = os.getenv("DB_USER")
+DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_NAME = os.getenv("DB_NAME")
+MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
+ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
+PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 IA_ESTADOS = {}
 
-
-# Diccionario de prefijos a código de país (solo algunos ejemplos, puedes ampliar)
+# Diccionario de prefijos a código de país
 PREFIJOS_PAIS = {
-    '52': 'mx',  # México
-    '1': 'us',   # USA y Canadá
-    '54': 'ar',  # Argentina
-    '57': 'co',  # Colombia
-    '55': 'br',  # Brasil
-    '34': 'es',  # España
-    '51': 'pe',  # Perú
-    '56': 'cl',  # Chile
-    '58': 've',  # Venezuela
-    '593': 'ec', # Ecuador
-    '591': 'bo', # Bolivia
-    '507': 'pa', # Panamá
-    '502': 'gt', # Guatemala
-    # ... agrega los que necesites
+    '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
+    '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
+    '591': 'bo', '507': 'pa', '502': 'gt'
 }
-def descargar_media_y_guardar_en_db(media_id, numero):
-    """
-    Descarga la media con Graph API y actualiza contactos.imagen_url y avatar_actualizado_en.
-    """
-    # 1) Obtén la URL de descarga
-    url_meta = f"https://graph.facebook.com/v23.0/{media_id}"
-    params   = {'fields':'url','access_token': WHATSAPP_TOKEN}
-    r_meta = requests.get(url_meta, params=params, timeout=10)
-    r_meta.raise_for_status()
-    media_url = r_meta.json().get('url')
-
-    # 2) Descarga el contenido binario
-    r_bin = requests.get(media_url, headers={'Authorization':f'Bearer {WHATSAPP_TOKEN}'}, timeout=10)
-    r_bin.raise_for_status()
-    content = r_bin.content
-
-    # 3) Guarda en disco (opcional) y arma el data-URL
-    import base64
-    b64 = base64.b64encode(content).decode()
-    data_url = f"data:image/jpeg;base64,{b64}"
-
-    # 4) Guarda en la base
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE contactos
-           SET imagen_url = %s,
-               avatar_actualizado_en = %s
-         WHERE numero_telefono = %s;
-    """, (data_url, datetime.utcnow(), numero))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    app.logger.info(f"✅ Avatar guardado para {numero}")
-
-
-def get_country_flag(numero):
-    """
-    Devuelve el código de país a partir del número (formato internacional) y la url de bandera.
-    """
-    if not numero:
-        return None
-    numero = str(numero)
-    # Quita signo "+" si lo trae
-    if numero.startswith('+'):
-        numero = numero[1:]
-    # Encuentra prefijo (máximo 3 dígitos)
-    for i in range(3, 0, -1):
-        prefijo = numero[:i]
-        if prefijo in PREFIJOS_PAIS:
-            codigo = PREFIJOS_PAIS[prefijo]
-            # Usamos flagcdn.com para traer banderas SVG de 24px de alto
-            return f"https://flagcdn.com/24x18/{codigo}.png"
-    return None
-
-# Registrar como filtro Jinja
-
-app.jinja_env.filters['bandera'] = get_country_flag
-
-# ——— Función auxiliar para descargar y guardar el avatar ———
-
-# ——— Función para descargar avatar vía WhatsApp Web con Playwright ———
-import mysql.connector
-import requests
-import os
-
-def fetch_and_save_avatar_api(wa_id):
-    """Obtiene la imagen de perfil de un contacto desde la API de WhatsApp y la guarda en la DB."""
-    try:
-        token = os.getenv("WHATSAPP_TOKEN")  # Tu token en Render u Oracle VM
-        phone_number_id = os.getenv("PHONE_NUMBER_ID")  # ID de número de WhatsApp
-
-        # Llamada a la API de WhatsApp para obtener info del perfil
-        url = f"https://graph.facebook.com/v21.0/{wa_id}"
-        params = {"fields": "profile_pic"}
-        headers = {"Authorization": f"Bearer {token}"}
-
-        response = requests.get(url, headers=headers, params=params)
-        response.raise_for_status()
-        data = response.json()
-
-        image_url = data.get("profile_pic", None)
-        if not image_url:
-            print(f"No se encontró imagen de perfil para {wa_id}")
-            return None
-
-        # Guardar en la DB
-        conn = mysql.connector.connect(
-            host=os.getenv("MYSQL_HOST"),
-            user=os.getenv("MYSQL_USER"),
-            password=os.getenv("MYSQL_PASSWORD"),
-            database=os.getenv("MYSQL_DATABASE")
-        )
-        cursor = conn.cursor()
-
-        sql = """
-        UPDATE contactos
-        SET image_url = %s
-        WHERE wa_id = %s
-        """
-        cursor.execute(sql, (image_url, wa_id))
-        conn.commit()
-
-        cursor.close()
-        conn.close()
-
-        print(f"Imagen de perfil guardada para {wa_id}: {image_url}")
-        return image_url
-
-    except Exception as e:
-        print(f"Error al obtener/guardar imagen de perfil: {e}")
-        return None
-
-def db_connection():
-    return mysql.connector.connect(
-        host=os.getenv("DB_HOST", "localhost"),
-        user=os.getenv("DB_USER", "root"),
-        password=os.getenv("DB_PASSWORD", "admin"),
-        database=os.getenv("DB_NAME", "PlataformaIA_CIEA_DB")
-    )
-
-
-
-def necesita_avatar(numero):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT imagen_url FROM contactos WHERE numero_telefono = %s;", (numero,))
-    resultado = cursor.fetchone()
-    cursor.close()
-    conn.close()
-
-    if resultado:
-        imagen = resultado[0]
-        return not imagen or imagen.strip() == '' or 'default-avatar.png' in imagen
-    return True
 
 # ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios']
@@ -204,28 +49,27 @@ def get_db_connection():
         host=DB_HOST,
         user=DB_USER,
         password=DB_PASSWORD,
-        database=DB_NAME,
-        ssl_ca="/etc/ssl/certs/ca-certificates.crt"
+        database=DB_NAME
     )
 
 # ——— Configuración en MySQL ———
 def load_config():
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
-      CREATE TABLE IF NOT EXISTS configuracion (
-        id INT PRIMARY KEY DEFAULT 1,
-        ia_nombre      VARCHAR(100),
-        negocio_nombre VARCHAR(100),
-        descripcion    TEXT,
-        url            VARCHAR(255),
-        direccion      VARCHAR(255),
-        telefono       VARCHAR(50),
-        correo         VARCHAR(100),
-        que_hace       TEXT,
-        tono           VARCHAR(50),
-        lenguaje       VARCHAR(50)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        CREATE TABLE IF NOT EXISTS configuracion (
+            id INT PRIMARY KEY DEFAULT 1,
+            ia_nombre VARCHAR(100),
+            negocio_nombre VARCHAR(100),
+            descripcion TEXT,
+            url VARCHAR(255),
+            direccion VARCHAR(255),
+            telefono VARCHAR(50),
+            correo VARCHAR(100),
+            que_hace TEXT,
+            tono VARCHAR(50),
+            lenguaje VARCHAR(50)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     row = cursor.fetchone()
@@ -236,17 +80,17 @@ def load_config():
         return {'negocio': {}, 'personalizacion': {}}
 
     negocio = {
-        'ia_nombre':      row['ia_nombre'],
+        'ia_nombre': row['ia_nombre'],
         'negocio_nombre': row['negocio_nombre'],
-        'descripcion':    row['descripcion'],
-        'url':            row['url'],
-        'direccion':      row['direccion'],
-        'telefono':       row['telefono'],
-        'correo':         row['correo'],
-        'que_hace':       row['que_hace'],
+        'descripcion': row['descripcion'],
+        'url': row['url'],
+        'direccion': row['direccion'],
+        'telefono': row['telefono'],
+        'correo': row['correo'],
+        'que_hace': row['que_hace'],
     }
     personalizacion = {
-        'tono':     row['tono'],
+        'tono': row['tono'],
         'lenguaje': row['lenguaje'],
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
@@ -255,25 +99,25 @@ def save_config(cfg_all):
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
 
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-      INSERT INTO configuracion
-        (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-         telefono, correo, que_hace, tono, lenguaje)
-      VALUES
-        (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-      ON DUPLICATE KEY UPDATE
-        ia_nombre      = VALUES(ia_nombre),
-        negocio_nombre = VALUES(negocio_nombre),
-        descripcion    = VALUES(descripcion),
-        url            = VALUES(url),
-        direccion      = VALUES(direccion),
-        telefono       = VALUES(telefono),
-        correo         = VALUES(correo),
-        que_hace       = VALUES(que_hace),
-        tono           = VALUES(tono),
-        lenguaje       = VALUES(lenguaje);
+        INSERT INTO configuracion
+            (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
+             telefono, correo, que_hace, tono, lenguaje)
+        VALUES
+            (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            ia_nombre = VALUES(ia_nombre),
+            negocio_nombre = VALUES(negocio_nombre),
+            descripcion = VALUES(descripcion),
+            url = VALUES(url),
+            direccion = VALUES(direccion),
+            telefono = VALUES(telefono),
+            correo = VALUES(correo),
+            que_hace = VALUES(que_hace),
+            tono = VALUES(tono),
+            lenguaje = VALUES(lenguaje);
     ''', (
         neg.get('ia_nombre'),
         neg.get('negocio_nombre'),
@@ -295,14 +139,14 @@ def obtener_todos_los_precios():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
-      CREATE TABLE IF NOT EXISTS precios (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        servicio VARCHAR(100) NOT NULL,
-        descripcion TEXT,
-        precio DECIMAL(10,2) NOT NULL,
-        moneda CHAR(3) NOT NULL,
-        UNIQUE(servicio)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        CREATE TABLE IF NOT EXISTS precios (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            servicio VARCHAR(100) NOT NULL,
+            descripcion TEXT,
+            precio DECIMAL(10,2) NOT NULL,
+            moneda CHAR(3) NOT NULL,
+            UNIQUE(servicio)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM precios ORDER BY servicio;")
     rows = cursor.fetchall()
@@ -323,10 +167,10 @@ def obtener_precio(servicio_nombre: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-      SELECT precio, moneda
+        SELECT precio, moneda
         FROM precios
-       WHERE LOWER(servicio)=LOWER(%s)
-       LIMIT 1;
+        WHERE LOWER(servicio)=LOWER(%s)
+        LIMIT 1;
     """, (servicio_nombre,))
     res = cursor.fetchone()
     cursor.close()
@@ -351,14 +195,13 @@ def obtener_historial(numero, limite=10):
 
 # ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero):
-    cfg            = load_config()
-    neg            = cfg['negocio']
-    ia_nombre      = neg.get('ia_nombre', 'Asistente')
+    cfg = load_config()
+    neg = cfg['negocio']
+    ia_nombre = neg.get('ia_nombre', 'Asistente')
     negocio_nombre = neg.get('negocio_nombre', '')
-    descripcion    = neg.get('descripcion', '')
-    que_hace       = neg.get('que_hace', '')
+    descripcion = neg.get('descripcion', '')
+    que_hace = neg.get('que_hace', '')
 
-    # Inyecto tabla de precios
     precios = obtener_todos_los_precios()
     lista_precios = "\n".join(
         f"- {p['servicio']}: {p['precio']} {p['moneda']}"
@@ -379,13 +222,12 @@ Servicios y tarifas actuales:
 Mantén siempre un tono profesional y conciso.
 """.strip()
 
-    # Agrego historial
     historial = obtener_historial(numero)
-    messages_chain = [{'role':'system', 'content': system_prompt}]
+    messages_chain = [{'role': 'system', 'content': system_prompt}]
     for entry in historial:
-        messages_chain.append({'role':'user',      'content': entry['mensaje']})
-        messages_chain.append({'role':'assistant', 'content': entry['respuesta']})
-    messages_chain.append({'role':'user', 'content': mensaje_usuario})
+        messages_chain.append({'role': 'user', 'content': entry['mensaje']})
+        messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+    messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
         resp = client.chat.completions.create(
@@ -399,8 +241,7 @@ Mantén siempre un tono profesional y conciso.
 
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
-    PHONE_NUMBER_ID = MI_NUMERO_BOT  # asegúrate de que sea tu Phone Number ID
-    url     = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
         'Content-Type': 'application/json'
@@ -422,22 +263,20 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-
 def guardar_conversacion(numero, mensaje, respuesta):
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS conversaciones (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          numero VARCHAR(20),
-          mensaje TEXT,
-          respuesta TEXT,
-          timestamp DATETIME
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            numero VARCHAR(20),
+            mensaje TEXT,
+            respuesta TEXT,
+            timestamp DATETIME
         ) ENGINE=InnoDB;
     ''')
 
-    # Guardamos en UTC real
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
@@ -455,8 +294,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia):
     if 'hablar con ' in texto or 'ponme con ' in texto:
         return True
     disparadores = [
-        'hablar con persona', 'hablar con un asesor', 'hablar con un agente',
-        'quiero un asesor', 'atención humana', 'soporte técnico',
+        'hablar con persona', 'hablar con asesor', 'hablar con agente',
+        'quiero asesor', 'atención humana', 'soporte técnico',
         'es urgente', 'necesito ayuda humana'
     ]
     for frase in disparadores:
@@ -464,19 +303,18 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia):
             return True
     respuesta = respuesta_ia.lower()
     canalizaciones = [
-        'te canalizaré', 'un asesor te contactará', 'te paso con'
+        'te canalizaré', 'asesor te contactará', 'te paso con'
     ]
     for tag in canalizaciones:
         if tag in respuesta:
             return True
     return False
 
-
-
 def enviar_template_alerta(nombre, numero_cliente, mensaje_clave, resumen):
     def sanitizar(texto):
-        clean = texto.replace('\n',' ').replace('\r',' ').replace('\t',' ')
+        clean = texto.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
         return ' '.join(clean.split())
+    
     payload = {
         "messaging_product": "whatsapp",
         "to": f"+{ALERT_NUMBER}",
@@ -487,28 +325,45 @@ def enviar_template_alerta(nombre, numero_cliente, mensaje_clave, resumen):
             "components": [{
                 "type": "body",
                 "parameters": [
-                    {"type":"text","text":sanitizar(nombre)},
-                    {"type":"text","text":sanitizar(numero_cliente)},
-                    {"type":"text","text":sanitizar(mensaje_clave)},
-                    {"type":"text","text":sanitizar(resumen)}
+                    {"type": "text", "text": sanitizar(nombre)},
+                    {"type": "text", "text": sanitizar(numero_cliente)},
+                    {"type": "text", "text": sanitizar(mensaje_clave)},
+                    {"type": "text", "text": sanitizar(resumen)}
                 ]
             }]
         }
     }
+    
     try:
         r = requests.post(
-            f"https://graph.facebook.com/v19.0/{MI_NUMERO_BOT}/messages",
-            headers={'Authorization':f'Bearer {WHATSAPP_TOKEN}','Content-Type':'application/json'},
+            f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages",
+            headers={
+                'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+                'Content-Type': 'application/json'
+            },
             json=payload
         )
         app.logger.info(f"📤 Alerta enviada: {r.status_code} {r.text}")
     except Exception as e:
         app.logger.error(f"🔴 Error enviando alerta: {e}")
 
-@app.route('/test-alerta')
-def test_alerta():
-    enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
-    return "🚀 Test alerta disparada."
+def resumen_rafa(numero):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute(
+        "SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 5;",
+        (numero,)
+    )
+    historial = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    resumen = "Últimas interacciones:\n"
+    for i, msg in enumerate(historial):
+        resumen += f"{i+1}. Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            resumen += f"   IA: {msg['respuesta']}\n"
+    return resumen
 
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
@@ -521,29 +376,22 @@ def webhook_verification():
 def webhook():
     try:
         payload = request.get_json()
-        print("📥 Payload recibido:", json.dumps(payload, indent=2))
-        # aquí va tu código actual de procesamiento
-        return "OK", 200
-    except Exception as e:
-        print("🔴 Error en webhook:", str(e))
-        return "Error interno", 500
-def recibir_mensaje():
-    payload = request.get_json()
-    app.logger.info(f"📥 Payload: {payload}")
-    try:
-        entry    = payload['entry'][0]
-        change   = entry['changes'][0]['value']
+        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)}")
+        
+        entry = payload['entry'][0]
+        change = entry['changes'][0]['value']
         mensajes = change.get('messages')
+        
         if not mensajes:
             return 'OK', 200
 
-        # ——— ACTUALIZA nombre y crea contacto si no existe ———
+        # Actualizar contacto
         contactos = change.get('contacts')
         if contactos and len(contactos) > 0:
             profile_name = contactos[0].get('profile', {}).get('name')
-            wa_id        = contactos[0].get('wa_id')
+            wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
-                conn   = get_db_connection()
+                conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO contactos (numero_telefono, nombre, plataforma)
@@ -554,24 +402,15 @@ def recibir_mensaje():
                 cursor.close()
                 conn.close()
 
-        msg    = mensajes[0]
+        msg = mensajes[0]
         numero = msg['from']
-        texto  = msg.get('text', {}).get('body', '')
+        texto = msg.get('text', {}).get('body', '')
 
-        # ——— SI NO TENEMOS AVATAR, LO DESCARGAMOS ———
-        if necesita_avatar(numero):
-            try:
-                app.logger.info(f"🖼️ Descargando avatar de {numero}…")
-                fetch_and_save_avatar(numero)
-                app.logger.info(f"✅ Avatar de {numero} guardado correctamente.")
-            except Exception as e:
-                app.logger.error(f"❌ Error al descargar avatar de {numero}: {e}")
-
-        # Ignorar mensajes de nuestro propio bot
+        # Ignorar mensajes del propio bot
         if numero == MI_NUMERO_BOT:
             return 'OK', 200
 
-        # ——— Consultas de precio ———
+        # Consultas de precio
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
             info = obtener_precio(servicio)
@@ -584,7 +423,7 @@ def recibir_mensaje():
             guardar_conversacion(numero, texto, respuesta)
             return 'OK', 200
 
-        # ——— IA normal ———
+        # IA normal
         IA_ESTADOS.setdefault(numero, True)
         respuesta = ""
         if IA_ESTADOS[numero]:
@@ -595,12 +434,11 @@ def recibir_mensaje():
                 enviar_template_alerta("Sin nombre", numero, texto, resumen)
 
         guardar_conversacion(numero, texto, respuesta)
+        return 'OK', 200
 
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
         return 'Error interno', 500
-
-    return 'OK', 200
 
 # ——— UI ———
 @app.route('/')
@@ -610,10 +448,10 @@ def inicio():
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
-    now    = datetime.now()
-    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
+    now = datetime.now()
+    start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
@@ -636,8 +474,8 @@ def home():
     cursor.close()
     conn.close()
 
-    labels = [num for num,_ in messages_per_chat]
-    values = [cnt for _,cnt in messages_per_chat]
+    labels = [num for num, _ in messages_per_chat]
+    values = [cnt for _, cnt in messages_per_chat]
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -650,17 +488,16 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
         SELECT 
-          conv.numero, 
-          COUNT(*) AS total_mensajes, 
-          cont.imagen_url, 
-          cont.nombre
+            conv.numero, 
+            COUNT(*) AS total_mensajes, 
+            cont.imagen_url, 
+            cont.nombre
         FROM conversaciones conv
-        JOIN contactos cont 
-          ON conv.numero = cont.numero_telefono
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         GROUP BY conv.numero, cont.imagen_url, cont.nombre
         ORDER BY MAX(conv.timestamp) DESC
     """)
@@ -672,36 +509,32 @@ def ver_chats():
         selected=None, IA_ESTADOS=IA_ESTADOS
     )
 
-
 @app.route('/chats/<numero>')
 def ver_chat(numero):
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    # 1. Traer TODOS los chats para la lista de la izquierda (con alias y nombre)
+    
     cursor.execute("""
         SELECT 
-          conv.numero, 
-          conv.mensaje, 
-          conv.respuesta, 
-          conv.timestamp, 
-          cont.imagen_url, 
-          cont.nombre
+            conv.numero, 
+            conv.mensaje, 
+            conv.respuesta, 
+            conv.timestamp, 
+            cont.imagen_url, 
+            cont.nombre
         FROM conversaciones conv
-        LEFT JOIN contactos cont 
-          ON conv.numero = cont.numero_telefono
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         WHERE conv.numero = %s
         ORDER BY conv.timestamp ASC
     """, (numero,))
     chats = cursor.fetchall()
 
-    # 2. Traer todos los mensajes de este chat
     cursor.execute(
         "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
         (numero,)
     )
     msgs = cursor.fetchall()
 
-    # 3. Horario local
     for msg in msgs:
         if msg.get('timestamp'):
             msg['timestamp'] = msg['timestamp'].replace(tzinfo=pytz.UTC).astimezone(tz_mx)
@@ -712,7 +545,7 @@ def ver_chat(numero):
         chats=chats, mensajes=msgs,
         selected=numero, IA_ESTADOS=IA_ESTADOS
     )
-    
+
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
     IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
@@ -720,8 +553,8 @@ def toggle_ai(numero):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    numero    = request.form['numero']
-    texto     = request.form['texto']
+    numero = request.form['numero']
+    texto = request.form['texto']
     respuesta = ""
     if IA_ESTADOS.get(numero, True):
         respuesta = responder_con_ia(texto, numero)
@@ -734,7 +567,7 @@ def enviar_manual():
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
     conn.commit()
@@ -744,28 +577,28 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
 # ——— Configuración ———
-@app.route('/configuracion/<tab>', methods=['GET','POST'])
+@app.route('/configuracion/<tab>', methods=['GET', 'POST'])
 def configuracion_tab(tab):
-    if tab not in ['negocio','personalizacion']:
+    if tab not in ['negocio', 'personalizacion']:
         abort(404)
 
-    cfg      = load_config()
+    cfg = load_config()
     guardado = False
     if request.method == 'POST':
         if tab == 'negocio':
             cfg['negocio'] = {
-                'ia_nombre':      request.form['ia_nombre'],
+                'ia_nombre': request.form['ia_nombre'],
                 'negocio_nombre': request.form['negocio_nombre'],
-                'descripcion':    request.form['descripcion'],
-                'url':            request.form['url'],
-                'direccion':      request.form['direccion'],
-                'telefono':       request.form['telefono'],
-                'correo':         request.form['correo'],
-                'que_hace':       request.form['que_hace']
+                'descripcion': request.form['descripcion'],
+                'url': request.form['url'],
+                'direccion': request.form['direccion'],
+                'telefono': request.form['telefono'],
+                'correo': request.form['correo'],
+                'que_hace': request.form['que_hace']
             }
         else:
             cfg['personalizacion'] = {
-                'tono':     request.form['tono'],
+                'tono': request.form['tono'],
                 'lenguaje': request.form['lenguaje']
             }
         save_config(cfg)
@@ -789,7 +622,7 @@ def configuracion_precios():
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-    precios     = obtener_todos_los_precios()
+    precios = obtener_todos_los_precios()
     precio_edit = obtener_precio_por_id(pid)
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
@@ -801,16 +634,16 @@ def configuracion_precio_editar(pid):
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
     data = request.form.to_dict()
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     if data.get('id'):
         cursor.execute("""
             UPDATE precios
-               SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
-             WHERE id=%s;
+            SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
+            WHERE id=%s;
         """, (
             data['servicio'],
-            data.get('descripcion',''),
+            data.get('descripcion', ''),
             data['precio'],
             data['moneda'],
             data['id']
@@ -818,10 +651,10 @@ def configuracion_precio_guardar():
     else:
         cursor.execute("""
             INSERT INTO precios (servicio, descripcion, precio, moneda)
-            VALUES (%s,%s,%s,%s);
+            VALUES (%s, %s, %s, %s);
         """, (
             data['servicio'],
-            data.get('descripcion',''),
+            data.get('descripcion', ''),
             data['precio'],
             data['moneda']
         ))
@@ -832,7 +665,7 @@ def configuracion_precio_guardar():
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM precios WHERE id=%s;", (pid,))
     conn.commit()
@@ -840,107 +673,10 @@ def configuracion_precio_borrar(pid):
     conn.close()
     return redirect(url_for('configuracion_precios'))
 
-@app.route('/kanban')
-def ver_kanban():
-    conn   = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-
-    # 1) Cargamos las columnas Kanban
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
-    columnas = cursor.fetchall()
-
-    # 2) Cargamos los chats con avatar, canal, última fecha, último mensaje y sin leer
-    cursor.execute("""
-        SELECT
-          cm.numero,
-          cm.columna_id,
-          c.ultima_fecha,
-          c.ultimo_mensaje,
-          cont.imagen_url    AS avatar,
-          cont.plataforma    AS canal,
-          cont.alias,
-          cont.nombre,
-          IFNULL(unread.cnt, 0) AS sin_leer
-        FROM chat_meta cm
-
-        -- subconsulta para fecha y mensaje más reciente
-        JOIN (
-          SELECT
-            numero,
-            MAX(timestamp) AS ultima_fecha,
-            (SELECT mensaje
-               FROM conversaciones
-              WHERE numero = t.numero
-              ORDER BY timestamp DESC
-              LIMIT 1
-            ) AS ultimo_mensaje
-          FROM conversaciones t
-          GROUP BY numero
-        ) AS c
-          ON c.numero = cm.numero
-
-        -- link al avatar y plataforma usando tu columna correcta
-        LEFT JOIN contactos cont
-          ON cont.numero_telefono = cm.numero
-
-        -- contamos cuántos mensajes sin respuesta quedan
-        LEFT JOIN (
-          SELECT numero, COUNT(*) AS cnt
-            FROM conversaciones
-           WHERE respuesta IS NULL
-           GROUP BY numero
-        ) AS unread
-          ON unread.numero = cm.numero
-
-        ORDER BY c.ultima_fecha DESC;
-    """)
-    chats = cursor.fetchall()
-
-    cursor.close()
-    conn.close()
-
-    return render_template('kanban.html',
-        columnas=columnas,
-        chats=chats
-    )
-
-@app.route('/kanban/mover', methods=['POST'])
-def kanban_mover():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-      "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
-      (data['columna_id'], data['numero'])
-    )
-    conn.commit(); cursor.close(); conn.close()
-    return '', 204
-
-@app.route('/privacy-policy')
-def privacy_policy():
-    return render_template('privacy_policy.html')
-    
-@app.route('/data-deletion')
-def data_deletion():
-    return render_template('data_deletion.html')
-    
-@app.route('/terms-of-service')
-def terms_of_service():
-    return render_template('terms_of_service.html')
-
-@app.route('/contactos/<numero>/alias', methods=['POST'])
-def guardar_alias_contacto(numero):
-    alias = request.form.get('alias','').strip()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
-        (alias if alias else None, numero)
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return '', 204
+@app.route('/test-alerta')
+def test_alerta():
+    enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
+    return "🚀 Test alerta disparada."
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
