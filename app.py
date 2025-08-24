@@ -29,7 +29,6 @@ DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
-PHONE_NUMBER_ID = os.getenv("PHONE_NUMBER_ID")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 IA_ESTADOS = {}
@@ -40,6 +39,21 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
+
+app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+
+def get_country_flag(numero):
+    if not numero:
+        return None
+    numero = str(numero)
+    if numero.startswith('+'):
+        numero = numero[1:]
+    for i in range(3, 0, -1):
+        prefijo = numero[:i]
+        if prefijo in PREFIJOS_PAIS:
+            codigo = PREFIJOS_PAIS[prefijo]
+            return f"https://flagcdn.com/24x18/{codigo}.png"
+    return None
 
 # ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios']
@@ -241,6 +255,7 @@ Mantén siempre un tono profesional y conciso.
 
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
+    PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
     url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
@@ -336,7 +351,7 @@ def enviar_template_alerta(nombre, numero_cliente, mensaje_clave, resumen):
     
     try:
         r = requests.post(
-            f"https://graph.facebook.com/v19.0/{PHONE_NUMBER_ID}/messages",
+            f"https://graph.facebook.com/v19.0/638096866063629/messages",
             headers={
                 'Authorization': f'Bearer {WHATSAPP_TOKEN}',
                 'Content-Type': 'application/json'
@@ -406,8 +421,6 @@ def webhook():
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '')
 
-
-
         # Consultas de precio
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
@@ -446,10 +459,10 @@ def inicio():
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
-    now = datetime.now()
-    start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+    now    = datetime.now()
+    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
 
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
@@ -472,8 +485,8 @@ def home():
     cursor.close()
     conn.close()
 
-    labels = [num for num, _ in messages_per_chat]
-    values = [cnt for _, cnt in messages_per_chat]
+    labels = [num for num,_ in messages_per_chat]
+    values = [cnt for _,cnt in messages_per_chat]
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -486,14 +499,14 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute("""
         SELECT 
-            conv.numero, 
-            COUNT(*) AS total_mensajes, 
-            cont.imagen_url, 
-            cont.nombre
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          cont.nombre
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         GROUP BY conv.numero, cont.imagen_url, cont.nombre
@@ -509,17 +522,17 @@ def ver_chats():
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute("""
         SELECT 
-            conv.numero, 
-            conv.mensaje, 
-            conv.respuesta, 
-            conv.timestamp, 
-            cont.imagen_url, 
-            cont.nombre
+          conv.numero, 
+          conv.mensaje, 
+          conv.respuesta, 
+          conv.timestamp, 
+          cont.imagen_url, 
+          cont.nombre
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         WHERE conv.numero = %s
@@ -551,8 +564,8 @@ def toggle_ai(numero):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    numero = request.form['numero']
-    texto = request.form['texto']
+    numero    = request.form['numero']
+    texto     = request.form['texto']
     respuesta = ""
     if IA_ESTADOS.get(numero, True):
         respuesta = responder_con_ia(texto, numero)
@@ -565,7 +578,7 @@ def enviar_manual():
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
     conn.commit()
@@ -575,28 +588,28 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
 # ——— Configuración ———
-@app.route('/configuracion/<tab>', methods=['GET', 'POST'])
+@app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
-    if tab not in ['negocio', 'personalizacion']:
+    if tab not in ['negocio','personalizacion']:
         abort(404)
 
-    cfg = load_config()
+    cfg      = load_config()
     guardado = False
     if request.method == 'POST':
         if tab == 'negocio':
             cfg['negocio'] = {
-                'ia_nombre': request.form['ia_nombre'],
+                'ia_nombre':      request.form['ia_nombre'],
                 'negocio_nombre': request.form['negocio_nombre'],
-                'descripcion': request.form['descripcion'],
-                'url': request.form['url'],
-                'direccion': request.form['direccion'],
-                'telefono': request.form['telefono'],
-                'correo': request.form['correo'],
-                'que_hace': request.form['que_hace']
+                'descripcion':    request.form['descripcion'],
+                'url':            request.form['url'],
+                'direccion':      request.form['direccion'],
+                'telefono':       request.form['telefono'],
+                'correo':         request.form['correo'],
+                'que_hace':       request.form['que_hace']
             }
         else:
             cfg['personalizacion'] = {
-                'tono': request.form['tono'],
+                'tono':     request.form['tono'],
                 'lenguaje': request.form['lenguaje']
             }
         save_config(cfg)
@@ -620,7 +633,7 @@ def configuracion_precios():
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-    precios = obtener_todos_los_precios()
+    precios     = obtener_todos_los_precios()
     precio_edit = obtener_precio_por_id(pid)
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
@@ -632,16 +645,16 @@ def configuracion_precio_editar(pid):
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
     data = request.form.to_dict()
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor()
     if data.get('id'):
         cursor.execute("""
             UPDATE precios
-            SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
-            WHERE id=%s;
+               SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
+             WHERE id=%s;
         """, (
             data['servicio'],
-            data.get('descripcion', ''),
+            data.get('descripcion',''),
             data['precio'],
             data['moneda'],
             data['id']
@@ -649,10 +662,10 @@ def configuracion_precio_guardar():
     else:
         cursor.execute("""
             INSERT INTO precios (servicio, descripcion, precio, moneda)
-            VALUES (%s, %s, %s, %s);
+            VALUES (%s,%s,%s,%s);
         """, (
             data['servicio'],
-            data.get('descripcion', ''),
+            data.get('descripcion',''),
             data['precio'],
             data['moneda']
         ))
@@ -663,7 +676,7 @@ def configuracion_precio_guardar():
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM precios WHERE id=%s;", (pid,))
     conn.commit()
@@ -671,20 +684,15 @@ def configuracion_precio_borrar(pid):
     conn.close()
     return redirect(url_for('configuracion_precios'))
 
-@app.route('/test-alerta')
-def test_alerta():
-    enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
-    return "🚀 Test alerta disparada."
+# ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-    conn = get_db_connection()
+    conn   = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
-    # 1) Cargamos las columnas Kanban
+
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
     columnas = cursor.fetchall()
 
-    # 2) Cargamos los chats con avatar, canal, última fecha, último mensaje y sin leer
     cursor.execute("""
         SELECT
           cm.numero,
@@ -697,8 +705,6 @@ def ver_kanban():
           cont.nombre,
           IFNULL(unread.cnt, 0) AS sin_leer
         FROM chat_meta cm
-
-        -- subconsulta para fecha y mensaje más reciente
         JOIN (
           SELECT
             numero,
@@ -713,12 +719,8 @@ def ver_kanban():
           GROUP BY numero
         ) AS c
           ON c.numero = cm.numero
-
-        -- link al avatar y plataforma usando tu columna correcta
         LEFT JOIN contactos cont
           ON cont.numero_telefono = cm.numero
-
-        -- contamos cuántos mensajes sin respuesta quedan
         LEFT JOIN (
           SELECT numero, COUNT(*) AS cnt
             FROM conversaciones
@@ -726,7 +728,6 @@ def ver_kanban():
            GROUP BY numero
         ) AS unread
           ON unread.numero = cm.numero
-
         ORDER BY c.ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
@@ -734,7 +735,10 @@ def ver_kanban():
     cursor.close()
     conn.close()
 
-    return render_template('kanban.html', columnas=columnas, chats=chats)
+    return render_template('kanban.html',
+        columnas=columnas,
+        chats=chats
+    )
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
@@ -763,8 +767,24 @@ def guardar_alias_contacto(numero):
     cursor.close()
     conn.close()
     return '', 204
-    
 
+# ——— Páginas legales ———
+@app.route('/privacy-policy')
+def privacy_policy():
+    return render_template('privacy_policy.html')
+
+@app.route('/terms-of-service')
+def terms_of_service():
+    return render_template('terms_of_service.html')
+
+@app.route('/data-deletion')
+def data_deletion():
+    return render_template('data_deletion.html')
+
+@app.route('/test-alerta')
+def test_alerta():
+    enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
+    return "🚀 Test alerta disparada."
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
