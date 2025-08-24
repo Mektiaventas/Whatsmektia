@@ -675,6 +675,96 @@ def configuracion_precio_borrar(pid):
 def test_alerta():
     enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
     return "🚀 Test alerta disparada."
+@app.route('/kanban')
+def ver_kanban():
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    # 1) Cargamos las columnas Kanban
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
+    columnas = cursor.fetchall()
+
+    # 2) Cargamos los chats con avatar, canal, última fecha, último mensaje y sin leer
+    cursor.execute("""
+        SELECT
+          cm.numero,
+          cm.columna_id,
+          c.ultima_fecha,
+          c.ultimo_mensaje,
+          cont.imagen_url    AS avatar,
+          cont.plataforma    AS canal,
+          cont.alias,
+          cont.nombre,
+          IFNULL(unread.cnt, 0) AS sin_leer
+        FROM chat_meta cm
+
+        -- subconsulta para fecha y mensaje más reciente
+        JOIN (
+          SELECT
+            numero,
+            MAX(timestamp) AS ultima_fecha,
+            (SELECT mensaje
+               FROM conversaciones
+              WHERE numero = t.numero
+              ORDER BY timestamp DESC
+              LIMIT 1
+            ) AS ultimo_mensaje
+          FROM conversaciones t
+          GROUP BY numero
+        ) AS c
+          ON c.numero = cm.numero
+
+        -- link al avatar y plataforma usando tu columna correcta
+        LEFT JOIN contactos cont
+          ON cont.numero_telefono = cm.numero
+
+        -- contamos cuántos mensajes sin respuesta quedan
+        LEFT JOIN (
+          SELECT numero, COUNT(*) AS cnt
+            FROM conversaciones
+           WHERE respuesta IS NULL
+           GROUP BY numero
+        ) AS unread
+          ON unread.numero = cm.numero
+
+        ORDER BY c.ultima_fecha DESC;
+    """)
+    chats = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return render_template('kanban.html', columnas=columnas, chats=chats)
+
+@app.route('/kanban/mover', methods=['POST'])
+def kanban_mover():
+    data = request.get_json()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+      "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
+      (data['columna_id'], data['numero'])
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return '', 204
+
+@app.route('/contactos/<numero>/alias', methods=['POST'])
+def guardar_alias_contacto(numero):
+    alias = request.form.get('alias','').strip()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
+        (alias if alias else None, numero)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return '', 204
+    
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
