@@ -406,9 +406,7 @@ def webhook():
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '')
 
-        # Ignorar mensajes del propio bot
-        if numero == MI_NUMERO_BOT:
-            return 'OK', 200
+
 
         # Consultas de precio
         if texto.lower().startswith('precio de '):
