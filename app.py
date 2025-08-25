@@ -715,44 +715,35 @@ def ver_kanban():
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # 2) Cargamos los chats SIN DUPLICADOS
+    # 2) CONSULTA CORREGIDA - ELIMINAR DUPLICADOS DEFINITIVAMENTE
     cursor.execute("""
-        SELECT DISTINCT
+        SELECT 
             cm.numero,
             cm.columna_id,
-            c.ultima_fecha,
-            c.ultimo_mensaje,
+            MAX(c.timestamp) AS ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = cm.numero 
+             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             cont.imagen_url AS avatar,
             cont.plataforma AS canal,
             cont.alias,
             cont.nombre,
-            IFNULL(unread.cnt, 0) AS sin_leer
+            (SELECT COUNT(*) FROM conversaciones 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         
-        -- Último mensaje y fecha
+        -- Última fecha de conversación
         LEFT JOIN (
-            SELECT 
-                numero,
-                MAX(timestamp) AS ultima_fecha,
-                (SELECT mensaje FROM conversaciones 
-                 WHERE numero = t.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje
-            FROM conversaciones t 
+            SELECT numero, MAX(timestamp) AS timestamp
+            FROM conversaciones 
             GROUP BY numero
         ) AS c ON c.numero = cm.numero
         
         -- Información del contacto
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         
-        -- Mensajes sin leer
-        LEFT JOIN (
-            SELECT numero, COUNT(*) AS cnt
-            FROM conversaciones 
-            WHERE respuesta IS NULL 
-            GROUP BY numero
-        ) AS unread ON unread.numero = cm.numero
-        
-        ORDER BY c.ultima_fecha DESC;
+        GROUP BY cm.numero, cm.columna_id, cont.imagen_url, cont.plataforma, cont.alias, cont.nombre
+        ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
 
