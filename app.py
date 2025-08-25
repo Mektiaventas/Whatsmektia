@@ -691,28 +691,35 @@ def ver_kanban():
         conn = get_db_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Obtener columnas Kanban (rápido)
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
-        columnas = cursor.fetchall()
+        app.logger.info("📊 Cargando Kanban con estructura correcta...")
 
-        # 2. Obtener ÚLTIMOS 50 chats solamente (para no sobrecargar)
+        # 1. Obtener columnas Kanban
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        columnas = cursor.fetchall()
+        app.logger.info(f"✅ Columnas encontradas: {len(columnas)}")
+
+        # 2. Obtener chats con la estructura CORRECTA de tu DB
         cursor.execute("""
             SELECT 
-                c.numero,
-                COALESCE(cm.columna_id, 1) as columna_id,
+                u.numero,
+                u.nombre,
+                u.email,
+                COALESCE(km.columna_id, 1) as columna_id,
                 MAX(c.timestamp) as ultima_fecha,
-                cont.imagen_url as avatar,
-                COALESCE(cont.nombre, c.numero) as nombre,
-                COALESCE(cont.alias, '') as alias,
-                0 as sin_leer  -- Simplificado temporalmente
-            FROM conversaciones c
-            LEFT JOIN chat_meta cm ON c.numero = cm.numero
-            LEFT JOIN contactos cont ON c.numero = cont.numero_telefono
-            GROUP BY c.numero, cm.columna_id, cont.imagen_url, cont.nombre, cont.alias
+                (SELECT mensaje FROM conversaciones 
+                 WHERE usuario_id = u.id 
+                 ORDER BY timestamp DESC LIMIT 1) as ultimo_mensaje,
+                (SELECT COUNT(*) FROM conversaciones 
+                 WHERE usuario_id = u.id AND respuesta IS NULL) as sin_leer
+            FROM usuarios u
+            LEFT JOIN conversaciones c ON u.id = c.usuario_id
+            LEFT JOIN kanban_meta km ON u.id = km.usuario_id
+            GROUP BY u.id, u.numero, u.nombre, u.email, km.columna_id
             ORDER BY ultima_fecha DESC
-            LIMIT 50;
+            LIMIT 100;
         """)
         chats = cursor.fetchall()
+        app.logger.info(f"✅ Usuarios/chats encontrados: {len(chats)}")
 
         cursor.close()
         conn.close()
@@ -720,9 +727,12 @@ def ver_kanban():
         return render_template('kanban.html', columnas=columnas, chats=chats)
 
     except Exception as e:
-        app.logger.error(f"Error en Kanban: {e}")
-        # Fallback: mostrar página aunque sea sin datos
-        return render_template('kanban.html', columnas=[], chats=[])
+        app.logger.error(f"🔴 Error en Kanban: {str(e)}")
+        # Fallback seguro
+        return render_template('kanban.html', 
+                             columnas=[{'id': 1, 'nombre': 'Nuevos', 'color': '#3498db'}],
+                             chats=[])
+                             
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
     data = request.get_json()
