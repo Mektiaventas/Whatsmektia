@@ -687,52 +687,68 @@ def configuracion_precio_borrar(pid):
 # ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+    conn   = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
-        app.logger.info("📊 Cargando Kanban con estructura correcta...")
+    # 1) Cargamos las columnas Kanban
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
+    columnas = cursor.fetchall()
 
-        # 1. Obtener columnas Kanban
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-        columnas = cursor.fetchall()
-        app.logger.info(f"✅ Columnas encontradas: {len(columnas)}")
+    # 2) Cargamos los chats con avatar, canal, última fecha, último mensaje y sin leer
+    cursor.execute("""
+        SELECT
+          cm.numero,
+          cm.columna_id,
+          c.ultima_fecha,
+          c.ultimo_mensaje,
+          cont.imagen_url    AS avatar,
+          cont.plataforma    AS canal,
+          cont.alias,
+          cont.nombre,
+          IFNULL(unread.cnt, 0) AS sin_leer
+        FROM chat_meta cm
 
-        # 2. Obtener chats con la estructura CORRECTA de tu DB
-        cursor.execute("""
-            SELECT 
-                u.numero,
-                u.nombre,
-                u.email,
-                COALESCE(km.columna_id, 1) as columna_id,
-                MAX(c.timestamp) as ultima_fecha,
-                (SELECT mensaje FROM conversaciones 
-                 WHERE usuario_id = u.id 
-                 ORDER BY timestamp DESC LIMIT 1) as ultimo_mensaje,
-                (SELECT COUNT(*) FROM conversaciones 
-                 WHERE usuario_id = u.id AND respuesta IS NULL) as sin_leer
-            FROM usuarios u
-            LEFT JOIN conversaciones c ON u.id = c.usuario_id
-            LEFT JOIN kanban_meta km ON u.id = km.usuario_id
-            GROUP BY u.id, u.numero, u.nombre, u.email, km.columna_id
-            ORDER BY ultima_fecha DESC
-            LIMIT 100;
-        """)
-        chats = cursor.fetchall()
-        app.logger.info(f"✅ Usuarios/chats encontrados: {len(chats)}")
+        -- subconsulta para fecha y mensaje más reciente
+        JOIN (
+          SELECT
+            numero,
+            MAX(timestamp) AS ultima_fecha,
+            (SELECT mensaje
+               FROM conversaciones
+              WHERE numero = t.numero
+              ORDER BY timestamp DESC
+              LIMIT 1
+            ) AS ultimo_mensaje
+          FROM conversaciones t
+          GROUP BY numero
+        ) AS c
+          ON c.numero = cm.numero
 
-        cursor.close()
-        conn.close()
+        -- link al avatar y plataforma usando tu columna correcta
+        LEFT JOIN contactos cont
+          ON cont.numero_telefono = cm.numero
 
-        return render_template('kanban.html', columnas=columnas, chats=chats)
+        -- contamos cuántos mensajes sin respuesta quedan
+        LEFT JOIN (
+          SELECT numero, COUNT(*) AS cnt
+            FROM conversaciones
+           WHERE respuesta IS NULL
+           GROUP BY numero
+        ) AS unread
+          ON unread.numero = cm.numero
 
-    except Exception as e:
-        app.logger.error(f"🔴 Error en Kanban: {str(e)}")
-        # Fallback seguro
-        return render_template('kanban.html', 
-                             columnas=[{'id': 1, 'nombre': 'Nuevos', 'color': '#3498db'}],
-                             chats=[])
-                             
+        ORDER BY c.ultima_fecha DESC;
+    """)
+    chats = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return render_template('kanban.html',
+        columnas=columnas,
+        chats=chats
+    )
+
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
     data = request.get_json()
@@ -742,11 +758,9 @@ def kanban_mover():
       "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
       (data['columna_id'], data['numero'])
     )
-    conn.commit()
-    cursor.close()
-    conn.close()
+    conn.commit(); cursor.close(); conn.close()
     return '', 204
-
+    
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero):
     alias = request.form.get('alias','').strip()
