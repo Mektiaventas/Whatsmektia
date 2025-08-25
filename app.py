@@ -445,12 +445,30 @@ def webhook():
                 enviar_template_alerta("Sin nombre", numero, texto, resumen)
 
         guardar_conversacion(numero, texto, respuesta)
+
+        # ==============================================
+        # INICIO DEL CÓDIGO NUEVO - KANBAN AUTOMÁTICO
+        # ==============================================
+        
+        # Inicializar metadata del chat si no existe
+        meta = obtener_chat_meta(numero)
+        if not meta:
+            inicializar_chat_meta(numero)
+        
+        # Evaluar movimiento automático basado en las reglas
+        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
+        actualizar_columna_chat(numero, nueva_columna)
+        
+        # ==============================================
+        # FIN DEL CÓDIGO NUEVO
+        # ==============================================
+
         return 'OK', 200
 
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
         return 'Error interno', 500
-
+        
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -792,6 +810,112 @@ def data_deletion():
 def test_alerta():
     enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
     return "🚀 Test alerta disparada."
+
+
+# ——— Funciones para Kanban ———
+def obtener_chat_meta(numero):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
+    meta = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return meta
+
+def inicializar_chat_meta(numero):
+    # Asignar automáticamente a la columna "Nuevos" (id=1)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO chat_meta (numero, columna_id) 
+        VALUES (%s, 1)
+        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
+    """, (numero,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def actualizar_columna_chat(numero, columna_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE chat_meta SET columna_id = %s 
+        WHERE numero = %s;
+    """, (columna_id, numero))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def evaluar_movimiento_automatico(numero, mensaje, respuesta):
+    historial = obtener_historial(numero, limite=5)
+    
+    # Si es primer mensaje, mantener en "Nuevos"
+    if len(historial) <= 1:
+        return 1  # Nuevos
+    
+    # Si hay intervención humana, mover a "Esperando Respuesta"
+    if detectar_intervencion_humana(mensaje, respuesta):
+        return 3  # Esperando Respuesta
+    
+    # Si tiene más de 2 mensajes, mover a "En Conversación"
+    if len(historial) >= 2:
+        return 2  # En Conversación
+    
+    # Si no cumple nada, mantener donde está
+    meta = obtener_chat_meta(numero)
+    return meta['columna_id'] if meta else 1
+# ——— Funciones para Kanban ———
+def obtener_chat_meta(numero):
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
+    meta = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    return meta
+
+def inicializar_chat_meta(numero):
+    # Asignar automáticamente a la columna "Nuevos" (id=1)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO chat_meta (numero, columna_id) 
+        VALUES (%s, 1)
+        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
+    """, (numero,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def actualizar_columna_chat(numero, columna_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE chat_meta SET columna_id = %s 
+        WHERE numero = %s;
+    """, (columna_id, numero))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def evaluar_movimiento_automatico(numero, mensaje, respuesta):
+    historial = obtener_historial(numero, limite=5)
+    
+    # Si es primer mensaje, mantener en "Nuevos"
+    if len(historial) <= 1:
+        return 1  # Nuevos
+    
+    # Si hay intervención humana, mover a "Esperando Respuesta"
+    if detectar_intervencion_humana(mensaje, respuesta):
+        return 3  # Esperando Respuesta
+    
+    # Si tiene más de 2 mensajes, mover a "En Conversación"
+    if len(historial) >= 2:
+        return 2  # En Conversación
+    
+    # Si no cumple nada, mantener donde está
+    meta = obtener_chat_meta(numero)
+    return meta['columna_id'] if meta else 1
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
