@@ -687,59 +687,42 @@ def configuracion_precio_borrar(pid):
 # ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-    conn   = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
-    columnas = cursor.fetchall()
+        # 1. Obtener columnas Kanban (rápido)
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
+        columnas = cursor.fetchall()
 
-    cursor.execute("""
-        SELECT
-          cm.numero,
-          cm.columna_id,
-          c.ultima_fecha,
-          c.ultimo_mensaje,
-          cont.imagen_url    AS avatar,
-          cont.plataforma    AS canal,
-          cont.alias,
-          cont.nombre,
-          IFNULL(unread.cnt, 0) AS sin_leer
-        FROM chat_meta cm
-        JOIN (
-          SELECT
-            numero,
-            MAX(timestamp) AS ultima_fecha,
-            (SELECT mensaje
-               FROM conversaciones
-              WHERE numero = t.numero
-              ORDER BY timestamp DESC
-              LIMIT 1
-            ) AS ultimo_mensaje
-          FROM conversaciones t
-          GROUP BY numero
-        ) AS c
-          ON c.numero = cm.numero
-        LEFT JOIN contactos cont
-          ON cont.numero_telefono = cm.numero
-        LEFT JOIN (
-          SELECT numero, COUNT(*) AS cnt
-            FROM conversaciones
-           WHERE respuesta IS NULL
-           GROUP BY numero
-        ) AS unread
-          ON unread.numero = cm.numero
-        ORDER BY c.ultima_fecha DESC;
-    """)
-    chats = cursor.fetchall()
+        # 2. Obtener ÚLTIMOS 50 chats solamente (para no sobrecargar)
+        cursor.execute("""
+            SELECT 
+                c.numero,
+                COALESCE(cm.columna_id, 1) as columna_id,
+                MAX(c.timestamp) as ultima_fecha,
+                cont.imagen_url as avatar,
+                COALESCE(cont.nombre, c.numero) as nombre,
+                COALESCE(cont.alias, '') as alias,
+                0 as sin_leer  -- Simplificado temporalmente
+            FROM conversaciones c
+            LEFT JOIN chat_meta cm ON c.numero = cm.numero
+            LEFT JOIN contactos cont ON c.numero = cont.numero_telefono
+            GROUP BY c.numero, cm.columna_id, cont.imagen_url, cont.nombre, cont.alias
+            ORDER BY ultima_fecha DESC
+            LIMIT 50;
+        """)
+        chats = cursor.fetchall()
 
-    cursor.close()
-    conn.close()
+        cursor.close()
+        conn.close()
 
-    return render_template('kanban.html',
-        columnas=columnas,
-        chats=chats
-    )
+        return render_template('kanban.html', columnas=columnas, chats=chats)
 
+    except Exception as e:
+        app.logger.error(f"Error en Kanban: {e}")
+        # Fallback: mostrar página aunque sea sin datos
+        return render_template('kanban.html', columnas=[], chats=[])
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
     data = request.get_json()
