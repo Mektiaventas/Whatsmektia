@@ -540,24 +540,24 @@ def ver_chats():
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
+    # CONSULTA CORREGIDA - SIN DUPLICADOS
     cursor.execute("""
-        SELECT 
-          conv.numero, 
-          conv.mensaje, 
-          conv.respuesta, 
-          conv.timestamp, 
-          cont.imagen_url, 
-          cont.nombre
+        SELECT DISTINCT
+            conv.numero, 
+            cont.imagen_url, 
+            cont.nombre,
+            cont.alias
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         WHERE conv.numero = %s
-        ORDER BY conv.timestamp ASC
+        LIMIT 1;
     """, (numero,))
     chats = cursor.fetchall()
 
+    # Esta consulta queda igual (para los mensajes)
     cursor.execute(
         "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
         (numero,)
@@ -570,11 +570,14 @@ def ver_chat(numero):
 
     cursor.close()
     conn.close()
+    
     return render_template('chats.html',
-        chats=chats, mensajes=msgs,
-        selected=numero, IA_ESTADOS=IA_ESTADOS
+        chats=chats, 
+        mensajes=msgs,
+        selected=numero, 
+        IA_ESTADOS=IA_ESTADOS
     )
-
+    
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
     IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
