@@ -715,12 +715,12 @@ def ver_kanban():
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # 2) CONSULTA DEFINITIVA - SIN DUPLICADOS
+    # 2) CONSULTA CORREGIDA - ELIMINAR DUPLICADOS DEFINITIVAMENTE
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
-            (SELECT MAX(timestamp) FROM conversaciones WHERE numero = cm.numero) AS ultima_fecha,
+            MAX(c.timestamp) AS ultima_fecha,
             (SELECT mensaje FROM conversaciones 
              WHERE numero = cm.numero 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
@@ -731,7 +731,18 @@ def ver_kanban():
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
+        
+        -- Última fecha de conversación
+        LEFT JOIN (
+            SELECT numero, MAX(timestamp) AS timestamp
+            FROM conversaciones 
+            GROUP BY numero
+        ) AS c ON c.numero = cm.numero
+        
+        -- Información del contacto
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        
+        GROUP BY cm.numero, cm.columna_id, cont.imagen_url, cont.plataforma, cont.alias, cont.nombre
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
@@ -740,7 +751,7 @@ def ver_kanban():
     conn.close()
 
     return render_template('kanban.html', columnas=columnas, chats=chats)
-
+    
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
     data = request.get_json()
