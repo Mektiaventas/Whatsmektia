@@ -409,10 +409,12 @@ def webhook():
                 conn = get_db_connection()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO contactos (numero_telefono, nombre, plataforma)
-                    VALUES (%s, %s, 'whatsapp')
-                    ON DUPLICATE KEY UPDATE nombre = VALUES(nombre);
-                """, (wa_id, profile_name))
+                    INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
+                    VALUES (%s, %s, 'whatsapp', %s)
+                    ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(VALUES(nombre), nombre),
+                    imagen_url = COALESCE(VALUES(imagen_url), imagen_url);
+                """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
                 conn.commit()
                 cursor.close()
                 conn.close()
