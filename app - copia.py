@@ -842,67 +842,40 @@ def configuracion_precio_borrar(pid):
 
 @app.route('/kanban')
 def ver_kanban():
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
 
     # 1) Cargamos las columnas Kanban
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY id;")
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # 2) Cargamos los chats con avatar, canal, última fecha, último mensaje y sin leer
+    # 2) CONSULTA COMPATIBLE con only_full_group_by
     cursor.execute("""
-        SELECT
-          cm.numero,
-          cm.columna_id,
-          c.ultima_fecha,
-          c.ultimo_mensaje,
-          cont.imagen_url    AS avatar,
-          cont.plataforma    AS canal,
-          cont.alias,
-          cont.nombre,
-          IFNULL(unread.cnt, 0) AS sin_leer
+        SELECT 
+            cm.numero,
+            cm.columna_id,
+            (SELECT MAX(timestamp) FROM conversaciones WHERE numero = cm.numero) AS ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = cm.numero 
+             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+            cont.imagen_url AS avatar,
+            cont.plataforma AS canal,
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
+            cont.alias,
+            cont.nombre,
+            (SELECT COUNT(*) FROM conversaciones 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
-
-        -- subconsulta para fecha y mensaje más reciente
-        JOIN (
-          SELECT
-            numero,
-            MAX(timestamp) AS ultima_fecha,
-            (SELECT mensaje
-               FROM conversaciones
-              WHERE numero = t.numero
-              ORDER BY timestamp DESC
-              LIMIT 1
-            ) AS ultimo_mensaje
-          FROM conversaciones t
-          GROUP BY numero
-        ) AS c
-          ON c.numero = cm.numero
-
-        -- link al avatar y plataforma usando tu columna correcta
-        LEFT JOIN contactos cont
-          ON cont.numero_telefono = cm.numero
-
-        -- contamos cuántos mensajes sin respuesta quedan
-        LEFT JOIN (
-          SELECT numero, COUNT(*) AS cnt
-            FROM conversaciones
-           WHERE respuesta IS NULL
-           GROUP BY numero
-        ) AS unread
-          ON unread.numero = cm.numero
-
-        ORDER BY c.ultima_fecha DESC;
+        LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
-    return render_template('kanban.html',
-        columnas=columnas,
-        chats=chats
-    )
+    return render_template('kanban.html', columnas=columnas, chats=chats)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
