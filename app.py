@@ -306,80 +306,136 @@ def guardar_conversacion(numero, mensaje, respuesta):
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia):
     texto = mensaje_usuario.lower()
-    if 'hablar con ' in texto or 'ponme con ' in texto:
-        return True
-    disparadores = [
+    
+    # Palabras clave más completas
+    palabras_clave = [
         'hablar con persona', 'hablar con asesor', 'hablar con agente',
-        'quiero asesor', 'atención humana', 'soporte técnico',
-        'es urgente', 'necesito ayuda humana'
+        'quiero asesor', 'atención humana', 'soporte técnico', 'soporte humano',
+        'es urgente', 'necesito ayuda humana', 'quiero un humano', 
+        'operador', 'ejecutivo', 'representante', 'persona real',
+        'no robot', 'no bots', 'no ia', 'no inteligencia artificial'
     ]
-    for frase in disparadores:
+    
+    # Detectar por palabras clave en mensaje del usuario
+    for frase in palabras_clave:
         if frase in texto:
             return True
+    
+    # Detectar por patrones específicos
+    patrones = [
+        r'hablar\s+con\s+',
+        r'ponerme\s+con\s+', 
+        r'contactar\s+con\s+',
+        r'quiero\s+hablar\s+con\s+'
+    ]
+    
+    for patron in patrones:
+        if re.search(patron, texto):
+            return True
+    
+    # Detectar por respuestas de la IA que indican canalización
     respuesta = respuesta_ia.lower()
     canalizaciones = [
-        'te canalizaré', 'asesor te contactará', 'te paso con'
+        'te canalizaré', 'asesor te contactará', 'te paso con',
+        'en breve te contacta', 'nuestro equipo te llamará',
+        'te transferiré', 'te conecto con'
     ]
+    
     for tag in canalizaciones:
         if tag in respuesta:
             return True
+    
     return False
 
-def enviar_template_alerta(nombre, numero_cliente, mensaje_clave, resumen):
-    def sanitizar(texto):
-        clean = texto.replace('\n', ' ').replace('\r', ' ').replace('\t', ' ')
-        return ' '.join(clean.split())
-    
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": f"+{ALERT_NUMBER}",
-        "type": "template",
-        "template": {
-            "name": "alerta_intervencion",
-            "language": {"code": "es_MX"},
-            "components": [{
-                "type": "body",
-                "parameters": [
-                    {"type": "text", "text": sanitizar(nombre)},
-                    {"type": "text", "text": sanitizar(numero_cliente)},
-                    {"type": "text", "text": sanitizar(mensaje_clave)},
-                    {"type": "text", "text": sanitizar(resumen)}
-                ]
-            }]
-        }
-    }
-    
-    try:
-        r = requests.post(
-            f"https://graph.facebook.com/v19.0/638096866063629/messages",
-            headers={
-                'Authorization': f'Bearer {WHATSAPP_TOKEN}',
-                'Content-Type': 'application/json'
-            },
-            json=payload
-        )
-        app.logger.info(f"📤 Alerta enviada: {r.status_code} {r.text}")
-    except Exception as e:
-        app.logger.error(f"🔴 Error enviando alerta: {e}")
 
 def resumen_rafa(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        "SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 5;",
+        "SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 10;",
         (numero,)
     )
     historial = cursor.fetchall()
     cursor.close()
     conn.close()
     
-    resumen = "Últimas interacciones:\n"
-    for i, msg in enumerate(historial):
-        resumen += f"{i+1}. Usuario: {msg['mensaje']}\n"
+    # Resumen más completo y estructurado
+    resumen = "🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    resumen += f"📞 *Cliente:* {numero}\n"
+    resumen += f"🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+    resumen += "📋 *Últimas interacciones:*\n"
+    
+    for i, msg in enumerate(historial[:5]):  # Solo últimos 5 mensajes
+        resumen += f"\n{i+1}. 👤 *Usuario:* {msg['mensaje'][:100]}"
         if msg['respuesta']:
-            resumen += f"   IA: {msg['respuesta']}\n"
+            resumen += f"\n   🤖 *IA:* {msg['respuesta'][:100]}"
+    
     return resumen
-
+    
+def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    mensaje += f"👤 *Cliente:* {numero_cliente}\n"
+    mensaje += f"📞 *Número:* {numero_cliente}\n"
+    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
+    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
+    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    mensaje += f"_________________________________________\n"
+    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    
+    # Enviar mensaje normal (sin template) a tu número personal
+    enviar_mensaje(ALERT_NUMBER, mensaje)
+    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
+    
+def enviar_informacion_completa(numero_cliente):
+    """Envía toda la información del cliente a tu número personal"""
+    try:
+        # Obtener información del contacto
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT * FROM contactos WHERE numero_telefono = %s",
+            (numero_cliente,)
+        )
+        contacto = cursor.fetchone()
+        
+        # Obtener historial reciente
+        cursor.execute(
+            "SELECT * FROM conversaciones WHERE numero = %s ORDER BY timestamp DESC LIMIT 10",
+            (numero_cliente,)
+        )
+        historial = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        # Construir mensaje completo
+        mensaje_completo = "📋 *INFORMACIÓN COMPLETA DEL CLIENTE*\n\n"
+        mensaje_completo += f"📞 *Número:* {numero_cliente}\n"
+        
+        if contacto:
+            mensaje_completo += f"👤 *Nombre:* {contacto.get('nombre', 'No disponible')}\n"
+            mensaje_completo += f"🏷️ *Alias:* {contacto.get('alias', 'No asignado')}\n"
+            mensaje_completo += f"🌐 *Plataforma:* {contacto.get('plataforma', 'WhatsApp')}\n"
+        
+        mensaje_completo += f"\n📊 *Total mensajes:* {len(historial)}\n"
+        mensaje_completo += f"🕒 *Última interacción:* {historial[0]['timestamp'].strftime('%d/%m/%Y %H:%M') if historial else 'N/A'}\n\n"
+        
+        mensaje_completo += "💬 *Últimos mensajes:*\n"
+        for i, msg in enumerate(historial[:3]):  # Solo últimos 3 mensajes
+            hora_msg = msg['timestamp'].strftime('%H:%M') if msg.get('timestamp') else 'N/A'
+            mensaje_completo += f"\n{i+1}. [{hora_msg}] 👤: {msg['mensaje'][:60]}"
+            if msg['respuesta']:
+                mensaje_completo += f"\n   🤖: {msg['respuesta'][:60]}"
+        
+        # Enviar mensaje completo
+        enviar_mensaje(ALERT_NUMBER, mensaje_completo)
+        app.logger.info(f"📤 Información completa enviada para {numero_cliente}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando información completa: {e}")
+        
+        
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -444,7 +500,8 @@ def webhook():
             enviar_mensaje(numero, respuesta)
             if detectar_intervencion_humana(texto, respuesta):
                 resumen = resumen_rafa(numero)
-                enviar_template_alerta("Sin nombre", numero, texto, resumen)
+                enviar_alerta_humana(numero, texto, resumen)
+                enviar_informacion_completa(numero)
 
         guardar_conversacion(numero, texto, respuesta)
 
