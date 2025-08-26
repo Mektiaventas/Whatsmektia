@@ -717,25 +717,25 @@ def ver_kanban():
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # 2) CONSULTA COMPATIBLE con only_full_group_by
+    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
-            (SELECT MAX(timestamp) FROM conversaciones WHERE numero = cm.numero) AS ultima_fecha,
+            MAX(c.timestamp) AS ultima_fecha,
             (SELECT mensaje FROM conversaciones 
              WHERE numero = cm.numero 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            cont.imagen_url AS avatar,
-            cont.plataforma AS canal,
+            MAX(cont.imagen_url) AS avatar,
+            MAX(cont.plataforma) AS canal,
             -- PRIORIDAD: alias > nombre > número
-            COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
-            cont.alias,
-            cont.nombre,
+            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        LEFT JOIN conversaciones c ON c.numero = cm.numero
+        GROUP BY cm.numero, cm.columna_id
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
