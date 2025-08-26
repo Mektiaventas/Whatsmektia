@@ -717,7 +717,7 @@ def ver_kanban():
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # 2) CONSULTA CORREGIDA - ELIMINAR DUPLICADOS DEFINITIVAMENTE
+    # 2) CONSULTA CORREGIDA - USAR ALIAS COMO PRIORIDAD
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -728,6 +728,8 @@ def ver_kanban():
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             cont.imagen_url AS avatar,
             cont.plataforma AS canal,
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
             cont.alias,
             cont.nombre,
             (SELECT COUNT(*) FROM conversaciones 
@@ -744,7 +746,7 @@ def ver_kanban():
         -- Información del contacto
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         
-        GROUP BY cm.numero, cm.columna_id, cont.imagen_url, cont.plataforma, cont.alias, cont.nombre
+        GROUP BY cm.numero  -- SOLO AGRUPAR POR NÚMERO PARA EVITAR DUPLICADOS
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
