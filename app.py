@@ -526,10 +526,17 @@ def ver_chats():
           conv.numero, 
           COUNT(*) AS total_mensajes, 
           cont.imagen_url, 
-          cont.nombre
+          -- PRIORIDAD: alias > nombre > número
+          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+          cont.alias,
+          cont.nombre,
+          (SELECT mensaje FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+          MAX(conv.timestamp) AS ultima_fecha
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-        GROUP BY conv.numero, cont.imagen_url, cont.nombre
+        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
         ORDER BY MAX(conv.timestamp) DESC
     """)
     chats = cursor.fetchall()
@@ -545,13 +552,15 @@ def ver_chat(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     
-    # CONSULTA CORREGIDA - SIN DUPLICADOS
+    # CONSULTA ACTUALIZADA - USAR PRIORIDAD
     cursor.execute("""
         SELECT DISTINCT
             conv.numero, 
             cont.imagen_url, 
-            cont.nombre,
-            cont.alias
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+            cont.alias,
+            cont.nombre
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
         WHERE conv.numero = %s
