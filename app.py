@@ -308,11 +308,9 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
     
     # ⚠️ EVITAR DETECTAR ALERTAS DEL MISMO SISTEMA
-    # Mensajes que provienen del sistema de alertas
     alertas_sistema = [
-        "🚨 ALERTA: Intervención Humana Requerida",
-        "📋 INFORMACIÓN COMPLETA DEL CLIENTE",
-        "👤 Cliente:", "📞 Número:", "💬 Mensaje clave:"
+        "🚨 ALERTA:", "📋 INFORMACIÓN COMPLETA", "👤 Cliente:", 
+        "📞 Número:", "💬 Mensaje clave:"
     ]
     
     for alerta in alertas_sistema:
@@ -320,7 +318,7 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
             return False
     
     # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
-    if numero == ALERT_NUMBER or numero == '5214491182201' or numero == '524491182201':
+    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201']:
         return False
     
     # 📋 DETECCIÓN NORMAL (tu código actual)
@@ -468,6 +466,11 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '')
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
+        if hasattr(app, 'ultimo_mensaje') and app.ultimo_mensaje == (numero, texto):
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {texto[:30]}...")
+            return 'OK', 200
+        app.ultimo_mensaje = (numero, texto)
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
         # Solo ignorar mensajes que claramente son del sistema de alertas
@@ -555,94 +558,6 @@ def webhook():
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
         actualizar_columna_chat(numero, nueva_columna)
-        # ==============================================
-        # ==============================================
-
-        # Actualizar contacto (VERSIÓN MEJORADA - EVITA DUPLICADOS)
-        contactos = change.get('contacts')
-        if contactos and len(contactos) > 0:
-            profile_name = contactos[0].get('profile', {}).get('name')
-            wa_id = contactos[0].get('wa_id')
-            if profile_name and wa_id:
-                try:
-                    conn = get_db_connection()
-                    cursor = conn.cursor()
-                    
-                    # PRIMERO: Eliminar cualquier duplicado existente para este número
-                    cursor.execute("""
-                        DELETE FROM contactos 
-                        WHERE numero_telefono = %s 
-                        AND id NOT IN (
-                            SELECT MAX(id) FROM (
-                                SELECT id FROM contactos WHERE numero_telefono = %s
-                            ) AS temp
-                        )
-                    """, (wa_id, wa_id))
-                    
-                    # LUEGO: Insertar o actualizar
-                    cursor.execute("""
-                        INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
-                        VALUES (%s, %s, 'whatsapp', %s)
-                        ON DUPLICATE KEY UPDATE 
-                            nombre = VALUES(nombre),
-                            imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
-                    
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    app.logger.info(f"✅ Contacto actualizado: {wa_id}")
-                    
-                except Exception as e:
-                    app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
-
-        msg = mensajes[0]
-        numero = msg['from']
-        texto = msg.get('text', {}).get('body', '')
-
-        # Consultas de precio
-        if texto.lower().startswith('precio de '):
-            servicio = texto[10:].strip()
-            info = obtener_precio(servicio)
-            if info:
-                precio, moneda = info
-                respuesta = f"El precio de *{servicio}* es {precio} {moneda}."
-            else:
-                respuesta = f"No encontré tarifa para *{servicio}*."
-            enviar_mensaje(numero, respuesta)
-            guardar_conversacion(numero, texto, respuesta)
-            return 'OK', 200
-
-        # IA normal
-        IA_ESTADOS.setdefault(numero, True)
-        respuesta = ""
-        if IA_ESTADOS[numero]:
-            respuesta = responder_con_ia(texto, numero)
-            enviar_mensaje(numero, respuesta)
-            if detectar_intervencion_humana(texto, respuesta, numero):
-                resumen = resumen_rafa(numero)
-                enviar_alerta_humana(numero, texto, resumen)
-                enviar_informacion_completa(numero)
-
-        guardar_conversacion(numero, texto, respuesta)
-
-        # ==============================================
-        # INICIO DEL CÓDIGO NUEVO - KANBAN AUTOMÁTICO
-        # ==============================================
-        
-        # Inicializar metadata del chat si no existe
-        meta = obtener_chat_meta(numero)
-        if not meta:
-            inicializar_chat_meta(numero)
-        
-        # Evaluar movimiento automático basado en las reglas
-        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
-        actualizar_columna_chat(numero, nueva_columna)
-        
-        # ==============================================
-        # FIN DEL CÓDIGO NUEVO
-        # ==============================================
-
         return 'OK', 200
 
     except Exception as e:
@@ -780,7 +695,7 @@ def enviar_manual():
     if IA_ESTADOS.get(numero, True):
         respuesta = responder_con_ia(texto, numero)
         enviar_mensaje(numero, respuesta)
-        if detectar_intervencion_humana(texto, respuesta):
+        if detectar_intervencion_humana(texto, respuesta, numero):
             resumen = resumen_rafa(numero)
             enviar_template_alerta("Sin nombre", numero, texto, resumen)
     guardar_conversacion(numero, texto, respuesta)
