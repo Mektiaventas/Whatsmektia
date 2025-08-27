@@ -541,7 +541,7 @@ def webhook():
             respuesta = responder_con_ia(texto, numero)
             enviar_mensaje(numero, respuesta)
             # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
-            if not es_mi_numero and detectar_intervencion_humana(texto, respuesta, numero):
+            if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
                 resumen = resumen_rafa(numero)
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
