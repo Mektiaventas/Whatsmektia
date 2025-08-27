@@ -481,24 +481,44 @@ def webhook():
             app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
         # ========== PROCESAMIENTO NORMAL PARA TODOS LOS NÚMEROS ==========
-        # Actualizar contacto
+        # Actualizar contacto (VERSIÓN MEJORADA - EVITA DUPLICADOS)
         contactos = change.get('contacts')
         if contactos and len(contactos) > 0:
             profile_name = contactos[0].get('profile', {}).get('name')
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
-                    VALUES (%s, %s, 'whatsapp', %s)
-                    ON DUPLICATE KEY UPDATE 
-                    nombre = COALESCE(VALUES(nombre), nombre),
-                    imagen_url = COALESCE(VALUES(imagen_url), imagen_url);
-                """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
-                conn.commit()
-                cursor.close()
-                conn.close()
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    # PRIMERO: Eliminar cualquier duplicado existente para este número
+                    cursor.execute("""
+                        DELETE FROM contactos 
+                        WHERE numero_telefono = %s 
+                        AND id NOT IN (
+                            SELECT MAX(id) FROM (
+                                SELECT id FROM contactos WHERE numero_telefono = %s
+                            ) AS temp
+                        )
+                    """, (wa_id, wa_id))
+                    
+                    # LUEGO: Insertar o actualizar
+                    cursor.execute("""
+                        INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
+                        VALUES (%s, %s, 'whatsapp', %s)
+                        ON DUPLICATE KEY UPDATE 
+                            nombre = VALUES(nombre),
+                            imagen_url = VALUES(imagen_url)
+                    """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    app.logger.info(f"✅ Contacto actualizado: {wa_id}")
+                    
+                except Exception as e:
+                    app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
+                    
 
         # Consultas de precio (funciona para todos)
         if texto.lower().startswith('precio de '):
@@ -537,24 +557,43 @@ def webhook():
         # ==============================================
         # ==============================================
 
-        # Actualizar contacto
+        # Actualizar contacto (VERSIÓN MEJORADA - EVITA DUPLICADOS)
         contactos = change.get('contacts')
         if contactos and len(contactos) > 0:
             profile_name = contactos[0].get('profile', {}).get('name')
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
-                conn = get_db_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
-                    VALUES (%s, %s, 'whatsapp', %s)
-                    ON DUPLICATE KEY UPDATE 
-                    nombre = COALESCE(VALUES(nombre), nombre),
-                    imagen_url = COALESCE(VALUES(imagen_url), imagen_url);
-                """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
-                conn.commit()
-                cursor.close()
-                conn.close()
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    
+                    # PRIMERO: Eliminar cualquier duplicado existente para este número
+                    cursor.execute("""
+                        DELETE FROM contactos 
+                        WHERE numero_telefono = %s 
+                        AND id NOT IN (
+                            SELECT MAX(id) FROM (
+                                SELECT id FROM contactos WHERE numero_telefono = %s
+                            ) AS temp
+                        )
+                    """, (wa_id, wa_id))
+                    
+                    # LUEGO: Insertar o actualizar
+                    cursor.execute("""
+                        INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
+                        VALUES (%s, %s, 'whatsapp', %s)
+                        ON DUPLICATE KEY UPDATE 
+                            nombre = VALUES(nombre),
+                            imagen_url = VALUES(imagen_url)
+                    """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    app.logger.info(f"✅ Contacto actualizado: {wa_id}")
+                    
+                except Exception as e:
+                    app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
 
         msg = mensajes[0]
         numero = msg['from']
