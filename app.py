@@ -710,9 +710,10 @@ def enviar_manual():
         cursor = conn.cursor()
         
         timestamp_utc = datetime.utcnow()
+        # OPCIÓN 2: Si quieres mantener la leyenda, concatenarla
         cursor.execute(
-            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-            (numero, texto, "[Enviado manualmente por operador]", timestamp_utc)
+            "INSERT INTO conversaciones (numero, mensaje, respuesta,timestamp) VALUES (%s, %s, %s, %s);",
+            (numero, None, f"{texto} [Enviado manualmente]", timestamp_utc)  # ← Texto + leyenda
         )
         
         conn.commit()
@@ -972,7 +973,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
         return 1  # Nuevos
     
     # Si hay intervención humana, mover a "Esperando Respuesta"
-    if detectar_intervencion_humana(mensaje, respuesta):
+    if detectar_intervencion_humana(mensaje, respuesta, numero):
         return 3  # Esperando Respuesta
     
     # Si tiene más de 2 mensajes, mover a "En Conversación"
@@ -1024,7 +1025,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
         return 1  # Nuevos
     
     # Si hay intervención humana, mover a "Esperando Respuesta"
-    if detectar_intervencion_humana(mensaje, respuesta):
+    if detectar_intervencion_humana(mensaje, respuesta, numero):
         return 3  # Esperando Respuesta
     
     # Si tiene más de 2 mensajes, mover a "En Conversación"
