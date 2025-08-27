@@ -462,31 +462,78 @@ def webhook():
         # ==============================================
         # PREVENCIÓN MEJORADA - EVITAR LOOPS SOLO PARA MI NÚMERO
         # ==============================================
+        # ==============================================
+        # PREVENCIÓN MEJORADA - SOLO EVITAR ALERTAS PARA MI NÚMERO
+        # ==============================================
         msg = mensajes[0]
         numero = msg['from']
+        texto = msg.get('text', {}).get('body', '')
 
-        # 🔄 DETECTAR SI ES MI NÚMERO PERSONAL (para evitar loops)
-        if numero in ['5214491182201', '524491182201']:
-            app.logger.info(f"🔵 Mensaje de mi número personal, procesando normal pero sin auto-alertas: {numero}")
-            
-            # Procesar NORMALMENTE pero EVITAR que mi propio número genere alertas
-            texto = msg.get('text', {}).get('body', '')
-            
-            # IA normal para mi número
-            IA_ESTADOS.setdefault(numero, True)
-            respuesta = ""
-            if IA_ESTADOS[numero]:
-                respuesta = responder_con_ia(texto, numero)
-                enviar_mensaje(numero, respuesta)
-                # ⚠️ EVITAR: No llamar a detectar_intervencion_humana para mi propio número
-            
-            guardar_conversacion(numero, texto, respuesta)
-            return 'OK', 200  # Salir después de procesar
-        
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
         if numero == ALERT_NUMBER:
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando completamente: {numero}")
             return 'OK', 200  # Ignorar completamente
+        
+        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
+        es_mi_numero = numero in ['5214491182201', '524491182201']
+        
+        if es_mi_numero:
+            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
+        
+        # ========== PROCESAMIENTO NORMAL PARA TODOS LOS NÚMEROS ==========
+        # Actualizar contacto
+        contactos = change.get('contacts')
+        if contactos and len(contactos) > 0:
+            profile_name = contactos[0].get('profile', {}).get('name')
+            wa_id = contactos[0].get('wa_id')
+            if profile_name and wa_id:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
+                    VALUES (%s, %s, 'whatsapp', %s)
+                    ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(VALUES(nombre), nombre),
+                    imagen_url = COALESCE(VALUES(imagen_url), imagen_url);
+                """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
+                conn.commit()
+                cursor.close()
+                conn.close()
+
+        # Consultas de precio (funciona para todos)
+        if texto.lower().startswith('precio de '):
+            servicio = texto[10:].strip()
+            info = obtener_precio(servicio)
+            if info:
+                precio, moneda = info
+                respuesta = f"El precio de *{servicio}* es {precio} {moneda}."
+            else:
+                respuesta = f"No encontré tarifa para *{servicio}*."
+            enviar_mensaje(numero, respuesta)
+            guardar_conversacion(numero, texto, respuesta)
+            return 'OK', 200
+
+        # IA normal
+        IA_ESTADOS.setdefault(numero, True)
+        respuesta = ""
+        if IA_ESTADOS[numero]:
+            respuesta = responder_con_ia(texto, numero)
+            enviar_mensaje(numero, respuesta)
+            # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
+            if not es_mi_numero and detectar_intervencion_humana(texto, respuesta, numero):
+                resumen = resumen_rafa(numero)
+                enviar_alerta_humana(numero, texto, resumen)
+                enviar_informacion_completa(numero)
+
+        guardar_conversacion(numero, texto, respuesta)
+
+        # ========== KANBAN AUTOMÁTICO (para todos) ==========
+        meta = obtener_chat_meta(numero)
+        if not meta:
+            inicializar_chat_meta(numero)
+        
+        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
+        actualizar_columna_chat(numero, nueva_columna)
         # ==============================================
         # ==============================================
 
