@@ -470,9 +470,10 @@ def webhook():
         texto = msg.get('text', {}).get('body', '')
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
-        if numero == ALERT_NUMBER:
-            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando completamente: {numero}")
-            return 'OK', 200  # Ignorar completamente
+        # Solo ignorar mensajes que claramente son del sistema de alertas
+        if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
+            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
+            return 'OK', 200
         
         # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
         es_mi_numero = numero in ['5214491182201', '524491182201']
