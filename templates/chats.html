@@ -1,191 +1,180 @@
-{% extends "base.html" %}
-{% block title %}Conversaciones{% endblock %}
-
-{% block content %}
-<div class="chat-list-header">
-  <h2>Conversaciones</h2>
-</div>
-
-<div class="chat-layout-v2">
-  <!-- Lado izquierdo: Lista -->
-  <aside class="chat-list-v2">
-    <div class="chat-list-tools">
-      <button class="add-contact-btn">+ Agregar Contacto</button>
-      <input type="text" placeholder="Buscar chats..." class="search-input">
-    </div>
-
-    <div class="chat-items">
-      {% for chat in chats %}
-      <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
-        <div class="chat-avatar">
-          <img 
-            src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
-            alt="Avatar"
-            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-            width="40" height="40">
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chats - WhatsMektia</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .chat-list { max-height: 80vh; overflow-y: auto; }
+        .chat-item:hover { background-color: #f8f9fa; cursor: pointer; }
+        .message-container { max-height: 60vh; overflow-y: auto; }
+        .user-message { background-color: #d1ecf1; border-radius: 15px; padding: 10px; margin: 5px; }
+        .bot-message { background-color: #e2e3e5; border-radius: 15px; padding: 10px; margin: 5px; }
+        .unread-badge { background-color: #dc3545; }
+        .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="{{ url_for('home') }}">
+                <i class="fab fa-whatsapp"></i> WhatsMektia
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="{{ url_for('home') }}">Dashboard</a>
+                <a class="nav-link active" href="{{ url_for('ver_chats') }}">Chats</a>
+                <a class="nav-link" href="{{ url_for('ver_kanban') }}">Kanban</a>
+                <a class="nav-link" href="{{ url_for('configuracion_tab', tab='negocio') }}">Configuración</a>
+            </div>
         </div>
-        <div class="chat-info">
-          <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
-            <span class="alias-view">
-              {{ chat.nombre_mostrado }}
-            </span>
-            <span class="alias-edit" style="display:none;">
-              <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
-            </span>
-            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
-              ✏️
-            </button>
-          </div>
-          {% if chat.alias or chat.nombre %}
-            <div class="chat-num" style="font-size:11px;color:#888;">
-              {{ chat.numero }}
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <!-- Lista de chats -->
+            <div class="col-md-4">
+                <div class="card">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0"><i class="fas fa-comments"></i> Chats Activos</h5>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="chat-list">
+                            {% for chat in chats %}
+                            <div class="chat-item p-3 border-bottom {% if selected == chat.numero %}bg-light{% endif %}"
+                                 onclick="location.href='{{ url_for('ver_chat', numero=chat.numero) }}'">
+                                <div class="d-flex align-items-center">
+                                    <img src="{{ chat.imagen_url or 'https://via.placeholder.com/40' }}" 
+                                         class="avatar me-3" alt="Avatar">
+                                    <div class="flex-grow-1">
+                                        <h6 class="mb-0">{{ chat.nombre_mostrado }}</h6>
+                                        <small class="text-muted">
+                                            {{ chat.ultimo_mensaje[:50] }}{% if chat.ultimo_mensaje and chat.ultimo_mensaje|length > 50 %}...{% endif %}
+                                        </small>
+                                        <br>
+                                        <small class="text-muted">
+                                            {{ chat.total_mensajes }} mensajes • 
+                                            {{ chat.ultima_fecha.strftime('%d/%m %H:%M') if chat.ultima_fecha else 'N/A' }}
+                                        </small>
+                                    </div>
+                                    {% if chat.sin_leer and chat.sin_leer > 0 %}
+                                    <span class="badge unread-badge">{{ chat.sin_leer }}</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
             </div>
-          {% endif %}
-          <div class="chat-preview">
-            {% if chat.ultimo_mensaje %}
-              {{ chat.ultimo_mensaje[:35] }}...
-            {% else %}
-              Sin mensajes
-            {% endif %}
-          </div>
+
+            <!-- Conversación seleccionada -->
+            <div class="col-md-8">
+                {% if selected %}
+                <div class="card">
+                    <div class="card-header bg-success text-white d-flex justify-content-between align-items-center">
+                        <div>
+                            <h5 class="mb-0">
+                                <img src="{{ chats[0].imagen_url if chats else 'https://via.placeholder.com/40' }}" 
+                                     class="avatar me-2" alt="Avatar">
+                                {{ chats[0].nombre_mostrado if chats else selected }}
+                            </h5>
+                        </div>
+                        <div>
+                            <form action="{{ url_for('toggle_ai', numero=selected) }}" method="post" class="d-inline">
+                                <button type="submit" class="btn btn-sm {% if IA_ESTADOS.get(selected, True) %}btn-warning{% else %}btn-info{% endif %} me-2">
+                                    {% if IA_ESTADOS.get(selected, True) %}
+                                        <i class="fas fa-robot"></i> Desactivar IA
+                                    {% else %}
+                                        <i class="fas fa-user"></i> Activar IA
+                                    {% endif %}
+                                </button>
+                            </form>
+                            <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}">
+                                {% if IA_ESTADOS.get(selected, True) %}
+                                    🤖 IA ACTIVADA
+                                {% else %}
+                                    👤 MODO MANUAL
+                                {% endif %}
+                            </span>
+                        </div>
+                    </div>
+
+                    <!-- Mensajes de la conversación -->
+                    <div class="card-body message-container">
+                        {% if mensajes %}
+                            {% for msg in mensajes %}
+                            <div class="message {% if msg.respuesta %}bot-message{% else %}user-message{% endif %}">
+                                <div class="d-flex justify-content-between">
+                                    <strong>{% if msg.respuesta %}🤖 IA{% else %}👤 Usuario{% endif %}</strong>
+                                    <small class="text-muted">
+                                        {{ msg.timestamp.strftime('%H:%M') if msg.timestamp else 'N/A' }}
+                                    </small>
+                                </div>
+                                <p class="mb-0">{{ msg.mensaje if msg.mensaje else msg.respuesta }}</p>
+                            </div>
+                            {% endfor %}
+                        {% else %}
+                            <p class="text-center text-muted">No hay mensajes en esta conversación.</p>
+                        {% endif %}
+                    </div>
+
+                    <!-- FORMULARIO DE MENSAJE MANUAL (SOLO CUANDO IA ESTÁ DESACTIVADA) -->
+                    {% if not IA_ESTADOS.get(selected, True) %}
+                    <div class="card-footer">
+                        <div class="manual-message-box" style="padding: 15px; background: #f8f9fa; border-radius: 10px;">
+                            <h6>💬 Enviar mensaje manual</h6>
+                            <form action="{{ url_for('enviar_manual') }}" method="post">
+                                <input type="hidden" name="numero" value="{{ selected }}">
+                                
+                                <div class="form-group mb-2">
+                                    <textarea name="texto" class="form-control" rows="2" 
+                                             placeholder="Escribe tu mensaje como representante humano..." 
+                                             required style="resize: none;"></textarea>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary btn-sm">
+                                    <i class="fas fa-paper-plane"></i> Enviar como humano
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                    {% else %}
+                    <!-- MENSAJE CUANDO IA ESTÁ ACTIVADA -->
+                    <div class="card-footer">
+                        <div class="ia-active-message" style="padding: 15px; background: #e3f2fd; border-radius: 10px; text-align: center;">
+                            <p class="mb-0">🤖 La IA está respondiendo automáticamente. Desactívala para enviar mensajes manuales.</p>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <div class="card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-comments fa-3x text-muted mb-3"></i>
+                        <h5>Selecciona un chat para ver la conversación</h5>
+                        <p class="text-muted">Elige una conversación de la lista lateral para comenzar</p>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
         </div>
-        <div class="chat-meta">
-          {% if chat.ultima_fecha %}
-            {{ chat.ultima_fecha.strftime("%d/%m/%Y") }}
-          {% endif %}
-        </div>
-      </a>
-      {% endfor %}
-    </div>
-  </aside>
-
-  <!-- Centro: Mensajes -->
-  <section class="chat-panel-v2">
-    <div class="chat-panel-header" data-num="{{ selected }}">
-      {% if selected %}
-        <span class="alias-view">
-          {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado }}
-        </span>
-        <span class="alias-edit" style="display:none;">
-          <input type="text" value="{{ (chats | selectattr("numero", "equalto", selected) | first).alias
-            or (chats | selectattr("numero", "equalto", selected) | first).nombre
-            or '' }}" data-num="{{ selected }}" maxlength="100" style="width: 110px;">
-        </span>
-        <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
-          ✏️
-        </button>
-        <span style="margin-left:8px; color:#888;">{{ selected }}</span>
-      {% else %}
-        Selecciona un chat
-      {% endif %}
     </div>
 
-    <div class="msgs-wrap-v2" id="msgs">
-      {% if mensajes %}
-        {% for msg in mensajes %}
-          {% if msg.respuesta %}
-            <div class="msg-box msg-user">
-              {{ msg.mensaje }}
-              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
-            </div>
-            <div class="msg-box msg-ai">
-              {{ msg.respuesta }}
-              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
-            </div>
-          {% else %}
-            <div class="msg-box msg-user">
-              {{ msg.mensaje }}
-              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
-            </div>
-          {% endif %}
-        {% endfor %}
-      {% else %}
-        <p style="padding:1rem;">Selecciona un chat para ver mensajes.</p>
-      {% endif %}
-    </div>
-
-    {% if selected %}
-    <form method="POST" action="/send-manual" class="reply-form">
-      <input type="hidden" name="numero" value="{{ selected }}">
-      <div class="input-group">
-        <button type="button" class="emoji-btn">😊</button>
-        <input type="text" name="texto" placeholder="Escribe un mensaje..." class="reply-input-line" autocomplete="off" />
-        <button type="submit" class="send-btn">Enviar</button>
-      </div>
-    </form>
-    {% endif %}
-  </section>
-
-  <!-- Lado derecho -->
-  <aside class="sidebar-right">
-    {% if selected %}
-      <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Eliminar este chat?')">
-        <button type="submit" class="delete-btn">🗑️ Eliminar Chat</button>
-      </form>
-      <form action="/toggle_ai/{{ selected }}" method="POST">
-        <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, True) else 'off' }}">
-          IA {{ 'ON' if IA_ESTADOS.get(selected, True) else 'OFF' }}
-        </button>
-      </form>
-    {% endif %}
-  </aside>
-</div>
-
-<script>
-  // Función para activar edición de alias
-  function activarEdicionAlias(parent) {
-    parent.querySelector('.alias-view').style.display = 'none';
-    parent.querySelector('.alias-edit').style.display = '';
-    const input = parent.querySelector('input[type=text]');
-    input.focus();
-    input.select();
-
-    function terminarEdicion() {
-      fetch(`/contactos/${input.dataset.num}/alias`, {
-        method: 'POST',
-        body: new URLSearchParams({alias: input.value}),
-        headers: {'Content-Type':'application/x-www-form-urlencoded'}
-      }).then(() => {
-        parent.querySelector('.alias-edit').style.display = 'none';
-        parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-        parent.querySelector('.alias-view').style.display = '';
-
-        // ACTUALIZA EN LISTA TAMBIÉN (si cambiaste en header)
-        // Busca en la lista de contactos y actualiza el alias ahí
-        document.querySelectorAll('.chat-name').forEach(function(chatName) {
-          if(chatName.dataset.num === input.dataset.num) {
-            chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-          }
-        });
-      });
-    }
-
-    input.onblur = terminarEdicion;
-    input.onkeydown = function(e) {
-      if (e.key === 'Enter') { terminarEdicion(); }
-      if (e.key === 'Escape') {
-        parent.querySelector('.alias-edit').style.display = 'none';
-        parent.querySelector('.alias-view').style.display = '';
-      }
-    };
-  }
-
-  // Activar edición en todos los botones ✏️, tanto lista como header
-  document.addEventListener('DOMContentLoaded', function () {
-    document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const parent = btn.closest('.chat-name, .chat-panel-header');
-        activarEdicionAlias(parent);
-      });
-    });
-  });
-
-  // Scroll to bottom mensajes
-  const msgs = document.getElementById('msgs');
-  if (msgs) {
-    msgs.scrollTop = msgs.scrollHeight;
-  }
-</script>
-{% endblock %}
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Auto-scroll to bottom of messages
+        function scrollToBottom() {
+            const container = document.querySelector('.message-container');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+        
+        // Scroll on page load and every 2 seconds
+        scrollToBottom();
+        setInterval(scrollToBottom, 2000);
+    </script>
+</body>
+</html>

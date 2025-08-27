@@ -685,20 +685,58 @@ def ver_chat(numero):
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
     IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
+    # Agregar log para debugging
+    app.logger.info(f"🔘 IA para {numero}: {'ACTIVADA' if IA_ESTADOS[numero] else 'DESACTIVADA'}")
     return redirect(url_for('ver_chat', numero=numero))
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    numero    = request.form['numero']
-    texto     = request.form['texto']
-    respuesta = ""
-    if IA_ESTADOS.get(numero, True):
-        respuesta = responder_con_ia(texto, numero)
-        enviar_mensaje(numero, respuesta)
-        if detectar_intervencion_humana(texto, respuesta, numero):
-            resumen = resumen_rafa(numero)
-            enviar_template_alerta("Sin nombre", numero, texto, resumen)
-    guardar_conversacion(numero, texto, respuesta)
+    try:
+        numero = request.form['numero']
+        texto = request.form['texto'].strip()
+        
+        # Validar que el mensaje no esté vacío
+        if not texto:
+            flash('❌ El mensaje no puede estar vacío', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+        
+        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+        
+        # 1. ENVIAR MENSAJE POR WHATSAPP
+        enviar_mensaje(numero, texto)
+        
+        # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        timestamp_utc = datetime.utcnow()
+        cursor.execute(
+            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
+            (numero, texto, "[Enviado manualmente por operador]", timestamp_utc)
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+        try:
+            actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+            app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
+        except Exception as e:
+            app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+        
+        # 4. MENSAJE DE CONFIRMACIÓN
+        flash('✅ Mensaje enviado correctamente', 'success')
+        app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+        
+    except KeyError:
+        flash('❌ Error: Número de teléfono no proporcionado', 'error')
+        app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+    except Exception as e:
+        flash('❌ Error al enviar el mensaje', 'error')
+        app.logger.error(f"🔴 Error en enviar_manual: {e}")
+    
     return redirect(url_for('ver_chat', numero=numero))
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
@@ -888,7 +926,7 @@ def data_deletion():
 
 @app.route('/test-alerta')
 def test_alerta():
-    enviar_template_alerta("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
     return "🚀 Test alerta disparada."
 
 
