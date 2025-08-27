@@ -458,16 +458,36 @@ def webhook():
         if not mensajes:
             return 'OK', 200
             
+        # ⛔ IGNORAR MENSAJES DEL SISTEMA DE ALERTAS
         # ==============================================
-        # PREVENCIÓN PARA EL FUTURO - EVITAR LOOPS
+        # PREVENCIÓN MEJORADA - EVITAR LOOPS SOLO PARA MI NÚMERO
         # ==============================================
         msg = mensajes[0]
         numero = msg['from']
+
+        # 🔄 DETECTAR SI ES MI NÚMERO PERSONAL (para evitar loops)
+        if numero in ['5214491182201', '524491182201']:
+            app.logger.info(f"🔵 Mensaje de mi número personal, procesando normal pero sin auto-alertas: {numero}")
+            
+            # Procesar NORMALMENTE pero EVITAR que mi propio número genere alertas
+            texto = msg.get('text', {}).get('body', '')
+            
+            # IA normal para mi número
+            IA_ESTADOS.setdefault(numero, True)
+            respuesta = ""
+            if IA_ESTADOS[numero]:
+                respuesta = responder_con_ia(texto, numero)
+                enviar_mensaje(numero, respuesta)
+                # ⚠️ EVITAR: No llamar a detectar_intervencion_humana para mi propio número
+            
+            guardar_conversacion(numero, texto, respuesta)
+            return 'OK', 200  # Salir después de procesar
         
-        # ⛔ IGNORAR MENSAJES DEL SISTEMA DE ALERTAS
-        if numero == ALERT_NUMBER or numero == '5214491182201' or numero == '524491182201':
-            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
-            return 'OK', 200  # Ignorar completamente mensajes del sistema
+        # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
+        if numero == ALERT_NUMBER:
+            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando completamente: {numero}")
+            return 'OK', 200  # Ignorar completamente
+        # ==============================================
         # ==============================================
 
         # Actualizar contacto
