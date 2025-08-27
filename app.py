@@ -304,49 +304,51 @@ def guardar_conversacion(numero, mensaje, respuesta):
     conn.close()
 
 # ——— Detección y alerta ———
-def detectar_intervencion_humana(mensaje_usuario, respuesta_ia):
-    texto = mensaje_usuario.lower()
+def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
+    """Detección mejorada que previene loops"""
     
-    # Palabras clave más completas
-    palabras_clave = [
-        'hablar con persona', 'hablar con asesor', 'hablar con agente',
-        'quiero asesor', 'atención humana', 'soporte técnico', 'soporte humano',
-        'es urgente', 'necesito ayuda humana', 'quiero un humano', 
-        'operador', 'ejecutivo', 'representante', 'persona real',
-        'no robot', 'no bots', 'no ia', 'no inteligencia artificial'
+    # ⚠️ EVITAR DETECTAR ALERTAS DEL MISMO SISTEMA
+    # Mensajes que provienen del sistema de alertas
+    alertas_sistema = [
+        "🚨 ALERTA: Intervención Humana Requerida",
+        "📋 INFORMACIÓN COMPLETA DEL CLIENTE",
+        "👤 Cliente:", "📞 Número:", "💬 Mensaje clave:"
     ]
     
-    # Detectar por palabras clave en mensaje del usuario
-    for frase in palabras_clave:
+    for alerta in alertas_sistema:
+        if alerta in mensaje_usuario:
+            return False
+    
+    # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
+    if numero == ALERT_NUMBER or numero == '5214491182201' or numero == '524491182201':
+        return False
+    
+    # 📋 DETECCIÓN NORMAL (tu código actual)
+    texto = mensaje_usuario.lower()
+    if 'hablar con ' in texto or 'ponme con ' in texto:
+        return True
+        
+    disparadores = [
+        'hablar con persona', 'hablar con asesor', 'hablar con agente',
+        'quiero asesor', 'atención humana', 'soporte técnico',
+        'es urgente', 'necesito ayuda humana', 'presupuesto',
+        'cotización', 'quiero comprar', 'me interesa'
+    ]
+    
+    for frase in disparadores:
         if frase in texto:
             return True
-    
-    # Detectar por patrones específicos
-    patrones = [
-        r'hablar\s+con\s+',
-        r'ponerme\s+con\s+', 
-        r'contactar\s+con\s+',
-        r'quiero\s+hablar\s+con\s+'
-    ]
-    
-    for patron in patrones:
-        if re.search(patron, texto):
-            return True
-    
-    # Detectar por respuestas de la IA que indican canalización
+            
     respuesta = respuesta_ia.lower()
     canalizaciones = [
-        'te canalizaré', 'asesor te contactará', 'te paso con',
-        'en breve te contacta', 'nuestro equipo te llamará',
-        'te transferiré', 'te conecto con'
+        'te canalizaré', 'asesor te contactará', 'te paso con'
     ]
     
     for tag in canalizaciones:
         if tag in respuesta:
             return True
-    
+            
     return False
-
 
 def resumen_rafa(numero):
     conn = get_db_connection()
@@ -455,6 +457,18 @@ def webhook():
         
         if not mensajes:
             return 'OK', 200
+            
+        # ==============================================
+        # PREVENCIÓN PARA EL FUTURO - EVITAR LOOPS
+        # ==============================================
+        msg = mensajes[0]
+        numero = msg['from']
+        
+        # ⛔ IGNORAR MENSAJES DEL SISTEMA DE ALERTAS
+        if numero == ALERT_NUMBER or numero == '5214491182201' or numero == '524491182201':
+            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
+            return 'OK', 200  # Ignorar completamente mensajes del sistema
+        # ==============================================
 
         # Actualizar contacto
         contactos = change.get('contacts')
@@ -498,7 +512,7 @@ def webhook():
         if IA_ESTADOS[numero]:
             respuesta = responder_con_ia(texto, numero)
             enviar_mensaje(numero, respuesta)
-            if detectar_intervencion_humana(texto, respuesta):
+            if detectar_intervencion_humana(texto, respuesta, numero):
                 resumen = resumen_rafa(numero)
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
