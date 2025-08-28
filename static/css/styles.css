@@ -1219,3 +1219,125 @@ body {
         margin: 0 !important;
     }
 }
+/* ========== SOLUCIÓN TEMPORAL URGENTE ========== */
+/* Fuerza los colores y posiciones aunque haya conflictos */
+
+/* 1. Mensaje de IA ACTIVA - FIX DEFINITIVO */
+.ia-active-message,
+div[style*="background: #e3f2fd"],
+div[style*="background:#e3f2fd"] {
+    background: #e3f2fd !important;
+    border: 2px solid #bbdefb !important;
+    padding: 15px !important;
+    border-radius: 8px !important;
+    text-align: center !important;
+    margin: 10px !important;
+}
+
+.ia-active-message p,
+div[style*="background: #e3f2fd"] p,
+div[style*="background:#e3f2fd"] p {
+    color: #000000 !important; /* NEGRO PURO - máximo contraste */
+    font-weight: bold !important;
+    margin: 0 !important;
+    font-size: 14px !important;
+}
+
+/* 2. Mensaje de "Selecciona un chat" */
+.no-chat-selected-message {
+    background: #fff3cd !important; /* Amarillo claro */
+    border: 2px solid #ffeaa7 !important;
+    padding: 20px !important;
+    border-radius: 8px !important;
+    text-align: center !important;
+    margin: 20px !important;
+}
+
+.no-chat-selected-message p {
+    color: #856404 !important; /* Amarillo oscuro */
+    font-weight: bold !important;
+    margin: 0 !important;
+    font-size: 16px !important;
+}
+
+/* 3. HEADER TEMPORAL - lo fijamos arriba SIEMPRE */
+.chat-panel-header {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 1000 !important;
+    background: #2a2f48 !important;
+    padding: 15px !important;
+    margin: 0 !important;
+    border-bottom: 3px solid #1f4e79 !important;
+}
+
+/* 4. RESET COMPLETO del layout para móvil */
+@media (max-width: 768px) {
+    .chat-layout-v2 {
+        display: block !important;
+        height: auto !important;
+    }
+    
+    .chat-panel-v2 {
+        display: block !important;
+        height: auto !important;
+        min-height: 100vh !important;
+    }
+    
+    .msgs-wrap-v2 {
+        padding: 20px 15px !important;
+        min-height: 60vh !important;
+    }
+    
+    /* Fuerza el header arriba de TODO */
+    .chat-panel-header {
+        position: fixed !important;
+        top: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        width: 100% !important;
+    }
+    
+    /* Compensa el espacio del header fijo */
+    .msgs-wrap-v2 {
+        padding-top: 70px !important;
+        padding-bottom: 100px !important;
+    }
+    
+    /* Formulario fijo abajo */
+    .reply-form,
+    .ia-active-message {
+        position: fixed !important;
+        bottom: 0 !important;
+        left: 0 !important;
+        right: 0 !important;
+        background: white !important;
+        padding: 15px !important;
+        z-index: 1001 !important;
+        margin: 0 !important;
+        border-top: 3px solid #1f4e79 !important;
+    }
+}
+
+/* 5. Asegurar que los mensajes se vean BIEN */
+.msg-box {
+    background: #ffffff !important;
+    border: 1px solid #ddd !important;
+    color: #000000 !important;
+    margin: 10px 0 !important;
+}
+
+.msg-user {
+    background: #e6f7ff !important;
+    border: 1px solid #91d5ff !important;
+}
+
+.msg-ai {
+    background: #fff7e6 !important;
+    border: 2px solid #ffd591 !important;
+}
+
+.msg-meta {
+    color: #666666 !important;
+    font-size: 12px !important;
+}
