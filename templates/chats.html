@@ -207,9 +207,7 @@
       });
     });
   });
-  
-  
-    // ========== AGREGAR JUSTO AQUÍ ==========
+
   // ========== SOLO PARA MÓVIL - Scroll al final ==========
   function scrollToBottomMobile() {
       if (window.innerWidth > 768) return;
@@ -223,13 +221,11 @@
   }
 
   document.addEventListener('DOMContentLoaded', scrollToBottomMobile);
-  // ========== HASTA AQUÍ ==========
-
 
   // Scroll to bottom mensajes
   const msgs = document.getElementById('msgs');
   if (msgs) {
-    msgs.scrollTop = msgs.scrollHeight;
+      msgs.scrollTop = msgs.scrollHeight;
   }
 
   // Toggle lista de chats en móvil
