@@ -61,34 +61,41 @@
 
   <!-- Centro: Mensajes -->
   <section class="chat-panel-v2">
+    {% if selected %}
     <div class="chat-panel-header" data-num="{{ selected }}">
-      {% if selected %}
-        <span class="alias-view">
-          {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado }}
-        </span>
-        <span class="alias-edit" style="display:none;">
-          <input type="text" value="{{ (chats | selectattr("numero", "equalto", selected) | first).alias
-            or (chats | selectattr("numero", "equalto", selected) | first).nombre
-            or '' }}" data-num="{{ selected }}" maxlength="100" style="width: 110px;">
-        </span>
-        <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
-          ✏️
-        </button>
-        <span style="margin-left:8px; color:#888;">{{ selected }}</span>
-        
-        <!-- BADGE DE ESTADO IA/MANUAL (NUEVO) -->
-        <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}" 
-              style="margin-left: 10px; font-size: 0.8em;">
-            {% if IA_ESTADOS.get(selected, True) %}
-                🤖 IA ACTIVADA
-            {% else %}
-                👤 MODO MANUAL
-            {% endif %}
-        </span>
-      {% else %}
-        Selecciona un chat
-      {% endif %}
+      <span class="alias-view">
+        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado }}
+      </span>
+      <span class="alias-edit" style="display:none;">
+        <input type="text" value="{{ (chats | selectattr("numero", "equalto", selected) | first).alias
+          or (chats | selectattr("numero", "equalto", selected) | first).nombre
+          or '' }}" data-num="{{ selected }}" maxlength="100" style="width: 110px;">
+      </span>
+      <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+        ✏️
+      </button>
+      <span style="margin-left:8px; color:#888;">{{ selected }}</span>
+      
+      <!-- BADGE DE ESTADO IA/MANUAL -->
+      <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}" 
+            style="margin-left: 10px; font-size: 0.8em;">
+          {% if IA_ESTADOS.get(selected, True) %}
+              🤖 IA ACTIVADA
+          {% else %}
+              👤 MODO MANUAL
+          {% endif %}
+      </span>
+      
+      <!-- Botón para toggle IA en móvil -->
+      <button class="mobile-toggle-ia" onclick="toggleIA('{{ selected }}')">
+        {{ IA_ESTADOS.get(selected, True) and '🔴' or '🟢' }}
+      </button>
     </div>
+    {% else %}
+    <div class="chat-panel-header">
+      <span>Selecciona un chat</span>
+    </div>
+    {% endif %}
 
     <div class="msgs-wrap-v2" id="msgs">
       {% if mensajes %}
@@ -110,11 +117,11 @@
           {% endif %}
         {% endfor %}
       {% else %}
-        <p style="padding:1rem;">Selecciona un chat para ver mensajes.</p>
+        <p class="no-chat-selected">Selecciona un chat para ver mensajes.</p>
       {% endif %}
     </div>
 
-    <!-- FORMULARIO DE MENSAJE MANUAL (SOLO CUANDO IA ESTÁ DESACTIVADA) -->
+    <!-- FORMULARIO DE MENSAJE MANUAL -->
     {% if selected %}
         {% if not IA_ESTADOS.get(selected, True) %}
         <form method="POST" action="/send-manual" class="reply-form">
@@ -126,15 +133,14 @@
             </div>
         </form>
         {% else %}
-        <!-- MENSAJE CUANDO IA ESTÁ ACTIVADA -->
-        <div style="padding: 15px; background: #e3f2fd; border-radius: 5px; text-align: center; margin: 10px;">
-            <p style="margin: 0; color: #1976d2;">🤖 La IA está respondiendo automáticamente. Desactívala para enviar mensajes manuales.</p>
+        <div class="ia-active-message">
+            <p>🤖 La IA está respondiendo automáticamente. Desactívala para enviar mensajes manuales.</p>
         </div>
         {% endif %}
     {% endif %}
   </section>
 
-  <!-- Lado derecho -->
+  <!-- Lado derecho - Solo visible en desktop -->
   <aside class="sidebar-right">
     {% if selected %}
       <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Eliminar este chat?')">
@@ -148,6 +154,9 @@
     {% endif %}
   </aside>
 </div>
+
+<!-- Botón móvil para mostrar/ocultar lista de chats -->
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
 <script>
   // Función para activar edición de alias
@@ -168,8 +177,7 @@
         parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
         parent.querySelector('.alias-view').style.display = '';
 
-        // ACTUALIZA EN LISTA TAMBIÉN (si cambiaste en header)
-        // Busca en la lista de contactos y actualiza el alias ahí
+        // ACTUALIZA EN LISTA TAMBIÉN
         document.querySelectorAll('.chat-name').forEach(function(chatName) {
           if(chatName.dataset.num === input.dataset.num) {
             chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
@@ -188,7 +196,7 @@
     };
   }
 
-  // Activar edición en todos los botones ✏️, tanto lista como header
+  // Activar edición en todos los botones ✏️
   document.addEventListener('DOMContentLoaded', function () {
     document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
@@ -204,6 +212,18 @@
   const msgs = document.getElementById('msgs');
   if (msgs) {
     msgs.scrollTop = msgs.scrollHeight;
+  }
+
+  // Toggle lista de chats en móvil
+  function toggleChatList() {
+    const chatList = document.querySelector('.chat-list-v2');
+    chatList.classList.toggle('mobile-visible');
+  }
+
+  // Toggle IA desde móvil
+  function toggleIA(numero) {
+    fetch(`/toggle_ai/${numero}`, { method: 'POST' })
+      .then(() => window.location.reload());
   }
 </script>
 {% endblock %}

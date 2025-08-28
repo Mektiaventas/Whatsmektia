@@ -945,3 +945,176 @@ body {
         height: 300px;
     }
 }
+/* ========== RESPONSIVE CHATS ========== */
+@media (max-width: 1024px) {
+  .chat-layout-v2 {
+    grid-template-columns: 35% 65%;
+  }
+  
+  .sidebar-right {
+    display: none;
+  }
+  
+  .chat-panel-header .badge {
+    font-size: 0.7em;
+  }
+}
+
+@media (max-width: 768px) {
+  .chat-layout-v2 {
+    display: block;
+    position: relative;
+  }
+  
+  .chat-list-v2 {
+    position: fixed;
+    left: -100%;
+    top: 0;
+    width: 80%;
+    height: 100vh;
+    z-index: 1000;
+    background: var(--card-bg);
+    transition: left 0.3s ease;
+    padding: 1rem;
+    box-shadow: 2px 0 10px rgba(0,0,0,0.1);
+  }
+  
+  .chat-list-v2.mobile-visible {
+    left: 0;
+  }
+  
+  .chat-panel-v2 {
+    width: 100%;
+    min-height: 100vh;
+  }
+  
+  .mobile-chat-toggle {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1001;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: var(--brand-blue);
+    color: white;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+    display: block;
+  }
+  
+  .mobile-toggle-ia {
+    display: inline-block;
+    margin-left: 10px;
+    background: none;
+    border: none;
+    font-size: 1.2rem;
+    cursor: pointer;
+  }
+  
+  .sidebar-right {
+    display: none;
+  }
+  
+  .chat-panel-header {
+    padding: 0.8rem;
+    font-size: 0.9rem;
+  }
+  
+  .msg-box {
+    max-width: 90%;
+    font-size: 0.9rem;
+    padding: 10px 14px;
+  }
+  
+  .reply-form {
+    padding: 8px;
+  }
+  
+  .input-group {
+    gap: 5px;
+  }
+  
+  .reply-input-line {
+    padding: 8px 12px;
+    font-size: 0.9rem;
+  }
+  
+  .send-btn {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-list-v2 {
+    width: 100%;
+  }
+  
+  .chat-item {
+    padding: 8px;
+  }
+  
+  .chat-avatar img {
+    width: 35px;
+    height: 35px;
+  }
+  
+  .chat-info {
+    font-size: 0.9rem;
+  }
+  
+  .chat-preview {
+    font-size: 0.8rem;
+  }
+  
+  .chat-meta {
+    font-size: 0.7rem;
+  }
+  
+  .msg-box {
+    max-width: 95%;
+    padding: 8px 12px;
+  }
+  
+  .msg-meta {
+    font-size: 0.7rem;
+  }
+  
+  .no-chat-selected {
+    text-align: center;
+    padding: 2rem;
+    color: #666;
+  }
+  
+  .ia-active-message {
+    padding: 10px;
+    font-size: 0.9rem;
+    text-align: center;
+  }
+}
+
+/* Ocultar botón toggle en desktop */
+@media (min-width: 769px) {
+  .mobile-chat-toggle,
+  .mobile-toggle-ia {
+    display: none;
+  }
+}
+
+/* Mejoras para tablets */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .chat-layout-v2 {
+    grid-template-columns: 40% 60%;
+  }
+  
+  .chat-item {
+    padding: 10px;
+  }
+  
+  .chat-panel-header {
+    padding: 1rem;
+  }
+}
