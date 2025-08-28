@@ -2,49 +2,82 @@
 {% block title %}Dashboard General{% endblock %}
 
 {% block content %}
-  <style>
-    .tabs a {
-      padding: 10px 20px;
-      text-decoration: none;
-      border-radius: 20px;
-      border: 2px solid #1f4e79;
-      color: #1f4e79;
-      margin-right: 10px;
-    }
-    .tabs a.active {
-      background-color: #1f4e79;
-      color: white;
-    }
+<style>
+  .tabs a {
+    padding: 10px 20px;
+    text-decoration: none;
+    border-radius: 20px;
+    border: 2px solid #1f4e79;
+    color: #1f4e79;
+    margin-right: 10px;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  .tabs a.active {
+    background-color: #1f4e79;
+    color: white;
+  }
+  .stats {
+    margin-top: 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+  .stat-card {
+    background: rgba(255, 255, 255, 0.9);
+    padding: 1rem;
+    border-radius: 8px;
+    border-left: 6px solid #1f4e79;
+    min-width: 200px;
+    flex: 1;
+  }
+  .chart-container {
+    margin-top: 2rem;
+    width: 100%;
+    position: relative;
+    height: 400px;
+  }
+  
+  /* Responsive */
+  @media (max-width: 768px) {
     .stats {
-      margin-top: 20px;
-      display: flex;
-      gap: 2rem;
+      flex-direction: column;
     }
-    .chart-container {
-      margin-top: 40px;
-      height: 600px;
+    .stat-card {
+      min-width: auto;
     }
-  </style>
+    .tabs a {
+      padding: 8px 16px;
+      font-size: 0.9rem;
+    }
+  }
+</style>
 
-  <h1 style="color:#1f4e79;">Dashboard General</h1>
+<div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
+  <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
 
-  <div class="tabs" style="margin-bottom: 20px;">
+  <div class="tabs" style="margin-bottom: 2rem;">
     <a href="/home?period=week" class="{{ 'active' if period == 'week' else '' }}">Últimos 7 días</a>
     <a href="/home?period=month" class="{{ 'active' if period == 'month' else '' }}">Últimos 30 días</a>
   </div>
 
   <div class="stats">
-    <div><strong>Chats distintos:</strong> {{ chat_counts }}</div>
-    <div><strong>Respuestas enviadas:</strong> {{ total_responded }}</div>
+    <div class="stat-card">
+      <strong>Chats distintos:</strong> {{ chat_counts }}
+    </div>
+    <div class="stat-card">
+      <strong>Respuestas enviadas:</strong> {{ total_responded }}
+    </div>
   </div>
 
   <div class="chart-container">
-    <canvas id="barChart" width="1000" height="600"></canvas>
+    <canvas id="barChart"></canvas>
   </div>
+</div>
 
-  <!-- Chart.js y plugin datalabels -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<!-- Chart.js y plugin datalabels -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
 <script>
   const ctx = document.getElementById('barChart').getContext('2d');
@@ -52,7 +85,7 @@
 
   // Calculamos el valor máximo con 10% extra como margen
   const maxValor = Math.max(...rawValues);
-  const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5; // redondeado al siguiente múltiplo de 5
+  const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5;
 
   const data = {
     labels: {{ labels|safe }},
@@ -63,13 +96,16 @@
     }]
   };
 
+  // Configuración responsive del chart
   new Chart(ctx, {
     type: 'bar',
     data: data,
     options: {
-      responsive: false,
-      animation: false,
+      responsive: true,
       maintainAspectRatio: false,
+      animation: {
+        duration: 0
+      },
       plugins: {
         legend: { display: false },
         datalabels: {
@@ -86,10 +122,21 @@
         y: {
           beginAtZero: true,
           suggestedMax: maxAuto
+        },
+        x: {
+          ticks: {
+            maxRotation: 45,
+            minRotation: 45
+          }
         }
       }
     },
     plugins: [ChartDataLabels]
+  });
+
+  // Redimensionar chart cuando cambia el tamaño de la ventana
+  window.addEventListener('resize', function() {
+    chart.resize();
   });
 </script>
 {% endblock %}

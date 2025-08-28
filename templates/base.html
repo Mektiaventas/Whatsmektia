@@ -33,6 +33,33 @@
     <main class="main-content">
       {% block content %}{% endblock %}
     </main>
+	
   </div>
+  <!-- Al final del body de base.html -->
+<script>
+// Función para manejar redimensionamiento responsive
+function makeResponsive() {
+    // Ajustar sidebar en móviles
+    if (window.innerWidth < 768) {
+        document.querySelector('.sidebar').style.width = '60px';
+        document.querySelector('.sidebar-title').style.display = 'none';
+        document.querySelectorAll('.sidebar-nav li a').forEach(a => {
+            a.style.padding = '8px';
+            a.style.textAlign = 'center';
+        });
+    } else {
+        document.querySelector('.sidebar').style.width = '240px';
+        document.querySelector('.sidebar-title').style.display = 'block';
+        document.querySelectorAll('.sidebar-nav li a').forEach(a => {
+            a.style.padding = '8px 12px';
+            a.style.textAlign = 'left';
+        });
+    }
+}
+
+// Ejecutar al cargar y al redimensionar
+window.addEventListener('load', makeResponsive);
+window.addEventListener('resize', makeResponsive);
+</script>
 </body>
 </html>

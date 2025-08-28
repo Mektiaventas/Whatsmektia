@@ -888,3 +888,60 @@ body {
   font-size: 0.75rem;
   color: #999;
 }
+/* ========== RESPONSIVE DESIGN ========== */
+@media (max-width: 1200px) {
+    .chat-layout-v2 {
+        flex-direction: column;
+        height: auto;
+    }
+    .chat-list-v2,
+    .chat-panel-v2 {
+        width: 100%;
+    }
+    .chat-list-v2 {
+        max-height: 300px;
+    }
+}
+
+@media (max-width: 768px) {
+    .layout {
+        flex-direction: column;
+    }
+    .sidebar {
+        width: 100%;
+        height: auto;
+        position: relative;
+    }
+    .main-content {
+        padding: 1rem;
+    }
+    .stats {
+        flex-direction: column;
+    }
+    
+    /* Ajustar tabs */
+    .tabs {
+        flex-wrap: wrap;
+    }
+    .tabs li {
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Ajustar mensajes */
+    .msg-box {
+        max-width: 95%;
+        font-size: 0.9rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .config-content {
+        grid-template-columns: 1fr;
+    }
+    .stat-card {
+        min-width: 100%;
+    }
+    .chart-container {
+        height: 300px;
+    }
+}
