@@ -35,8 +35,8 @@ body {
   background: linear-gradient(
     135deg, /* Diagonal para mejor efecto */
     var(--bg-light-1) 0%,
-    var(--bg-light-2) 70%,
-    var(--bg-dark) 90%
+    var(--bg-light-2) 85%,
+    var(--bg-dark) 100%
   );
   background-attachment: fixed;
   background-repeat: no-repeat;
