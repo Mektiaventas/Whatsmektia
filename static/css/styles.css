@@ -10,13 +10,14 @@
   --text-light:    #ECEFF4;  /* blanco suave */
   --text-dark:     #24303C;  /* gris azulado oscuro */
   --border-light:  #CFD8DC;
+  
+  /* Colores institucionales (del segundo bloque) */
   --bg-page:        #1f2640;  /* fondo general */
   --bg-config:      #2c344f;  /* fondo de secciones de config */
   --bg-card-header: #2a2f48;  /* encabezado de tarjeta */
   --btn-primary:    #8BC34A;  /* verde negocio */
   --btn-secondary:  #ECECEC;  /* gris claro */
   --btn-danger:     #E53935;  /* rojo de "borrar" */
-}
 
 *, *::before, *::after {
   box-sizing: border-box;
@@ -545,25 +546,6 @@ body {
     margin: 0;
     color: white;
     font-weight: 600;
-}
-ChatGPT dijo:
-
-Pensado durante 7 segundos
-Aquí tienes un snippet de static/css/styles.css con los colores institucionales que ya usas en las otras pestañas (azul oscuro de fondo, tonos gris-azulados para el contenedor, verde para el botón primario, gris claro para secundarios y rojo para acciones de borrado). Pégalos al final de tu CSS y haz un hard refresh (Ctrl+F5) tras el deploy:
-
-css
-Copiar
-Editar
-:root {
-  /* Colores institucionales */
-  --bg-page:        #1f2640;  /* fondo general */
-  --bg-config:      #2c344f;  /* fondo de secciones de config */
-  --bg-card-header: #2a2f48;  /* encabezado de tarjeta */
-  --text-light:     #ffffff;  /* texto claro */
-  --text-dark:      #333333;  /* texto oscuro */
-  --btn-primary:    #8BC34A;  /* verde negocio */
-  --btn-secondary:  #ECECEC;  /* gris claro */
-  --btn-danger:     #E53935;  /* rojo de "borrar" */
 }
 
 /* --- Contenedor en dos columnas --- */
