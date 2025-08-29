@@ -1138,3 +1138,110 @@ body {
         flex-shrink: 0 !important;
     }
 }
+/* ========== ESTILO TRANSLÚCIDO PARA CHATS (KANBAN STYLE) ========= */
+.chat-layout-v2 {
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+.chat-list-v2 {
+  background: rgba(30, 30, 47, 0.7) !important;
+  border-right: 1px solid rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(12px);
+  border-radius: 12px 0 0 12px;
+}
+
+.chat-panel-v2 {
+  background: rgba(30, 30, 47, 0.7) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 0 12px 12px 0;
+  backdrop-filter: blur(12px);
+}
+
+.chat-panel-header {
+  background: rgba(37, 37, 59, 0.8) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(12px);
+}
+
+.msgs-wrap-v2 {
+  background: rgba(30, 30, 47, 0.4) !important;
+  backdrop-filter: blur(10px);
+}
+
+.reply-form {
+  background: rgba(37, 37, 59, 0.8) !important;
+  border-top: 1px solid rgba(255, 255, 255, 0.1) !important;
+  backdrop-filter: blur(12px);
+  border-radius: 0 0 12px 0;
+}
+
+/* Tarjetas de chat translúcidas */
+.chat-item {
+  background: rgba(255, 255, 255, 0.12) !important;
+  border: 1.5px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.13);
+  transition: all 0.3s ease !important;
+  color: var(--text-light) !important;
+}
+
+.chat-item:hover {
+  background: rgba(255, 255, 255, 0.18) !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+}
+
+.chat-item.selected {
+  background: rgba(255, 224, 130, 0.3) !important;
+  border-color: rgba(255, 224, 130, 0.5) !important;
+}
+
+/* Ajustes de texto para mejor contraste */
+.chat-name {
+  color: var(--text-light) !important;
+  font-weight: 600 !important;
+}
+
+.chat-preview {
+  color: rgba(236, 239, 244, 0.8) !important;
+}
+
+.chat-meta {
+  color: rgba(236, 239, 244, 0.6) !important;
+}
+
+/* Mensajes translúcidos */
+.msg-box {
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+}
+
+.msg-box.msg-user {
+  background: rgba(230, 247, 255, 0.2) !important;
+  border: 1px solid rgba(145, 213, 255, 0.4) !important;
+}
+
+.msg-box.msg-ai {
+  background: rgba(255, 247, 230, 0.2) !important;
+  border: 2px solid rgba(255, 213, 145, 0.4) !important;
+}
+
+/* Responsive para móvil */
+@media (max-width: 768px) {
+  .chat-list-v2 {
+    border-radius: 12px 12px 0 0;
+  }
+  
+  .chat-panel-v2 {
+    border-radius: 0;
+  }
+  
+  .chat-list-v2.mobile-visible {
+    background: rgba(30, 30, 47, 0.9) !important;
+  }
+}
