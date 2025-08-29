@@ -31,13 +31,16 @@ html, body {
 
 body {
   font-family: 'Segoe UI', sans-serif;
-  /* Gradiente global */
+  /* GRADIENTE COMPLETO - OCUPA TODA LA ALTURA */
   background: linear-gradient(
-    180deg,
+    to bottom,
     var(--bg-light-1) 0%,
-    var(--bg-light-2) 50%,
+    var(--bg-light-2) 30%,
     var(--bg-dark) 100%
   );
+  background-attachment: fixed; /* Fija el gradiente a toda la pantalla */
+  background-size: 100% 100%; /* Cubre toda el área */
+  min-height: 100vh; /* Asegura que ocupe al menos toda la pantalla */
   color: var(--text-light);
 }
 
