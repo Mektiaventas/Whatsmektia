@@ -293,6 +293,17 @@ def enviar_mensaje(numero, texto):
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
 def guardar_conversacion(numero, mensaje, respuesta):
+    # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
+    if mensaje is None:
+        mensaje = '[Mensaje vacío]'
+    elif isinstance(mensaje, str) and mensaje.strip() == '':
+        mensaje = '[Mensaje vacío]'
+    
+    if respuesta is None:
+        respuesta = '[Respuesta vacía]'  
+    elif isinstance(respuesta, str) and respuesta.strip() == '':
+        respuesta = '[Respuesta vacía]'
+    
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -724,10 +735,10 @@ def enviar_manual():
         cursor = conn.cursor()
         
         timestamp_utc = datetime.utcnow()
-        # OPCIÓN 2: Si quieres mantener la leyenda, concatenarla
+        # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
         cursor.execute(
-            "INSERT INTO conversaciones (numero, mensaje, respuesta,timestamp) VALUES (%s, %s, %s, %s);",
-            (numero, None, f"{texto} [Enviado manualmente]", timestamp_utc)  # ← Texto + leyenda
+            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
+            (numero, '[Mensaje manual desde web]', texto, timestamp_utc)  # ← Sin NULLs
         )
         
         conn.commit()
@@ -753,7 +764,7 @@ def enviar_manual():
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
     
     return redirect(url_for('ver_chat', numero=numero))
-
+    
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     conn   = get_db_connection()

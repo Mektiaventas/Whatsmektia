@@ -1187,8 +1187,8 @@ body {
 
 /* Textos de las tarjetas de chat con mejor contraste */
 .chat-item {
-  background: rgba(255, 255, 255, 0.25) !important;
-  border: 1.5px solid rgba(255, 255, 255, 0.3) !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  border: 2px solid rgba(255, 255, 255, 0.5) !important;
   border-radius: 12px !important;
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.13);
