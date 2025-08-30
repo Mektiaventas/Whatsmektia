@@ -238,12 +238,26 @@ Mantén siempre un tono profesional y conciso.
 
     historial = obtener_historial(numero)
     messages_chain = [{'role': 'system', 'content': system_prompt}]
+    
+    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
     for entry in historial:
-        messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-    messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+        # Solo agregar mensajes de usuario con contenido válido
+        if entry['mensaje'] and str(entry['mensaje']).strip() != '':
+            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
+        
+        # Solo agregar respuestas de IA con contenido válido
+        if entry['respuesta'] and str(entry['respuesta']).strip() != '':
+            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+    
+    # Agregar el mensaje actual (si es válido)
+    if mensaje_usuario and str(mensaje_usuario).strip() != '':
+        messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
+        # 🔥 VALIDACIÓN FINAL: Asegurar que hay mensajes para enviar
+        if len(messages_chain) <= 1:  # Solo el system prompt
+            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+            
         resp = client.chat.completions.create(
             model='gpt-4',
             messages=messages_chain
