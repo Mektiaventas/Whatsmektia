@@ -23,9 +23,6 @@ app.logger.setLevel(logging.INFO)
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 # Agrega esta línea con las otras variables de entorno
-OPEN_AI_API_KEY = os.getenv("OPENAI_API_KEY")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
-OPENAI_VISION_MODEL = "gpt-4-vision-preview"  # o el modelo que prefieras
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
@@ -213,7 +210,7 @@ def obtener_historial(numero, limite=10):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, url_imagen=None):
+def responder_con_ia(mensaje_usuario, numero):
     cfg = load_config()
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -256,71 +253,40 @@ Mantén siempre un tono profesional y conciso.
     
     # Agregar el mensaje actual (si es válido)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        if es_imagen and url_imagen:
-            # Para imágenes: usar formato de contenido multimodal
-            messages_chain.append({
-                'role': 'user',
-                'content': [
-                    {"type": "text", "text": mensaje_usuario},
-                    {"type": "image_url", "image_url": {"url": url_imagen}}
-                ]
-            })
-        else:
-            # Para texto normal
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+        messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
-        if es_imagen:
-            # Usar OpenAI para imágenes
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": OPENAI_VISION_MODEL,
-                "messages": messages_chain,
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            return data['choices'][0]['message']['content'].strip()
+        # Configurar la llamada a la API de DeepSeek
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
         
-        else:
-            # Usar DeepSeek para texto
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages_chain,
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            return data['choices'][0]['message']['content'].strip()
+        payload = {
+            "model": "deepseek-chat",  # O el modelo específico que quieras usar
+            "messages": messages_chain,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()  # Lanza excepción para errores HTTP
+        
+        data = response.json()
+        return data['choices'][0]['message']['content'].strip()
     
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 API error: {e}")
+        app.logger.error(f"🔴 DeepSeek API error: {e}")
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
         return 'Lo siento, hubo un error con la IA.'
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
+
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
@@ -517,78 +483,10 @@ def enviar_informacion_completa(numero_cliente):
         
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        payload = request.get_json()
-        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)}")
-        
-        entry = payload['entry'][0]
-        change = entry['changes'][0]['value']
-        mensajes = change.get('messages')
-        
-        if not mensajes:
-            return 'OK', 200
-            
-        msg = mensajes[0]
-        numero = msg['from']
-        
-        # Detectar si es imagen
-        es_imagen = False
-        url_imagen = None
-        texto = ""
-        
-        if 'image' in msg:
-            # Es una imagen
-            es_imagen = True
-            image_id = msg['image']['id']
-            
-            # Obtener la URL de la imagen de WhatsApp
-            url = f"https://graph.facebook.com/v23.0/{image_id}"
-            headers = {'Authorization': f'Bearer {WHATSAPP_TOKEN}'}
-            response = requests.get(url, headers=headers)
-            
-            if response.status_code == 200:
-                image_data = response.json()
-                url_imagen = image_data.get('url')
-                
-            # Verificar si hay texto acompañando la imagen
-            if 'caption' in msg['image']:
-                texto = msg['image']['caption']
-            else:
-                texto = "Analiza esta imagen"
-                
-        elif 'text' in msg:
-            # Es texto normal
-            texto = msg['text']['body']
-        
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        if hasattr(app, 'ultimo_mensaje') and app.ultimo_mensaje == (numero, texto):
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {texto[:30]}...")
-            return 'OK', 200
-        app.ultimo_mensaje = (numero, texto)
-
-        # ... (el resto de tu código de validación de números)
-        
-        # IA normal
-        IA_ESTADOS.setdefault(numero, True)
-        respuesta = ""
-        if IA_ESTADOS[numero]:
-            respuesta = responder_con_ia(texto, numero, es_imagen, url_imagen)
-            enviar_mensaje(numero, respuesta)
-            
-            if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
-                resumen = resumen_rafa(numero)
-                enviar_alerta_humana(numero, texto, resumen)
-                enviar_informacion_completa(numero)
-
-        guardar_conversacion(numero, texto, respuesta)
-
-        # ... (el resto de tu código)
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en webhook: {e}")
-        return 'Error interno', 500
+def webhook_verification():
+    if request.args.get('hub.verify_token') == VERIFY_TOKEN:
+        return request.args.get('hub.challenge')
+    return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -786,20 +684,6 @@ def ver_chats():
         chats=chats, mensajes=None,
         selected=None, IA_ESTADOS=IA_ESTADOS
     )
-
-def obtener_url_imagen_whatsapp(image_id):
-    """Obtiene la URL de una imagen de WhatsApp usando su ID"""
-    try:
-        url = f"https://graph.facebook.com/v23.0/{image_id}"
-        headers = {'Authorization': f'Bearer {WHATSAPP_TOKEN}'}
-        response = requests.get(url, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            return response.json().get('url')
-        return None
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen: {e}")
-        return None
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
