@@ -209,7 +209,7 @@ def obtener_historial(numero, limite=10):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, url_imagen=None):
+def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None):
     cfg = load_config()
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -252,13 +252,19 @@ Mantén siempre un tono profesional y conciso.
     
     # Agregar el mensaje actual (si es válido)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        if es_imagen and url_imagen:
-            # Para imágenes: usar formato de contenido multimodal
+        if es_imagen and imagen_base64:
+            # Para imágenes: usar base64 en lugar de URL
             messages_chain.append({
                 'role': 'user',
                 'content': [
                     {"type": "text", "text": mensaje_usuario},
-                    {"type": "image_url", "image_url": {"url": url_imagen}}
+                    {
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": imagen_base64,
+                            "detail": "auto"  # "low", "high", o "auto"
+                        }
+                    }
                 ]
             })
         else:
@@ -277,14 +283,13 @@ Mantén siempre un tono profesional y conciso.
             }
             
             payload = {
-                "model": "gpt-4o",  # Nuevo modelo que soporta visión,
+                "model": "gpt-4o",
                 "messages": messages_chain,
                 "temperature": 0.7,
                 "max_tokens": 1000,
-                "max_completion_tokens": 1000
             }
             
-            app.logger.info(f"🖼️ Enviando imagen a OpenAI: {url_imagen}")
+            app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
             app.logger.info(f"📦 Payload OpenAI: {json.dumps(payload, indent=2)}")
             
             response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
@@ -324,28 +329,53 @@ Mantén siempre un tono profesional y conciso.
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-
-def obtener_url_imagen_whatsapp(image_id):
-    """Obtiene la URL de una imagen de WhatsApp usando su ID"""
+    
+def obtener_imagen_whatsapp(image_id):
+    """Descarga la imagen de WhatsApp y la convierte a base64"""
     try:
+        # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
-        headers = {'Authorization': f'Bearer {WHATSAPP_TOKEN}'}
-        response = requests.get(url, headers=headers, timeout=10)
+        headers = {
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
-        app.logger.info(f"📷 Solicitando imagen WhatsApp: {url}")
-        app.logger.info(f"📷 Respuesta imagen Status: {response.status_code}")
+        app.logger.info(f"📷 Descargando imagen WhatsApp: {url}")
         
-        if response.status_code == 200:
-            image_data = response.json()
-            app.logger.info(f"📷 Datos imagen: {json.dumps(image_data, indent=2)}")
-            return image_data.get('url')
-        else:
-            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"📷 Status descarga: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {response.status_code} - {response.text}")
             return None
+        
+        # 2. Obtener la URL de descarga real
+        image_data = response.json()
+        download_url = image_data.get('url')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
+            return None
+            
+        app.logger.info(f"📷 URL de descarga: {download_url}")
+        
+        # 3. Descargar la imagen con autenticación
+        image_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if image_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
+            return None
+        
+        # 4. Convertir a base64 para OpenAI
+        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
+        
+        app.logger.info(f"✅ Imagen descargada correctamente. Tamaño: {len(image_base64)} bytes")
+        
+        return f"data:image/jpeg;base64,{image_base64}"
+        
     except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen: {e}")
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
         return None
-
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
