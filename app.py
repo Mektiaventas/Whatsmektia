@@ -277,7 +277,7 @@ Mantén siempre un tono profesional y conciso.
             }
             
             payload = {
-                "model": "gpt-4-vision-preview",
+                "model": "gpt-4o",  # Nuevo modelo que soporta visión,
                 "messages": messages_chain,
                 "temperature": 0.7,
                 "max_tokens": 1000,
@@ -1112,33 +1112,25 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
         return meta['columna_id'] if meta else 1
 
 @app.route('/test-imagen-personalizada', methods=['GET', 'POST'])
-def test_imagen_personalizada():
-    if request.method == 'POST':
-        try:
-            url_imagen = request.form['url_imagen']
-            texto_prueba = request.form.get('texto', 'Describe esta imagen')
-            
-            respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen)
-            return jsonify({
-                "respuesta": respuesta, 
-                "status": "success",
-                "imagen": url_imagen
-            })
-            
-        except Exception as e:
-            return jsonify({
-                "error": str(e), 
-                "status": "error"
-            })
-    
-    # Formulario HTML para pruebas
-    return '''
-    <form method="post">
-        <h2>Probar imagen personalizada</h2>
-        <input type="url" name="url_imagen" placeholder="URL de la imagen" required style="width: 300px;"><br>
-        <textarea name="texto" placeholder="Pregunta sobre la imagen" style="width: 300px; height: 100px;">Describe esta imagen</textarea><br>
-        <button type="submit">Probar</button>
-    </form>
-    '''
+@app.route('/test-imagen')
+def test_imagen():
+    """Ruta para probar el procesamiento de imágenes con una URL pública"""
+    try:
+        # Usar una imagen pública de prueba
+        url_imagen_prueba = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg/800px-Good_Food_Display_-_NCI_Visuals_Online.jpg"
+        texto_prueba = "¿Qué alimentos ves en esta imagen?"
+        
+        respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen_prueba)
+        return jsonify({
+            "respuesta": respuesta, 
+            "status": "success",
+            "modelo_utilizado": "gpt-4o"  # ✅ Actualizado
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "error": str(e), 
+            "status": "error"
+        })
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5000, debug=True)
