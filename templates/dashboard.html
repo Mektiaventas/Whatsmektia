@@ -97,7 +97,7 @@
   };
 
   // Configuración responsive del chart
-  new Chart(ctx, {
+  const chart = new Chart(ctx, {
     type: 'bar',
     data: data,
     options: {
@@ -121,12 +121,22 @@
       scales: {
         y: {
           beginAtZero: true,
-          suggestedMax: maxAuto
+          suggestedMax: maxAuto,
+          ticks: {
+            color: 'white'  // Números del eje Y en blanco
+          },
+          grid: {
+            color: 'rgba(255, 255, 255, 0.1)'
+          }
         },
         x: {
           ticks: {
             maxRotation: 45,
-            minRotation: 45
+            minRotation: 45,
+            color: 'white'  // Números telefónicos en blanco
+          },
+          grid: {
+            color: 'rgba(255, 255, 255, 0.1)'
           }
         }
       }
