@@ -1111,19 +1111,34 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
 
-@app.route('/test-imagen')
-def test_imagen():
-        """Ruta para probar el procesamiento de imágenes con una URL pública"""
+@app.route('/test-imagen-personalizada', methods=['GET', 'POST'])
+def test_imagen_personalizada():
+    if request.method == 'POST':
         try:
-            # Usar una imagen pública de prueba
-            url_imagen_prueba = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg/800px-Good_Food_Display_-_NCI_Visuals_Online.jpg"
-            texto_prueba = "¿Qué alimentos ves en esta imagen?"
+            url_imagen = request.form['url_imagen']
+            texto_prueba = request.form.get('texto', 'Describe esta imagen')
             
-            respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen_prueba)
-            return jsonify({"respuesta": respuesta, "status": "success"})
+            respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen)
+            return jsonify({
+                "respuesta": respuesta, 
+                "status": "success",
+                "imagen": url_imagen
+            })
             
         except Exception as e:
-            return jsonify({"error": str(e), "status": "error"})
-
+            return jsonify({
+                "error": str(e), 
+                "status": "error"
+            })
+    
+    # Formulario HTML para pruebas
+    return '''
+    <form method="post">
+        <h2>Probar imagen personalizada</h2>
+        <input type="url" name="url_imagen" placeholder="URL de la imagen" required style="width: 300px;"><br>
+        <textarea name="texto" placeholder="Pregunta sobre la imagen" style="width: 300px; height: 100px;">Describe esta imagen</textarea><br>
+        <button type="submit">Probar</button>
+    </form>
+    '''
 if __name__ == '__main__':
         app.run(host='0.0.0.0', port=5000, debug=True)
