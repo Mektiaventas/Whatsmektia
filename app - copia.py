@@ -3,18 +3,18 @@ import pytz
 import os
 import logging
 import requests
-import json
+import json 
 import base64
 import mysql.connector
 from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
-from openai import OpenAI
+import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
-load_dotenv('mienv')  # Cargar desde archivo específico
+load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
@@ -22,7 +22,8 @@ app.logger.setLevel(logging.INFO)
 # ——— Env vars ———
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Agrega esta línea con las otras variables de entorno
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
@@ -30,7 +31,8 @@ DB_NAME = os.getenv("DB_NAME")
 MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")  # Asegúrate de agregar esto a tu .env
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # URL de DeepSeek
 IA_ESTADOS = {}
 
 # Diccionario de prefijos a código de país
@@ -254,17 +256,35 @@ Mantén siempre un tono profesional y conciso.
         messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
-        # 🔥 VALIDACIÓN FINAL: Asegurar que hay mensajes para enviar
-        if len(messages_chain) <= 1:  # Solo el system prompt
+        if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
-            
-        resp = client.chat.completions.create(
-            model='gpt-4',
-            messages=messages_chain
-        )
-        return resp.choices[0].message.content.strip()
+        
+        # Configurar la llamada a la API de DeepSeek
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",  # O el modelo específico que quieras usar
+            "messages": messages_chain,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()  # Lanza excepción para errores HTTP
+        
+        data = response.json()
+        return data['choices'][0]['message']['content'].strip()
+    
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"🔴 DeepSeek API error: {e}")
+        if hasattr(e, 'response') and e.response:
+            app.logger.error(f"🔴 Response: {e.response.text}")
+        return 'Lo siento, hubo un error con la IA.'
     except Exception as e:
-        app.logger.error(f"🔴 OpenAI error: {e}")
+        app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
 # ——— Envío WhatsApp y guardado de conversación ———
