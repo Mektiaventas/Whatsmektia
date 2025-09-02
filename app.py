@@ -578,6 +578,7 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -598,7 +599,7 @@ def webhook():
         
         # Detectar si es imagen o texto
         es_imagen = False
-        url_imagen = None
+        imagen_base64 = None
         texto = ""
         
         if 'image' in msg:
@@ -607,8 +608,14 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            url_imagen = obtener_url_imagen_whatsapp(image_id)
-            app.logger.info(f"🖼️ URL de imagen: {url_imagen}")
+            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64
+            imagen_base64 = obtener_imagen_whatsapp(image_id)
+            
+            if not imagen_base64:
+                app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
+                texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
+                enviar_mensaje(numero, texto)
+                return 'OK', 200
             
             # Verificar si hay texto acompañando la imagen
             if 'caption' in msg['image']:
@@ -702,7 +709,8 @@ def webhook():
         IA_ESTADOS.setdefault(numero, True)
         respuesta = ""
         if IA_ESTADOS[numero]:
-            respuesta = responder_con_ia(texto, numero, es_imagen, url_imagen)
+            # ✅ PASAR imagen_base64 EN LUGAR DE url_imagen
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64)
             enviar_mensaje(numero, respuesta)
             # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
             if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
@@ -724,7 +732,6 @@ def webhook():
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
         return 'Error interno', 500
-        
 # ——— UI ———
 @app.route('/')
 def inicio():
