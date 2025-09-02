@@ -535,7 +535,6 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
-@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -1100,18 +1099,6 @@ def obtener_chat_meta(numero):
     conn.close()
     return meta
 
-def inicializar_chat_meta(numero):
-    # Asignar automáticamente a la columna "Nuevos" (id=1)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, columna_id) 
-        VALUES (%s, 1)
-        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
-    """, (numero,))
-    conn.commit()
-    cursor.close()
-    conn.close()
 
 def actualizar_columna_chat(numero, columna_id):
     conn = get_db_connection()
