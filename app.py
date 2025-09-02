@@ -1145,5 +1145,19 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
     meta = obtener_chat_meta(numero)
     return meta['columna_id'] if meta else 1
 
+@app.route('/test-imagen')
+def test_imagen():
+    """Ruta para probar el procesamiento de imágenes con una URL pública"""
+    try:
+        # Usar una imagen pública de prueba
+        url_imagen_prueba = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg/800px-Good_Food_Display_-_NCI_Visuals_Online.jpg"
+        texto_prueba = "¿Qué alimentos ves en esta imagen?"
+        
+        respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen_prueba)
+        return jsonify({"respuesta": respuesta, "status": "success"})
+        
+    except Exception as e:
+        return jsonify({"error": str(e), "status": "error"})
+
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
