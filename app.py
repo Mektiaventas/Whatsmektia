@@ -211,6 +211,7 @@ def obtener_historial(numero, limite=10):
 
 # ——— Función IA con contexto y precios ———
 # ——— Función IA con contexto y precios ———
+# ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, url_imagen=None):
     cfg = load_config()
     neg = cfg['negocio']
@@ -279,13 +280,20 @@ Mantén siempre un tono profesional y conciso.
             }
             
             payload = {
-                "model": "gpt-4-vision-preview",  # Modelo de OpenAI para imágenes
+                "model": "gpt-4-vision-preview",
                 "messages": messages_chain,
                 "temperature": 0.7,
-                "max_tokens": 2000
+                "max_tokens": 1000,  # Reducir tokens para imágenes
+                "max_completion_tokens": 1000  # Agregar este parámetro
             }
             
-            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=30)
+            app.logger.info(f"🖼️ Enviando imagen a OpenAI: {url_imagen}")
+            app.logger.info(f"📦 Payload OpenAI: {json.dumps(payload, indent=2)}")
+            
+            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)  # Aumentar timeout
+            app.logger.info(f"📨 Respuesta OpenAI Status: {response.status_code}")
+            app.logger.info(f"📨 Respuesta OpenAI Text: {response.text}")
+            
             response.raise_for_status()
             
             data = response.json()
@@ -319,7 +327,7 @@ Mantén siempre un tono profesional y conciso.
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-    
+
 def obtener_url_imagen_whatsapp(image_id):
     """Obtiene la URL de una imagen de WhatsApp usando su ID"""
     try:
@@ -327,9 +335,16 @@ def obtener_url_imagen_whatsapp(image_id):
         headers = {'Authorization': f'Bearer {WHATSAPP_TOKEN}'}
         response = requests.get(url, headers=headers, timeout=10)
         
+        app.logger.info(f"📷 Solicitando imagen WhatsApp: {url}")
+        app.logger.info(f"📷 Respuesta imagen Status: {response.status_code}")
+        
         if response.status_code == 200:
-            return response.json().get('url')
-        return None
+            image_data = response.json()
+            app.logger.info(f"📷 Datos imagen: {json.dumps(image_data, indent=2)}")
+            return image_data.get('url')
+        else:
+            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
+            return None
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen: {e}")
         return None
