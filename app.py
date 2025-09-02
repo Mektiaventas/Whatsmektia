@@ -14,7 +14,7 @@ from decimal import Decimal
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
-load_dotenv('mienv')  # Cargar desde archivo específico
+load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
