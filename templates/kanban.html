@@ -5,57 +5,46 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
 <div id="kanban-board" class="kanban-board">
-  {% for col in columnas %}
-  <div class="kanban-column" data-col-id="{{ col.id }}">
-    <div class="column-header">
-      <img src="{{ col.icono }}" class="col-icon" alt="">
-      <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
-      <button class="add-chat-btn" title="Agregar aquí">+</button>
-    </div>
-    <div class="column-list">
-      {% for chat in chats if chat.columna_id == col.id %}
-      <div class="kanban-card" data-chat-num="{{ chat.numero }}">
-        <div class="card-avatar-section">
-          <img 
-            src="{{ chat.avatar or url_for('static', filename='icons/default-avatar.png') }}" 
-            class="card-avatar" alt="Avatar"
-            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-          >
-        </div>
-        <div class="card-content">
-          <div class="card-title-row">
-            {% set bandera = chat.numero | bandera %}
-            {% if bandera %}
-              <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-            {% endif %}
-            <span class="alias-view" data-num="{{ chat.numero }}">
-              {{ chat.nombre_mostrado }}
-            </span>
-            <span class="alias-edit" style="display:none;">
-              <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
-            </span>
-            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
-              ✏️
-            </button>
-          </div>
-          <div class="card-meta-row">
-            <span class="card-num">{{ chat.numero }}</span>
-            <span class="card-time">
-              {% if chat.ultima_fecha %}
-                {{ chat.ultima_fecha.strftime('%d/%m %H:%M') }}
-              {% endif %}
-            </span>
-          </div>
-          <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
-        </div>
-        {% if chat.sin_leer > 0 %}
-          <span class="card-unread">{{ chat.sin_leer }}</span>
-        {% endif %}
-      </div>
-      {% endfor %}
-    </div>
+  {% for chat in chats if chat.columna_id == col.id %}
+<a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
+  <div class="card-avatar-section">
+    <img 
+      src="{{ chat.avatar or url_for('static', filename='icons/default-avatar.png') }}" 
+      class="card-avatar" alt="Avatar"
+      onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
+    >
   </div>
-  {% endfor %}
+  <div class="card-content">
+    <div class="card-title-row">
+      {% set bandera = chat.numero | bandera %}
+      {% if bandera %}
+        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+      {% endif %}
+      <span class="alias-view" data-num="{{ chat.numero }}">
+        {{ chat.nombre_mostrado }}
+      </span>
+      <span class="alias-edit" style="display:none;">
+        <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+      </span>
+      <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
+        ✏️
+      </button>
+    </div>
+    <div class="card-meta-row">
+      <span class="card-num">{{ chat.numero }}</span>
+      <span class="card-time">
+        {% if chat.ultima_fecha %}
+          {{ chat.ultima_fecha.strftime('%d/%m %H:%M') }}
+        {% endif %}
+      </span>
+    </div>
+    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+  </div>
+  {% if chat.sin_leer > 0 %}
+    <span class="card-unread">{{ chat.sin_leer }}</span>
+  {% endif %}
+</a>
+{% endfor %}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
@@ -134,49 +123,50 @@ window.addEventListener('DOMContentLoaded', () => {
 </script>
 <!-- Al final de tu kanban.html, antes de cerrar el bloque -->
 <script>
-  // Función para scroll al final de los mensajes en la conversación
+  // Función para scroll al final de los mensajes
   function scrollToBottom() {
     const msgsContainer = document.getElementById('msgs');
     if (msgsContainer) {
-      // Pequeño delay para asegurar que el DOM está renderizado
       setTimeout(() => {
-        msgsContainer.scrollTo({
-          top: msgsContainer.scrollHeight,
-          behavior: 'smooth'
-        });
+        msgsContainer.scrollTop = msgsContainer.scrollHeight;
       }, 100);
     }
   }
 
-  // Ejecutar cuando se carga la página o cuando se cambia de conversación
-  document.addEventListener('DOMContentLoaded', function() {
-    // Scroll al fondo al cargar la página
-    setTimeout(scrollToBottom, 300);
-    
-    // También configurar para cuando se haga clic en chats del kanban
-    setupKanbanChatLinks();
-  });
-
-  // Configurar los enlaces de chat en el kanban
-  function setupKanbanChatLinks() {
-    const chatLinks = document.querySelectorAll('.kanban-chat-link');
-    chatLinks.forEach(link => {
-      link.addEventListener('click', function(e) {
-        // Guardar que vamos a cambiar de conversación
-        sessionStorage.setItem('scrollToBottom', 'true');
-      });
-    });
-  }
-
-  // Verificar si debemos hacer scroll al fondo después de cargar
-  function checkScrollOnLoad() {
-    if (sessionStorage.getItem('scrollToBottom') === 'true') {
-      setTimeout(scrollToBottom, 500); // Un poco más de delay para carga completa
-      sessionStorage.removeItem('scrollToBottom'); // Limpiar para next time
+  // Manejar clicks desde Kanban
+  function handleKanbanClick(e) {
+    // Solo si es un click izquierdo (evitar que se ejecute con botones de edición)
+    if (e.button === 0) {
+      sessionStorage.setItem('fromKanban', 'true');
+      // Permitir que el navegación continue normalmente
+      return true;
     }
   }
 
-  // Llamar cuando la página esté completamente cargada
-  window.addEventListener('load', checkScrollOnLoad);
+  document.addEventListener('DOMContentLoaded', function() {
+    // Configurar todos los enlaces del Kanban
+    const kanbanLinks = document.querySelectorAll('.kanban-chat-link');
+    kanbanLinks.forEach(link => {
+      link.addEventListener('click', handleKanbanClick);
+      link.addEventListener('auxclick', handleKanbanClick); // Para click medio también
+    });
+
+    // Verificar si venimos desde Kanban y hacer scroll
+    if (sessionStorage.getItem('fromKanban') === 'true') {
+      // Pequeño delay para esperar a que cargue la conversación
+      setTimeout(() => {
+        scrollToBottom();
+        sessionStorage.removeItem('fromKanban');
+      }, 800);
+    }
+
+    // También scroll automático para nuevas cargas
+    setTimeout(scrollToBottom, 300);
+  });
+
+  // Sortable.js y demás código existente...
+  window.addEventListener('DOMContentLoaded', () => {
+    // Tu código existente de Sortable aquí...
+  });
 </script>
 {% endblock %}
