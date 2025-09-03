@@ -22,16 +22,15 @@ app.logger.setLevel(logging.INFO)
 # ——— Env vars ———
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
-# Agrega esta línea con las otras variables de entorno
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Nueva variable
 DB_HOST = os.getenv("DB_HOST")
 DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
-
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")  # Asegúrate de agregar esto a tu .env
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"  # Nueva URL
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # URL de DeepSeek
 IA_ESTADOS = {}
 
@@ -124,7 +123,7 @@ def save_config(cfg_all):
         VALUES
             (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-            ia_nombre = VALUES(ia_nombre),
+            ia_nomen = VALUES(ia_nombre),
             negocio_nombre = VALUES(negocio_nombre),
             descripcion = VALUES(descripcion),
             url = VALUES(url),
@@ -210,7 +209,7 @@ def obtener_historial(numero, limite=10):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero):
+def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None):
     cfg = load_config()
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -253,40 +252,130 @@ Mantén siempre un tono profesional y conciso.
     
     # Agregar el mensaje actual (si es válido)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+        if es_imagen and imagen_base64:
+            # Para imágenes: usar base64 en lugar de URL
+            messages_chain.append({
+                'role': 'user',
+                'content': [
+                    {"type": "text", "text": mensaje_usuario},
+                    {
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": imagen_base64,
+                            "detail": "auto"  # "low", "high", o "auto"
+                        }
+                    }
+                ]
+            })
+        else:
+            # Para texto normal
+            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
-        # Configurar la llamada a la API de DeepSeek
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
+        if es_imagen:
+            # Usar OpenAI para imágenes
+            headers = {
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "gpt-4o",
+                "messages": messages_chain,
+                "temperature": 0.7,
+                "max_tokens": 1000,
+            }
+            
+            app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
+            app.logger.info(f"📦 Payload OpenAI: {json.dumps(payload, indent=2)}")
+            
+            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
+            app.logger.info(f"📨 Respuesta OpenAI Status: {response.status_code}")
+            app.logger.info(f"📨 Respuesta OpenAI Text: {response.text}")
+            
+            response.raise_for_status()
+            
+            data = response.json()
+            return data['choices'][0]['message']['content'].strip()
         
-        payload = {
-            "model": "deepseek-chat",  # O el modelo específico que quieras usar
-            "messages": messages_chain,
-            "temperature": 0.7,
-            "max_tokens": 2000
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()  # Lanza excepción para errores HTTP
-        
-        data = response.json()
-        return data['choices'][0]['message']['content'].strip()
+        else:
+            # Usar DeepSeek para texto
+            headers = {
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "deepseek-chat",
+                "messages": messages_chain,
+                "temperature": 0.7,
+                "max_tokens": 2000
+            }
+            
+            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            return data['choices'][0]['message']['content'].strip()
     
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 DeepSeek API error: {e}")
+        app.logger.error(f"🔴 API error: {e}")
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
         return 'Lo siento, hubo un error con la IA.'
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-
+    
+def obtener_imagen_whatsapp(image_id):
+    """Descarga la imagen de WhatsApp y la convierte a base64"""
+    try:
+        # 1. Obtener la URL de la imagen con autenticación
+        url = f"https://graph.facebook.com/v23.0/{image_id}"
+        headers = {
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        app.logger.info(f"📷 Descargando imagen WhatsApp: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"📷 Status descarga: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {response.status_code} - {response.text}")
+            return None
+        
+        # 2. Obtener la URL de descarga real
+        image_data = response.json()
+        download_url = image_data.get('url')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
+            return None
+            
+        app.logger.info(f"📷 URL de descarga: {download_url}")
+        
+        # 3. Descargar la imagen con autenticación
+        image_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if image_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
+            return None
+        
+        # 4. Convertir a base64 para OpenAI
+        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
+        
+        app.logger.info(f"✅ Imagen descargada correctamente. Tamaño: {len(image_base64)} bytes")
+        
+        return f"data:image/jpeg;base64,{image_base64}"
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
+        return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
@@ -489,6 +578,7 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -501,16 +591,50 @@ def webhook():
         if not mensajes:
             return 'OK', 200
             
-        # ⛔ IGNORAR MENSAJES DEL SISTEMA DE ALERTAS
-        # ==============================================
-        # PREVENCIÓN MEJORADA - EVITAR LOOPS SOLO PARA MI NÚMERO
-        # ==============================================
-        # ==============================================
-        # PREVENCIÓN MEJORADA - SOLO EVITAR ALERTAS PARA MI NÚMERO
-        # ==============================================
         msg = mensajes[0]
         numero = msg['from']
-        texto = msg.get('text', {}).get('body', '')
+        
+        app.logger.info(f"📱 Mensaje recibido de: {numero}")
+        app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
+        
+        # Detectar si es imagen o texto
+        es_imagen = False
+        imagen_base64 = None
+        texto = ""
+        
+        if 'image' in msg:
+            app.logger.info(f"🖼️ Mensaje de imagen detectado")
+            es_imagen = True
+            image_id = msg['image']['id']
+            app.logger.info(f"🖼️ ID de imagen: {image_id}")
+            
+            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64
+            imagen_base64 = obtener_imagen_whatsapp(image_id)
+            
+            if not imagen_base64:
+                app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
+                texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
+                enviar_mensaje(numero, texto)
+                return 'OK', 200
+            
+            # Verificar si hay texto acompañando la imagen
+            if 'caption' in msg['image']:
+                texto = msg['image']['caption']
+                app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
+            else:
+                texto = "Analiza esta imagen"
+                app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
+                
+        elif 'text' in msg:
+            app.logger.info(f"📝 Mensaje de texto detectado")
+            texto = msg['text']['body']
+            app.logger.info(f"📝 Texto: {texto}")
+        else:
+            # Otro tipo de mensaje (audio, video, etc.)
+            tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
+            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
+            app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
+        
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         if hasattr(app, 'ultimo_mensaje') and app.ultimo_mensaje == (numero, texto):
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {texto[:30]}...")
@@ -518,7 +642,6 @@ def webhook():
         app.ultimo_mensaje = (numero, texto)
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
-        # Solo ignorar mensajes que claramente son del sistema de alertas
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
@@ -586,7 +709,8 @@ def webhook():
         IA_ESTADOS.setdefault(numero, True)
         respuesta = ""
         if IA_ESTADOS[numero]:
-            respuesta = responder_con_ia(texto, numero)
+            # ✅ PASAR imagen_base64 EN LUGAR DE url_imagen
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64)
             enviar_mensaje(numero, respuesta)
             # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
             if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
@@ -608,7 +732,6 @@ def webhook():
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
         return 'Error interno', 500
-        
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -705,12 +828,10 @@ def ver_chat(numero):
         LIMIT 1;
     """, (numero,))
     chats = cursor.fetchall()
-
-    # Esta consulta queda igual (para los mensajes)
     cursor.execute(
         "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
         (numero,)
-    )
+        )
     msgs = cursor.fetchall()
 
     for msg in msgs:
@@ -719,367 +840,334 @@ def ver_chat(numero):
 
     cursor.close()
     conn.close()
-    
+        
     return render_template('chats.html',
-        chats=chats, 
-        mensajes=msgs,
-        selected=numero, 
-        IA_ESTADOS=IA_ESTADOS
+            chats=chats, 
+            mensajes=msgs,
+            selected=numero, 
+            IA_ESTADOS=IA_ESTADOS
     )
-    
+        
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
-    IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
-    # Agregar log para debugging
-    app.logger.info(f"🔘 IA para {numero}: {'ACTIVADA' if IA_ESTADOS[numero] else 'DESACTIVADA'}")
-    return redirect(url_for('ver_chat', numero=numero))
+        IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
+        # Agregar log para debugging
+        app.logger.info(f"🔘 IA para {numero}: {'ACTIVADA' if IA_ESTADOS[numero] else 'DESACTIVADA'}")
+        return redirect(url_for('ver_chat', numero=numero))
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    try:
-        numero = request.form['numero']
-        texto = request.form['texto'].strip()
+        try:
+            numero = request.form['numero']
+            texto = request.form['texto'].strip()
+            
+            # Validar que el mensaje no esté vacío
+            if not texto:
+                flash('❌ El mensaje no puede estar vacío', 'error')
+                return redirect(url_for('ver_chat', numero=numero))
+            
+            app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+            
+            # 1. ENVIAR MENSAJE POR WHATSAPP
+            enviar_mensaje(numero, texto)
+            
+            # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            
+            timestamp_utc = datetime.utcnow()
+            # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
+            cursor.execute(
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
+                (numero, '[Mensaje manual desde web]', texto, timestamp_utc)  # ← Sin NULLs
+            )
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            try:
+                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
+            except Exception as e:
+                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+            
+            # 4. MENSAJE DE CONFIRMACIÓN
+            flash('✅ Mensaje enviado correctamente', 'success')
+            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+            
+        except KeyError:
+            flash('❌ Error: Número de teléfono no proporcionado', 'error')
+            app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+        except Exception as e:
+            flash('❌ Error al enviar el mensaje', 'error')
+            app.logger.error(f"🔴 Error en enviar_manual: {e}")
         
-        # Validar que el mensaje no esté vacío
-        if not texto:
-            flash('❌ El mensaje no puede estar vacío', 'error')
-            return redirect(url_for('ver_chat', numero=numero))
+        return redirect(url_for('ver_chat', numero=numero))
         
-        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
-        
-        # 1. ENVIAR MENSAJE POR WHATSAPP
-        enviar_mensaje(numero, texto)
-        
-        # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
-        conn = get_db_connection()
+@app.route('/chats/<numero>/eliminar', methods=['POST'])
+def eliminar_chat(numero):
+        conn   = get_db_connection()
         cursor = conn.cursor()
-        
-        timestamp_utc = datetime.utcnow()
-        # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
-        cursor.execute(
-            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-            (numero, '[Mensaje manual desde web]', texto, timestamp_utc)  # ← Sin NULLs
-        )
-        
+        cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
         conn.commit()
         cursor.close()
         conn.close()
-        
-        # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
-        try:
-            actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-            app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-        except Exception as e:
-            app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
-        
-        # 4. MENSAJE DE CONFIRMACIÓN
-        flash('✅ Mensaje enviado correctamente', 'success')
-        app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
-        
-    except KeyError:
-        flash('❌ Error: Número de teléfono no proporcionado', 'error')
-        app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
-    except Exception as e:
-        flash('❌ Error al enviar el mensaje', 'error')
-        app.logger.error(f"🔴 Error en enviar_manual: {e}")
-    
-    return redirect(url_for('ver_chat', numero=numero))
-    
-@app.route('/chats/<numero>/eliminar', methods=['POST'])
-def eliminar_chat(numero):
-    conn   = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    IA_ESTADOS.pop(numero, None)
-    return redirect(url_for('ver_chats'))
+        IA_ESTADOS.pop(numero, None)
+        return redirect(url_for('ver_chats'))
 
-# ——— Configuración ———
+    # ——— Configuración ———
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
-    if tab not in ['negocio','personalizacion']:
-        abort(404)
+        if tab not in ['negocio','personalizacion']:
+            abort(404)
 
-    cfg      = load_config()
-    guardado = False
-    if request.method == 'POST':
-        if tab == 'negocio':
-            cfg['negocio'] = {
-                'ia_nombre':      request.form['ia_nombre'],
-                'negocio_nombre': request.form['negocio_nombre'],
-                'descripcion':    request.form['descripcion'],
-                'url':            request.form['url'],
-                'direccion':      request.form['direccion'],
-                'telefono':       request.form['telefono'],
-                'correo':         request.form['correo'],
-                'que_hace':       request.form['que_hace']
-            }
-        else:
-            cfg['personalizacion'] = {
-                'tono':     request.form['tono'],
-                'lenguaje': request.form['lenguaje']
-            }
-        save_config(cfg)
-        guardado = True
+        cfg      = load_config()
+        guardado = False
+        if request.method == 'POST':
+            if tab == 'negocio':
+                cfg['negocio'] = {
+                    'ia_nombre':      request.form['ia_nombre'],
+                    'negocio_nombre': request.form['negocio_nombre'],
+                    'descripcion':    request.form['descripcion'],
+                    'url':            request.form['url'],
+                    'direccion':      request.form['direccion'],
+                    'telefono':       request.form['telefono'],
+                    'correo':         request.form['correo'],
+                    'que_hace':       request.form['que_hace']
+                }
+            else:
+                cfg['personalizacion'] = {
+                    'tono':     request.form['tono'],
+                    'lenguaje': request.form['lenguaje']
+                }
+            save_config(cfg)
+            guardado = True
 
-    datos = cfg.get(tab, {})
-    return render_template('configuracion.html',
-        tabs=SUBTABS, active=tab,
-        datos=datos, guardado=guardado
-    )
+        datos = cfg.get(tab, {})
+        return render_template('configuracion.html',
+            tabs=SUBTABS, active=tab,
+            datos=datos, guardado=guardado
+        )
 
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
-    precios = obtener_todos_los_precios()
-    return render_template('configuracion/precios.html',
-        tabs=SUBTABS, active='precios',
-        guardado=False,
-        precios=precios,
-        precio_edit=None
-    )
+        precios = obtener_todos_los_precios()
+        return render_template('configuracion/precios.html',
+            tabs=SUBTABS, active='precios',
+            guardado=False,
+            precios=precios,
+            precio_edit=None
+        )
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-    precios     = obtener_todos_los_precios()
-    precio_edit = obtener_precio_por_id(pid)
-    return render_template('configuracion/precios.html',
-        tabs=SUBTABS, active='precios',
-        guardado=False,
-        precios=precios,
-        precio_edit=precio_edit
-    )
-
+        precios     = obtener_todos_los_precios()
+        precio_edit = obtener_precio_por_id(pid)
+        return render_template('configuracion/precios.html',
+            tabs=SUBTABS, active='precios',
+            guardado=False,
+            precios=precios,
+            precio_edit=precio_edit
+        )
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
-    data = request.form.to_dict()
-    conn   = get_db_connection()
-    cursor = conn.cursor()
-    if data.get('id'):
-        cursor.execute("""
-            UPDATE precios
-               SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
-             WHERE id=%s;
-        """, (
-            data['servicio'],
-            data.get('descripcion',''),
-            data['precio'],
-            data['moneda'],
-            data['id']
-        ))
-    else:
-        cursor.execute("""
-            INSERT INTO precios (servicio, descripcion, precio, moneda)
-            VALUES (%s,%s,%s,%s);
-        """, (
-            data['servicio'],
-            data.get('descripcion',''),
-            data['precio'],
-            data['moneda']
-        ))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return redirect(url_for('configuracion_precios'))
+        data = request.form.to_dict()
+        conn   = get_db_connection()
+        cursor = conn.cursor()
+        if data.get('id'):
+            cursor.execute("""
+                UPDATE precios
+                   SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
+                 WHERE id=%s;
+            """, (
+                data['servicio'],
+                data.get('descripcion',''),
+                data['precio'],
+                data['moneda'],
+                data['id']
+            ))
+        else:
+            cursor.execute("""
+                INSERT INTO precios (servicio, descripcion, precio, moneda)
+                VALUES (%s,%s,%s,%s);
+            """, (
+                data['servicio'],
+                data.get('descripcion',''),
+                data['precio'],
+                data['moneda']
+            ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('configuracion_precios'))
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
-    conn   = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM precios WHERE id=%s;", (pid,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return redirect(url_for('configuracion_precios'))
+        conn   = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM precios WHERE id=%s;", (pid,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return redirect(url_for('configuracion_precios'))
 
-# ——— Kanban ———
+    # ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
 
-    # 1) Cargamos las columnas Kanban
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-    columnas = cursor.fetchall()
+        # 1) Cargamos las columnas Kanban
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        columnas = cursor.fetchall()
 
-    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    cursor.execute("""
-        SELECT 
-            cm.numero,
-            cm.columna_id,
-            MAX(c.timestamp) AS ultima_fecha,
-            (SELECT mensaje FROM conversaciones 
-             WHERE numero = cm.numero 
-             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            MAX(cont.imagen_url) AS avatar,
-            MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre > número
-            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
-            (SELECT COUNT(*) FROM conversaciones 
-             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
-        FROM chat_meta cm
-        LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-        LEFT JOIN conversaciones c ON c.numero = cm.numero
-        GROUP BY cm.numero, cm.columna_id
-        ORDER BY ultima_fecha DESC;
-    """)
-    chats = cursor.fetchall()
+        # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+        cursor.execute("""
+            SELECT 
+                cm.numero,
+                cm.columna_id,
+                MAX(c.timestamp) AS ultima_fecha,
+                (SELECT mensaje FROM conversaciones 
+                 WHERE numero = cm.numero 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                MAX(cont.imagen_url) AS avatar,
+                MAX(cont.plataforma) AS canal,
+                -- PRIORIDAD: alias > nombre > número
+                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                (SELECT COUNT(*) FROM conversaciones 
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+            FROM chat_meta cm
+            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+            LEFT JOIN conversaciones c ON c.numero = cm.numero
+            GROUP BY cm.numero, cm.columna_id
+            ORDER BY ultima_fecha DESC;
+        """)
+        chats = cursor.fetchall()
 
-    cursor.close()
-    conn.close()
+        cursor.close()
+        conn.close()
 
-    return render_template('kanban.html', columnas=columnas, chats=chats)
-    
+        return render_template('kanban.html', columnas=columnas, chats=chats)
+        
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
-    data = request.get_json()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-      "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
-      (data['columna_id'], data['numero'])
-    )
-    conn.commit(); cursor.close(); conn.close()
-    return '', 204
-    
+        data = request.get_json()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+          "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
+          (data['columna_id'], data['numero'])
+        )
+        conn.commit(); cursor.close(); conn.close()
+        return '', 204
+        
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero):
-    alias = request.form.get('alias','').strip()
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
-        (alias if alias else None, numero)
-    )
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return '', 204
+        alias = request.form.get('alias','').strip()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
+            (alias if alias else None, numero)
+        )
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return '', 204
 
-# ——— Páginas legales ———
+    # ——— Páginas legales ———
 @app.route('/privacy-policy')
 def privacy_policy():
-    return render_template('privacy_policy.html')
+        return render_template('privacy_policy.html')
 
 @app.route('/terms-of-service')
 def terms_of_service():
-    return render_template('terms_of_service.html')
+        return render_template('terms_of_service.html')
 
 @app.route('/data-deletion')
 def data_deletion():
-    return render_template('data_deletion.html')
+        return render_template('data_deletion.html')
 
 @app.route('/test-alerta')
 def test_alerta():
-    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
-    return "🚀 Test alerta disparada."
+        enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
+        return "🚀 Test alerta disparada."
 
-
-# ——— Funciones para Kanban ———
+    # ——— Funciones para Kanban ———
 def obtener_chat_meta(numero):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
-    meta = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return meta
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
+        meta = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return meta
 
 def inicializar_chat_meta(numero):
-    # Asignar automáticamente a la columna "Nuevos" (id=1)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, columna_id) 
-        VALUES (%s, 1)
-        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
-    """, (numero,))
-    conn.commit()
-    cursor.close()
-    conn.close()
+        # Asignar automáticamente a la columna "Nuevos" (id=1)
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id) 
+            VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
+        """, (numero,))
+        conn.commit()
+        cursor.close()
+        conn.close()
 
 def actualizar_columna_chat(numero, columna_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE chat_meta SET columna_id = %s 
-        WHERE numero = %s;
-    """, (columna_id, numero))
-    conn.commit()
-    cursor.close()
-    conn.close()
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_meta SET columna_id = %s 
+            WHERE numero = %s;
+        """, (columna_id, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta):
-    historial = obtener_historial(numero, limite=5)
-    
-    # Si es primer mensaje, mantener en "Nuevos"
-    if len(historial) <= 1:
-        return 1  # Nuevos
-    
-    # Si hay intervención humana, mover a "Esperando Respuesta"
-    if detectar_intervencion_humana(mensaje, respuesta, numero):
-        return 3  # Esperando Respuesta
-    
-    # Si tiene más de 2 mensajes, mover a "En Conversación"
-    if len(historial) >= 2:
-        return 2  # En Conversación
-    
-    # Si no cumple nada, mantener donde está
-    meta = obtener_chat_meta(numero)
-    return meta['columna_id'] if meta else 1
-# ——— Funciones para Kanban ———
-def obtener_chat_meta(numero):
-    conn = get_db_connection()
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
-    meta = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return meta
+        historial = obtener_historial(numero, limite=5)
+        
+        # Si es primer mensaje, mantener en "Nuevos"
+        if len(historial) <= 1:
+            return 1  # Nuevos
+        
+        # Si hay intervención humana, mover a "Esperando Respuesta"
+        if detectar_intervencion_humana(mensaje, respuesta, numero):
+            return 3  # Esperando Respuesta
+        
+        # Si tiene más de 2 mensajes, mover a "En Conversación"
+        if len(historial) >= 2:
+            return 2  # En Conversación
+        
+        # Si no cumple nada, mantener donde está
+        meta = obtener_chat_meta(numero)
+        return meta['columna_id'] if meta else 1
 
-def inicializar_chat_meta(numero):
-    # Asignar automáticamente a la columna "Nuevos" (id=1)
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, columna_id) 
-        VALUES (%s, 1)
-        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
-    """, (numero,))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def actualizar_columna_chat(numero, columna_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        UPDATE chat_meta SET columna_id = %s 
-        WHERE numero = %s;
-    """, (columna_id, numero))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def evaluar_movimiento_automatico(numero, mensaje, respuesta):
-    historial = obtener_historial(numero, limite=5)
-    
-    # Si es primer mensaje, mantener en "Nuevos"
-    if len(historial) <= 1:
-        return 1  # Nuevos
-    
-    # Si hay intervención humana, mover a "Esperando Respuesta"
-    if detectar_intervencion_humana(mensaje, respuesta, numero):
-        return 3  # Esperando Respuesta
-    
-    # Si tiene más de 2 mensajes, mover a "En Conversación"
-    if len(historial) >= 2:
-        return 2  # En Conversación
-    
-    # Si no cumple nada, mantener donde está
-    meta = obtener_chat_meta(numero)
-    return meta['columna_id'] if meta else 1
-
+@app.route('/test-imagen-personalizada', methods=['GET', 'POST'])
+@app.route('/test-imagen')
+def test_imagen():
+    """Ruta para probar el procesamiento de imágenes con una URL pública"""
+    try:
+        # Usar una imagen pública de prueba
+        url_imagen_prueba = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg/800px-Good_Food_Display_-_NCI_Visuals_Online.jpg"
+        texto_prueba = "¿Qué alimentos ves en esta imagen?"
+        
+        respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen_prueba)
+        return jsonify({
+            "respuesta": respuesta, 
+            "status": "success",
+            "modelo_utilizado": "gpt-4o"  # ✅ Actualizado
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "error": str(e), 
+            "status": "error"
+        })
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+        app.run(host='0.0.0.0', port=5000, debug=True)
