@@ -125,21 +125,42 @@
                         {{ msg.mensaje }}
                       </div>
                     {% endif %}
-                {% if msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
-                  <!-- Mostrar audio -->
-                  <div class="audio-message">
-                    <audio controls class="whatsapp-audio">
+                  </div>
+
+                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                  <!-- Mostrar audio con reproductor personalizado -->
+                  <div class="audio-player">
+                    <!-- Reproductor nativo (oculto) -->
+                    <audio class="whatsapp-audio">
                       <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                      <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
                       Tu navegador no soporta el elemento de audio.
                     </audio>
-                    {% if msg.mensaje and not msg.mensaje.startswith('[Audio]') %}
-                      <div class="audio-transcription">
-                        {{ msg.mensaje }}
+                    
+                    <!-- Controles personalizados -->
+                    <div class="audio-controls">
+                      <button class="audio-play-btn" onclick="toggleAudio(this)">▶️</button>
+                      <div class="audio-progress" onclick="seekAudio(this, event)">
+                        <div class="audio-progress-bar"></div>
                       </div>
+                      <span class="audio-duration">0:00</span>
+                      <button class="audio-download-btn" onclick="downloadAudio(this)" title="Descargar audio">
+                        ⬇️
+                      </button>
+                    </div>
+                    
+                    <!-- Transcripción -->
+                    {% if msg.transcripcion_audio %}
+                    <div class="audio-transcription">
+                      <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                    </div>
+                    {% elif msg.mensaje %}
+                    <div class="audio-transcription">
+                      <strong>Mensaje:</strong> {{ msg.mensaje }}
+                    </div>
                     {% endif %}
                   </div>
-                {% endif %}
-                  </div>
+
                 {% else %}
                   <!-- Mostrar texto normal -->
                   <div class="text-message">
@@ -186,7 +207,7 @@
     <!-- FORMULARIO DE MENSAJE MANUAL -->
     {% if selected %}
         {% if not IA_ESTADOS.get(selected, True) %}
-        <form method="POST" action="/send-manual" class="reply-form">
+        <form method="POST", action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
                 <input type="text" name="texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
@@ -352,6 +373,105 @@
     font-weight: 500;
     color: #333;
   }
+
+  /* ESTILOS PARA AUDIO PLAYER */
+  .audio-player {
+    background: #f8f9fa;
+    border-radius: 12px;
+    padding: 15px;
+    margin: 10px 0;
+    border: 1px solid #e9ecef;
+    max-width: 350px;
+  }
+
+  .whatsapp-audio {
+    display: none; /* Ocultamos el reproductor nativo */
+  }
+
+  .audio-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .audio-play-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 8px;
+    border-radius: 50%;
+    background-color: #25D366;
+    color: white;
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+  }
+
+  .audio-play-btn:hover {
+    background-color: #128C7E;
+  }
+
+  .audio-progress {
+    flex: 1;
+    height: 6px;
+    background-color: #ddd;
+    border-radius: 3px;
+    overflow: hidden;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .audio-progress-bar {
+    height: 100%;
+    background-color: #25D366;
+    width: 0%;
+    transition: width 0.1s ease;
+    border-radius: 3px;
+  }
+
+  .audio-duration {
+    font-size: 11px;
+    color: #666;
+    min-width: 35px;
+    text-align: center;
+    font-family: monospace;
+  }
+
+  .audio-download-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    padding: 6px;
+    border-radius: 4px;
+    color: #666;
+    transition: all 0.2s;
+  }
+
+  .audio-download-btn:hover {
+    color: #25D366;
+    background-color: #f0f0f0;
+  }
+
+  .audio-transcription {
+    background-color: #e8f5e8;
+    padding: 10px 12px;
+    border-radius: 8px;
+    margin-top: 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    border-left: 3px solid #25D366;
+  }
+
+  .audio-transcription strong {
+    color: #128C7E;
+    font-size: 12px;
+  }
 </style>
 
 <script>
@@ -403,8 +523,81 @@
     };
   }
 
-  // Activar edición en todos los botones ✏️
-  document.addEventListener('DOMContentLoaded', function () {
+  // Controlador de audio personalizado
+  function toggleAudio(button) {
+    const audioPlayer = button.closest('.audio-player').querySelector('audio');
+    const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
+    const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
+    
+    if (audioPlayer.paused) {
+      audioPlayer.play();
+      button.textContent = '⏸️';
+      
+      // Actualizar barra de progreso
+      audioPlayer.ontimeupdate = function() {
+        if (audioPlayer.duration) {
+          const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+          progressBar.style.width = progress + '%';
+          
+          // Actualizar tiempo actual
+          const minutes = Math.floor(audioPlayer.currentTime / 60);
+          const seconds = Math.floor(audioPlayer.currentTime % 60);
+          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+      };
+    } else {
+      audioPlayer.pause();
+      button.textContent = '▶️';
+    }
+  }
+
+  // Función para buscar en el audio
+  function seekAudio(progressBar, event) {
+    const audioPlayer = progressBar.closest('.audio-player').querySelector('audio');
+    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const width = rect.width;
+    
+    if (audioPlayer.duration) {
+      const clickTime = (clickX / width) * audioPlayer.duration;
+      audioPlayer.currentTime = clickTime;
+      progressBarInner.style.width = (clickX / width) * 100 + '%';
+    }
+  }
+
+  // Función para descargar audio
+  function downloadAudio(button) {
+    const audioPlayer = button.closest('.audio-player').querySelector('audio');
+    const source = audioPlayer.querySelector('source').src;
+    const link = document.createElement('a');
+    link.href = source;
+    link.download = 'audio-mensaje.ogg';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }
+
+  // Inicializar todos los audios al cargar la página
+  document.addEventListener('DOMContentLoaded', function() {
+    // Configurar duración de audios
+    document.querySelectorAll('.audio-player audio').forEach(audio => {
+      audio.addEventListener('loadedmetadata', function() {
+        const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+        if (this.duration && isFinite(this.duration)) {
+          const minutes = Math.floor(this.duration / 60);
+          const seconds = Math.floor(this.duration % 60);
+          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+      });
+      
+      // Cargar metadata si no se cargó automáticamente
+      if (audio.readyState >= 1) {
+        audio.dispatchEvent(new Event('loadedmetadata'));
+      }
+    });
+
+    // Activar edición en todos los botones ✏️
     document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
@@ -414,14 +607,13 @@
       });
     });
 
-    // 🔥 NUEVO: Scroll automático al cargar la página
+    // Scroll automático al cargar la página
     scrollToBottom();
     
-    // También scroll cuando hay nuevos mensajes (si estás en la misma conversación)
+    // También scroll cuando hay nuevos mensajes
     const observer = new MutationObserver(function(mutations) {
       mutations.forEach(function(mutation) {
         if (mutation.addedNodes.length > 0) {
-          // Pequeño delay para asegurar que el DOM se actualizó
           setTimeout(scrollToBottom, 100);
         }
       });

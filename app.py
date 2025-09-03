@@ -561,21 +561,25 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
             respuesta TEXT,
             timestamp DATETIME,
             tipo_mensaje VARCHAR(10) DEFAULT 'texto',
-            contenido_extra TEXT
+            contenido_extra TEXT,
+            transcripcion_audio TEXT  -- 🆕 NUEVO CAMPO para guardar transcripción
         ) ENGINE=InnoDB;
     ''')
+
+    # 🆕 Guardar transcripción si es audio
+    transcripcion = mensaje if es_audio and mensaje.startswith('Transcripción del audio:') else None
 
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra) VALUES (%s, %s, %s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra)
+        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio) VALUES (%s, %s, %s, %s, %s, %s, %s);",
+        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion)
     )
 
     conn.commit()
     cursor.close()
     conn.close()
-    
+
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
@@ -779,12 +783,12 @@ def webhook():
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
                 if transcripcion_audio:
-                    texto = f"Transcripción del audio: {transcripcion_audio}"
+                    texto = transcripcion_audio  # 🆕 Guardar solo la transcripción
                     app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
                 else:
-                    texto = "No pude transcribir el audio. ¿Podrías escribirlo?"
+                    texto = "No pude transcribir el audio"
             else:
-                texto = "No pude procesar el audio. ¿Podrías escribirlo?"       
+                texto = "No pude procesar el audio"     
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
             texto = msg['text']['body']
