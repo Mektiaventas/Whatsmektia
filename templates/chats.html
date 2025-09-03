@@ -42,10 +42,14 @@
             </div>
           {% endif %}
           <div class="chat-preview">
-            {% if chat.ultimo_mensaje %}
-              {{ chat.ultimo_mensaje[:35] }}...
+            {% if chat.ultimo and chat.ultimo.mensaje %}
+              {% if '[IMAGEN]' in chat.ultimo.mensaje %}
+                Imagen
+              {% else %}
+                {{ chat.ultimo.mensaje[:35] }}
+              {% endif %}
             {% else %}
-              Sin mensajes
+              Siniestros
             {% endif %}
           </div>
         </div>
@@ -100,18 +104,23 @@
     <div class="msgs-wrap-v2" id="msgs">
       {% if mensajes %}
         {% for msg in mensajes %}
+          {% if msg.mensaje %}
+            {% if '[IMAGEN]' in msg.mensaje %}
+              <div class="msg-box msg-user">
+                Imagen de la atención
+                <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
+              </div>
+            {% else %}
+              <div class="msg-box msg-user">
+                {{ msg.mensaje }}
+                <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
+              </div>
+            {% endif %}
+          {% endif %}
+
           {% if msg.respuesta %}
-            <div class="msg-box msg-user">
-              {{ msg.mensaje }}
-              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
-            </div>
             <div class="msg-box msg-ai">
               {{ msg.respuesta }}
-              <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
-            </div>
-          {% else %}
-            <div class="msg-box msg-user">
-              {{ msg.mensaje }}
               <div class="msg-meta">{{ msg.timestamp.astimezone().strftime("%Y-%m-%d %H:%M:%S") }}</div>
             </div>
           {% endif %}
