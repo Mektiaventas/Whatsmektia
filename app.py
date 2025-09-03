@@ -1047,41 +1047,50 @@ def configuracion_precio_borrar(pid):
     # ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
-        # 1) Cargamos las columnas Kanban
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-        columnas = cursor.fetchall()
+    # 1) Cargamos las columnas Kanban
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+    columnas = cursor.fetchall()
 
-        # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-        cursor.execute("""
-            SELECT 
-                cm.numero,
-                cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha,
-                (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
-                MAX(cont.plataforma) AS canal,
-                -- PRIORIDAD: alias > nombre > número
-                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
-                (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
-            FROM chat_meta cm
-            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-            LEFT JOIN conversaciones c ON c.numero = cm.numero
-            GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC;
-        """)
-        chats = cursor.fetchall()
+    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+    cursor.execute("""
+        SELECT 
+            cm.numero,
+            cm.columna_id,
+            MAX(c.timestamp) AS ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = cm.numero 
+             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+            MAX(cont.imagen_url) AS avatar,
+            MAX(cont.plataforma) AS canal,
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+            (SELECT COUNT(*) FROM conversaciones 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+        FROM chat_meta cm
+        LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        LEFT JOIN conversaciones c ON c.numero = cm.numero
+        GROUP BY cm.numero, cm.columna_id
+        ORDER BY ultima_fecha DESC;
+    """)
+    chats = cursor.fetchall()
 
-        cursor.close()
-        conn.close()
+    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
 
-        return render_template('kanban.html', columnas=columnas, chats=chats)
-        
+    cursor.close()
+    conn.close()
+
+    return render_template('kanban.html', columnas=columnas, chats=chats)     
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
         data = request.get_json()
