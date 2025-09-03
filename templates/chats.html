@@ -81,19 +81,21 @@
       <span style="margin-left:8px; color:#888;">{{ selected }}</span>
       
       <!-- BADGE DE ESTADO IA/MANUAL -->
-      <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}" 
+      <span class="badge {% if (chats | selectattr('numero', 'equalto', selected) | first).ia_activada %}bg-success{% else %}bg-warning{% endif %}" 
             style="margin-left: 10px; font-size: 0.8em;">
-          {% if IA_ESTADOS.get(selected, True) %}
+          {% if (chats | selectattr('numero', 'equalto', selected) | first).ia_activada %}
               🤖 IA ACTIVADA
           {% else %}
               👤 MODO MANUAL
           {% endif %}
       </span>
       
-      <!-- Botón para toggle IA en móvil -->
-      <button class="mobile-toggle-ia" onclick="toggleIA('{{ selected }}')">
-        {{ IA_ESTADOS.get(selected, True) and '🔴' or '🟢' }}
-      </button>
+      <!-- Botón toggle IA -->
+      <form action="/toggle_ai/{{ selected }}" method="POST" style="display:inline;">
+        <button type="submit" class="toggle-btn {{ 'on' if (chats | selectattr('numero', 'equalto', selected) | first).ia_activada else 'off' }}">
+          IA {{ 'ON' if (chats | selectattr('numero', 'equalto', selected) | first).ia_activada else 'OFF' }}
+        </button>
+      </form>
     </div>
     {% else %}
     <div class="chat-panel-header">

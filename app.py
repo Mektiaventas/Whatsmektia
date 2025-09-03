@@ -780,95 +780,80 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
+
     cursor.execute("""
-        SELECT 
-          conv.numero, 
-          COUNT(*) AS total_mensajes, 
-          cont.imagen_url, 
-          -- PRIORIDAD: alias > nombre > número
-          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-          cont.alias,
-          cont.nombre,
-          (SELECT mensaje FROM conversaciones 
-           WHERE numero = conv.numero 
-           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-          MAX(conv.timestamp) AS ultima_fecha
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
-        ORDER BY MAX(conv.timestamp) DESC
+        SELECT c.numero_telefono AS numero,
+               c.nombre,
+               c.alias,
+               c.imagen_url,
+               c.ia_activada,
+               m.mensaje AS ultimo_mensaje,
+               m.fecha AS ultima_fecha
+        FROM contactos c
+        LEFT JOIN mensajes m
+          ON m.contacto_id = c.id
+        GROUP BY c.numero_telefono
+        ORDER BY ultima_fecha DESC
     """)
     chats = cursor.fetchall()
     cursor.close()
     conn.close()
-    return render_template('chats.html',
-        chats=chats, mensajes=None,
-        selected=None, IA_ESTADOS=IA_ESTADOS
-    )
+
+    return render_template("chats.html", chats=chats, selected=None)
+
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-    
-    # CONSULTA ACTUALIZADA - USAR PRIORIDAD
-    cursor.execute("""
-        SELECT DISTINCT
-            conv.numero, 
-            cont.imagen_url, 
-            -- PRIORIDAD: alias > nombre > número
-            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-            cont.alias,
-            cont.nombre
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-        WHERE conv.numero = %s
-        LIMIT 1;
-    """, (numero,))
-    chats = cursor.fetchall()
-    cursor.execute(
-        "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
-        (numero,)
-        )
-    msgs = cursor.fetchall()
 
-    for msg in msgs:
-        if msg.get('timestamp'):
-            msg['timestamp'] = msg['timestamp'].replace(tzinfo=pytz.UTC).astimezone(tz_mx)
+    # Info del contacto + estado IA
+    cursor.execute("""
+        SELECT id, numero_telefono AS numero, nombre, alias, imagen_url, ia_activada
+        FROM contactos
+        WHERE numero_telefono = %s
+    """, (numero,))
+    contacto = cursor.fetchone()
+
+    # Mensajes
+    cursor.execute("""
+        SELECT mensaje, respuesta, fecha AS timestamp
+        FROM mensajes
+        WHERE contacto_id = %s
+        ORDER BY fecha ASC
+    """, (contacto["id"],))
+    mensajes = cursor.fetchall()
 
     cursor.close()
     conn.close()
-        
-    return render_template('chats.html',
-            chats=chats, 
-            mensajes=msgs,
-            selected=numero, 
-            IA_ESTADOS=IA_ESTADOS
-    )
+
+    return render_template("chats.html", chats=[contacto], selected=numero, mensajes=mensajes)
         
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
-        
+
+        # Cambiar el valor (si es 1 pasa a 0, si es 0 pasa a 1)
         cursor.execute("""
-            UPDATE contactos 
+            UPDATE contactos
             SET ia_activada = NOT COALESCE(ia_activada, 1)
             WHERE numero_telefono = %s
         """, (numero,))
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
-        app.logger.info(f"🔘 IA para {numero}: cambiada en DB")
+
+        app.logger.info(f"🔘 Estado IA cambiado para {numero}")
     except Exception as e:
-        app.logger.error(f"🔴 Error al cambiar estado IA: {e}")
-    
+        app.logger.error(f"Error al cambiar estado IA: {e}")
+
     return redirect(url_for('ver_chat', numero=numero))
+
 
 
 @app.route('/send-manual', methods=['POST'])
