@@ -656,20 +656,19 @@ def webhook():
             texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
         
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
-            # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
-            current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
+# 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+        current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
 
-            if not hasattr(app, 'ultimos_mensajes'):
+        if not hasattr(app, 'ultimos_mensajes'):
                 app.ultimos_mensajes = set()
 
-            if current_message_id in app.ultimos_mensajes:
+        if current_message_id in app.ultimos_mensajes:
                 app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
                 return 'OK', 200
 
-            app.ultimos_mensajes.add(current_message_id)
+        app.ultimos_mensajes.add(current_message_id)
             # Limitar el tamaño para no consumir mucha memoria
-            if len(app.ultimos_mensajes) > 100:
+        if len(app.ultimos_mensajes) > 100:
                 app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
@@ -691,10 +690,14 @@ def webhook():
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
                 try:
+
+                    # OBTENER IMAGEN DE PERFIL
+                    imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
+
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # PRIMERO: Eliminar cualquier duplicado existente para este número
+                    # Eliminar duplicados
                     cursor.execute("""
                         DELETE FROM contactos 
                         WHERE numero_telefono = %s 
@@ -705,14 +708,14 @@ def webhook():
                         )
                     """, (wa_id, wa_id))
                     
-                    # LUEGO: Insertar o actualizar
+                    # Insertar o actualizar CON IMAGEN DE PERFIL
                     cursor.execute("""
                         INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
                         VALUES (%s, %s, 'whatsapp', %s)
                         ON DUPLICATE KEY UPDATE 
                             nombre = VALUES(nombre),
                             imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
+                    """, (wa_id, profile_name, imagen_perfil))  # ← Usar imagen_perfil aquí
                     
                     conn.commit()
                     cursor.close()
@@ -736,7 +739,6 @@ def webhook():
                     app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
                     
 
-        # Consultas de precio (funciona para todos)
         # Consultas de precio (funciona para todos)
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
@@ -781,6 +783,31 @@ def webhook():
 @app.route('/')
 def inicio():
     return redirect(url_for('home'))
+
+def obtener_imagen_perfil_whatsapp(numero):
+    """Obtiene la URL de la imagen de perfil de WhatsApp"""
+    try:
+        # Necesitas el ID de número de teléfono de negocio de WhatsApp
+        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        params = {
+            'fields': f'profile_picture_url({numero})',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'profile_picture_url' in data:
+                return data['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
 
 @app.route('/home')
 def home():
