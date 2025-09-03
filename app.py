@@ -209,7 +209,7 @@ def obtener_historial(numero, limite=10):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None):
+def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None):
     cfg = load_config()
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -262,10 +262,16 @@ Mantén siempre un tono profesional y conciso.
                         "type": "image_url", 
                         "image_url": {
                             "url": imagen_base64,
-                            "detail": "auto"  # "low", "high", o "auto"
+                            "detail": "auto"
                         }
                     }
                 ]
+            })
+        elif es_audio and transcripcion_audio:
+            # Para audio: incluir la transcripción
+            messages_chain.append({
+                'role': 'user',
+                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
             })
         else:
             # Para texto normal
@@ -290,19 +296,14 @@ Mantén siempre un tono profesional y conciso.
             }
             
             app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
-            app.logger.info(f"📦 Payload OpenAI: {json.dumps(payload, indent=2)}")
-            
             response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            app.logger.info(f"📨 Respuesta OpenAI Status: {response.status_code}")
-            app.logger.info(f"📨 Respuesta OpenAI Text: {response.text}")
-            
             response.raise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
         
         else:
-            # Usar DeepSeek para texto
+            # Usar DeepSeek para texto (o audio transcrito)
             headers = {
                 "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
                 "Content-Type": "application/json"
@@ -329,7 +330,7 @@ Mantén siempre un tono profesional y conciso.
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-    
+        
 def obtener_imagen_perfil_whatsapp(numero):
     """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
@@ -375,6 +376,105 @@ def obtener_imagen_perfil_whatsapp(numero):
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+
+def obtener_audio_whatsapp(audio_id):
+    """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
+    try:
+        # 1. Obtener la URL del audio con autenticación
+        url = f"https://graph.facebook.com/v23.0/{audio_id}"
+        headers = {
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando audio: {response.status_code} - {response.text}")
+            return None, None
+        
+        # 2. Obtener la URL de descarga real
+        audio_data = response.json()
+        download_url = audio_data.get('url')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga de audio: {audio_data}")
+            return None, None
+            
+        app.logger.info(f"🎵 URL de descarga audio: {download_url}")
+        
+        # 3. Descargar el audio con autenticación
+        audio_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if audio_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando audio: {audio_response.status_code}")
+            return None, None
+        
+        # 4. Guardar audio en sistema de archivos
+        import uuid
+        import os
+        
+        # Crear directorio si no existe
+        os.makedirs('static/audio/whatsapp', exist_ok=True)
+        
+        # Generar nombre único para el archivo
+        filename = f"{uuid.uuid4().hex}.ogg"  # WhatsApp usa formato OGG
+        filepath = f"static/audio/whatsapp/{filename}"
+        
+        # Guardar audio
+        with open(filepath, 'wb') as f:
+            f.write(audio_response.content)
+        
+        app.logger.info(f"✅ Audio guardado: {filepath}")
+        
+        return filepath, f"/{filepath}"
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {e}")
+        return None, None
+
+def transcribir_audio_con_openai(audio_file_path):
+    """Transcribe audio usando Whisper de OpenAI"""
+    try:
+        # Verificar que el archivo existe
+        if not os.path.exists(audio_file_path):
+            app.logger.error(f"🔴 Archivo de audio no encontrado: {audio_file_path}")
+            return None
+        
+        # OpenAI Whisper endpoint
+        whisper_url = "https://api.openai.com/v1/audio/transcriptions"
+        
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+        }
+        
+        # Preparar el archivo para enviar
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {
+                'file': (os.path.basename(audio_file_path), audio_file, 'audio/ogg')
+            }
+            data = {
+                'model': 'whisper-1',
+                'language': 'es'  # Opcional: especificar idioma
+            }
+            
+            app.logger.info(f"🎵 Enviando audio a Whisper: {audio_file_path}")
+            response = requests.post(whisper_url, headers=headers, files=files, data=data, timeout=60)
+            
+            app.logger.info(f"🎵 Respuesta Whisper Status: {response.status_code}")
+            app.logger.info(f"🎵 Respuesta Whisper Text: {response.text}")
+            
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('text', '').strip()
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error transcribiendo audio: {e}")
         return None
 
 def obtener_imagen_perfil_alternativo(numero):
@@ -430,7 +530,7 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url=None):
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
         mensaje = '[Mensaje vacío]'
@@ -442,9 +542,13 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url
     elif isinstance(respuesta, str) and respuesta.strip() == '':
         respuesta = '[Respuesta vacía]'
     
-    # Si es imagen, guardar información adicional
-    tipo_mensaje = 'imagen' if es_imagen else 'texto'
-    contenido_extra = imagen_url if es_imagen else None
+    # Determinar tipo de mensaje
+    if es_imagen:
+        tipo_mensaje = 'imagen'
+    elif es_audio:
+        tipo_mensaje = 'audio'
+    else:
+        tipo_mensaje = 'texto'
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -471,6 +575,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url
     conn.commit()
     cursor.close()
     conn.close()
+    
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
@@ -630,11 +735,15 @@ def webhook():
         app.logger.info(f"📱 Mensaje recibido de: {numero}")
         app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
         
-        # Detectar si es imagen o texto
+        # Detectar tipo de mensaje
         es_imagen = False
+        es_audio = False
         imagen_base64 = None
-        imagen_url = None  # ← AÑADIR ESTA LÍNEA
+        imagen_url = None
+        audio_path = None
+        audio_url = None
         texto = ""
+        transcripcion_audio = None
         
         if 'image' in msg:
             app.logger.info(f"🖼️ Mensaje de imagen detectado")
@@ -658,16 +767,34 @@ def webhook():
             else:
                 texto = "Analiza esta imagen"
                 app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
-                
+        elif 'audio' in msg:
+            app.logger.info(f"🎵 Mensaje de audio detectado")
+            es_audio = True
+            audio_id = msg['audio']['id']
+            app.logger.info(f"🎵 ID de audio: {audio_id}")
+            
+            # Obtener y transcribir audio
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id)
+            
+            if audio_path:
+                transcripcion_audio = transcribir_audio_con_openai(audio_path)
+                if transcripcion_audio:
+                    texto = f"Transcripción del audio: {transcripcion_audio}"
+                    app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
+                else:
+                    texto = "No pude transcribir el audio. ¿Podrías escribirlo?"
+            else:
+                texto = "No pude procesar el audio. ¿Podrías escribirlo?"       
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
             texto = msg['text']['body']
             app.logger.info(f"📝 Texto: {texto}")
         else:
-            # Otro tipo de mensaje (audio, video, etc.)
+            # Otro tipo de mensaje (video, documento, etc.)
             tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
-            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
+            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
+
         
 # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
         current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
@@ -778,8 +905,10 @@ def webhook():
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
 
-        guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
-
+        if es_audio:
+            guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url)
+        else:
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
         # ========== KANBAN AUTOMÁTICO (para todos) ==========
         meta = obtener_chat_meta(numero)
         if not meta:

@@ -125,6 +125,20 @@
                         {{ msg.mensaje }}
                       </div>
                     {% endif %}
+                {% if msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                  <!-- Mostrar audio -->
+                  <div class="audio-message">
+                    <audio controls class="whatsapp-audio">
+                      <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                      Tu navegador no soporta el elemento de audio.
+                    </audio>
+                    {% if msg.mensaje and not msg.mensaje.startswith('[Audio]') %}
+                      <div class="audio-transcription">
+                        {{ msg.mensaje }}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% endif %}
                   </div>
                 {% else %}
                   <!-- Mostrar texto normal -->

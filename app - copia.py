@@ -123,7 +123,7 @@ def save_config(cfg_all):
         VALUES
             (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-            ia_nomen = VALUES(ia_nombre),
+            ia_nombre = VALUES(ia_nombre),
             negocio_nombre = VALUES(negocio_nombre),
             descripcion = VALUES(descripcion),
             url = VALUES(url),
@@ -330,51 +330,82 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
     
-def obtener_imagen_whatsapp(image_id):
-    """Descarga la imagen de WhatsApp y la convierte a base64"""
+def obtener_imagen_perfil_whatsapp(numero):
+    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
-        # 1. Obtener la URL de la imagen con autenticación
-        url = f"https://graph.facebook.com/v23.0/{image_id}"
-        headers = {
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Phone Number ID de tu negocio de WhatsApp
+        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        
+        # URL correcta de la API de Meta
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        
+        params = {
+            'fields': f'profile_picture_url({numero_formateado})',
+            'access_token': WHATSAPP_TOKEN
         }
         
-        app.logger.info(f"📷 Descargando imagen WhatsApp: {url}")
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+        }
         
-        response = requests.get(url, headers=headers, timeout=30)
-        app.logger.info(f"📷 Status descarga: {response.status_code}")
+        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
+        app.logger.info(f"📸 URL: {url}")
+        app.logger.info(f"📸 Params: {params}")
         
-        if response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {response.status_code} - {response.text}")
-            return None
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         
-        # 2. Obtener la URL de descarga real
-        image_data = response.json()
-        download_url = image_data.get('url')
+        app.logger.info(f"📸 Status Code: {response.status_code}")
+        app.logger.info(f"📸 Response: {response.text}")
         
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
-            return None
-            
-        app.logger.info(f"📷 URL de descarga: {download_url}")
+        if response.status_code == 200:
+            data = response.json()
+            if 'profile_picture_url' in data:
+                imagen_url = data['profile_picture_url']
+                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
+                return imagen_url
+            else:
+                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
         
-        # 3. Descargar la imagen con autenticación
-        image_response = requests.get(download_url, headers=headers, timeout=30)
-        
-        if image_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
-            return None
-        
-        # 4. Convertir a base64 para OpenAI
-        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        
-        app.logger.info(f"✅ Imagen descargada correctamente. Tamaño: {len(image_base64)} bytes")
-        
-        return f"data:image/jpeg;base64,{image_base64}"
+        # Si falla, intentar con la versión alternativa de la API
+        return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+
+
+
+def obtener_imagen_perfil_alternativo(numero):
+    """Método alternativo para obtener la imagen de perfil"""
+    try:
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "638096866063629"
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
@@ -401,7 +432,7 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-def guardar_conversacion(numero, mensaje, respuesta):
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url=None):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
         mensaje = '[Mensaje vacío]'
@@ -413,6 +444,10 @@ def guardar_conversacion(numero, mensaje, respuesta):
     elif isinstance(respuesta, str) and respuesta.strip() == '':
         respuesta = '[Respuesta vacía]'
     
+    # Si es imagen, guardar información adicional
+    tipo_mensaje = 'imagen' if es_imagen else 'texto'
+    contenido_extra = imagen_url if es_imagen else None
+    
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -422,21 +457,22 @@ def guardar_conversacion(numero, mensaje, respuesta):
             numero VARCHAR(20),
             mensaje TEXT,
             respuesta TEXT,
-            timestamp DATETIME
+            timestamp DATETIME,
+            tipo_mensaje VARCHAR(10) DEFAULT 'texto',
+            contenido_extra TEXT
         ) ENGINE=InnoDB;
     ''')
 
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc)
+        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra) VALUES (%s, %s, %s, %s, %s, %s);",
+        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra)
     )
 
     conn.commit()
     cursor.close()
     conn.close()
-
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
@@ -578,7 +614,6 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
-@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -600,6 +635,7 @@ def webhook():
         # Detectar si es imagen o texto
         es_imagen = False
         imagen_base64 = None
+        imagen_url = None  # ← AÑADIR ESTA LÍNEA
         texto = ""
         
         if 'image' in msg:
@@ -608,15 +644,15 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64
-            imagen_base64 = obtener_imagen_whatsapp(image_id)
+            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64 Y GUARDA ARCHIVO
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)  # ← Ahora recibe ambos valores
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
                 texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
                 enviar_mensaje(numero, texto)
+                guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
                 return 'OK', 200
-            
             # Verificar si hay texto acompañando la imagen
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
@@ -635,11 +671,20 @@ def webhook():
             texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
         
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        if hasattr(app, 'ultimo_mensaje') and app.ultimo_mensaje == (numero, texto):
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {texto[:30]}...")
-            return 'OK', 200
-        app.ultimo_mensaje = (numero, texto)
+# 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+        current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
+
+        if not hasattr(app, 'ultimos_mensajes'):
+                app.ultimos_mensajes = set()
+
+        if current_message_id in app.ultimos_mensajes:
+                app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+                return 'OK', 200
+
+        app.ultimos_mensajes.add(current_message_id)
+            # Limitar el tamaño para no consumir mucha memoria
+        if len(app.ultimos_mensajes) > 100:
+                app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
@@ -660,10 +705,14 @@ def webhook():
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
                 try:
+
+                    # OBTENER IMAGEN DE PERFIL
+                    imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
+
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
-                    # PRIMERO: Eliminar cualquier duplicado existente para este número
+                    # Eliminar duplicados
                     cursor.execute("""
                         DELETE FROM contactos 
                         WHERE numero_telefono = %s 
@@ -674,19 +723,32 @@ def webhook():
                         )
                     """, (wa_id, wa_id))
                     
-                    # LUEGO: Insertar o actualizar
+                    # Insertar o actualizar CON IMAGEN DE PERFIL
                     cursor.execute("""
                         INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
                         VALUES (%s, %s, 'whatsapp', %s)
                         ON DUPLICATE KEY UPDATE 
                             nombre = VALUES(nombre),
                             imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, change.get('profile', {}).get('picture', None)))
+                    """, (wa_id, profile_name, imagen_perfil))  # ← Usar imagen_perfil aquí
                     
                     conn.commit()
                     cursor.close()
                     conn.close()
                     app.logger.info(f"✅ Contacto actualizado: {wa_id}")
+                    # Asegurar que el contacto exista incluso si no hay información de perfil
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT IGNORE INTO contactos (numero_telefono, plataforma)
+                            VALUES (%s, 'whatsapp')
+                        """, (numero,))
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
+                    except Exception as e:
+                        app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
@@ -702,7 +764,7 @@ def webhook():
             else:
                 respuesta = f"No encontré tarifa para *{servicio}*."
             enviar_mensaje(numero, respuesta)
-            guardar_conversacion(numero, texto, respuesta)
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None)
             return 'OK', 200
 
         # IA normal
@@ -718,7 +780,7 @@ def webhook():
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
 
-        guardar_conversacion(numero, texto, respuesta)
+        guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
 
         # ========== KANBAN AUTOMÁTICO (para todos) ==========
         meta = obtener_chat_meta(numero)
@@ -737,6 +799,82 @@ def webhook():
 def inicio():
     return redirect(url_for('home'))
 
+def obtener_imagen_perfil_whatsapp(numero):
+    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
+    try:
+        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Phone Number ID de tu negocio de WhatsApp
+        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        
+        # URL correcta de la API de Meta
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        
+        params = {
+            'fields': f'profile_picture_url({numero_formateado})',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+        }
+        
+        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
+        app.logger.info(f"📸 URL: {url}")
+        app.logger.info(f"📸 Params: {params}")
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        app.logger.info(f"📸 Status Code: {response.status_code}")
+        app.logger.info(f"📸 Response: {response.text}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'profile_picture_url' in data:
+                imagen_url = data['profile_picture_url']
+                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
+                return imagen_url
+            else:
+                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+        
+        # Si falla, intentar con la versión alternativa de la API
+        return obtener_imagen_perfil_alternativo(numero_formateado)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+
+def obtener_imagen_perfil_alternativo(numero):
+    """Método alternativo para obtener la imagen de perfil"""
+    try:
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "638096866063629"
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
+        return None
+    
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
@@ -780,8 +918,9 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    conn   = get_db_connection()
+    conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
+    
     cursor.execute("""
         SELECT 
           conv.numero, 
@@ -801,11 +940,15 @@ def ver_chats():
         ORDER BY MAX(conv.timestamp) DESC
     """)
     chats = cursor.fetchall()
+    
     cursor.close()
     conn.close()
+    
     return render_template('chats.html',
-        chats=chats, mensajes=None,
-        selected=None, IA_ESTADOS=IA_ESTADOS
+        chats=chats, 
+        mensajes=None,
+        selected=None, 
+        IA_ESTADOS=IA_ESTADOS
     )
 
 @app.route('/chats/<numero>')
@@ -828,32 +971,57 @@ def ver_chat(numero):
         LIMIT 1;
     """, (numero,))
     chats = cursor.fetchall()
+
+    # Esta consulta queda igual (para los mensajes) pero usando CONVERSACIONES
     cursor.execute(
         "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
         (numero,)
-        )
+    )
     msgs = cursor.fetchall()
 
+    # Convertir timestamps a hora de México
     for msg in msgs:
         if msg.get('timestamp'):
-            msg['timestamp'] = msg['timestamp'].replace(tzinfo=pytz.UTC).astimezone(tz_mx)
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if msg['timestamp'].tzinfo is not None:
+                msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
 
     cursor.close()
     conn.close()
-        
+    
     return render_template('chats.html',
-            chats=chats, 
-            mensajes=msgs,
-            selected=numero, 
-            IA_ESTADOS=IA_ESTADOS
-    )
-        
+        chats=chats, 
+        mensajes=msgs,
+        selected=numero, 
+        IA_ESTADOS=IA_ESTADOS
+    )        
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
-        IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
-        # Agregar log para debugging
-        app.logger.info(f"🔘 IA para {numero}: {'ACTIVADA' if IA_ESTADOS[numero] else 'DESACTIVADA'}")
-        return redirect(url_for('ver_chat', numero=numero))
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Cambiar el valor (si es 1 pasa a 0, si es 0 pasa a 1)
+        cursor.execute("""
+            UPDATE contactos
+            SET ia_activada = NOT COALESCE(ia_activada, 1)
+            WHERE numero_telefono = %s
+        """, (numero,))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"🔘 Estado IA cambiado para {numero}")
+    except Exception as e:
+        app.logger.error(f"Error al cambiar estado IA: {e}")
+
+    return redirect(url_for('ver_chat', numero=numero))
+
+
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
@@ -908,14 +1076,24 @@ def enviar_manual():
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
-        conn   = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        IA_ESTADOS.pop(numero, None)
-        return redirect(url_for('ver_chats'))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Solo eliminar conversaciones, NO contactos
+    cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
+    
+    # Opcional: también eliminar de chat_meta si usas kanban
+    try:
+        cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
+    except:
+        pass  # Ignorar si la tabla no existe
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    IA_ESTADOS.pop(numero, None)
+    return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
@@ -1016,41 +1194,50 @@ def configuracion_precio_borrar(pid):
     # ——— Kanban ———
 @app.route('/kanban')
 def ver_kanban():
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
 
-        # 1) Cargamos las columnas Kanban
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-        columnas = cursor.fetchall()
+    # 1) Cargamos las columnas Kanban
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+    columnas = cursor.fetchall()
 
-        # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-        cursor.execute("""
-            SELECT 
-                cm.numero,
-                cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha,
-                (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
-                MAX(cont.plataforma) AS canal,
-                -- PRIORIDAD: alias > nombre > número
-                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
-                (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
-            FROM chat_meta cm
-            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-            LEFT JOIN conversaciones c ON c.numero = cm.numero
-            GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC;
-        """)
-        chats = cursor.fetchall()
+    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+    cursor.execute("""
+        SELECT 
+            cm.numero,
+            cm.columna_id,
+            MAX(c.timestamp) AS ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = cm.numero 
+             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+            MAX(cont.imagen_url) AS avatar,
+            MAX(cont.plataforma) AS canal,
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+            (SELECT COUNT(*) FROM conversaciones 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+        FROM chat_meta cm
+        LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        LEFT JOIN conversaciones c ON c.numero = cm.numero
+        GROUP BY cm.numero, cm.columna_id
+        ORDER BY ultima_fecha DESC;
+    """)
+    chats = cursor.fetchall()
 
-        cursor.close()
-        conn.close()
+    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
 
-        return render_template('kanban.html', columnas=columnas, chats=chats)
-        
+    cursor.close()
+    conn.close()
+
+    return render_template('kanban.html', columnas=columnas, chats=chats)     
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
         data = request.get_json()
