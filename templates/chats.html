@@ -71,12 +71,12 @@
       <div class="chat-header-info">
         <div class="chat-title">
           <span class="alias-view">
-            {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado }}
+            {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
           </span>
           <span class="alias-edit" style="display:none;">
-            <input type="text" value="{{ (chats | selectattr("numero", "equalto", selected) | first).alias
-              or (chats | selectattr("numero", "equalto", selected) | first).nombre
-              or '' }}" data-num="{{ selected }}" maxlength="100">
+          {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
+          <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}" 
+                data-num="{{ selected }}" maxlength="100">
           </span>
           <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
             ✏️

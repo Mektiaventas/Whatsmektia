@@ -638,15 +638,6 @@ def webhook():
                 enviar_mensaje(numero, texto)
                 guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
                 return 'OK', 200
-    
-            # Verificar si hay texto acompañando la imagen
-            if 'caption' in msg['image']:
-                texto = msg['image']['caption']
-                app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
-            else:
-                texto = "Analiza esta imagen"
-                app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
-            
             # Verificar si hay texto acompañando la imagen
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
@@ -665,8 +656,8 @@ def webhook():
             texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
         
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+            # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
             current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
 
             if not hasattr(app, 'ultimos_mensajes'):
@@ -727,6 +718,19 @@ def webhook():
                     cursor.close()
                     conn.close()
                     app.logger.info(f"✅ Contacto actualizado: {wa_id}")
+                    # Asegurar que el contacto exista incluso si no hay información de perfil
+                    try:
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT IGNORE INTO contactos (numero_telefono, plataforma)
+                            VALUES (%s, 'whatsapp')
+                        """, (numero,))
+                        conn.commit()
+                        cursor.close()
+                        conn.close()
+                    except Exception as e:
+                        app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
@@ -979,14 +983,24 @@ def enviar_manual():
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
-        conn   = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        IA_ESTADOS.pop(numero, None)
-        return redirect(url_for('ver_chats'))
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Solo eliminar conversaciones, NO contactos
+    cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
+    
+    # Opcional: también eliminar de chat_meta si usas kanban
+    try:
+        cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
+    except:
+        pass  # Ignorar si la tabla no existe
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    IA_ESTADOS.pop(numero, None)
+    return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
