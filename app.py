@@ -782,54 +782,84 @@ def home():
 def ver_chats():
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-
+    
     cursor.execute("""
-        SELECT c.numero_telefono AS numero,
-               c.nombre,
-               c.alias,
-               c.imagen_url,
-               c.ia_activada,
-               m.mensaje AS ultimo_mensaje,
-               m.fecha AS ultima_fecha
-        FROM contactos c
-        LEFT JOIN mensajes m
-          ON m.contacto_id = c.id
-        GROUP BY c.numero_telefono
-        ORDER BY ultima_fecha DESC
+        SELECT 
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          -- PRIORIDAD: alias > nombre > número
+          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+          cont.alias,
+          cont.nombre,
+          (SELECT mensaje FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+          MAX(conv.timestamp) AS ultima_fecha
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
+        ORDER BY MAX(conv.timestamp) DESC
     """)
     chats = cursor.fetchall()
+    
     cursor.close()
     conn.close()
-
-    return render_template("chats.html", chats=chats, selected=None)
-
+    
+    return render_template('chats.html',
+        chats=chats, 
+        mensajes=None,
+        selected=None, 
+        IA_ESTADOS=IA_ESTADOS
+    )
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
-
-    # Info del contacto + estado IA
+    
+    # CONSULTA ACTUALIZADA - USAR PRIORIDAD
     cursor.execute("""
-        SELECT id, numero_telefono AS numero, nombre, alias, imagen_url, ia_activada
-        FROM contactos
-        WHERE numero_telefono = %s
+        SELECT DISTINCT
+            conv.numero, 
+            cont.imagen_url, 
+            -- PRIORIDAD: alias > nombre > número
+            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+            cont.alias,
+            cont.nombre
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+        WHERE conv.numero = %s
+        LIMIT 1;
     """, (numero,))
-    contacto = cursor.fetchone()
+    chats = cursor.fetchall()
 
-    # Mensajes
-    cursor.execute("""
-        SELECT mensaje, respuesta, fecha AS timestamp
-        FROM mensajes
-        WHERE contacto_id = %s
-        ORDER BY fecha ASC
-    """, (contacto["id"],))
-    mensajes = cursor.fetchall()
+    # Esta consulta queda igual (para los mensajes) pero usando CONVERSACIONES
+    cursor.execute(
+        "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
+        (numero,)
+    )
+    msgs = cursor.fetchall()
+
+    # Convertir timestamps a hora de México
+    for msg in msgs:
+        if msg.get('timestamp'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if msg['timestamp'].tzinfo is not None:
+                msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
 
     cursor.close()
     conn.close()
-
-    return render_template("chats.html", chats=[contacto], selected=numero, mensajes=mensajes)
+    
+    return render_template('chats.html',
+        chats=chats, 
+        mensajes=msgs,
+        selected=numero, 
+        IA_ESTADOS=IA_ESTADOS
+    )
         
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
