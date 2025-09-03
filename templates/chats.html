@@ -355,6 +355,14 @@
 </style>
 
 <script>
+  // Función para scroll al final de los mensajes
+  function scrollToBottom() {
+    const msgsContainer = document.getElementById('msgs');
+    if (msgsContainer) {
+      msgsContainer.scrollTop = msgsContainer.scrollHeight;
+    }
+  }
+
   // Función para activar edición de alias
   function activarEdicionAlias(parent) {
     parent.querySelector('.alias-view').style.display = 'none';
@@ -405,32 +413,33 @@
         activarEdicionAlias(parent);
       });
     });
-  });
 
-  // Scroll al final de los mensajes
-  function scrollToBottom() {
-    const msgs = document.getElementById('msgs');
-    if (msgs) {
-      msgs.scrollTop = msgs.scrollHeight;
+    // 🔥 NUEVO: Scroll automático al cargar la página
+    scrollToBottom();
+    
+    // También scroll cuando hay nuevos mensajes (si estás en la misma conversación)
+    const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mutation) {
+        if (mutation.addedNodes.length > 0) {
+          // Pequeño delay para asegurar que el DOM se actualizó
+          setTimeout(scrollToBottom, 100);
+        }
+      });
+    });
+    
+    const msgsContainer = document.getElementById('msgs');
+    if (msgsContainer) {
+      observer.observe(msgsContainer, { 
+        childList: true, 
+        subtree: true 
+      });
     }
-  }
+  });
 
   // Toggle lista de chats en móvil
   function toggleChatList() {
     const chatList = document.querySelector('.chat-list-v2');
     chatList.classList.toggle('mobile-visible');
   }
-
-  // Inicializar
-  document.addEventListener('DOMContentLoaded', function() {
-    scrollToBottom();
-    
-    // Auto-scroll cuando hay nuevos mensajes
-    const observer = new MutationObserver(scrollToBottom);
-    const msgs = document.getElementById('msgs');
-    if (msgs) {
-      observer.observe(msgs, { childList: true, subtree: true });
-    }
-  });
 </script>
 {% endblock %}
