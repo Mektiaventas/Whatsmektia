@@ -850,10 +850,26 @@ def ver_chat(numero):
         
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
-        IA_ESTADOS[numero] = not IA_ESTADOS.get(numero, True)
-        # Agregar log para debugging
-        app.logger.info(f"🔘 IA para {numero}: {'ACTIVADA' if IA_ESTADOS[numero] else 'DESACTIVADA'}")
-        return redirect(url_for('ver_chat', numero=numero))
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE contactos 
+            SET ia_activada = NOT COALESCE(ia_activada, 1)
+            WHERE numero_telefono = %s
+        """, (numero,))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"🔘 IA para {numero}: cambiada en DB")
+    except Exception as e:
+        app.logger.error(f"🔴 Error al cambiar estado IA: {e}")
+    
+    return redirect(url_for('ver_chat', numero=numero))
+
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
