@@ -785,14 +785,63 @@ def inicio():
     return redirect(url_for('home'))
 
 def obtener_imagen_perfil_whatsapp(numero):
-    """Obtiene la URL de la imagen de perfil de WhatsApp"""
+    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
-        # Necesitas el ID de número de teléfono de negocio de WhatsApp
+        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Phone Number ID de tu negocio de WhatsApp
         phone_number_id = "638096866063629"  # Tu Phone Number ID
         
+        # URL correcta de la API de Meta
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        
         params = {
-            'fields': f'profile_picture_url({numero})',
+            'fields': f'profile_picture_url({numero_formateado})',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+        }
+        
+        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
+        app.logger.info(f"📸 URL: {url}")
+        app.logger.info(f"📸 Params: {params}")
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        app.logger.info(f"📸 Status Code: {response.status_code}")
+        app.logger.info(f"📸 Response: {response.text}")
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'profile_picture_url' in data:
+                imagen_url = data['profile_picture_url']
+                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
+                return imagen_url
+            else:
+                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+        
+        # Si falla, intentar con la versión alternativa de la API
+        return obtener_imagen_perfil_alternativo(numero_formateado)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+
+def obtener_imagen_perfil_alternativo(numero):
+    """Método alternativo para obtener la imagen de perfil"""
+    try:
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "638096866063629"
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
             'access_token': WHATSAPP_TOKEN
         }
         
@@ -800,15 +849,17 @@ def obtener_imagen_perfil_whatsapp(numero):
         
         if response.status_code == 200:
             data = response.json()
-            if 'profile_picture_url' in data:
-                return data['profile_picture_url']
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
         
         return None
         
     except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
-
+    
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
