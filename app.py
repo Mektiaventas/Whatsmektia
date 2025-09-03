@@ -629,14 +629,23 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64
-            imagen_base64 = obtener_imagen_whatsapp(image_id)
+            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64 Y GUARDA ARCHIVO
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)  # ← Ahora recibe ambos valores
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
                 texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
                 enviar_mensaje(numero, texto)
+                guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
                 return 'OK', 200
+    
+            # Verificar si hay texto acompañando la imagen
+            if 'caption' in msg['image']:
+                texto = msg['image']['caption']
+                app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
+            else:
+                texto = "Analiza esta imagen"
+                app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
             
             # Verificar si hay texto acompañando la imagen
             if 'caption' in msg['image']:
@@ -657,10 +666,20 @@ def webhook():
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
         
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        if hasattr(app, 'ultimo_mensaje') and app.ultimo_mensaje == (numero, texto):
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {texto[:30]}...")
-            return 'OK', 200
-        app.ultimo_mensaje = (numero, texto)
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+            current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
+
+            if not hasattr(app, 'ultimos_mensajes'):
+                app.ultimos_mensajes = set()
+
+            if current_message_id in app.ultimos_mensajes:
+                app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+                return 'OK', 200
+
+            app.ultimos_mensajes.add(current_message_id)
+            # Limitar el tamaño para no consumir mucha memoria
+            if len(app.ultimos_mensajes) > 100:
+                app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
 
         # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
@@ -714,6 +733,7 @@ def webhook():
                     
 
         # Consultas de precio (funciona para todos)
+        # Consultas de precio (funciona para todos)
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
             info = obtener_precio(servicio)
@@ -723,7 +743,7 @@ def webhook():
             else:
                 respuesta = f"No encontré tarifa para *{servicio}*."
             enviar_mensaje(numero, respuesta)
-            guardar_conversacion(numero, texto, respuesta)
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None)
             return 'OK', 200
 
         # IA normal
@@ -739,7 +759,7 @@ def webhook():
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
 
-        guardar_conversacion(numero, texto, respuesta)
+        guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
 
         # ========== KANBAN AUTOMÁTICO (para todos) ==========
         meta = obtener_chat_meta(numero)
