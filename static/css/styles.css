@@ -99,7 +99,22 @@ body {
   background: var(--brand-gold);
   color: var(--brand-blue);
 }
+.image-message {
+    margin: 10px 0;
+}
 
+.image-message img {
+    max-width: 300px;
+    border-radius: 10px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+}
+
+.image-message p {
+    margin-top: 8px;
+    padding: 8px 12px;
+    background-color: #f0f0f0;
+    border-radius: 8px;
+}
 /* Main content transparente para ver el degradado */
 .main-content {
   flex: 1;

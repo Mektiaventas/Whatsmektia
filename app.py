@@ -331,7 +331,7 @@ Mantén siempre un tono profesional y conciso.
         return 'Lo siento, hubo un error con la IA.'
     
 def obtener_imagen_whatsapp(image_id):
-    """Descarga la imagen de WhatsApp y la convierte a base64"""
+    """Descarga la imagen de WhatsApp y la convierte a base64 y guarda el archivo"""
     try:
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
@@ -347,7 +347,7 @@ def obtener_imagen_whatsapp(image_id):
         
         if response.status_code != 200:
             app.logger.error(f"🔴 Error descargando imagen: {response.status_code} - {response.text}")
-            return None
+            return None, None
         
         # 2. Obtener la URL de descarga real
         image_data = response.json()
@@ -355,7 +355,7 @@ def obtener_imagen_whatsapp(image_id):
         
         if not download_url:
             app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
-            return None
+            return None, None
             
         app.logger.info(f"📷 URL de descarga: {download_url}")
         
@@ -364,18 +364,34 @@ def obtener_imagen_whatsapp(image_id):
         
         if image_response.status_code != 200:
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
-            return None
+            return None, None
         
         # 4. Convertir a base64 para OpenAI
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         
+        # 5. Guardar imagen en sistema de archivos
+        import uuid
+        import os
+        
+        # Crear directorio si no existe
+        os.makedirs('static/images/whatsapp', exist_ok=True)
+        
+        # Generar nombre único para el archivo
+        filename = f"{uuid.uuid4().hex}.jpg"
+        filepath = f"static/images/whatsapp/{filename}"
+        
+        # Guardar imagen
+        with open(filepath, 'wb') as f:
+            f.write(image_response.content)
+        
+        app.logger.info(f"✅ Imagen guardada: {filepath}")
         app.logger.info(f"✅ Imagen descargada correctamente. Tamaño: {len(image_base64)} bytes")
         
-        return f"data:image/jpeg;base64,{image_base64}"
+        return f"data:image/jpeg;base64,{image_base64}", f"/{filepath}"
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
-        return None
+        return None, None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
@@ -401,7 +417,7 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-def guardar_conversacion(numero, mensaje, respuesta):
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url=None):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
         mensaje = '[Mensaje vacío]'
@@ -413,6 +429,10 @@ def guardar_conversacion(numero, mensaje, respuesta):
     elif isinstance(respuesta, str) and respuesta.strip() == '':
         respuesta = '[Respuesta vacía]'
     
+    # Si es imagen, guardar información adicional
+    tipo_mensaje = 'imagen' if es_imagen else 'texto'
+    contenido_extra = imagen_url if es_imagen else None
+    
     conn = get_db_connection()
     cursor = conn.cursor()
 
@@ -422,21 +442,22 @@ def guardar_conversacion(numero, mensaje, respuesta):
             numero VARCHAR(20),
             mensaje TEXT,
             respuesta TEXT,
-            timestamp DATETIME
+            timestamp DATETIME,
+            tipo_mensaje VARCHAR(10) DEFAULT 'texto',
+            contenido_extra TEXT
         ) ENGINE=InnoDB;
     ''')
 
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc)
+        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra) VALUES (%s, %s, %s, %s, %s, %s);",
+        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra)
     )
 
     conn.commit()
     cursor.close()
     conn.close()
-
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
@@ -859,8 +880,7 @@ def ver_chat(numero):
         mensajes=msgs,
         selected=numero, 
         IA_ESTADOS=IA_ESTADOS
-    )
-        
+    )        
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero):
     try:
