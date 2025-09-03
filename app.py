@@ -330,68 +330,81 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
     
-def obtener_imagen_whatsapp(image_id):
-    """Descarga la imagen de WhatsApp y la convierte a base64 y guarda el archivo"""
+def obtener_imagen_perfil_whatsapp(numero):
+    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
-        # 1. Obtener la URL de la imagen con autenticación
-        url = f"https://graph.facebook.com/v23.0/{image_id}"
-        headers = {
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Phone Number ID de tu negocio de WhatsApp
+        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        
+        # URL correcta de la API de Meta
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
+        
+        params = {
+            'fields': f'profile_picture_url({numero_formateado})',
+            'access_token': WHATSAPP_TOKEN
         }
         
-        app.logger.info(f"📷 Descargando imagen WhatsApp: {url}")
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+        }
         
-        response = requests.get(url, headers=headers, timeout=30)
-        app.logger.info(f"📷 Status descarga: {response.status_code}")
+        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
+        app.logger.info(f"📸 URL: {url}")
+        app.logger.info(f"📸 Params: {params}")
         
-        if response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {response.status_code} - {response.text}")
-            return None, None
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         
-        # 2. Obtener la URL de descarga real
-        image_data = response.json()
-        download_url = image_data.get('url')
+        app.logger.info(f"📸 Status Code: {response.status_code}")
+        app.logger.info(f"📸 Response: {response.text}")
         
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
-            return None, None
-            
-        app.logger.info(f"📷 URL de descarga: {download_url}")
+        if response.status_code == 200:
+            data = response.json()
+            if 'profile_picture_url' in data:
+                imagen_url = data['profile_picture_url']
+                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
+                return imagen_url
+            else:
+                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
         
-        # 3. Descargar la imagen con autenticación
-        image_response = requests.get(download_url, headers=headers, timeout=30)
-        
-        if image_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
-            return None, None
-        
-        # 4. Convertir a base64 para OpenAI
-        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        
-        # 5. Guardar imagen en sistema de archivos
-        import uuid
-        import os
-        
-        # Crear directorio si no existe
-        os.makedirs('static/images/whatsapp', exist_ok=True)
-        
-        # Generar nombre único para el archivo
-        filename = f"{uuid.uuid4().hex}.jpg"
-        filepath = f"static/images/whatsapp/{filename}"
-        
-        # Guardar imagen
-        with open(filepath, 'wb') as f:
-            f.write(image_response.content)
-        
-        app.logger.info(f"✅ Imagen guardada: {filepath}")
-        app.logger.info(f"✅ Imagen descargada correctamente. Tamaño: {len(image_base64)} bytes")
-        
-        return f"data:image/jpeg;base64,{image_base64}", f"/{filepath}"
+        # Si falla, intentar con la versión alternativa de la API
+        return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
-        return None, None
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+
+def obtener_imagen_perfil_alternativo(numero):
+    """Método alternativo para obtener la imagen de perfil"""
+    try:
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "638096866063629"
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
+        return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
