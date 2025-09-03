@@ -123,7 +123,7 @@ def save_config(cfg_all):
         VALUES
             (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
-            ia_nomen = VALUES(ia_nombre),
+            ia_nombre = VALUES(ia_nombre),
             negocio_nombre = VALUES(negocio_nombre),
             descripcion = VALUES(descripcion),
             url = VALUES(url),
@@ -599,7 +599,6 @@ def webhook_verification():
     return 'Token inválido', 403
 
 @app.route('/webhook', methods=['POST'])
-@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -621,6 +620,7 @@ def webhook():
         # Detectar si es imagen o texto
         es_imagen = False
         imagen_base64 = None
+        imagen_url = None  # ← AÑADIR ESTA LÍNEA
         texto = ""
         
         if 'image' in msg:
