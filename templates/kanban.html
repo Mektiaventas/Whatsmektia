@@ -132,4 +132,51 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 </script>
+<!-- Al final de tu kanban.html, antes de cerrar el bloque -->
+<script>
+  // Función para scroll al final de los mensajes en la conversación
+  function scrollToBottom() {
+    const msgsContainer = document.getElementById('msgs');
+    if (msgsContainer) {
+      // Pequeño delay para asegurar que el DOM está renderizado
+      setTimeout(() => {
+        msgsContainer.scrollTo({
+          top: msgsContainer.scrollHeight,
+          behavior: 'smooth'
+        });
+      }, 100);
+    }
+  }
+
+  // Ejecutar cuando se carga la página o cuando se cambia de conversación
+  document.addEventListener('DOMContentLoaded', function() {
+    // Scroll al fondo al cargar la página
+    setTimeout(scrollToBottom, 300);
+    
+    // También configurar para cuando se haga clic en chats del kanban
+    setupKanbanChatLinks();
+  });
+
+  // Configurar los enlaces de chat en el kanban
+  function setupKanbanChatLinks() {
+    const chatLinks = document.querySelectorAll('.kanban-chat-link');
+    chatLinks.forEach(link => {
+      link.addEventListener('click', function(e) {
+        // Guardar que vamos a cambiar de conversación
+        sessionStorage.setItem('scrollToBottom', 'true');
+      });
+    });
+  }
+
+  // Verificar si debemos hacer scroll al fondo después de cargar
+  function checkScrollOnLoad() {
+    if (sessionStorage.getItem('scrollToBottom') === 'true') {
+      setTimeout(scrollToBottom, 500); // Un poco más de delay para carga completa
+      sessionStorage.removeItem('scrollToBottom'); // Limpiar para next time
+    }
+  }
+
+  // Llamar cuando la página esté completamente cargada
+  window.addEventListener('load', checkScrollOnLoad);
+</script>
 {% endblock %}
