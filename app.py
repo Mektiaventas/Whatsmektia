@@ -73,22 +73,34 @@ def enviar_mensaje_voz(numero, audio_url):
         app.logger.error(f"🔴 Error enviando audio: {e}")
         return False
 
-# ——— Función para convertir texto a voz ———
 def texto_a_voz(texto, filename):
-    """Convierte texto a audio usando Google TTS o otro servicio"""
+    """Convierte texto a audio usando Google TTS"""
     try:
         from gtts import gTTS
         import os
         
+        # ✅ Ruta ABSOLUTA para evitar problemas
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
+        
         # Crear directorio si no existe
-        os.makedirs('static/audio/respuestas', exist_ok=True)
+        os.makedirs(audio_dir, exist_ok=True)
+        
+        # Ruta completa del archivo
+        filepath = os.path.join(audio_dir, f"{filename}.mp3")
         
         # Convertir texto a voz
         tts = gTTS(text=texto, lang='es', slow=False)
-        filepath = f"static/audio/respuestas/{filename}.mp3"
         tts.save(filepath)
         
-        return f"/{filepath}"
+        # ✅ URL PÚBLICA - Usa tu dominio real
+        MI_DOMINIO = os.getenv('MI_DOMINIO', 'https://tu-dominio.com')
+        audio_url = f"{MI_DOMINIO}/static/audio/respuestas/{filename}.mp3"
+        
+        app.logger.info(f"🎵 Audio guardado en: {filepath}")
+        app.logger.info(f"🌐 URL pública: {audio_url}")
+        
+        return audio_url
         
     except Exception as e:
         app.logger.error(f"Error en texto a voz: {e}")
@@ -1039,8 +1051,8 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64 Y GUARDA ARCHIVO
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)  # ← Ahora recibe ambos valores
+            # Obtener imagen
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
@@ -1048,13 +1060,14 @@ def webhook():
                 enviar_mensaje(numero, texto)
                 guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
                 return 'OK', 200
-            # Verificar si hay texto acompañando la imagen
+            
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
                 app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
             else:
                 texto = "Analiza esta imagen"
                 app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
+                
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
@@ -1067,39 +1080,39 @@ def webhook():
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
                 if transcripcion_audio:
-                    texto = transcripcion_audio  # 🆕 Guardar solo la transcripción
+                    texto = transcripcion_audio
                     app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
                 else:
                     texto = "No pude transcribir el audio"
             else:
-                texto = "No pude procesar el audio"     
+                texto = "No pude procesar el audio"
+                
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
             texto = msg['text']['body']
             app.logger.info(f"📝 Texto: {texto}")
+            
         else:
-            # Otro tipo de mensaje (video, documento, etc.)
             tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
             texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
 
-        
-# 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
-
+        
         if not hasattr(app, 'ultimos_mensajes'):
-                app.ultimos_mensajes = set()
-
+            app.ultimos_mensajes = set()
+        
         if current_message_id in app.ultimos_mensajes:
-                app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
-                return 'OK', 200
-
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+            return 'OK', 200
+        
         app.ultimos_mensajes.add(current_message_id)
-            # Limitar el tamaño para no consumir mucha memoria
+        
         if len(app.ultimos_mensajes) > 100:
-                app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
-
-        # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
+            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
+        
+        # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
@@ -1110,18 +1123,16 @@ def webhook():
         if es_mi_numero:
             app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
-        # ========== PROCESAMIENTO NORMAL PARA TODOS LOS NÚMEROS ==========
-        # Actualizar contacto (VERSIÓN MEJORADA - EVITA DUPLICADOS)
+        # ========== PROCESAMIENTO NORMAL ==========
+        # Actualizar contacto
         contactos = change.get('contacts')
         if contactos and len(contactos) > 0:
             profile_name = contactos[0].get('profile', {}).get('name')
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
                 try:
-
-                    # OBTENER IMAGEN DE PERFIL
                     imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
-
+                    
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
@@ -1136,38 +1147,38 @@ def webhook():
                         )
                     """, (wa_id, wa_id))
                     
-                    # Insertar o actualizar CON IMAGEN DE PERFIL
+                    # Insertar o actualizar
                     cursor.execute("""
                         INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
                         VALUES (%s, %s, 'whatsapp', %s)
                         ON DUPLICATE KEY UPDATE 
                             nombre = VALUES(nombre),
                             imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, imagen_perfil))  # ← Usar imagen_perfil aquí
+                    """, (wa_id, profile_name, imagen_perfil))
                     
                     conn.commit()
                     cursor.close()
                     conn.close()
                     app.logger.info(f"✅ Contacto actualizado: {wa_id}")
-                    # Asegurar que el contacto exista incluso si no hay información de perfil
-                    try:
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT IGNORE INTO contactos (numero_telefono, plataforma)
-                            VALUES (%s, 'whatsapp')
-                        """, (numero,))
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-                    except Exception as e:
-                        app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
-                    
-
-        # Consultas de precio (funciona para todos)
+        
+        # Asegurar que el contacto exista
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT IGNORE INTO contactos (numero_telefono, plataforma)
+                VALUES (%s, 'whatsapp')
+            """, (numero,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
+        
+        # Consultas de precio
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
             info = obtener_precio(servicio)
@@ -1179,36 +1190,98 @@ def webhook():
             enviar_mensaje(numero, respuesta)
             guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None)
             return 'OK', 200
-
+        
+        # 🆕 DETECCIÓN DE CITAS
+        if detectar_solicitud_cita(texto):
+            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
+            
+            info_cita = extraer_info_cita(texto, numero)
+            
+            if info_cita:
+                cita_id = guardar_cita(info_cita)
+                
+                if cita_id:
+                    enviar_confirmacion_cita(numero, info_cita, cita_id)
+                    enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
+                    app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
+                    guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}")
+                    return 'OK', 200
+                else:
+                    app.logger.error("❌ Error guardando cita en BD")
+            else:
+                app.logger.error("❌ Error extrayendo información de cita")
+            
+            app.logger.warning("⚠️ Falló detección de cita, continuando con IA normal")
+        
         # IA normal
-        IA_ESTADOS.setdefault(numero, True)
+        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
-        if IA_ESTADOS[numero]:
-            # ✅ PASAR imagen_base64 EN LUGAR DE url_imagen
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64)
-            enviar_mensaje(numero, respuesta)
-            # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
+        
+        if IA_ESTADOS[numero]['activa']:
+            # 🆕 DETECTAR PREFERENCIA DE VOZ
+            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
+                IA_ESTADOS[numero]['prefiere_voz'] = True
+                app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
+            
+            responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
+            
+            # Obtener respuesta de IA
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion_audio)
+            
+            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+            if responder_con_voz:
+                # Intentar enviar respuesta de voz
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename)
+                
+                if audio_url_local:
+                    # URL pública del audio (ajusta según tu configuración)
+                    audio_url_publica = f"https://mektia.com{audio_url_local}"
+                    
+                    if enviar_mensaje_voz(numero, audio_url_publica):
+                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True)
+                    else:
+                        # Fallback a texto
+                        enviar_mensaje(numero, respuesta)
+                        app.logger.info(f"✅ Fallback a texto enviado a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local)
+                else:
+                    # Fallback a texto
+                    enviar_mensaje(numero, respuesta)
+                    app.logger.info(f"✅ Fallback a texto (error TTS) enviado a {numero}")
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, None)
+            else:
+                # Respuesta normal de texto
+                enviar_mensaje(numero, respuesta)
+                app.logger.info(f"✅ Respuesta de texto enviada a {numero}")
+                
+                if es_audio:
+                    guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url, es_audio=True)
+                else:
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
+            
+            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA
             if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
                 resumen = resumen_rafa(numero)
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
-
-        if es_audio:
-            guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url)
-        else:
-            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
-        # ========== KANBAN AUTOMÁTICO (para todos) ==========
+        
+        # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero)
         if not meta:
             inicializar_chat_meta(numero)
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
         actualizar_columna_chat(numero, nueva_columna)
+        
         return 'OK', 200
 
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
+        app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
+
 # ——— UI ———
 @app.route('/')
 def inicio():
