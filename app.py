@@ -1799,7 +1799,17 @@ def guardar_alias_contacto(numero):
         conn.close()
         return '', 204
 
-    # ——— Páginas legales ———
+    # ——— Páginas legales —
+
+@app.route('/proxy-audio/<path:audio_url>')
+def proxy_audio(audio_url):
+    """Proxy para evitar problemas de CORS con archivos de audio"""
+    try:
+        response = requests.get(audio_url, timeout=10)
+        return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
+    except Exception as e:
+        return str(e), 500
+
 @app.route('/privacy-policy')
 def privacy_policy():
         return render_template('privacy_policy.html')

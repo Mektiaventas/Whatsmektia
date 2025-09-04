@@ -128,38 +128,40 @@
                   </div>
 
                 {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
-                  <!-- Mostrar audio con reproductor personalizado -->
-                  <div class="audio-player">
-                    <!-- Reproductor nativo (oculto) -->
-                    <audio class="whatsapp-audio">
-                      <source src="{{ msg.contenido_extra }}" type="audio/ogg">
-                      <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
-                      Tu navegador no soporta el elemento de audio.
-                    </audio>
-                    
-                    <!-- Controles personalizados -->
-                    <div class="audio-controls">
-                      <button class="audio-play-btn" onclick="toggleAudio(this)">▶️</button>
-                      <div class="audio-progress" onclick="seekAudio(this, event)">
-                        <div class="audio-progress-bar"></div>
-                      </div>
-                      <span class="audio-duration">0:00</span>
-                      <button class="audio-download-btn" onclick="downloadAudio(this)" title="Descargar audio">
-                        ⬇️
-                      </button>
-                    </div>
-                    
-                    <!-- Transcripción -->
-                    {% if msg.transcripcion_audio %}
-                    <div class="audio-transcription">
-                      <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
-                    </div>
-                    {% elif msg.mensaje %}
-                    <div class="audio-transcription">
-                      <strong>Mensaje:</strong> {{ msg.mensaje }}
-                    </div>
-                    {% endif %}
-                  </div>
+<!-- Mostrar audio con reproductor funcional -->
+<div class="audio-player">
+    <!-- Reproductor nativo (oculto pero funcional) -->
+    <audio id="audio-{{ msg.id }}" class="whatsapp-audio">
+        <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+        <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+        Tu navegador no soporta el elemento de audio.
+    </audio>
+    
+    <!-- Controles personalizados -->
+    <div class="audio-controls">
+        <button class="audio-play-btn" onclick="toggleAudio('audio-{{ msg.id }}', this)">
+            ▶️
+        </button>
+        <div class="audio-progress" onclick="seekAudio('audio-{{ msg.id }}', this, event)">
+            <div class="audio-progress-bar"></div>
+        </div>
+        <span class="audio-duration" id="duration-{{ msg.id }}">0:00</span>
+        <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+            ⬇️
+        </a>
+    </div>
+    
+    <!-- Transcripción -->
+    {% if msg.transcripcion_audio %}
+    <div class="audio-transcription">
+        <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+    </div>
+    {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+    <div class="audio-transcription">
+        <strong>Mensaje:</strong> {{ msg.mensaje }}
+    </div>
+    {% endif %}
+</div>
 
                 {% else %}
                   <!-- Mostrar texto normal -->
@@ -524,33 +526,104 @@
   }
 
   // Controlador de audio personalizado
-  function toggleAudio(button) {
-    const audioPlayer = button.closest('.audio-player').querySelector('audio');
+// Controlador de audio mejorado - FUNCIÓN CORREGIDA
+function toggleAudio(audioId, button) {
+    const audioPlayer = document.getElementById(audioId);
     const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
     const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
     
     if (audioPlayer.paused) {
-      audioPlayer.play();
-      button.textContent = '⏸️';
-      
-      // Actualizar barra de progreso
-      audioPlayer.ontimeupdate = function() {
-        if (audioPlayer.duration) {
-          const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
-          progressBar.style.width = progress + '%';
-          
-          // Actualizar tiempo actual
-          const minutes = Math.floor(audioPlayer.currentTime / 60);
-          const seconds = Math.floor(audioPlayer.currentTime % 60);
-          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-        }
-      };
+        audioPlayer.play().then(() => {
+            button.textContent = '⏸️';
+            
+            // Actualizar barra de progreso
+            audioPlayer.ontimeupdate = function() {
+                if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+                    const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+                    progressBar.style.width = progress + '%';
+                    
+                    // Actualizar tiempo actual
+                    const minutes = Math.floor(audioPlayer.currentTime / 60);
+                    const seconds = Math.floor(audioPlayer.currentTime % 60);
+                    durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                }
+            };
+        }).catch(error => {
+            console.error('Error al reproducir audio:', error);
+            // Fallback: descargar el audio
+            const downloadLink = button.closest('.audio-player').querySelector('.audio-download-btn');
+            if (downloadLink) downloadLink.click();
+        });
     } else {
-      audioPlayer.pause();
-      button.textContent = '▶️';
+        audioPlayer.pause();
+        button.textContent = '▶️';
     }
-  }
+}
 
+// Función para buscar en el audio - FUNCIÓN CORREGIDA
+function seekAudio(audioId, progressBar, event) {
+    const audioPlayer = document.getElementById(audioId);
+    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const width = rect.width;
+    
+    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+        const clickTime = (clickX / width) * audioPlayer.duration;
+        audioPlayer.currentTime = clickTime;
+        progressBarInner.style.width = (clickX / width) * 100 + '%';
+        
+        // Actualizar tiempo visualmente
+        const minutes = Math.floor(audioPlayer.currentTime / 60);
+        const seconds = Math.floor(audioPlayer.currentTime % 60);
+        const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
+        durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+}
+
+// ELIMINA la función downloadAudio - ya no es necesaria porque usamos enlace HTML
+// function downloadAudio(button) { ... }
+
+// Inicializar todos los audios al cargar la página - FUNCIÓN ACTUALIZADA
+document.addEventListener('DOMContentLoaded', function() {
+    // Configurar duración de audios
+    document.querySelectorAll('.audio-player audio').forEach(audio => {
+        audio.addEventListener('loadedmetadata', function() {
+            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+            if (this.duration && isFinite(this.duration)) {
+                const minutes = Math.floor(this.duration / 60);
+                const seconds = Math.floor(this.duration % 60);
+                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        });
+        
+        // Forzar carga de metadata si es necesario
+        if (audio.readyState < 1) {
+            audio.load();
+        }
+        
+        // También cargar cuando el audio se puede reproducir
+        audio.addEventListener('canplay', function() {
+            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+            if (this.duration && isFinite(this.duration)) {
+                const minutes = Math.floor(this.duration / 60);
+                const seconds = Math.floor(this.duration % 60);
+                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        });
+        
+        // Manejar el final de la reproducción
+        audio.addEventListener('ended', function() {
+            const button = this.closest('.audio-player').querySelector('.audio-play-btn');
+            if (button) button.textContent = '▶️';
+            
+            const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
+            if (progressBar) progressBar.style.width = '0%';
+        });
+    });
+
+    // ... el resto de tu código de inicialización ...
+});
   // Función para buscar en el audio
   function seekAudio(progressBar, event) {
     const audioPlayer = progressBar.closest('.audio-player').querySelector('audio');
