@@ -1,4 +1,3 @@
-from datetime import datetime
 import pytz
 import os
 import logging
@@ -12,7 +11,8 @@ from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
 import re
-from datetime import datetime
+import io
+from PIL import Image
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
@@ -31,7 +31,8 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
-ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
+PHONE_NUMBER_ID = MI_NUMERO_BOT
+ALERT_NUMBER = os.getenv("ALERT_NUMBER")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"  # Nueva URL
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # URL de DeepSeek
 IA_ESTADOS = {}
@@ -44,6 +45,55 @@ PREFIJOS_PAIS = {
 }
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+
+# ——— Función para enviar mensajes de voz ———
+def enviar_mensaje_voz(numero, audio_url):
+    """Envía un mensaje de voz por WhatsApp"""
+    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
+    headers = {
+        'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'messaging_product': 'whatsapp',
+        'to': numero,
+        'type': 'audio',
+        'audio': {
+            'link': audio_url
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        app.logger.info(f"✅ Audio enviado a {numero}")
+        return True
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando audio: {e}")
+        return False
+
+# ——— Función para convertir texto a voz ———
+def texto_a_voz(texto, filename):
+    """Convierte texto a audio usando Google TTS o otro servicio"""
+    try:
+        from gtts import gTTS
+        import os
+        
+        # Crear directorio si no existe
+        os.makedirs('static/audio/respuestas', exist_ok=True)
+        
+        # Convertir texto a voz
+        tts = gTTS(text=texto, lang='es', slow=False)
+        filepath = f"static/audio/respuestas/{filename}.mp3"
+        tts.save(filepath)
+        
+        return f"/{filepath}"
+        
+    except Exception as e:
+        app.logger.error(f"Error en texto a voz: {e}")
+        return None
+
 
 def extraer_info_cita(mensaje, numero):
     """Extrae información de la cita del mensaje usando IA"""
@@ -527,7 +577,91 @@ Mantén siempre un tono profesional y conciso.
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
+
+def obtener_imagen_whatsapp(image_id):
+    """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
+    try:
+        # 1. Obtener la URL de la imagen con autenticación
+        url = f"https://graph.facebook.com/v23.0/{image_id}"
+        headers = {
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
         
+        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
+            return None, None
+        
+        # 2. Obtener la URL de descarga real
+        image_data = response.json()
+        download_url = image_data.get('url')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
+            return None, None
+            
+        app.logger.info(f"🖼️ URL de descarga imagen: {download_url}")
+        
+        # 3. Descargar la imagen con autenticación
+        image_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if image_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
+            return None, None
+        
+        # 4. Guardar imagen en sistema de archivos
+        import uuid
+        import os
+        from PIL import Image
+        import io
+        
+        # Crear directorio si no existe
+        os.makedirs('static/images/whatsapp', exist_ok=True)
+        
+        # Generar nombre único para el archivo
+        filename = f"{uuid.uuid4().hex}.jpg"
+        filepath = f"static/images/whatsapp/{filename}"
+        
+        # Guardar imagen
+        with open(filepath, 'wb') as f:
+            f.write(image_response.content)
+        
+        app.logger.info(f"✅ Imagen guardada: {filepath}")
+        
+        # 5. Convertir a base64 para la IA
+        try:
+            # Redimensionar imagen si es muy grande (para ahorrar tokens)
+            img = Image.open(filepath)
+            
+            # Redimensionar manteniendo aspecto (max 512px en el lado más grande)
+            img.thumbnail((512, 512))
+            
+            # Convertir a base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=85)
+            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            base64_data_url = f"data:image/jpeg;base64,{img_base64}"
+            
+            app.logger.info(f"✅ Imagen convertida a base64, tamaño: {len(img_base64)} caracteres")
+            
+        except Exception as e:
+            app.logger.error(f"🔴 Error procesando imagen: {e}")
+            # Fallback: usar la imagen original en base64
+            with open(filepath, 'rb') as f:
+                img_base64 = base64.b64encode(f.read()).decode('utf-8')
+                base64_data_url = f"data:image/jpeg;base64,{img_base64}"
+        
+        return base64_data_url, f"/{filepath}"
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
+        return None, None   
+
 def obtener_audio_whatsapp(audio_id):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
     try:
@@ -633,7 +767,7 @@ def obtener_imagen_perfil_alternativo(numero):
         # Intentar con el endpoint específico para contactos
         phone_number_id = "799540293238176"
         
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
@@ -657,8 +791,7 @@ def obtener_imagen_perfil_alternativo(numero):
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
-    PHONE_NUMBER_ID = "799540293238176"  # Tu Phone Number ID de WhatsApp
-    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
         'Content-Type': 'application/json'
@@ -1084,17 +1217,15 @@ def inicio():
 def obtener_imagen_perfil_whatsapp(numero):
     """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
-        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "799540293238176"  # Tu Phone Number ID
+        # ✅ USAR MI_NUMERO_BOT
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
         
-        # URL correcta de la API de Meta
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
-        
+        # ✅ FORMATO CORRECTO
         params = {
-            'fields': f'profile_picture_url({numero_formateado})',
+            'fields': 'profile_picture',
             'access_token': WHATSAPP_TOKEN
         }
         
@@ -1103,38 +1234,29 @@ def obtener_imagen_perfil_whatsapp(numero):
             'Authorization': f'Bearer {WHATSAPP_TOKEN}'
         }
         
-        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
-        app.logger.info(f"📸 URL: {url}")
-        app.logger.info(f"📸 Params: {params}")
-        
         response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        app.logger.info(f"📸 Status Code: {response.status_code}")
-        app.logger.info(f"📸 Response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            if 'profile_picture_url' in data:
-                imagen_url = data['profile_picture_url']
+            # ✅ NUEVA ESTRUCTURA DE RESPUESTA
+            if 'profile_picture' in data and 'url' in data['profile_picture']:
+                imagen_url = data['profile_picture']['url']
                 app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
                 return imagen_url
             else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+                app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
         
-        # Si falla, intentar con la versión alternativa de la API
         return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
-
+    
 def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
-        # Intentar con el endpoint específico para contactos
-        phone_number_id = "799540293238176"
-        
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        # Intentar con el endpoint específico para contactos      
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
