@@ -287,7 +287,7 @@ def enviar_alerta_cita_administrador(info_cita, cita_id):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de cita: {e}")
-        
+
 @app.route('/citas')
 def ver_citas():
     """Endpoint para ver citas pendientes"""
@@ -528,53 +528,6 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
         
-def obtener_imagen_perfil_whatsapp(numero):
-    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
-    try:
-        # Formatear el número correctamente (eliminar el + y cualquier espacio)
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "799540293238176"  # Tu Phone Number ID
-        
-        # URL correcta de la API de Meta - NUEVO FORMATO
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
-        
-        # NUEVO PARÁMETRO - sin paréntesis
-        params = {
-            'fields': f'profile_picture',
-            'access_token': WHATSAPP_TOKEN
-        }
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
-        }
-        
-        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
-        app.logger.info(f"📸 URL: {url}")
-        app.logger.info(f"📸 Params: {params}")
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        app.logger.info(f"📸 Status Code: {response.status_code}")
-        app.logger.info(f"📸 Response: {response.text}")
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'profile_picture' in data and 'url' in data['profile_picture']:
-                imagen_url = data['profile_picture']['url']
-                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
-                return imagen_url
-            else:
-                app.logger.warning(f"⚠ No se encontró profile_picture en la respuesta: {data}")
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
-
 def obtener_audio_whatsapp(audio_id):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
     try:
