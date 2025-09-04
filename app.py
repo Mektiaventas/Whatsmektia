@@ -13,8 +13,6 @@ from decimal import Decimal
 import re
 import io
 from PIL import Image
-import traceback
-import uuid
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
@@ -108,6 +106,7 @@ def texto_a_voz(texto, filename):
         app.logger.error(f"Error en texto a voz: {e}")
         return None
 
+
 def extraer_info_cita(mensaje, numero):
     """Extrae información de la cita del mensaje usando IA"""
     try:
@@ -117,7 +116,7 @@ def extraer_info_cita(mensaje, numero):
         Devuélvelo en formato JSON con estos campos:
         - servicio_solicitado (string)
         - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
-        - hora_sugerida (string en formato HH:MM or null si no se especifica)
+        - hora_sugerida (string en formato HH:MM o null si no se especifica)
         - nombre_cliente (string si se menciona)
         - telefono (string, usar este número: {numero})
         - estado (siempre "pendiente")
@@ -517,7 +516,7 @@ def obtener_historial(numero, limite=10):
     conn = get_db_connection()
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
-        "SELECT mensaje, respuesta, tipo_mensaje, contenido_extra FROM conversaciones "
+        "SELECT mensaje, respuesta FROM conversaciones "
         "WHERE numero=%s ORDER BY timestamp DESC LIMIT %s;",
         (numero, limite)
     )
@@ -686,7 +685,10 @@ def obtener_imagen_whatsapp(image_id):
             return None, None
         
         # 4. Guardar imagen en sistema de archivos
+        import uuid
         import os
+        from PIL import Image
+        import io
         
         # Crear directorio si no existe
         os.makedirs('static/images/whatsapp', exist_ok=True)
@@ -767,6 +769,7 @@ def obtener_audio_whatsapp(audio_id):
             return None, None
         
         # 4. Guardar audio en sistema de archivos
+        import uuid
         import os
         
         # Crear directorio si no existe
@@ -828,48 +831,12 @@ def transcribir_audio_con_openai(audio_file_path):
         app.logger.error(f"🔴 Error transcribiendo audio: {e}")
         return None
 
-def obtener_imagen_perfil_whatsapp(numero):
-    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
-    try:
-        # Formatear el número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # ✅ USAR MI_NUMERO_BOT
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
-        
-        # ✅ FORMATO CORRECTO
-        params = {
-            'fields': 'profile_picture',
-            'access_token': WHATSAPP_TOKEN
-        }
-        
-        headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
-        }
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            # ✅ NUEVA ESTRUCTURA DE RESPUESTA
-            if 'profile_picture' in data and 'url' in data['profile_picture']:
-                imagen_url = data['profile_picture']['url']
-                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
-                return imagen_url
-            else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
-        
-        return obtener_imagen_perfil_alternativo(numero_formateado)
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
-    
 def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
-        # Intentar con el endpoint específico para contactos      
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "799540293238176"
+        
         url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
@@ -892,7 +859,6 @@ def obtener_imagen_perfil_alternativo(numero):
     except Exception as e:
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
-    
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
     url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
@@ -1101,7 +1067,6 @@ def enviar_informacion_completa(numero_cliente):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
         
-
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -1173,12 +1138,12 @@ def webhook():
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
                 if transcripcion_audio:
-                    texto = f"Transcripción del audio: {transcripcion_audio}"
+                    texto = transcripcion_audio
                     app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
                 else:
-                    texto = "Recibí un audio pero no pude transcribirlo"
+                    texto = "No pude transcribir el audio"
             else:
-                texto = "Recibí un audio pero no pude procesarlo"
+                texto = "No pude procesar el audio"
                 
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
@@ -1380,6 +1345,71 @@ def webhook():
 def inicio():
     return redirect(url_for('home'))
 
+def obtener_imagen_perfil_whatsapp(numero):
+    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
+    try:
+        # Formatear el número correctamente
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # ✅ USAR MI_NUMERO_BOT
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
+        
+        # ✅ FORMATO CORRECTO
+        params = {
+            'fields': 'profile_picture',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # ✅ NUEVA ESTRUCTURA DE RESPUESTA
+            if 'profile_picture' in data and 'url' in data['profile_picture']:
+                imagen_url = data['profile_picture']['url']
+                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
+                return imagen_url
+            else:
+                app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
+        
+        return obtener_imagen_perfil_alternativo(numero_formateado)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+    
+def obtener_imagen_perfil_alternativo(numero):
+    """Método alternativo para obtener la imagen de perfil"""
+    try:
+        # Intentar con el endpoint específico para contactos      
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': WHATSAPP_TOKEN
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
+        return None
+    
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
@@ -1525,6 +1555,7 @@ def toggle_ai(numero):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
+
 
 
 @app.route('/send-manual', methods=['POST'])
@@ -1722,8 +1753,8 @@ def ver_kanban():
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-        LEFT JOIN conversaciones c ON c.numero = cm.num
-                           GROUP BY cm.numero, cm.columna_id
+        LEFT JOIN conversaciones c ON c.numero = cm.numero
+        GROUP BY cm.numero, cm.columna_id
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
@@ -1774,10 +1805,6 @@ def guardar_alias_contacto(numero):
 def proxy_audio(audio_url):
     """Proxy para evitar problemas de CORS con archivos de audio"""
     try:
-        # Si es una URL local, servir directamente el archivo
-        if audio_url.startswith('/static/audio/'):
-            return redirect(audio_url)
-        
         response = requests.get(audio_url, timeout=10)
         return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
     except Exception as e:
@@ -1874,165 +1901,8 @@ def test_imagen():
             "error": str(e), 
             "status": "error"
         })
-
-# ——— Nuevas funciones para manejar archivos multimedia ———
-@app.route('/media/audio/<path:filename>')
-def servir_audio(filename):
-    """Sirve archivos de audio desde el directorio static/audio"""
-    return redirect(url_for('static', filename=f'audio/whatsapp/{filename}'))
-
-@app.route('/media/imagen/<path:filename>')
-def servir_imagen(filename):
-    """Sirve archivos de imagen desde el directorio static/images"""
-    return redirect(url_for('static', filename=f'images/whatsapp/{filename}'))
-
-# ——— Función para obtener avatar del contacto ———
-def obtener_avatar_contacto(numero):
-    """Obtiene la imagen de perfil del contacto desde la base de datos"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT imagen_url FROM contactos WHERE numero_telefono = %s",
-            (numero,)
-        )
-        contacto = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        if contacto and contacto.get('imagen_url'):
-            return contacto['imagen_url']
-        
-        # Si no hay imagen, devolver una por defecto
-        return url_for('static', filename='images/default-avatar.png')
-        
-    except Exception as e:
-        app.logger.error(f"Error obteniendo avatar: {e}")
-        return url_for('static', filename='images/default-avatar.png')
-
-# ——— Mejora en la función para mostrar conversaciones ———
-@app.route('/api/conversaciones/<numero>')
-def api_conversaciones(numero):
-    """Endpoint API para obtener conversaciones con información multimedia"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT 
-                id, numero, mensaje, respuesta, timestamp, 
-                tipo_mensaje, contenido_extra, transcripcion_audio
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp ASC
-        """, (numero,))
-        
-        conversaciones = cursor.fetchall()
-        
-        # Procesar multimedia
-        for conv in conversaciones:
-            if conv['tipo_mensaje'] == 'audio' and conv['contenido_extra']:
-                # Convertir ruta local a URL accesible
-                conv['audio_url'] = conv['contenido_extra']
-            
-            elif conv['tipo_mensaje'] == 'imagen' and conv['contenido_extra']:
-                # Convertir ruta local a URL accesible
-                conv['imagen_url'] = conv['contenido_extra']
-                
-            # Formatear fecha
-            if conv['timestamp']:
-                if conv['timestamp'].tzinfo is not None:
-                    conv['timestamp'] = conv['timestamp'].astimezone(tz_mx)
-                else:
-                    conv['timestamp'] = pytz.utc.localize(conv['timestamp']).astimezone(tz_mx)
-                conv['timestamp_str'] = conv['timestamp'].strftime('%d/%m/%Y %H:%M')
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            'success': True,
-            'conversaciones': conversaciones,
-            'avatar': obtener_avatar_contacto(numero)
-        })
-        
-    except Exception as e:
-        app.logger.error(f"Error en api_conversaciones: {e}")
-        return jsonify({'success': False, 'error': str(e)})
-
-# ——— Mejora en la plantilla de chats para mostrar multimedia ———
-@app.route('/chats-mejorado/<numero>')
-def ver_chat_mejorado(numero):
-    """Versión mejorada del chat que muestra multimedia"""
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor(dictionary=True)
-        
-        # Obtener información del contacto
-        cursor.execute("""
-            SELECT 
-                numero_telefono, nombre, alias, imagen_url,
-                COALESCE(alias, nombre, numero_telefono) AS nombre_mostrado
-            FROM contactos 
-            WHERE numero_telefono = %s
-        """, (numero,))
-        
-        contacto = cursor.fetchone()
-        
-        if not contacto:
-            flash('Contacto no encontrado', 'error')
-            return redirect(url_for('ver_chats'))
-        
-        # Obtener conversaciones
-        cursor.execute("""
-            SELECT 
-                id, numero, mensaje, respuesta, timestamp, 
-                tipo_mensaje, contenido_extra, transcripcion_audio
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp ASC
-        """, (numero,))
-        
-        conversaciones = cursor.fetchall()
-        
-        # Procesar multimedia y formatear fechas
-        for conv in conversaciones:
-            if conv['tipo_mensaje'] == 'audio' and conv['contenido_extra']:
-                conv['audio_url'] = conv['contenido_extra']
-            
-            elif conv['tipo_mensaje'] == 'imagen' and conv['contenido_extra']:
-                conv['imagen_url'] = conv['contenido_extra']
-                
-            # Formatear fecha
-            if conv['timestamp']:
-                if conv['timestamp'].tzinfo is not None:
-                    conv['timestamp'] = conv['timestamp'].astimezone(tz_mx)
-                else:
-                    conv['timestamp'] = pytz.utc.localize(conv['timestamp']).astimezone(tz_mx)
-                conv['timestamp_str'] = conv['timestamp'].strftime('%d/%m/%Y %H:%M')
-        
-        cursor.close()
-        conn.close()
-        
-        return render_template('chats_mejorado.html',
-            contacto=contacto,
-            conversaciones=conversaciones,
-            IA_ESTADOS=IA_ESTADOS
-        )
-        
-    except Exception as e:
-        app.logger.error(f"Error en ver_chat_mejorado: {e}")
-        flash('Error al cargar el chat', 'error')
-        return redirect(url_for('ver_chats'))
-
-# ——— Inicialización de la aplicación ———
 if __name__ == '__main__':
-    # Crear tablas necesarias
+        # Crear tablas necesarias
     crear_tabla_citas()
-    
-    # Crear directorios para multimedia si no existen
-    os.makedirs('static/audio/whatsapp', exist_ok=True)
-    os.makedirs('static/audio/respuestas', exist_ok=True)
-    os.makedirs('static/images/whatsapp', exist_ok=True)
     
     app.run(host='0.0.0.0', port=5000, debug=True)
