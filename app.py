@@ -279,12 +279,15 @@ def enviar_alerta_cita_administrador(info_cita, cita_id):
         📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
         """
         
+        # Enviar a ambos números
         enviar_mensaje(ALERT_NUMBER, mensaje_alerta)
-        app.logger.info(f"✅ Alerta de cita enviada al administrador, ID: {cita_id}")
+        enviar_mensaje("524491182201", mensaje_alerta)
+        
+        app.logger.info(f"✅ Alerta de cita enviada a ambos administradores, ID: {cita_id}")
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de cita: {e}")
-
+        
 @app.route('/citas')
 def ver_citas():
     """Endpoint para ver citas pendientes"""
@@ -859,7 +862,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
     
 def enviar_informacion_completa(numero_cliente):
-    """Envía toda la información del cliente a tu número personal"""
+    """Envía toda la información del cliente a ambos números"""
     try:
         # Obtener información del contacto
         conn = get_db_connection()
@@ -899,13 +902,14 @@ def enviar_informacion_completa(numero_cliente):
             if msg['respuesta']:
                 mensaje_completo += f"\n   🤖: {msg['respuesta'][:60]}"
         
-        # Enviar mensaje completo
-        enviar_mensaje(ALERT_NUMBER, mensaje_completo)
-        app.logger.info(f"📤 Información completa enviada para {numero_cliente}")
+        # Enviar mensaje completo a ambos números
+        enviar_mensaje(ALERT_NUMBER, mensaje_completo)  # Número original
+        enviar_mensaje("524491182201", mensaje_completo)  # Nuevo número
+        
+        app.logger.info(f"📤 Información completa enviada para {numero_cliente} a ambos números")
         
     except Exception as e:
-        app.logger.error(f"🔴 Error enviando información completa: {e}")
-        
+        app.logger.error(f"🔴 Error enviando información completa: {e}")        
         
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
