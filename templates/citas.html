@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Citas Pendientes{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h2>📅 Citas Pendientes</h2>
+    
+    <div class="citas-list">
+        {% for cita in citas %}
+        <div class="cita-card {{ cita.estado }}">
+            <div class="cita-header">
+                <h3>ID: #{{ cita.id }}</h3>
+                <span class="estado {{ cita.estado }}">{{ cita.estado }}</span>
+            </div>
+            
+            <div class="cita-info">
+                <p><strong>Cliente:</strong> {{ cita.nombre or cita.alias or cita.numero_cliente }}</p>
+                <p><strong>Teléfono:</strong> {{ cita.numero_cliente }}</p>
+                <p><strong>Servicio:</strong> {{ cita.servicio_solicitado }}</p>
+                
+                {% if cita.fecha_propuesta %}
+                <p><strong>Fecha propuesta:</strong> {{ cita.fecha_propuesta }}</p>
+                {% endif %}
+                
+                {% if cita.hora_propuesta %}
+                <p><strong>Hora propuesta:</strong> {{ cita.hora_propuesta }}</p>
+                {% endif %}
+                
+                <p><strong>Solicitado:</strong> {{ cita.fecha_creacion.strftime('%d/%m/%Y %H:%M') }}</p>
+            </div>
+            
+            <div class="cita-actions">
+                <form action="/citas/{{ cita.id }}/confirmar" method="POST">
+                    <button type="submit" class="btn-confirmar">✅ Confirmar</button>
+                </form>
+                <form action="/citas/{{ cita.id }}/cancelar" method="POST">
+                    <button type="submit" class="btn-cancelar">❌ Cancelar</button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <p>No hay citas pendientes.</p>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

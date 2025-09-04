@@ -11,6 +11,8 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
+import re
+from datetime import datetime
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
@@ -42,6 +44,69 @@ PREFIJOS_PAIS = {
 }
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+
+def extraer_info_cita(mensaje, numero):
+    """Extrae información de la cita del mensaje usando IA"""
+    try:
+        prompt_cita = f"""
+        Extrae la información de la cita solicitada en este mensaje: "{mensaje}"
+        
+        Devuélvelo en formato JSON con estos campos:
+        - servicio_solicitado (string)
+        - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
+        - hora_sugerida (string en formato HH:MM o null si no se especifica)
+        - nombre_cliente (string si se menciona)
+        - telefono (string, usar este número: {numero})
+        - estado (siempre "pendiente")
+        
+        Si no se puede determinar algún campo, usa null.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt_cita}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            info_cita = json.loads(json_match.group())
+            return info_cita
+        else:
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"Error extrayendo info de cita: {e}")
+        return None
+
+def detectar_solicitud_cita(mensaje):
+    """Detecta si el mensaje es una solicitud de cita"""
+    palabras_clave = [
+        'agendar cita', 'quiero cita', 'solicitar cita', 'reservar cita',
+        'cita para', 'necesito cita', 'disponibilidad para', 'horario para',
+        'agenda una cita', 'programar cita'
+    ]
+    
+    mensaje_lower = mensaje.lower()
+    
+    for palabra in palabras_clave:
+        if palabra in mensaje_lower:
+            return True
+    
+    return False
 
 def get_country_flag(numero):
     if not numero:
@@ -109,6 +174,135 @@ def load_config():
         'lenguaje': row['lenguaje'],
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
+
+def crear_tabla_citas():
+    """Crea la tabla para almacenar las citas"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS citas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            numero_cliente VARCHAR(20),
+            servicio_solicitado VARCHAR(200),
+            fecha_propuesta DATE,
+            hora_propuesta TIME,
+            nombre_cliente VARCHAR(100),
+            telefono VARCHAR(20),
+            estado ENUM('pendiente', 'confirmada', 'cancelada') DEFAULT 'pendiente',
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+            fecha_confirmacion DATETIME NULL,
+            notas TEXT,
+            FOREIGN KEY (numero_cliente) REFERENCES contactos(numero_telefono)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def guardar_cita(info_cita):
+    """Guarda la cita en la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO citas (
+                numero_cliente, servicio_solicitado, fecha_propuesta,
+                hora_propuesta, nombre_cliente, telefono, estado
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            info_cita.get('telefono'),
+            info_cita.get('servicio_solicitado'),
+            info_cita.get('fecha_sugerida'),
+            info_cita.get('hora_sugerida'),
+            info_cita.get('nombre_cliente'),
+            info_cita.get('telefono'),
+            'pendiente'
+        ))
+        
+        conn.commit()
+        cita_id = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        
+        return cita_id
+        
+    except Exception as e:
+        app.logger.error(f"Error guardando cita: {e}")
+        return None
+    
+def enviar_confirmacion_cita(numero, info_cita, cita_id):
+    """Envía confirmación de cita por WhatsApp"""
+    try:
+        mensaje_confirmacion = f"""
+        📅 *Confirmación de Cita* - ID: #{cita_id}
+
+        ¡Hola! Hemos recibido tu solicitud de cita:
+
+        *Servicio:* {info_cita.get('servicio_solicitado', 'Por confirmar')}
+        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'Por confirmar')}
+        *Hora sugerida:* {info_cita.get('hora_sugerida', 'Por confirmar')}
+
+        📞 *Tu número:* {numero}
+
+        ⏰ *Próximos pasos:*
+        Nos pondremos en contacto contigo dentro de las próximas 24 horas para confirmar la disponibilidad.
+
+        ¿Necesitas hacer algún cambio? Responde a este mensaje.
+
+        ¡Gracias por confiar en nosotros! 🙏
+        """
+        
+        enviar_mensaje(numero, mensaje_confirmacion)
+        app.logger.info(f"✅ Confirmación de cita enviada a {numero}, ID: {cita_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando confirmación de cita: {e}")
+
+def enviar_alerta_cita_administrador(info_cita, cita_id):
+    """Envía alerta al administrador sobre nueva cita"""
+    try:
+        mensaje_alerta = f"""
+        🚨 *NUEVA SOLICITUD DE CITA* - ID: #{cita_id}
+
+        *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+        *Teléfono:* {info_cita.get('telefono')}
+
+        *Servicio solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
+        *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
+
+        ⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+        📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
+        """
+        
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta)
+        app.logger.info(f"✅ Alerta de cita enviada al administrador, ID: {cita_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando alerta de cita: {e}")
+
+@app.route('/citas')
+def ver_citas():
+    """Endpoint para ver citas pendientes"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT c.*, co.nombre, co.alias 
+        FROM citas c 
+        LEFT JOIN contactos co ON c.numero_cliente = co.numero_telefono 
+        ORDER BY c.fecha_creacion DESC
+    ''')
+    citas = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('citas.html', citas=citas)
 
 def save_config(cfg_all):
     neg = cfg_all.get('negocio', {})
@@ -340,11 +534,12 @@ def obtener_imagen_perfil_whatsapp(numero):
         # Phone Number ID de tu negocio de WhatsApp
         phone_number_id = "799540293238176"  # Tu Phone Number ID
         
-        # URL correcta de la API de Meta
+        # URL correcta de la API de Meta - NUEVO FORMATO
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
         
+        # NUEVO PARÁMETRO - sin paréntesis
         params = {
-            'fields': f'profile_picture_url({numero_formateado})',
+            'fields': f'profile_picture',
             'access_token': WHATSAPP_TOKEN
         }
         
@@ -364,15 +559,14 @@ def obtener_imagen_perfil_whatsapp(numero):
         
         if response.status_code == 200:
             data = response.json()
-            if 'profile_picture_url' in data:
-                imagen_url = data['profile_picture_url']
+            if 'profile_picture' in data and 'url' in data['profile_picture']:
+                imagen_url = data['profile_picture']['url']
                 app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
                 return imagen_url
             else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+                app.logger.warning(f"⚠ No se encontró profile_picture en la respuesta: {data}")
         
-        # Si falla, intentar con la versión alternativa de la API
-        return obtener_imagen_perfil_alternativo(numero_formateado)
+        return None
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
@@ -1488,4 +1682,7 @@ def test_imagen():
             "status": "error"
         })
 if __name__ == '__main__':
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        # Crear tablas necesarias
+    crear_tabla_citas()
+    
+    app.run(host='0.0.0.0', port=5000, debug=True)
