@@ -338,7 +338,7 @@ def obtener_imagen_perfil_whatsapp(numero):
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        phone_number_id = "799540293238176"  # Tu Phone Number ID
         
         # URL correcta de la API de Meta
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
@@ -507,7 +507,7 @@ def obtener_imagen_perfil_alternativo(numero):
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
-    PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
+    PHONE_NUMBER_ID = "799540293238176"  # Tu Phone Number ID de WhatsApp
     url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
@@ -937,7 +937,7 @@ def obtener_imagen_perfil_whatsapp(numero):
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        phone_number_id = "799540293238176"  # Tu Phone Number ID
         
         # URL correcta de la API de Meta
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
