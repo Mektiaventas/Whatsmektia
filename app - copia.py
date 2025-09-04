@@ -1,4 +1,3 @@
-from datetime import datetime
 import pytz
 import os
 import logging
@@ -11,6 +10,9 @@ import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
+import re
+import io
+from PIL import Image
 
 tz_mx = pytz.timezone('America/Mexico_City')
 
@@ -29,7 +31,8 @@ DB_USER = os.getenv("DB_USER")
 DB_PASSWORD = os.getenv("DB_PASSWORD")
 DB_NAME = os.getenv("DB_NAME")
 MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
-ALERT_NUMBER = os.getenv("ALERT_NUMBER", "524491182201")
+PHONE_NUMBER_ID = MI_NUMERO_BOT
+ALERT_NUMBER = os.getenv("ALERT_NUMBER")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"  # Nueva URL
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # URL de DeepSeek
 IA_ESTADOS = {}
@@ -42,6 +45,130 @@ PREFIJOS_PAIS = {
 }
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+
+# ——— Función para enviar mensajes de voz ———
+def enviar_mensaje_voz(numero, audio_url):
+    """Envía un mensaje de voz por WhatsApp"""
+    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
+    headers = {
+        'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'messaging_product': 'whatsapp',
+        'to': numero,
+        'type': 'audio',
+        'audio': {
+            'link': audio_url
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        app.logger.info(f"✅ Audio enviado a {numero}")
+        return True
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando audio: {e}")
+        return False
+
+def texto_a_voz(texto, filename):
+    """Convierte texto a audio usando Google TTS"""
+    try:
+        from gtts import gTTS
+        import os
+        
+        # ✅ Ruta ABSOLUTA para evitar problemas
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
+        
+        # Crear directorio si no existe
+        os.makedirs(audio_dir, exist_ok=True)
+        
+        # Ruta completa del archivo
+        filepath = os.path.join(audio_dir, f"{filename}.mp3")
+        
+        # Convertir texto a voz
+        tts = gTTS(text=texto, lang='es', slow=False)
+        tts.save(filepath)
+        
+        # ✅ URL PÚBLICA - Usa tu dominio real
+        MI_DOMINIO = os.getenv('MI_DOMINIO', 'https://tu-dominio.com')
+        audio_url = f"{MI_DOMINIO}/static/audio/respuestas/{filename}.mp3"
+        
+        app.logger.info(f"🎵 Audio guardado en: {filepath}")
+        app.logger.info(f"🌐 URL pública: {audio_url}")
+        
+        return audio_url
+        
+    except Exception as e:
+        app.logger.error(f"Error en texto a voz: {e}")
+        return None
+
+
+def extraer_info_cita(mensaje, numero):
+    """Extrae información de la cita del mensaje usando IA"""
+    try:
+        prompt_cita = f"""
+        Extrae la información de la cita solicitada en este mensaje: "{mensaje}"
+        
+        Devuélvelo en formato JSON con estos campos:
+        - servicio_solicitado (string)
+        - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
+        - hora_sugerida (string en formato HH:MM o null si no se especifica)
+        - nombre_cliente (string si se menciona)
+        - telefono (string, usar este número: {numero})
+        - estado (siempre "pendiente")
+        
+        Si no se puede determinar algún campo, usa null.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt_cita}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            info_cita = json.loads(json_match.group())
+            return info_cita
+        else:
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"Error extrayendo info de cita: {e}")
+        return None
+
+def detectar_solicitud_cita(mensaje):
+    """Detecta si el mensaje es una solicitud de cita"""
+    palabras_clave = [
+        'agendar cita', 'quiero cita', 'solicitar cita', 'reservar cita',
+        'cita para', 'necesito cita', 'disponibilidad para', 'horario para',
+        'agenda una cita', 'programar cita'
+    ]
+    
+    mensaje_lower = mensaje.lower()
+    
+    for palabra in palabras_clave:
+        if palabra in mensaje_lower:
+            return True
+    
+    return False
 
 def get_country_flag(numero):
     if not numero:
@@ -66,6 +193,64 @@ def get_db_connection():
         password=DB_PASSWORD,
         database=DB_NAME
     )
+
+@app.route('/kanban/data')
+def kanban_data():
+    """Endpoint que devuelve los datos del Kanban en formato JSON"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 1) Cargar las columnas Kanban
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        columnas = cursor.fetchall()
+
+        # 2) Datos de los chats
+        cursor.execute("""
+            SELECT 
+                cm.numero,
+                cm.columna_id,
+                MAX(c.timestamp) AS ultima_fecha,
+                (SELECT mensaje FROM conversaciones 
+                 WHERE numero = cm.numero 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                MAX(cont.imagen_url) AS avatar,
+                MAX(cont.plataforma) AS canal,
+                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                (SELECT COUNT(*) FROM conversaciones 
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+            FROM chat_meta cm
+            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+            LEFT JOIN conversaciones c ON c.numero = cm.numero
+            GROUP BY cm.numero, cm.columna_id
+            ORDER BY ultima_fecha DESC;
+        """)
+        chats = cursor.fetchall()
+
+        # Convertir timestamps a hora de México
+        for chat in chats:
+            if chat.get('ultima_fecha'):
+                if chat['ultima_fecha'].tzinfo is not None:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                else:
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                
+                # Formatear fecha para JSON
+                chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'columnas': columnas,
+            'chats': chats,
+            'timestamp': datetime.now().isoformat(),
+            'total_chats': len(chats)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en kanban_data: {e}")
+        return jsonify({'error': str(e)}), 500
 
 # ——— Configuración en MySQL ———
 def load_config():
@@ -109,6 +294,138 @@ def load_config():
         'lenguaje': row['lenguaje'],
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
+
+def crear_tabla_citas():
+    """Crea la tabla para almacenar las citas"""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS citas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            numero_cliente VARCHAR(20),
+            servicio_solicitado VARCHAR(200),
+            fecha_propuesta DATE,
+            hora_propuesta TIME,
+            nombre_cliente VARCHAR(100),
+            telefono VARCHAR(20),
+            estado ENUM('pendiente', 'confirmada', 'cancelada') DEFAULT 'pendiente',
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+            fecha_confirmacion DATETIME NULL,
+            notas TEXT,
+            FOREIGN KEY (numero_cliente) REFERENCES contactos(numero_telefono)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def guardar_cita(info_cita):
+    """Guarda la cita en la base de datos"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO citas (
+                numero_cliente, servicio_solicitado, fecha_propuesta,
+                hora_propuesta, nombre_cliente, telefono, estado
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            info_cita.get('telefono'),
+            info_cita.get('servicio_solicitado'),
+            info_cita.get('fecha_sugerida'),
+            info_cita.get('hora_sugerida'),
+            info_cita.get('nombre_cliente'),
+            info_cita.get('telefono'),
+            'pendiente'
+        ))
+        
+        conn.commit()
+        cita_id = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        
+        return cita_id
+        
+    except Exception as e:
+        app.logger.error(f"Error guardando cita: {e}")
+        return None
+    
+def enviar_confirmacion_cita(numero, info_cita, cita_id):
+    """Envía confirmación de cita por WhatsApp"""
+    try:
+        mensaje_confirmacion = f"""
+        📅 *Confirmación de Cita* - ID: #{cita_id}
+
+        ¡Hola! Hemos recibido tu solicitud de cita:
+
+        *Servicio:* {info_cita.get('servicio_solicitado', 'Por confirmar')}
+        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'Por confirmar')}
+        *Hora sugerida:* {info_cita.get('hora_sugerida', 'Por confirmar')}
+
+        📞 *Tu número:* {numero}
+
+        ⏰ *Próximos pasos:*
+        Nos pondremos en contacto contigo dentro de las próximas 24 horas para confirmar la disponibilidad.
+
+        ¿Necesitas hacer algún cambio? Responde a este mensaje.
+
+        ¡Gracias por confiar en nosotros! 🙏
+        """
+        
+        enviar_mensaje(numero, mensaje_confirmacion)
+        app.logger.info(f"✅ Confirmación de cita enviada a {numero}, ID: {cita_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando confirmación de cita: {e}")
+
+def enviar_alerta_cita_administrador(info_cita, cita_id):
+    """Envía alerta al administrador sobre nueva cita"""
+    try:
+        mensaje_alerta = f"""
+        🚨 *NUEVA SOLICITUD DE CITA* - ID: #{cita_id}
+
+        *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+        *Teléfono:* {info_cita.get('telefono')}
+
+        *Servicio solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
+        *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
+
+        ⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+        📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
+        """
+        
+        # Enviar a ambos números
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta)
+        enviar_mensaje("524491182201", mensaje_alerta)
+        
+        app.logger.info(f"✅ Alerta de cita enviada a ambos administradores, ID: {cita_id}")
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando alerta de cita: {e}")
+
+@app.route('/citas')
+def ver_citas():
+    """Endpoint para ver citas pendientes"""
+    conn = get_db_connection()
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT c.*, co.nombre, co.alias 
+        FROM citas c 
+        LEFT JOIN contactos co ON c.numero_cliente = co.numero_telefono 
+        ORDER BY c.fecha_creacion DESC
+    ''')
+    citas = cursor.fetchall()
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('citas.html', citas=citas)
 
 def save_config(cfg_all):
     neg = cfg_all.get('negocio', {})
@@ -209,7 +526,7 @@ def obtener_historial(numero, limite=10):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None):
+def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None):
     cfg = load_config()
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -262,10 +579,16 @@ Mantén siempre un tono profesional y conciso.
                         "type": "image_url", 
                         "image_url": {
                             "url": imagen_base64,
-                            "detail": "auto"  # "low", "high", o "auto"
+                            "detail": "auto"
                         }
                     }
                 ]
+            })
+        elif es_audio and transcripcion_audio:
+            # Para audio: incluir la transcripción
+            messages_chain.append({
+                'role': 'user',
+                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
             })
         else:
             # Para texto normal
@@ -290,19 +613,14 @@ Mantén siempre un tono profesional y conciso.
             }
             
             app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
-            app.logger.info(f"📦 Payload OpenAI: {json.dumps(payload, indent=2)}")
-            
             response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            app.logger.info(f"📨 Respuesta OpenAI Status: {response.status_code}")
-            app.logger.info(f"📨 Respuesta OpenAI Text: {response.text}")
-            
             response.raise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
         
         else:
-            # Usar DeepSeek para texto
+            # Usar DeepSeek para texto (o audio transcrito)
             headers = {
                 "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
                 "Content-Type": "application/json"
@@ -329,63 +647,197 @@ Mantén siempre un tono profesional y conciso.
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-    
-def obtener_imagen_perfil_whatsapp(numero):
-    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
+
+def obtener_imagen_whatsapp(image_id):
+    """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
     try:
-        # Formatear el número correctamente (eliminar el + y cualquier espacio)
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "638096866063629"  # Tu Phone Number ID
-        
-        # URL correcta de la API de Meta
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
-        
-        params = {
-            'fields': f'profile_picture_url({numero_formateado})',
-            'access_token': WHATSAPP_TOKEN
-        }
-        
+        # 1. Obtener la URL de la imagen con autenticación
+        url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
-        app.logger.info(f"📸 URL: {url}")
-        app.logger.info(f"📸 Params: {params}")
+        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp: {url}")
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
         
-        app.logger.info(f"📸 Status Code: {response.status_code}")
-        app.logger.info(f"📸 Response: {response.text}")
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
+            return None, None
         
-        if response.status_code == 200:
-            data = response.json()
-            if 'profile_picture_url' in data:
-                imagen_url = data['profile_picture_url']
-                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
-                return imagen_url
-            else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+        # 2. Obtener la URL de descarga real
+        image_data = response.json()
+        download_url = image_data.get('url')
         
-        # Si falla, intentar con la versión alternativa de la API
-        return obtener_imagen_perfil_alternativo(numero_formateado)
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
+            return None, None
+            
+        app.logger.info(f"🖼️ URL de descarga imagen: {download_url}")
+        
+        # 3. Descargar la imagen con autenticación
+        image_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if image_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
+            return None, None
+        
+        # 4. Guardar imagen en sistema de archivos
+        import uuid
+        import os
+        from PIL import Image
+        import io
+        
+        # Crear directorio si no existe
+        os.makedirs('static/images/whatsapp', exist_ok=True)
+        
+        # Generar nombre único para el archivo
+        filename = f"{uuid.uuid4().hex}.jpg"
+        filepath = f"static/images/whatsapp/{filename}"
+        
+        # Guardar imagen
+        with open(filepath, 'wb') as f:
+            f.write(image_response.content)
+        
+        app.logger.info(f"✅ Imagen guardada: {filepath}")
+        
+        # 5. Convertir a base64 para la IA
+        try:
+            # Redimensionar imagen si es muy grande (para ahorrar tokens)
+            img = Image.open(filepath)
+            
+            # Redimensionar manteniendo aspecto (max 512px en el lado más grande)
+            img.thumbnail((512, 512))
+            
+            # Convertir a base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG", quality=85)
+            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            base64_data_url = f"data:image/jpeg;base64,{img_base64}"
+            
+            app.logger.info(f"✅ Imagen convertida a base64, tamaño: {len(img_base64)} caracteres")
+            
+        except Exception as e:
+            app.logger.error(f"🔴 Error procesando imagen: {e}")
+            # Fallback: usar la imagen original en base64
+            with open(filepath, 'rb') as f:
+                img_base64 = base64.b64encode(f.read()).decode('utf-8')
+                base64_data_url = f"data:image/jpeg;base64,{img_base64}"
+        
+        return base64_data_url, f"/{filepath}"
         
     except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
+        return None, None   
+
+def obtener_audio_whatsapp(audio_id):
+    """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
+    try:
+        # 1. Obtener la URL del audio con autenticación
+        url = f"https://graph.facebook.com/v23.0/{audio_id}"
+        headers = {
+            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
+        
+        response = requests.get(url, headers=headers, timeout=30)
+        app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando audio: {response.status_code} - {response.text}")
+            return None, None
+        
+        # 2. Obtener la URL de descarga real
+        audio_data = response.json()
+        download_url = audio_data.get('url')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga de audio: {audio_data}")
+            return None, None
+            
+        app.logger.info(f"🎵 URL de descarga audio: {download_url}")
+        
+        # 3. Descargar el audio con autenticación
+        audio_response = requests.get(download_url, headers=headers, timeout=30)
+        
+        if audio_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando audio: {audio_response.status_code}")
+            return None, None
+        
+        # 4. Guardar audio en sistema de archivos
+        import uuid
+        import os
+        
+        # Crear directorio si no existe
+        os.makedirs('static/audio/whatsapp', exist_ok=True)
+        
+        # Generar nombre único para el archivo
+        filename = f"{uuid.uuid4().hex}.ogg"  # WhatsApp usa formato OGG
+        filepath = f"static/audio/whatsapp/{filename}"
+        
+        # Guardar audio
+        with open(filepath, 'wb') as f:
+            f.write(audio_response.content)
+        
+        app.logger.info(f"✅ Audio guardado: {filepath}")
+        
+        return filepath, f"/{filepath}"
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {e}")
+        return None, None
+
+def transcribir_audio_con_openai(audio_file_path):
+    """Transcribe audio usando Whisper de OpenAI"""
+    try:
+        # Verificar que el archivo existe
+        if not os.path.exists(audio_file_path):
+            app.logger.error(f"🔴 Archivo de audio no encontrado: {audio_file_path}")
+            return None
+        
+        # OpenAI Whisper endpoint
+        whisper_url = "https://api.openai.com/v1/audio/transcriptions"
+        
+        headers = {
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+        }
+        
+        # Preparar el archivo para enviar
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {
+                'file': (os.path.basename(audio_file_path), audio_file, 'audio/ogg')
+            }
+            data = {
+                'model': 'whisper-1',
+                'language': 'es'  # Opcional: especificar idioma
+            }
+            
+            app.logger.info(f"🎵 Enviando audio a Whisper: {audio_file_path}")
+            response = requests.post(whisper_url, headers=headers, files=files, data=data, timeout=60)
+            
+            app.logger.info(f"🎵 Respuesta Whisper Status: {response.status_code}")
+            app.logger.info(f"🎵 Respuesta Whisper Text: {response.text}")
+            
+            response.raise_for_status()
+            
+            data = response.json()
+            return data.get('text', '').strip()
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error transcribiendo audio: {e}")
         return None
-
-
 
 def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
         # Intentar con el endpoint específico para contactos
-        phone_number_id = "638096866063629"
+        phone_number_id = "799540293238176"
         
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
@@ -409,8 +861,7 @@ def obtener_imagen_perfil_alternativo(numero):
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
-    PHONE_NUMBER_ID = "638096866063629"  # Tu Phone Number ID de WhatsApp
-    url = f"https://graph.facebook.com/v23.0/{PHONE_NUMBER_ID}/messages"
+    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
         'Content-Type': 'application/json'
@@ -432,7 +883,7 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url=None):
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
         mensaje = '[Mensaje vacío]'
@@ -444,9 +895,13 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url
     elif isinstance(respuesta, str) and respuesta.strip() == '':
         respuesta = '[Respuesta vacía]'
     
-    # Si es imagen, guardar información adicional
-    tipo_mensaje = 'imagen' if es_imagen else 'texto'
-    contenido_extra = imagen_url if es_imagen else None
+    # Determinar tipo de mensaje
+    if es_imagen:
+        tipo_mensaje = 'imagen'
+    elif es_audio:
+        tipo_mensaje = 'audio'
+    else:
+        tipo_mensaje = 'texto'
     
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -459,20 +914,25 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url
             respuesta TEXT,
             timestamp DATETIME,
             tipo_mensaje VARCHAR(10) DEFAULT 'texto',
-            contenido_extra TEXT
+            contenido_extra TEXT,
+            transcripcion_audio TEXT  -- 🆕 NUEVO CAMPO para guardar transcripción
         ) ENGINE=InnoDB;
     ''')
+
+    # 🆕 Guardar transcripción si es audio
+    transcripcion = mensaje if es_audio and mensaje.startswith('Transcripción del audio:') else None
 
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra) VALUES (%s, %s, %s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra)
+        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio) VALUES (%s, %s, %s, %s, %s, %s, %s);",
+        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion)
     )
 
     conn.commit()
     cursor.close()
     conn.close()
+
 # ——— Detección y alerta ———
 def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     """Detección mejorada que previene loops"""
@@ -558,7 +1018,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
     
 def enviar_informacion_completa(numero_cliente):
-    """Envía toda la información del cliente a tu número personal"""
+    """Envía toda la información del cliente a ambos números"""
     try:
         # Obtener información del contacto
         conn = get_db_connection()
@@ -598,13 +1058,14 @@ def enviar_informacion_completa(numero_cliente):
             if msg['respuesta']:
                 mensaje_completo += f"\n   🤖: {msg['respuesta'][:60]}"
         
-        # Enviar mensaje completo
-        enviar_mensaje(ALERT_NUMBER, mensaje_completo)
-        app.logger.info(f"📤 Información completa enviada para {numero_cliente}")
+        # Enviar mensaje completo a ambos números
+        enviar_mensaje(ALERT_NUMBER, mensaje_completo)  # Número original
+        enviar_mensaje("524491182201", mensaje_completo)  # Nuevo número
+        
+        app.logger.info(f"📤 Información completa enviada para {numero_cliente} a ambos números")
         
     except Exception as e:
-        app.logger.error(f"🔴 Error enviando información completa: {e}")
-        
+        app.logger.error(f"🔴 Error enviando información completa: {e}")        
         
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
@@ -632,11 +1093,15 @@ def webhook():
         app.logger.info(f"📱 Mensaje recibido de: {numero}")
         app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
         
-        # Detectar si es imagen o texto
+        # Detectar tipo de mensaje
         es_imagen = False
+        es_audio = False
         imagen_base64 = None
-        imagen_url = None  # ← AÑADIR ESTA LÍNEA
+        imagen_url = None
+        audio_path = None
+        audio_url = None
         texto = ""
+        transcripcion_audio = None
         
         if 'image' in msg:
             app.logger.info(f"🖼️ Mensaje de imagen detectado")
@@ -644,8 +1109,8 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            # ✅ USAR LA NUEVA FUNCIÓN QUE CONVIERTE A BASE64 Y GUARDA ARCHIVO
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)  # ← Ahora recibe ambos valores
+            # Obtener imagen
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
@@ -653,7 +1118,7 @@ def webhook():
                 enviar_mensaje(numero, texto)
                 guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
                 return 'OK', 200
-            # Verificar si hay texto acompañando la imagen
+            
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
                 app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
@@ -661,32 +1126,51 @@ def webhook():
                 texto = "Analiza esta imagen"
                 app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
                 
+        elif 'audio' in msg:
+            app.logger.info(f"🎵 Mensaje de audio detectado")
+            es_audio = True
+            audio_id = msg['audio']['id']
+            app.logger.info(f"🎵 ID de audio: {audio_id}")
+            
+            # Obtener y transcribir audio
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id)
+            
+            if audio_path:
+                transcripcion_audio = transcribir_audio_con_openai(audio_path)
+                if transcripcion_audio:
+                    texto = transcripcion_audio
+                    app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
+                else:
+                    texto = "No pude transcribir el audio"
+            else:
+                texto = "No pude procesar el audio"
+                
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
             texto = msg['text']['body']
             app.logger.info(f"📝 Texto: {texto}")
+            
         else:
-            # Otro tipo de mensaje (audio, video, etc.)
             tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
-            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto o imagen."
+            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
-        
-# 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES - VERSIÓN MEJORADA
+
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
-
+        
         if not hasattr(app, 'ultimos_mensajes'):
-                app.ultimos_mensajes = set()
-
+            app.ultimos_mensajes = set()
+        
         if current_message_id in app.ultimos_mensajes:
-                app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
-                return 'OK', 200
-
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+            return 'OK', 200
+        
         app.ultimos_mensajes.add(current_message_id)
-            # Limitar el tamaño para no consumir mucha memoria
+        
         if len(app.ultimos_mensajes) > 100:
-                app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
-
-        # ⛔ BLOQUEAR COMPLETAMENTE MENSAJES DEL NÚMERO DE ALERTA (para evitar loops)
+            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
+        
+        # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
@@ -697,18 +1181,16 @@ def webhook():
         if es_mi_numero:
             app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
-        # ========== PROCESAMIENTO NORMAL PARA TODOS LOS NÚMEROS ==========
-        # Actualizar contacto (VERSIÓN MEJORADA - EVITA DUPLICADOS)
+        # ========== PROCESAMIENTO NORMAL ==========
+        # Actualizar contacto
         contactos = change.get('contacts')
         if contactos and len(contactos) > 0:
             profile_name = contactos[0].get('profile', {}).get('name')
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
                 try:
-
-                    # OBTENER IMAGEN DE PERFIL
                     imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
-
+                    
                     conn = get_db_connection()
                     cursor = conn.cursor()
                     
@@ -723,38 +1205,38 @@ def webhook():
                         )
                     """, (wa_id, wa_id))
                     
-                    # Insertar o actualizar CON IMAGEN DE PERFIL
+                    # Insertar o actualizar
                     cursor.execute("""
                         INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
                         VALUES (%s, %s, 'whatsapp', %s)
                         ON DUPLICATE KEY UPDATE 
                             nombre = VALUES(nombre),
                             imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, imagen_perfil))  # ← Usar imagen_perfil aquí
+                    """, (wa_id, profile_name, imagen_perfil))
                     
                     conn.commit()
                     cursor.close()
                     conn.close()
                     app.logger.info(f"✅ Contacto actualizado: {wa_id}")
-                    # Asegurar que el contacto exista incluso si no hay información de perfil
-                    try:
-                        conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute("""
-                            INSERT IGNORE INTO contactos (numero_telefono, plataforma)
-                            VALUES (%s, 'whatsapp')
-                        """, (numero,))
-                        conn.commit()
-                        cursor.close()
-                        conn.close()
-                    except Exception as e:
-                        app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
-                    
-
-        # Consultas de precio (funciona para todos)
+        
+        # Asegurar que el contacto exista
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT IGNORE INTO contactos (numero_telefono, plataforma)
+                VALUES (%s, 'whatsapp')
+            """, (numero,))
+            conn.commit()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
+        
+        # Consultas de precio
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
             info = obtener_precio(servicio)
@@ -766,34 +1248,98 @@ def webhook():
             enviar_mensaje(numero, respuesta)
             guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None)
             return 'OK', 200
-
+        
+        # 🆕 DETECCIÓN DE CITAS
+        if detectar_solicitud_cita(texto):
+            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
+            
+            info_cita = extraer_info_cita(texto, numero)
+            
+            if info_cita:
+                cita_id = guardar_cita(info_cita)
+                
+                if cita_id:
+                    enviar_confirmacion_cita(numero, info_cita, cita_id)
+                    enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
+                    app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
+                    guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}")
+                    return 'OK', 200
+                else:
+                    app.logger.error("❌ Error guardando cita en BD")
+            else:
+                app.logger.error("❌ Error extrayendo información de cita")
+            
+            app.logger.warning("⚠️ Falló detección de cita, continuando con IA normal")
+        
         # IA normal
-        IA_ESTADOS.setdefault(numero, True)
+        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
-        if IA_ESTADOS[numero]:
-            # ✅ PASAR imagen_base64 EN LUGAR DE url_imagen
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64)
-            enviar_mensaje(numero, respuesta)
-            # 🔄 SOLO DETECTAR INTERVENCIÓN HUMANA SI NO ES MI NÚMERO
+        
+        if IA_ESTADOS[numero]['activa']:
+            # 🆕 DETECTAR PREFERENCIA DE VOZ
+            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
+                IA_ESTADOS[numero]['prefiere_voz'] = True
+                app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
+            
+            responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
+            
+            # Obtener respuesta de IA
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion_audio)
+            
+            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+            if responder_con_voz:
+                # Intentar enviar respuesta de voz
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename)
+                
+                if audio_url_local:
+                    # URL pública del audio (ajusta según tu configuración)
+                    audio_url_publica = f"https://mektia.com{audio_url_local}"
+                    
+                    if enviar_mensaje_voz(numero, audio_url_publica):
+                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True)
+                    else:
+                        # Fallback a texto
+                        enviar_mensaje(numero, respuesta)
+                        app.logger.info(f"✅ Fallback a texto enviado a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local)
+                else:
+                    # Fallback a texto
+                    enviar_mensaje(numero, respuesta)
+                    app.logger.info(f"✅ Fallback a texto (error TTS) enviado a {numero}")
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, None)
+            else:
+                # Respuesta normal de texto
+                enviar_mensaje(numero, respuesta)
+                app.logger.info(f"✅ Respuesta de texto enviada a {numero}")
+                
+                if es_audio:
+                    guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url, es_audio=True)
+                else:
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
+            
+            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA
             if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
                 resumen = resumen_rafa(numero)
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero)
-
-        guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
-
-        # ========== KANBAN AUTOMÁTICO (para todos) ==========
+        
+        # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero)
         if not meta:
             inicializar_chat_meta(numero)
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
         actualizar_columna_chat(numero, nueva_columna)
+        
         return 'OK', 200
 
     except Exception as e:
         app.logger.error(f"🔴 Error en webhook: {e}")
+        app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
+
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -802,17 +1348,15 @@ def inicio():
 def obtener_imagen_perfil_whatsapp(numero):
     """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
     try:
-        # Formatear el número correctamente (eliminar el + y cualquier espacio)
+        # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Phone Number ID de tu negocio de WhatsApp
-        phone_number_id = "638096866063629"  # Tu Phone Number ID
+        # ✅ USAR MI_NUMERO_BOT
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
         
-        # URL correcta de la API de Meta
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}"
-        
+        # ✅ FORMATO CORRECTO
         params = {
-            'fields': f'profile_picture_url({numero_formateado})',
+            'fields': 'profile_picture',
             'access_token': WHATSAPP_TOKEN
         }
         
@@ -821,38 +1365,29 @@ def obtener_imagen_perfil_whatsapp(numero):
             'Authorization': f'Bearer {WHATSAPP_TOKEN}'
         }
         
-        app.logger.info(f"📸 Intentando obtener imagen para: {numero_formateado}")
-        app.logger.info(f"📸 URL: {url}")
-        app.logger.info(f"📸 Params: {params}")
-        
         response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        app.logger.info(f"📸 Status Code: {response.status_code}")
-        app.logger.info(f"📸 Response: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            if 'profile_picture_url' in data:
-                imagen_url = data['profile_picture_url']
+            # ✅ NUEVA ESTRUCTURA DE RESPUESTA
+            if 'profile_picture' in data and 'url' in data['profile_picture']:
+                imagen_url = data['profile_picture']['url']
                 app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
                 return imagen_url
             else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture_url en la respuesta: {data}")
+                app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
         
-        # Si falla, intentar con la versión alternativa de la API
         return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
-
+    
 def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
-        # Intentar con el endpoint específico para contactos
-        phone_number_id = "638096866063629"
-        
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        # Intentar con el endpoint específico para contactos      
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
@@ -1264,7 +1799,17 @@ def guardar_alias_contacto(numero):
         conn.close()
         return '', 204
 
-    # ——— Páginas legales ———
+    # ——— Páginas legales —
+
+@app.route('/proxy-audio/<path:audio_url>')
+def proxy_audio(audio_url):
+    """Proxy para evitar problemas de CORS con archivos de audio"""
+    try:
+        response = requests.get(audio_url, timeout=10)
+        return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
+    except Exception as e:
+        return str(e), 500
+
 @app.route('/privacy-policy')
 def privacy_policy():
         return render_template('privacy_policy.html')
@@ -1357,4 +1902,7 @@ def test_imagen():
             "status": "error"
         })
 if __name__ == '__main__':
-        app.run(host='0.0.0.0', port=5000, debug=True)
+        # Crear tablas necesarias
+    crear_tabla_citas()
+    
+    app.run(host='0.0.0.0', port=5000, debug=True)
