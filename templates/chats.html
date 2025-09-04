@@ -527,6 +527,7 @@
 
   // Controlador de audio personalizado
 // Controlador de audio mejorado - FUNCIÓN CORREGIDA
+// Controlador de audio mejorado
 function toggleAudio(audioId, button) {
     const audioPlayer = document.getElementById(audioId);
     const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
@@ -550,9 +551,6 @@ function toggleAudio(audioId, button) {
             };
         }).catch(error => {
             console.error('Error al reproducir audio:', error);
-            // Fallback: descargar el audio
-            const downloadLink = button.closest('.audio-player').querySelector('.audio-download-btn');
-            if (downloadLink) downloadLink.click();
         });
     } else {
         audioPlayer.pause();
@@ -560,6 +558,92 @@ function toggleAudio(audioId, button) {
     }
 }
 
+// Función para buscar en el audio
+function seekAudio(audioId, progressBar, event) {
+    const audioPlayer = document.getElementById(audioId);
+    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const width = rect.width;
+    
+    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+        const clickTime = (clickX / width) * audioPlayer.duration;
+        audioPlayer.currentTime = clickTime;
+        progressBarInner.style.width = (clickX / width) * 100 + '%';
+        
+        // Actualizar tiempo visualmente
+        const minutes = Math.floor(audioPlayer.currentTime / 60);
+        const seconds = Math.floor(audioPlayer.currentTime % 60);
+        const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
+        durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+}
+
+// Inicializar todos los audios al cargar la página
+document.addEventListener('DOMContentLoaded', function() {
+    // Configurar duración de audios
+    document.querySelectorAll('.audio-player audio').forEach(audio => {
+        audio.addEventListener('loadedmetadata', function() {
+            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+            if (this.duration && isFinite(this.duration)) {
+                const minutes = Math.floor(this.duration / 60);
+                const seconds = Math.floor(this.duration % 60);
+                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+            }
+        });
+        
+        // Forzar carga de metadata
+        if (audio.readyState < 1) {
+            audio.load();
+        }
+        
+        // Manejar el final de la reproducción
+        audio.addEventListener('ended', function() {
+            const button = this.closest('.audio-player').querySelector('.audio-play-btn');
+            if (button) button.textContent = '▶️';
+            
+            const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
+            if (progressBar) progressBar.style.width = '0%';
+        });
+    });
+
+    // MutationObserver mejorado (ignora cambios de audio)
+    const observer = new MutationObserver(function(mutations) {
+        mutations.forEach(function(mutation) {
+            // Ignorar cambios en elementos de audio
+            const isAudioRelated = mutation.target.closest('.audio-player') || 
+                                 mutation.target.classList.contains('audio-progress-bar') ||
+                                 mutation.target.classList.contains('audio-duration');
+            
+            if (mutation.addedNodes.length > 0 && !isAudioRelated) {
+                let shouldScroll = true;
+                
+                // Verificar que los nodos añadidos no sean de audio
+                mutation.addedNodes.forEach(node => {
+                    if (node.nodeType === 1 && ( // Element nodes only
+                        node.classList.contains('audio-player') || 
+                        node.closest('.audio-player') ||
+                        node.querySelector('.audio-player')
+                    )) {
+                        shouldScroll = false;
+                    }
+                });
+                
+                if (shouldScroll) {
+                    setTimeout(scrollToBottom, 100);
+                }
+            }
+        });
+    });
+    
+    const msgsContainer = document.getElementById('msgs');
+    if (msgsContainer) {
+        observer.observe(msgsContainer, { 
+            childList: true, 
+            subtree: true 
+        });
+    }
+});
 // Función para buscar en el audio - FUNCIÓN CORREGIDA
 function seekAudio(audioId, progressBar, event) {
     const audioPlayer = document.getElementById(audioId);
@@ -684,13 +768,31 @@ document.addEventListener('DOMContentLoaded', function() {
     scrollToBottom();
     
     // También scroll cuando hay nuevos mensajes
-    const observer = new MutationObserver(function(mutations) {
-      mutations.forEach(function(mutation) {
-        if (mutation.addedNodes.length > 0) {
-          setTimeout(scrollToBottom, 100);
+    // También scroll cuando hay nuevos mensajes
+const observer = new MutationObserver(function(mutations) {
+    mutations.forEach(function(mutation) {
+        // IGNORAR cambios en elementos de audio y barras de progreso
+        const isAudioChange = mutation.target.closest('.audio-player') || 
+                             mutation.target.classList.contains('audio-progress-bar');
+        
+        if (mutation.addedNodes.length > 0 && !isAudioChange) {
+            // Verificar que no sean cambios de audio
+            let shouldScroll = true;
+            mutation.addedNodes.forEach(node => {
+                if (node.classList && (
+                    node.classList.contains('audio-player') || 
+                    node.closest('.audio-player')
+                )) {
+                    shouldScroll = false;
+                }
+            });
+            
+            if (shouldScroll) {
+                setTimeout(scrollToBottom, 100);
+            }
         }
-      });
     });
+});
     
     const msgsContainer = document.getElementById('msgs');
     if (msgsContainer) {
