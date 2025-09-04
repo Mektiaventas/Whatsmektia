@@ -481,7 +481,7 @@ def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
         # Intentar con el endpoint específico para contactos
-        phone_number_id = "638096866063629"
+        phone_number_id = "799540293238176"
         
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
         
@@ -981,7 +981,7 @@ def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
         # Intentar con el endpoint específico para contactos
-        phone_number_id = "638096866063629"
+        phone_number_id = "799540293238176"
         
         url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
         
