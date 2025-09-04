@@ -162,4 +162,100 @@ document.addEventListener('DOMContentLoaded', function() {
   // porque ahora las tarjetas son enlaces directos
 });
 </script>
+<!-- Al final de kanban.html, antes de cerrar el body -->
+<script>
+// ——— AUTO-ACTUALIZACIÓN DEL KANBAN CADA 5 SEGUNDOS ———
+document.addEventListener('DOMContentLoaded', function() {
+    let kanbanAutoRefresh = true;
+    let refreshInterval = 5000; // 5 segundos
+    
+    console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+    
+    // Función para actualizar el Kanban
+    function actualizarKanban() {
+        if (!kanbanAutoRefresh) return;
+        
+        fetch('/kanban/data', {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            cache: 'no-cache'
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Error en la respuesta del servidor');
+            }
+            return response.json();
+        })
+        .then(data => {
+            // Actualizar la interfaz con los nuevos datos
+            actualizarInterfazKanban(data);
+            console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
+        })
+        .catch(error => {
+            console.error('❌ Error actualizando Kanban:', error);
+        });
+    }
+    
+    // Función para actualizar la interfaz (debes adaptarla a tu estructura)
+    function actualizarInterfazKanban(data) {
+        // Aquí va la lógica para actualizar el HTML con los nuevos datos
+        // Esto depende de cómo tengas estructurado tu Kanban
+        
+        // Ejemplo básico:
+        data.chats.forEach(chat => {
+            const chatElement = document.querySelector(`[data-numero="${chat.numero}"]`);
+            if (chatElement) {
+                // Actualizar información del chat
+                const fechaElement = chatElement.querySelector('.ultima-fecha');
+                const mensajeElement = chatElement.querySelector('.ultimo-mensaje');
+                
+                if (fechaElement) {
+                    fechaElement.textContent = new Date(chat.ultima_fecha).toLocaleString();
+                }
+                if (mensajeElement) {
+                    mensajeElement.textContent = chat.ultimo_mensaje || 'Sin mensajes';
+                }
+                
+                // Mover entre columnas si es necesario
+                const columnaActual = chatElement.closest('.kanban-columna');
+                if (columnaActual && columnaActual.dataset.columnaId != chat.columna_id) {
+                    const nuevaColumna = document.querySelector(`[data-columna-id="${chat.columna_id}"] .kanban-chats`);
+                    if (nuevaColumna) {
+                        nuevaColumna.appendChild(chatElement);
+                    }
+                }
+            }
+        });
+    }
+    
+    // Iniciar el intervalo
+    let intervalo = setInterval(actualizarKanban, refreshInterval);
+    
+    // Opcional: Pausar actualización cuando la pestaña no está visible
+    document.addEventListener('visibilitychange', function() {
+        if (document.hidden) {
+            kanbanAutoRefresh = false;
+            console.log('⏸️ Auto-actualización pausada (pestaña oculta)');
+        } else {
+            kanbanAutoRefresh = true;
+            console.log('▶️ Auto-actualización reanudada');
+        }
+    });
+    
+    // También actualizar al hacer foco en la ventana
+    window.addEventListener('focus', function() {
+        kanbanAutoRefresh = true;
+        actualizarKanban(); // Actualizar inmediatamente
+    });
+    
+    window.addEventListener('blur', function() {
+        kanbanAutoRefresh = false;
+    });
+    
+    // Forzar primera actualización
+    setTimeout(actualizarKanban, 1000);
+});
+</script>
 {% endblock %}

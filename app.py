@@ -194,6 +194,64 @@ def get_db_connection():
         database=DB_NAME
     )
 
+@app.route('/kanban/data')
+def kanban_data():
+    """Endpoint que devuelve los datos del Kanban en formato JSON"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor(dictionary=True)
+
+        # 1) Cargar las columnas Kanban
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        columnas = cursor.fetchall()
+
+        # 2) Datos de los chats
+        cursor.execute("""
+            SELECT 
+                cm.numero,
+                cm.columna_id,
+                MAX(c.timestamp) AS ultima_fecha,
+                (SELECT mensaje FROM conversaciones 
+                 WHERE numero = cm.numero 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                MAX(cont.imagen_url) AS avatar,
+                MAX(cont.plataforma) AS canal,
+                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                (SELECT COUNT(*) FROM conversaciones 
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+            FROM chat_meta cm
+            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+            LEFT JOIN conversaciones c ON c.numero = cm.numero
+            GROUP BY cm.numero, cm.columna_id
+            ORDER BY ultima_fecha DESC;
+        """)
+        chats = cursor.fetchall()
+
+        # Convertir timestamps a hora de México
+        for chat in chats:
+            if chat.get('ultima_fecha'):
+                if chat['ultima_fecha'].tzinfo is not None:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                else:
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                
+                # Formatear fecha para JSON
+                chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'columnas': columnas,
+            'chats': chats,
+            'timestamp': datetime.now().isoformat(),
+            'total_chats': len(chats)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en kanban_data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # ——— Configuración en MySQL ———
 def load_config():
     conn = get_db_connection()
