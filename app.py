@@ -1590,6 +1590,26 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None 
  #............................................................................................   
+def obtener_configuracion_por_host():
+    """Obtiene la configuración basada en el host de la solicitud"""
+    try:
+        host = request.headers.get('Host', '').lower()
+        app.logger.info(f"🌐 Host detectado: {host}")
+        
+        # Buscar configuración por dominio
+        for config_id, config_data in NUMEROS_CONFIG.items():
+            if config_data.get('dominio', '') in host:
+                app.logger.info(f"✅ Configuración encontrada: {config_data.get('dominio')}")
+                return config_data
+        
+        # Fallback a Mektia por defecto
+        app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
+        return NUMEROS_CONFIG['799540293238176']
+            
+    except RuntimeError:
+        # ⚠️ Fuera de contexto de request - usar configuración por defecto
+        app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
+        return NUMEROS_CONFIG['799540293238176']
         
 def obtener_configuracion_por_phone_id(phone_number_id):
     """
@@ -1616,21 +1636,12 @@ def obtener_configuracion_por_phone_id(phone_number_id):
         
         # Fallback a configuración por defecto (Mektia)
         app.logger.warning(f"⚠️ Phone ID {phone_number_id} no encontrado, usando Mektia por defecto")
-        return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
+        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo configuración por Phone ID: {e}")
         # Fallback extremo a Mektia
-        return {
-            'phone_number_id': '799540293238176',
-            'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
-            'db_host': os.getenv("MEKTIA_DB_HOST"),
-            'db_user': os.getenv("MEKTIA_DB_USER"),
-            'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
-            'db_name': os.getenv("MEKTIA_DB_NAME"),
-            'dominio': 'mektia.com',
-            'numero_whatsapp': '524495486142'
-        }
+        return NUMEROS_CONFIG['799540293238176']
 
 @app.route('/home')
 def home():
