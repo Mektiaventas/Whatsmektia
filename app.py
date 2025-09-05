@@ -42,7 +42,7 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
-        'dominio': 'mektia.com'
+        'dominio': 'mektia.com',
         'numero_whatsapp': '524495486142'  # Número asociado
     },
     '638096866063629': {  # Número de La Porfirianna
@@ -52,7 +52,7 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
-        'dominio': 'laporfirianna.mektia.com'
+        'dominio': 'laporfirianna.mektia.com',
         'numero_whatsapp': '524812372326'  # Número asociado
     }
 }
