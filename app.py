@@ -1647,7 +1647,7 @@ def obtener_configuracion_por_phone_id(phone_number_id):
 def home():
     
     # Usar configuración por defecto para la UI (Mektia)
-    config = NUMEROS_CONFIG['799540293238176']
+    config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
@@ -1693,7 +1693,7 @@ def home():
 def ver_chats():
     
     # Usar configuración por defecto para la UI (Mektia)
-    config = NUMEROS_CONFIG['799540293238176']
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
@@ -1728,7 +1728,8 @@ def ver_chats():
     )
 
 @app.route('/chats/<numero>')
-def ver_chat(numero, config=None):
+def ver_chat(numero):
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
