@@ -1,9 +1,9 @@
 import pytz
 import os
 import logging
-import requests
 import json 
 import base64
+import argparse
 import mysql.connector
 from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
 import requests
@@ -23,19 +23,44 @@ app.logger.setLevel(logging.INFO)
 
 # ——— Env vars ———
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
-WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # Nueva variable
-DB_HOST = os.getenv("DB_HOST")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
-DB_NAME = os.getenv("DB_NAME")
-MI_NUMERO_BOT = os.getenv("MI_NUMERO_BOT")
-PHONE_NUMBER_ID = MI_NUMERO_BOT
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER")
-OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"  # Nueva URL
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"  # URL de DeepSeek
+SECRET_KEY = os.getenv("SECRET_KEY", "cualquier-cosa")
+OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
+DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
+
+# ——— Configuración Multi-Tenant ———
+NUMEROS_CONFIG = {
+    '524495486142': {  # Número de Mektia
+        'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("MEKTIA_DB_HOST"),
+        'db_user': os.getenv("MEKTIA_DB_USER"),
+        'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
+        'db_name': os.getenv("MEKTIA_DB_NAME"),
+        'dominio': 'mektia.com'
+    },
+    '524812372326': {  # Número de La Porfirianna
+        'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
+        'db_user': os.getenv("PORFIRIANNA_DB_USER"),
+        'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
+        'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
+        'dominio': 'laporfirianna.mektia.com'
+    }
+}
+
+# Configuración por defecto (para backward compatibility)
+WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
+DB_HOST = os.getenv("MEKTIA_DB_HOST")
+DB_USER = os.getenv("MEKTIA_DB_USER")
+DB_PASSWORD = os.getenv("MEKTIA_DB_PASSWORD")
+DB_NAME = os.getenv("MEKTIA_DB_NAME")
+MI_NUMERO_BOT = os.getenv("MEKTIA_PHONE_NUMBER_ID")
+PHONE_NUMBER_ID = MI_NUMERO_BOT
 
 # Diccionario de prefijos a código de país
 PREFIJOS_PAIS = {
@@ -45,6 +70,18 @@ PREFIJOS_PAIS = {
 }
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+
+def get_db_connection(config=None):
+    if config is None:
+        # Usar configuración por defecto (Mektia)
+        config = NUMEROS_CONFIG['524495486142']
+    
+    return mysql.connector.connect(
+        host=config['db_host'],
+        user=config['db_user'],
+        password=config['db_password'],
+        database=config['db_name']
+    )
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url):
@@ -105,7 +142,6 @@ def texto_a_voz(texto, filename):
     except Exception as e:
         app.logger.error(f"Error en texto a voz: {e}")
         return None
-
 
 def extraer_info_cita(mensaje, numero):
     """Extrae información de la cita del mensaje usando IA"""
@@ -170,6 +206,24 @@ def detectar_solicitud_cita(mensaje):
     
     return False
 
+@app.route('/debug-dominio')
+def debug_dominio():
+    host = request.headers.get('Host', 'desconocido')
+    user_agent = request.headers.get('User-Agent', 'desconocido')
+    
+    return f"""
+    <h1>Información del Dominio</h1>
+    <p><strong>Dominio detectado:</strong> {host}</p>
+    <p><strong>User-Agent:</strong> {user_agent}</p>
+    <p><strong>Hora:</strong> {datetime.now()}</p>
+    
+    <h2>Probar ambos dominios:</h2>
+    <ul>
+        <li><a href="https://mektia.com/debug-dominio">mektia.com</a></li>
+        <li><a href="https://laporfirianna.mektia.com/debug-dominio">laporfirianna.mektia.com</a></li>
+    </ul>
+    """
+
 def get_country_flag(numero):
     if not numero:
         return None
@@ -194,11 +248,11 @@ def get_db_connection():
         database=DB_NAME
     )
 
-@app.route('/kanban/data')
+@app.route('/kanban/data', config=None)
 def kanban_data():
     """Endpoint que devuelve los datos del Kanban en formato JSON"""
     try:
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
         # 1) Cargar las columnas Kanban
@@ -253,8 +307,8 @@ def kanban_data():
         return jsonify({'error': str(e)}), 500
 
 # ——— Configuración en MySQL ———
-def load_config():
-    conn = get_db_connection()
+def load_config(config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS configuracion (
@@ -295,9 +349,9 @@ def load_config():
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
 
-def crear_tabla_citas():
+def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
-    conn = get_db_connection()
+    conn = get_db_connection(config)
     cursor = conn.cursor()
     
     cursor.execute('''
@@ -321,10 +375,10 @@ def crear_tabla_citas():
     cursor.close()
     conn.close()
 
-def guardar_cita(info_cita):
+def guardar_cita(info_cita, config=None):
     """Guarda la cita en la base de datos"""
     try:
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         
         cursor.execute('''
@@ -409,9 +463,9 @@ def enviar_alerta_cita_administrador(info_cita, cita_id):
         app.logger.error(f"Error enviando alerta de cita: {e}")
 
 @app.route('/citas')
-def ver_citas():
+def ver_citas(config=None):
     """Endpoint para ver citas pendientes"""
-    conn = get_db_connection()
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute('''
@@ -427,11 +481,11 @@ def ver_citas():
     
     return render_template('citas.html', citas=citas)
 
-def save_config(cfg_all):
+def save_config(cfg_all, config=None):
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
 
-    conn = get_db_connection()
+    conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO configuracion
@@ -467,8 +521,8 @@ def save_config(cfg_all):
     conn.close()
 
 # ——— CRUD y helpers para 'precios' ———
-def obtener_todos_los_precios():
-    conn = get_db_connection()
+def obtener_todos_los_precios(config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS precios (
@@ -486,8 +540,8 @@ def obtener_todos_los_precios():
     conn.close()
     return rows
 
-def obtener_precio_por_id(pid):
-    conn = get_db_connection()
+def obtener_precio_por_id(pid,config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM precios WHERE id=%s;", (pid,))
     row = cursor.fetchone()
@@ -495,8 +549,8 @@ def obtener_precio_por_id(pid):
     conn.close()
     return row
 
-def obtener_precio(servicio_nombre: str):
-    conn = get_db_connection()
+def obtener_precio(servicio_nombre: str, config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute("""
         SELECT precio, moneda
@@ -512,8 +566,8 @@ def obtener_precio(servicio_nombre: str):
     return None
 
 # ——— Memoria de conversación ———
-def obtener_historial(numero, limite=10):
-    conn = get_db_connection()
+def obtener_historial(numero, limite=10, config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
         "SELECT mensaje, respuesta FROM conversaciones "
@@ -684,53 +738,101 @@ def obtener_imagen_whatsapp(image_id):
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 4. Guardar imagen en sistema de archivos
-        import uuid
-        import os
-        from PIL import Image
-        import io
+        # 4. Guardar la imagen localmente
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"whatsapp_image_{timestamp}.jpg"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         
-        # Crear directorio si no existe
-        os.makedirs('static/images/whatsapp', exist_ok=True)
-        
-        # Generar nombre único para el archivo
-        filename = f"{uuid.uuid4().hex}.jpg"
-        filepath = f"static/images/whatsapp/{filename}"
-        
-        # Guardar imagen
-        with open(filepath, 'wb') as f:
+        with open(filepath, "wb") as f:
             f.write(image_response.content)
         
         app.logger.info(f"✅ Imagen guardada: {filepath}")
         
-        # 5. Convertir a base64 para la IA
-        try:
-            # Redimensionar imagen si es muy grande (para ahorrar tokens)
-            img = Image.open(filepath)
-            
-            # Redimensionar manteniendo aspecto (max 512px en el lado más grande)
-            img.thumbnail((512, 512))
-            
-            # Convertir a base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG", quality=85)
-            img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
-            base64_data_url = f"data:image/jpeg;base64,{img_base64}"
-            
-            app.logger.info(f"✅ Imagen convertida a base64, tamaño: {len(img_base64)} caracteres")
-            
-        except Exception as e:
-            app.logger.error(f"🔴 Error procesando imagen: {e}")
-            # Fallback: usar la imagen original en base64
-            with open(filepath, 'rb') as f:
-                img_base64 = base64.b64encode(f.read()).decode('utf-8')
-                base64_data_url = f"data:image/jpeg;base64,{img_base64}"
+        # 5. Convertir a base64
+        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         
-        return base64_data_url, f"/{filepath}"
+        return image_base64, filename
         
     except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {e}")
-        return None, None   
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
+        return None, None
+
+def procesar_mensaje(texto, image_base64=None, filename=None):
+    """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
+    try:
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {OPENAI_API_KEY}"
+        }
+        
+        # Preparar el payload según si hay imagen o no
+        if image_base64:
+            app.logger.info("👁️ Procesando mensaje con imagen...")
+            
+            payload = {
+                "model": "gpt-4-vision-preview",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": texto
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{image_base64}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 1000
+            }
+        else:
+            app.logger.info("💬 Procesando mensaje de texto...")
+            
+            payload = {
+                "model": "gpt-3.5-turbo",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "Eres un asistente útil que responde preguntas de manera clara y concisa."
+                    },
+                    {
+                        "role": "user",
+                        "content": texto
+                    }
+                ],
+                "max_tokens": 500,
+                "temperature": 0.7
+            }
+        
+        # Realizar la solicitud
+        response = requests.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error API OpenAI: {response.status_code} - {response.text}")
+            return "Lo siento, hubo un error al procesar tu solicitud."
+        
+        result = response.json()
+        respuesta = result['choices'][0]['message']['content']
+        
+        app.logger.info(f"✅ Respuesta generada: {respuesta[:100]}...")
+        return respuesta
+        
+    except requests.exceptions.Timeout:
+        app.logger.error("🔴 Timeout al conectar con OpenAI API")
+        return "Lo siento, el servicio está tardando más de lo esperado. Por favor, intenta de nuevo."
+    except Exception as e:
+        app.logger.error(f"🔴 Error en procesar_mensaje: {str(e)}")
+        return "Lo siento, hubo un error al procesar tu mensaje."  
 
 def obtener_audio_whatsapp(audio_id):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
@@ -831,6 +933,16 @@ def transcribir_audio_con_openai(audio_file_path):
         app.logger.error(f"🔴 Error transcribiendo audio: {e}")
         return None
 
+def obtener_configuracion_numero(numero_whatsapp):
+    """Obtiene la configuración específica para un número de WhatsApp"""
+    # Buscar en la configuración multi-tenant
+    for numero_config, config in NUMEROS_CONFIG.items():
+        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
+            return config
+    
+    # Fallback a configuración por defecto (Mektia)
+    return NUMEROS_CONFIG['524495486142']
+
 def obtener_imagen_perfil_alternativo(numero):
     """Método alternativo para obtener la imagen de perfil"""
     try:
@@ -861,6 +973,20 @@ def obtener_imagen_perfil_alternativo(numero):
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto):
+    if config is None:
+        config = obtener_configuracion_numero(numero)
+    
+    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+    headers = {
+        'Authorization': f'Bearer {config['whatsapp_token']}',
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        'messaging_product': 'whatsapp',
+        'to': numero,
+        'type': 'text',
+        'text': {'body': texto}
+    }
     url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
     headers = {
         'Authorization': f'Bearer {WHATSAPP_TOKEN}',
@@ -903,7 +1029,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     else:
         tipo_mensaje = 'texto'
     
-    conn = get_db_connection()
+    conn = get_db_connection(config=None)
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -978,8 +1104,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
             
     return False
 
-def resumen_rafa(numero):
-    conn = get_db_connection()
+def resumen_rafa(numero,config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
         "SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 10;",
@@ -1017,11 +1143,11 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
     enviar_mensaje(ALERT_NUMBER, mensaje)
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
     
-def enviar_informacion_completa(numero_cliente):
+def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
     try:
         # Obtener información del contacto
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute(
             "SELECT * FROM contactos WHERE numero_telefono = %s",
@@ -1070,7 +1196,15 @@ def enviar_informacion_completa(numero_cliente):
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
-    if request.args.get('hub.verify_token') == VERIFY_TOKEN:
+    # Obtener el host desde los headers para determinar qué verify token usar
+    host = request.headers.get('Host', '')
+    
+    if 'laporfirianna' in host:
+        verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
+    else:
+        verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
+    
+    if request.args.get('hub.verify_token') == verify_token:
         return request.args.get('hub.challenge')
     return 'Token inválido', 403
 
@@ -1089,6 +1223,8 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+
+        config = obtener_configuracion_numero(numero)
         
         app.logger.info(f"📱 Mensaje recibido de: {numero}")
         app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
@@ -1191,7 +1327,7 @@ def webhook():
                 try:
                     imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
                     
-                    conn = get_db_connection()
+                    conn = get_db_connection(config)
                     cursor = conn.cursor()
                     
                     # Eliminar duplicados
@@ -1224,7 +1360,7 @@ def webhook():
         
         # Asegurar que el contacto exista
         try:
-            conn = get_db_connection()
+            conn = get_db_connection(config)
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT IGNORE INTO contactos (numero_telefono, plataforma)
@@ -1383,33 +1519,6 @@ def obtener_imagen_perfil_whatsapp(numero):
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
     
-def obtener_imagen_perfil_alternativo(numero):
-    """Método alternativo para obtener la imagen de perfil"""
-    try:
-        # Intentar con el endpoint específico para contactos      
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
-        
-        params = {
-            'fields': 'profile_picture_url',
-            'user_numbers': f'[{numero}]',
-            'access_token': WHATSAPP_TOKEN
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and len(data['data']) > 0:
-                contacto = data['data'][0]
-                if 'profile_picture_url' in contacto:
-                    return contacto['profile_picture_url']
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en método alternativo: {e}")
-        return None
-    
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
@@ -1452,8 +1561,8 @@ def home():
     )
 
 @app.route('/chats')
-def ver_chats():
-    conn = get_db_connection()
+def ver_chats(config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute("""
@@ -1487,8 +1596,8 @@ def ver_chats():
     )
 
 @app.route('/chats/<numero>')
-def ver_chat(numero):
-    conn = get_db_connection()
+def ver_chat(numero, config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     # CONSULTA ACTUALIZADA - USAR PRIORIDAD
@@ -1533,10 +1642,11 @@ def ver_chat(numero):
         selected=numero, 
         IA_ESTADOS=IA_ESTADOS
     )        
+
 @app.route('/toggle_ai/<numero>', methods=['POST'])
-def toggle_ai(numero):
+def toggle_ai(numero, config=None):
     try:
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor()
 
         # Cambiar el valor (si es 1 pasa a 0, si es 0 pasa a 1)
@@ -1556,8 +1666,6 @@ def toggle_ai(numero):
 
     return redirect(url_for('ver_chat', numero=numero))
 
-
-
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
         try:
@@ -1575,7 +1683,7 @@ def enviar_manual():
             enviar_mensaje(numero, texto)
             
             # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
-            conn = get_db_connection()
+            conn = get_db_connection(config)
             cursor = conn.cursor()
             
             timestamp_utc = datetime.utcnow()
@@ -1610,8 +1718,8 @@ def enviar_manual():
         return redirect(url_for('ver_chat', numero=numero))
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
-def eliminar_chat(numero):
-    conn = get_db_connection()
+def eliminar_chat(numero, config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor()
     
     # Solo eliminar conversaciones, NO contactos
@@ -1631,6 +1739,7 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
+
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
         if tab not in ['negocio','personalizacion']:
@@ -1684,6 +1793,7 @@ def configuracion_precio_editar(pid):
             precios=precios,
             precio_edit=precio_edit
         )
+
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
         data = request.form.to_dict()
@@ -1727,9 +1837,10 @@ def configuracion_precio_borrar(pid):
         return redirect(url_for('configuracion_precios'))
 
     # ——— Kanban ———
+
 @app.route('/kanban')
-def ver_kanban():
-    conn = get_db_connection()
+def ver_kanban(config=None):
+    conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
 
     # 1) Cargamos las columnas Kanban
@@ -1773,10 +1884,11 @@ def ver_kanban():
     conn.close()
 
     return render_template('kanban.html', columnas=columnas, chats=chats)     
+
 @app.route('/kanban/mover', methods=['POST'])
-def kanban_mover():
+def kanban_mover(config=None):
         data = request.get_json()
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute(
           "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
@@ -1786,9 +1898,9 @@ def kanban_mover():
         return '', 204
         
 @app.route('/contactos/<numero>/alias', methods=['POST'])
-def guardar_alias_contacto(numero):
+def guardar_alias_contacto(numero, config=None):
         alias = request.form.get('alias','').strip()
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute(
             "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
@@ -1828,8 +1940,9 @@ def test_alerta():
         return "🚀 Test alerta disparada."
 
     # ——— Funciones para Kanban ———
-def obtener_chat_meta(numero):
-        conn = get_db_connection()
+
+def obtener_chat_meta(numero, config=None):
+        conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
         meta = cursor.fetchone()
@@ -1837,9 +1950,9 @@ def obtener_chat_meta(numero):
         conn.close()
         return meta
 
-def inicializar_chat_meta(numero):
+def inicializar_chat_meta(numero, config=None):
         # Asignar automáticamente a la columna "Nuevos" (id=1)
-        conn = get_db_connection()
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id) 
@@ -1850,8 +1963,8 @@ def inicializar_chat_meta(numero):
         cursor.close()
         conn.close()
 
-def actualizar_columna_chat(numero, columna_id):
-        conn = get_db_connection()
+def actualizar_columna_chat(numero, columna_id, config=None):
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute("""
             UPDATE chat_meta SET columna_id = %s 
@@ -1881,6 +1994,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta):
         return meta['columna_id'] if meta else 1
 
 @app.route('/test-imagen-personalizada', methods=['GET', 'POST'])
+
 @app.route('/test-imagen')
 def test_imagen():
     """Ruta para probar el procesamiento de imágenes con una URL pública"""
@@ -1901,8 +2015,13 @@ def test_imagen():
             "error": str(e), 
             "status": "error"
         })
+    
 if __name__ == '__main__':
-        # Crear tablas necesarias
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    args = parser.parse_args()
+    
+    # Crear tablas necesarias
     crear_tabla_citas()
     
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=args.port, debug=False)

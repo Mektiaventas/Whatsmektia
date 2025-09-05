@@ -42,7 +42,7 @@ body {
   background-repeat: no-repeat;
   background-size: cover;
   min-height: 100vh;
-  color: var(--text-light);
+  color: var(--text-brand-blue);
 }
 
 /* ========== LAYOUT ========= */
@@ -56,7 +56,7 @@ body {
   position: sticky;
   top: 0;
   width: 240px;
-  height: 100vh;
+  height: 100vh; 
   background: var(--brand-blue);
   color: #fff;
   padding: 24px 16px;
