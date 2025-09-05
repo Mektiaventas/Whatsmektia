@@ -35,7 +35,7 @@ IA_ESTADOS = {}
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
-    '524495486142': {  # Número de Mektia
+    '799540293238176': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -43,8 +43,9 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com'
+        'numero_whatsapp': '524495486142'  # Número asociado
     },
-    '524812372326': {  # Número de La Porfirianna
+    '638096866063629': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
@@ -52,6 +53,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
+        'numero_whatsapp': '524812372326'  # Número asociado
     }
 }
 
@@ -78,8 +80,8 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
     if config is None:
-        # Detectar configuración basada en el host
-        config = obtener_configuracion_por_host()
+        # Usar configuración por defecto (Mektia) cuando no hay contexto específico
+        config = NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
     
@@ -967,13 +969,32 @@ def transcribir_audio_con_openai(audio_file_path):
 
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
-    # Buscar en la configuración multi-tenant
-    for numero_config, config in NUMEROS_CONFIG.items():
-        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
-            return config
-    
-    # Fallback a configuración por defecto (Mektia)
-    return NUMEROS_CONFIG['524495486142']
+    try:
+        app.logger.info(f"🔍 Buscando configuración para número: {numero_whatsapp}")
+        
+        # Normalizar el número (eliminar el + si existe)
+        numero_normalizado = numero_whatsapp.replace('+', '')
+        
+        # Buscar en la configuración multi-tenant por número asociado
+        for config_id, config_data in NUMEROS_CONFIG.items():
+            if config_data.get('numero_whatsapp') == numero_normalizado:
+                app.logger.info(f"✅ Configuración encontrada por número: {config_data.get('dominio', 'desconocido')}")
+                return config_data
+        
+        # Buscar por coincidencia parcial del número
+        for config_id, config_data in NUMEROS_CONFIG.items():
+            if numero_normalizado.endswith(config_data.get('numero_whatsapp', '')):
+                app.logger.info(f"✅ Configuración encontrada por coincidencia parcial: {config_data.get('dominio', 'desconocido')}")
+                return config_data
+        
+        # Fallback a configuración por defecto (Mektia)
+        app.logger.warning(f"⚠️ Número {numero_whatsapp} no encontrado, usando Mektia por defecto")
+        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo configuración por número: {e}")
+        # Fallback extremo a Mektia
+        return NUMEROS_CONFIG['799540293238176']
 
 def obtener_imagen_perfil_alternativo(numero, config = None):
     """Método alternativo para obtener la imagen de perfil"""
@@ -1259,11 +1280,20 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
 
-        # OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE ENVÍA EL MENSAJE
-        config = obtener_configuracion_numero(numero)
+        # 🔍 OBTENER EL PHONE NUMBER ID DEL WEBHOOK
+        metadata = change.get('metadata', {})
+        phone_number_id = metadata.get('phone_number_id')
         
-        app.logger.info(f"📱 Mensaje recibido de: {numero}")
-        app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
+        app.logger.info(f"📱 Phone Number ID del webhook: {phone_number_id}")
+        
+        # 🎯 OBTENER CONFIGURACIÓN CORRECTA USANDO LA NUEVA FUNCIÓN
+        if phone_number_id:
+            config = obtener_configuracion_por_phone_id(phone_number_id)
+        else:
+            # Fallback: usar detección por número de teléfono (función existente)
+            app.logger.warning("⚠️ No se pudo obtener phone_number_id, usando detección por número")
+            config = obtener_configuracion_numero(numero)
+        
         app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
         
         # Detectar tipo de mensaje
@@ -1433,7 +1463,7 @@ def webhook():
                 
                 if cita_id:
                     enviar_confirmacion_cita(numero, info_cita, cita_id)
-                    enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
+                    enviar_alerta_cita_administrador(info_cita, cita_id)
                     app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
                     guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
                     return 'OK', 200
@@ -1559,28 +1589,54 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None 
-    
-def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host de la solicitud"""
-    try:
-        host = request.headers.get('Host', '')
-        app.logger.info(f"🌐 Host detectado: {host}")
+ #............................................................................................   
         
-        if 'laporfirianna' in host:
-            app.logger.info("🔧 Usando configuración de La Porfirianna")
-            return NUMEROS_CONFIG['524812372326']
-        else:
-            app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-            return NUMEROS_CONFIG['524495486142']
-            
-    except RuntimeError:
-        # ⚠️ Fuera de contexto de request - usar configuración por defecto
-        app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-        return NUMEROS_CONFIG['524495486142']
+def obtener_configuracion_por_phone_id(phone_number_id):
+    """
+    Obtiene la configuración basada en el Phone Number ID
+    Args:
+        phone_number_id: El ID del número de teléfono de WhatsApp Business
+    Returns:
+        dict: Configuración correspondiente al phone_number_id
+    """
+    try:
+        app.logger.info(f"🔍 Buscando configuración para Phone ID: {phone_number_id}")
+        
+        # Buscar en la configuración multi-tenant por phone_number_id
+        for config_id, config_data in NUMEROS_CONFIG.items():
+            if config_data.get('phone_number_id') == phone_number_id:
+                app.logger.info(f"✅ Configuración encontrada: {config_data.get('dominio', 'desconocido')}")
+                return config_data
+        
+        # Si no se encuentra, buscar por clave (por si acaso)
+        if phone_number_id in NUMEROS_CONFIG:
+            config = NUMEROS_CONFIG[phone_number_id]
+            app.logger.info(f"✅ Configuración encontrada por clave: {config.get('dominio', 'desconocido')}")
+            return config
+        
+        # Fallback a configuración por defecto (Mektia)
+        app.logger.warning(f"⚠️ Phone ID {phone_number_id} no encontrado, usando Mektia por defecto")
+        return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo configuración por Phone ID: {e}")
+        # Fallback extremo a Mektia
+        return {
+            'phone_number_id': '799540293238176',
+            'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
+            'db_host': os.getenv("MEKTIA_DB_HOST"),
+            'db_user': os.getenv("MEKTIA_DB_USER"),
+            'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
+            'db_name': os.getenv("MEKTIA_DB_NAME"),
+            'dominio': 'mektia.com',
+            'numero_whatsapp': '524495486142'
+        }
 
 @app.route('/home')
 def home():
-    config = obtener_configuracion_por_host()
+    
+    # Usar configuración por defecto para la UI (Mektia)
+    config = NUMEROS_CONFIG['799540293238176']
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
@@ -1624,7 +1680,9 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    config = obtener_configuracion_por_host()
+    
+    # Usar configuración por defecto para la UI (Mektia)
+    config = NUMEROS_CONFIG['799540293238176']
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
@@ -1706,12 +1764,6 @@ def ver_chat(numero, config=None):
         IA_ESTADOS=IA_ESTADOS
     )        
 
-@app.before_request
-def log_configuracion():
-    if request.endpoint and request.endpoint != 'static':
-        host = request.headers.get('Host', '')
-        config = obtener_configuracion_por_host()
-        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | BD: {config['db_name']}")
 
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero, config=None):
