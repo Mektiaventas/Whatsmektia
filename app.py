@@ -44,7 +44,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com',
         'numero_whatsapp': '524495486142'  # Número asociado
-    },
+    },  # ✅ ¡AQUÍ FALTABA LA COMA!
     '638096866063629': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
