@@ -80,8 +80,8 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
     if config is None:
-        # Usar configuración por defecto (Mektia) cuando no hay contexto específico
-        config = NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
+        # ✅ CORREGIDO: Usar obtener_configuracion_por_host() en lugar de hardcodeado
+        config = obtener_configuracion_por_host()
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
     
