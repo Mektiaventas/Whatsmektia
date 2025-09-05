@@ -1,3 +1,5 @@
+# Agrega esto con los otros imports al inicio
+import traceback
 import pytz
 import os
 import logging
@@ -61,6 +63,9 @@ DB_PASSWORD = os.getenv("MEKTIA_DB_PASSWORD")
 DB_NAME = os.getenv("MEKTIA_DB_NAME")
 MI_NUMERO_BOT = os.getenv("MEKTIA_PHONE_NUMBER_ID")
 PHONE_NUMBER_ID = MI_NUMERO_BOT
+# Agrega esto después de las otras variables de configuración
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
 # Diccionario de prefijos a código de país
 PREFIJOS_PAIS = {
@@ -84,11 +89,14 @@ def get_db_connection(config=None):
     )
 
 # ——— Función para enviar mensajes de voz ———
-def enviar_mensaje_voz(numero, audio_url):
+def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
-    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
+    if config is None:
+        config = obtener_configuracion_numero(numero)
+    
+    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
-        'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+        'Authorization': f'Bearer {config['whatsapp_token']}',
         'Content-Type': 'application/json'
     }
     
@@ -109,7 +117,7 @@ def enviar_mensaje_voz(numero, audio_url):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando audio: {e}")
         return False
-
+    
 def texto_a_voz(texto, filename):
     """Convierte texto a audio usando Google TTS"""
     try:
@@ -239,14 +247,6 @@ def get_country_flag(numero):
 
 # ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios']
-
-def get_db_connection():
-    return mysql.connector.connect(
-        host=DB_HOST,
-        user=DB_USER,
-        password=DB_PASSWORD,
-        database=DB_NAME
-    )
 
 @app.route('/kanban/data') 
 def kanban_data(config = None):
@@ -407,7 +407,7 @@ def guardar_cita(info_cita, config=None):
         app.logger.error(f"Error guardando cita: {e}")
         return None
     
-def enviar_confirmacion_cita(numero, info_cita, cita_id):
+def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
     try:
         mensaje_confirmacion = f"""
@@ -429,13 +429,13 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id):
         ¡Gracias por confiar en nosotros! 🙏
         """
         
-        enviar_mensaje(numero, mensaje_confirmacion)
+        enviar_mensaje(numero, mensaje_confirmacion, config)
         app.logger.info(f"✅ Confirmación de cita enviada a {numero}, ID: {cita_id}")
         
     except Exception as e:
         app.logger.error(f"Error enviando confirmación de cita: {e}")
 
-def enviar_alerta_cita_administrador(info_cita, cita_id):
+def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     """Envía alerta al administrador sobre nueva cita"""
     try:
         mensaje_alerta = f"""
@@ -454,8 +454,8 @@ def enviar_alerta_cita_administrador(info_cita, cita_id):
         """
         
         # Enviar a ambos números
-        enviar_mensaje(ALERT_NUMBER, mensaje_alerta)
-        enviar_mensaje("524491182201", mensaje_alerta)
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        enviar_mensaje("524491182201", mensaje_alerta, config)
         
         app.logger.info(f"✅ Alerta de cita enviada a ambos administradores, ID: {cita_id}")
         
@@ -580,15 +580,15 @@ def obtener_historial(numero, limite=10, config=None):
     return list(reversed(rows))
 
 # ——— Función IA con contexto y precios ———
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None):
-    cfg = load_config()
+def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
+    cfg = load_config(config)
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
 
-    precios = obtener_todos_los_precios()
+    precios = obtener_todos_los_precios(config)
     lista_precios = "\n".join(
         f"- {p['servicio']}: {p['precio']} {p['moneda']}"
         for p in precios
@@ -608,7 +608,7 @@ Servicios y tarifas actuales:
 Mantén siempre un tono profesional y conciso.
 """.strip()
 
-    historial = obtener_historial(numero)
+    historial = obtener_historial(numero, config=config)  # ✅ Pasar config
     messages_chain = [{'role': 'system', 'content': system_prompt}]
     
     # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
@@ -972,24 +972,13 @@ def obtener_imagen_perfil_alternativo(numero):
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
-def enviar_mensaje(numero, texto):
+def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_numero(numero)
     
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config['whatsapp_token']}',
-        'Content-Type': 'application/json'
-    }
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': numero,
-        'type': 'text',
-        'text': {'body': texto}
-    }
-    url = f"https://graph.facebook.com/v23.0/{MI_NUMERO_BOT}/messages"
-    headers = {
-        'Authorization': f'Bearer {WHATSAPP_TOKEN}',
         'Content-Type': 'application/json'
     }
     payload = {
@@ -1009,7 +998,7 @@ def enviar_mensaje(numero, texto):
     except Exception as e:
         app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
 
-def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False):
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False, config=None):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
         mensaje = '[Mensaje vacío]'
@@ -1029,7 +1018,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     else:
         tipo_mensaje = 'texto'
     
-    conn = get_db_connection(config=None)
+    conn = get_db_connection(config)
     cursor = conn.cursor()
 
     cursor.execute('''
@@ -1128,7 +1117,7 @@ def resumen_rafa(numero,config=None):
     
     return resumen
     
-def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
+def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     mensaje += f"👤 *Cliente:* {numero_cliente}\n"
@@ -1140,9 +1129,9 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen):
     mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
     
     # Enviar mensaje normal (sin template) a tu número personal
-    enviar_mensaje(ALERT_NUMBER, mensaje)
+    enviar_mensaje(ALERT_NUMBER, mensaje, config)
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
-    
+
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
     try:
@@ -1224,10 +1213,12 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
 
+        # OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE ENVÍA EL MENSAJE
         config = obtener_configuracion_numero(numero)
         
         app.logger.info(f"📱 Mensaje recibido de: {numero}")
         app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
+        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
         
         # Detectar tipo de mensaje
         es_imagen = False
@@ -1251,8 +1242,8 @@ def webhook():
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
                 texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
-                enviar_mensaje(numero, texto)
-                guardar_conversacion(numero, texto, "Error al procesar imagen", False, None)
+                enviar_mensaje(numero, texto, config)
+                guardar_conversacion(numero, texto, "Error al procesar imagen", False, None, config=config)
                 return 'OK', 200
             
             if 'caption' in msg['image']:
@@ -1375,14 +1366,14 @@ def webhook():
         # Consultas de precio
         if texto.lower().startswith('precio de '):
             servicio = texto[10:].strip()
-            info = obtener_precio(servicio)
+            info = obtener_precio(servicio, config)
             if info:
                 precio, moneda = info
                 respuesta = f"El precio de *{servicio}* es {precio} {moneda}."
             else:
                 respuesta = f"No encontré tarifa para *{servicio}*."
-            enviar_mensaje(numero, respuesta)
-            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None)
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None, config=config)
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
@@ -1392,13 +1383,13 @@ def webhook():
             info_cita = extraer_info_cita(texto, numero)
             
             if info_cita:
-                cita_id = guardar_cita(info_cita)
+                cita_id = guardar_cita(info_cita, config)
                 
                 if cita_id:
                     enviar_confirmacion_cita(numero, info_cita, cita_id)
                     enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
                     app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
-                    guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}")
+                    guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
                     return 'OK', 200
                 else:
                     app.logger.error("❌ Error guardando cita en BD")
@@ -1420,7 +1411,7 @@ def webhook():
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
             
             # Obtener respuesta de IA
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion_audio)
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion_audio, config)
             
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
             if responder_con_voz:
@@ -1434,40 +1425,40 @@ def webhook():
                     
                     if enviar_mensaje_voz(numero, audio_url_publica):
                         app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True)
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True, config=config)
                     else:
                         # Fallback a texto
-                        enviar_mensaje(numero, respuesta)
+                        enviar_mensaje(numero, respuesta, config)
                         app.logger.info(f"✅ Fallback a texto enviado a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local)
+                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, config=config)
                 else:
                     # Fallback a texto
-                    enviar_mensaje(numero, respuesta)
+                    enviar_mensaje(numero, respuesta, config)
                     app.logger.info(f"✅ Fallback a texto (error TTS) enviado a {numero}")
-                    guardar_conversacion(numero, texto, respuesta, es_imagen, None)
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, None, config=config)
             else:
                 # Respuesta normal de texto
-                enviar_mensaje(numero, respuesta)
+                enviar_mensaje(numero, respuesta, config)
                 app.logger.info(f"✅ Respuesta de texto enviada a {numero}")
                 
                 if es_audio:
-                    guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url, es_audio=True)
+                    guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url, es_audio=True, config=config)
                 else:
-                    guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url)
+                    guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
             
             # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA
             if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
-                resumen = resumen_rafa(numero)
+                resumen = resumen_rafa(numero, config)
                 enviar_alerta_humana(numero, texto, resumen)
-                enviar_informacion_completa(numero)
+                enviar_informacion_completa(numero, config)
         
         # KANBAN AUTOMÁTICO
-        meta = obtener_chat_meta(numero)
+        meta = obtener_chat_meta(numero, config)
         if not meta:
-            inicializar_chat_meta(numero)
+            inicializar_chat_meta(numero, config)
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
-        actualizar_columna_chat(numero, nueva_columna)
+        actualizar_columna_chat(numero, nueva_columna, config)
         
         return 'OK', 200
 
@@ -1475,22 +1466,21 @@ def webhook():
         app.logger.error(f"🔴 Error en webhook: {e}")
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
-
+    
 # ——— UI ———
 @app.route('/')
 def inicio():
     return redirect(url_for('home'))
 
 def obtener_imagen_perfil_whatsapp(numero):
-    """Obtiene la URL de la imagen de perfil de WhatsApp CORRECTAMENTE"""
+    """Obtiene la URL de la imagen de perfil de WhatsApp"""
     try:
         # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # ✅ USAR MI_NUMERO_BOT
+        # Usar el endpoint correcto de WhatsApp Business API
         url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
         
-        # ✅ FORMATO CORRECTO
         params = {
             'fields': 'profile_picture',
             'access_token': WHATSAPP_TOKEN
@@ -1505,7 +1495,6 @@ def obtener_imagen_perfil_whatsapp(numero):
         
         if response.status_code == 200:
             data = response.json()
-            # ✅ NUEVA ESTRUCTURA DE RESPUESTA
             if 'profile_picture' in data and 'url' in data['profile_picture']:
                 imagen_url = data['profile_picture']['url']
                 app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
@@ -1513,18 +1502,38 @@ def obtener_imagen_perfil_whatsapp(numero):
             else:
                 app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
         
+        # Fallback al método alternativo
         return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
+        return None 
     
+def obtener_configuracion_por_host():
+    """Obtiene la configuración basada en el host de la solicitud"""
+    host = request.headers.get('Host', '')
+    if 'laporfirianna' in host:
+        return NUMEROS_CONFIG['524812372326']
+    else:
+        return NUMEROS_CONFIG['524495486142']
+
 @app.route('/home')
 def home():
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
+    # Detectar configuración basada en el host
+    host = request.headers.get('Host', '')
+    if 'laporfirianna' in host:
+        config = NUMEROS_CONFIG['524812372326']
+    else:
+        config = NUMEROS_CONFIG['524495486142']
+    
+    period = request.args.get('period', 'week')
+    now = datetime.now()
+    start = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
 
+    conn = get_db_connection(config)  # ✅ Usar config
     conn   = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
