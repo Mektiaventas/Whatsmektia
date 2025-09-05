@@ -35,7 +35,7 @@ IA_ESTADOS = {}
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
-    '5214495486142': {  # Número de Mektia
+    '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -44,7 +44,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com'
     },
-    '5214812372326': {  # Número de La Porfirianna
+    '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
@@ -740,7 +740,7 @@ def obtener_imagen_whatsapp(image_id):
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'Authorization': f'Bearer {'whatsapp_token'}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
@@ -872,7 +872,7 @@ def obtener_audio_whatsapp(audio_id):
         # 1. Obtener la URL del audio con autenticación
         url = f"https://graph.facebook.com/v23.0/{audio_id}"
         headers = {
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}',
+            'Authorization': f'Bearer {'whatsapp_token'}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
@@ -990,7 +990,7 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
         params = {
             'fields': 'profile_picture_url',
             'user_numbers': f'[{numero}]',
-            'access_token': WHATSAPP_TOKEN
+            'access_token': 'whatsapp_token'
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -1534,12 +1534,12 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         
         params = {
             'fields': 'profile_picture',
-            'access_token': WHATSAPP_TOKEN
+            'access_token': 'whatsapp_token'
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {WHATSAPP_TOKEN}'
+            'Authorization': f'Bearer {'whatsapp_token'}'
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
