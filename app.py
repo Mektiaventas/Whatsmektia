@@ -575,7 +575,9 @@ def obtener_precio_por_id(pid, config=None):
     conn.close()
     return row
 
-def obtener_precio(servicio_nombre: str, config=None):
+def obtener_precio(servicio_nombre: str, config):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute("""
@@ -1577,16 +1579,8 @@ def home():
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
     # Detectar configuración basada en el host
-    host = request.headers.get('Host', '')
-    if 'laporfirianna' in host:
-        config = NUMEROS_CONFIG['524812372326']
-    else:
-        config = NUMEROS_CONFIG['524495486142']
-    
     period = request.args.get('period', 'week')
     now = datetime.now()
-    start = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-
     conn = get_db_connection(config)  # ✅ Usar config
     cursor = conn.cursor()
     cursor.execute(
@@ -1862,8 +1856,9 @@ def configuracion_precios():
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-        precios     = obtener_todos_los_precios()
-        precio_edit = obtener_precio_por_id(pid)
+        config = obtener_configuracion_por_host()
+        precios     = obtener_todos_los_precios(config)
+        precio_edit = obtener_precio_por_id(pid, config)
         return render_template('configuracion/precios.html',
             tabs=SUBTABS, active='precios',
             guardado=False,
@@ -1906,7 +1901,8 @@ def configuracion_precio_guardar():
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
-        conn   = get_db_connection()
+        config = obtener_configuracion_por_host()
+        conn   = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute("DELETE FROM precios WHERE id=%s;", (pid,))
         conn.commit()
