@@ -157,7 +157,7 @@ def texto_a_voz(texto, filename,config=None):
         app.logger.error(f"Error en texto a voz: {e}")
         return None
 
-def extraer_info_cita(mensaje, numero):
+def extraer_info_cita(mensaje, numero, config=None):
     """Extrae información de la cita del mensaje usando IA"""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1562,14 +1562,20 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
-    host = request.headers.get('Host', '')
-    app.logger.info(f"🌐 Host detectado: {host}")
-    
-    if 'laporfirianna' in host:
-        app.logger.info("🔧 Usando configuración de La Porfirianna")
-        return NUMEROS_CONFIG['524812372326']
-    else:
-        app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
+    try:
+        host = request.headers.get('Host', '')
+        app.logger.info(f"🌐 Host detectado: {host}")
+        
+        if 'laporfirianna' in host:
+            app.logger.info("🔧 Usando configuración de La Porfirianna")
+            return NUMEROS_CONFIG['524812372326']
+        else:
+            app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
+            return NUMEROS_CONFIG['524495486142']
+            
+    except RuntimeError:
+        # ⚠️ Fuera de contexto de request - usar configuración por defecto
+        app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
         return NUMEROS_CONFIG['524495486142']
 
 @app.route('/home')
