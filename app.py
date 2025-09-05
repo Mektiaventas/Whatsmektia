@@ -248,8 +248,8 @@ def get_db_connection():
         database=DB_NAME
     )
 
-@app.route('/kanban/data', config=None)
-def kanban_data():
+@app.route('/kanban/data') 
+def kanban_data(config = None):
     """Endpoint que devuelve los datos del Kanban en formato JSON"""
     try:
         conn = get_db_connection(config)
