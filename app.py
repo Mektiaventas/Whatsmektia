@@ -78,8 +78,10 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
     if config is None:
-        # Usar configuración por defecto (Mektia)
-        config = NUMEROS_CONFIG['524495486142']
+        # Detectar configuración basada en el host
+        config = obtener_configuracion_por_host()
+    
+    app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
     
     return mysql.connector.connect(
         host=config['db_host'],
@@ -91,6 +93,8 @@ def get_db_connection(config=None):
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     if config is None:
         config = obtener_configuracion_numero(numero)
     
@@ -118,8 +122,10 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
         app.logger.error(f"🔴 Error enviando audio: {e}")
         return False
     
-def texto_a_voz(texto, filename):
+def texto_a_voz(texto, filename,config=None):
     """Convierte texto a audio usando Google TTS"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         from gtts import gTTS
         import os
@@ -153,6 +159,8 @@ def texto_a_voz(texto, filename):
 
 def extraer_info_cita(mensaje, numero):
     """Extrae información de la cita del mensaje usando IA"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         prompt_cita = f"""
         Extrae la información de la cita solicitada en este mensaje: "{mensaje}"
@@ -251,6 +259,7 @@ SUBTABS = ['negocio', 'personalizacion', 'precios']
 @app.route('/kanban/data') 
 def kanban_data(config = None):
     """Endpoint que devuelve los datos del Kanban en formato JSON"""
+    config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -308,6 +317,8 @@ def kanban_data(config = None):
 
 # ——— Configuración en MySQL ———
 def load_config(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
@@ -377,6 +388,8 @@ def crear_tabla_citas(config=None):
 
 def guardar_cita(info_cita, config=None):
     """Guarda la cita en la base de datos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -409,6 +422,8 @@ def guardar_cita(info_cita, config=None):
     
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         mensaje_confirmacion = f"""
         📅 *Confirmación de Cita* - ID: #{cita_id}
@@ -437,6 +452,8 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
 
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     """Envía alerta al administrador sobre nueva cita"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         mensaje_alerta = f"""
         🚨 *NUEVA SOLICITUD DE CITA* - ID: #{cita_id}
@@ -465,6 +482,8 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
 @app.route('/citas')
 def ver_citas(config=None):
     """Endpoint para ver citas pendientes"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
@@ -482,6 +501,8 @@ def ver_citas(config=None):
     return render_template('citas.html', citas=citas)
 
 def save_config(cfg_all, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
 
@@ -522,6 +543,8 @@ def save_config(cfg_all, config=None):
 
 # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute('''
@@ -540,7 +563,10 @@ def obtener_todos_los_precios(config=None):
     conn.close()
     return rows
 
-def obtener_precio_por_id(pid,config=None):
+def obtener_precio_por_id(pid, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute("SELECT * FROM precios WHERE id=%s;", (pid,))
@@ -567,6 +593,8 @@ def obtener_precio(servicio_nombre: str, config=None):
 
 # ——— Memoria de conversación ———
 def obtener_historial(numero, limite=10, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
@@ -581,6 +609,8 @@ def obtener_historial(numero, limite=10, config=None):
 
 # ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     cfg = load_config(config)
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
@@ -943,8 +973,12 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero):
+def obtener_imagen_perfil_alternativo(numero, config = None):
     """Método alternativo para obtener la imagen de perfil"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
     try:
         # Intentar con el endpoint específico para contactos
         phone_number_id = "799540293238176"
@@ -974,7 +1008,8 @@ def obtener_imagen_perfil_alternativo(numero):
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
-        config = obtener_configuracion_numero(numero)
+        config = obtener_configuracion_por_host()
+    app.logger.info(f"📤 Enviando mensaje usando configuración: {config['dominio']}")
     
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
@@ -1017,7 +1052,9 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
         tipo_mensaje = 'audio'
     else:
         tipo_mensaje = 'texto'
-    
+    if config is None:
+        config = obtener_configuracion_por_host()
+
     conn = get_db_connection(config)
     cursor = conn.cursor()
 
@@ -1094,6 +1131,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
     return False
 
 def resumen_rafa(numero,config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     cursor.execute(
@@ -1118,6 +1157,9 @@ def resumen_rafa(numero,config=None):
     return resumen
     
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     mensaje += f"👤 *Cliente:* {numero_cliente}\n"
@@ -1134,6 +1176,8 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         # Obtener información del contacto
         conn = get_db_connection(config)
@@ -1470,10 +1514,15 @@ def webhook():
 # ——— UI ———
 @app.route('/')
 def inicio():
-    return redirect(url_for('home'))
+    config = obtener_configuracion_por_host()
+    return redirect(url_for('home', config=config))
 
-def obtener_imagen_perfil_whatsapp(numero):
+def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
     try:
         # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
@@ -1512,13 +1561,18 @@ def obtener_imagen_perfil_whatsapp(numero):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     host = request.headers.get('Host', '')
+    app.logger.info(f"🌐 Host detectado: {host}")
+    
     if 'laporfirianna' in host:
+        app.logger.info("🔧 Usando configuración de La Porfirianna")
         return NUMEROS_CONFIG['524812372326']
     else:
+        app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
         return NUMEROS_CONFIG['524495486142']
 
 @app.route('/home')
 def home():
+    config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
@@ -1534,7 +1588,6 @@ def home():
     start = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
 
     conn = get_db_connection(config)  # ✅ Usar config
-    conn   = get_db_connection()
     cursor = conn.cursor()
     cursor.execute(
         "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
@@ -1570,7 +1623,8 @@ def home():
     )
 
 @app.route('/chats')
-def ver_chats(config=None):
+def ver_chats():
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
@@ -1652,8 +1706,16 @@ def ver_chat(numero, config=None):
         IA_ESTADOS=IA_ESTADOS
     )        
 
+@app.before_request
+def log_configuracion():
+    if request.endpoint and request.endpoint != 'static':
+        host = request.headers.get('Host', '')
+        config = obtener_configuracion_por_host()
+        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | BD: {config['db_name']}")
+
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero, config=None):
+    config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -1677,6 +1739,9 @@ def toggle_ai(numero, config=None):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
+        config = obtener_configuracion_por_host()
+        conn = get_db_connection(config)
+        # ... código existente ...
         try:
             numero = request.form['numero']
             texto = request.form['texto'].strip()
@@ -1727,7 +1792,8 @@ def enviar_manual():
         return redirect(url_for('ver_chat', numero=numero))
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
-def eliminar_chat(numero, config=None):
+def eliminar_chat(numero):
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
@@ -1751,10 +1817,11 @@ def eliminar_chat(numero, config=None):
 
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
+        config = obtener_configuracion_por_host()
         if tab not in ['negocio','personalizacion']:
             abort(404)
 
-        cfg      = load_config()
+        cfg = load_config(config)
         guardado = False
         if request.method == 'POST':
             if tab == 'negocio':
@@ -1784,7 +1851,8 @@ def configuracion_tab(tab):
 
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
-        precios = obtener_todos_los_precios()
+        config = obtener_configuracion_por_host()
+        precios = obtener_todos_los_precios(config)
         return render_template('configuracion/precios.html',
             tabs=SUBTABS, active='precios',
             guardado=False,
@@ -1805,8 +1873,9 @@ def configuracion_precio_editar(pid):
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
+        config = obtener_configuracion_por_host()
         data = request.form.to_dict()
-        conn   = get_db_connection()
+        conn   = get_db_connection(config)
         cursor = conn.cursor()
         if data.get('id'):
             cursor.execute("""
@@ -1849,6 +1918,7 @@ def configuracion_precio_borrar(pid):
 
 @app.route('/kanban')
 def ver_kanban(config=None):
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
 
@@ -1895,7 +1965,9 @@ def ver_kanban(config=None):
     return render_template('kanban.html', columnas=columnas, chats=chats)     
 
 @app.route('/kanban/mover', methods=['POST'])
-def kanban_mover(config=None):
+def kanban_mover():
+        config = obtener_configuracion_por_host()
+        conn = get_db_connection(config)
         data = request.get_json()
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -1908,6 +1980,7 @@ def kanban_mover(config=None):
         
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
+        config = obtener_configuracion_por_host()
         alias = request.form.get('alias','').strip()
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -1951,6 +2024,8 @@ def test_alerta():
     # ——— Funciones para Kanban ———
 
 def obtener_chat_meta(numero, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
@@ -1973,6 +2048,8 @@ def inicializar_chat_meta(numero, config=None):
         conn.close()
 
 def actualizar_columna_chat(numero, columna_id, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
         conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute("""
@@ -1983,8 +2060,11 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         cursor.close()
         conn.close()
 
-def evaluar_movimiento_automatico(numero, mensaje, respuesta):
-        historial = obtener_historial(numero, limite=5)
+def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+    
+        historial = obtener_historial(numero, limite=5, config=config)
         
         # Si es primer mensaje, mantener en "Nuevos"
         if len(historial) <= 1:
