@@ -1,4 +1,5 @@
 # Agrega esto con los otros imports al inicio
+import uuid  # ✅ Asegúrate de tener esta importación al inicio del archivo
 import traceback
 import pytz
 import os
@@ -80,7 +81,11 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
     if config is None:
-        # ✅ CORREGIDO: Usar obtener_configuracion_por_host() en lugar de hardcodeado
+        # ❌ PROBLEMA: Esto está hardcodeado a Mektia
+        config = NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
+    
+    # ✅ SOLUCIÓN: Debe usar obtener_configuracion_por_host()
+    if config is None:
         config = obtener_configuracion_por_host()
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
@@ -91,7 +96,7 @@ def get_db_connection(config=None):
         password=config['db_password'],
         database=config['db_name']
     )
-
+    
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -736,17 +741,21 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
-def obtener_imagen_whatsapp(image_id):
+def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     try:
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {'whatsapp_token'}',
+            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar token de la configuración
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         app.logger.info(f"🖼️ Obteniendo imagen WhatsApp: {url}")
+        app.logger.info(f"🖼️ Usando token: {config['whatsapp_token'][:10]}...")  # Log parcial del token
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
@@ -765,7 +774,7 @@ def obtener_imagen_whatsapp(image_id):
             
         app.logger.info(f"🖼️ URL de descarga imagen: {download_url}")
         
-        # 3. Descargar la imagen con autenticación
+        # 3. Descargar la imagen con autenticación (usar mismo token)
         image_response = requests.get(download_url, headers=headers, timeout=30)
         
         if image_response.status_code != 200:
@@ -868,17 +877,21 @@ def procesar_mensaje(texto, image_base64=None, filename=None):
         app.logger.error(f"🔴 Error en procesar_mensaje: {str(e)}")
         return "Lo siento, hubo un error al procesar tu mensaje."  
 
-def obtener_audio_whatsapp(audio_id):
+def obtener_audio_whatsapp(audio_id, config=None):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     try:
         # 1. Obtener la URL del audio con autenticación
         url = f"https://graph.facebook.com/v23.0/{audio_id}"
         headers = {
-            'Authorization': f'Bearer {'whatsapp_token'}',
+            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar token de la configuración
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
+        app.logger.info(f"🎵 Usando token: {config['whatsapp_token'][:10]}...")  # Log parcial del token
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
@@ -897,7 +910,7 @@ def obtener_audio_whatsapp(audio_id):
             
         app.logger.info(f"🎵 URL de descarga audio: {download_url}")
         
-        # 3. Descargar el audio con autenticación
+        # 3. Descargar el audio con autenticación (usar mismo token)
         audio_response = requests.get(download_url, headers=headers, timeout=30)
         
         if audio_response.status_code != 200:
@@ -996,22 +1009,21 @@ def obtener_configuracion_numero(numero_whatsapp):
         # Fallback extremo a Mektia
         return NUMEROS_CONFIG['799540293238176']
 
-def obtener_imagen_perfil_alternativo(numero, config = None):
+def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
     if config is None:
         config = obtener_configuracion_por_host()
     
-    conn = get_db_connection(config)
     try:
-        # Intentar con el endpoint específico para contactos
-        phone_number_id = "799540293238176"
+        # ✅ Usar el phone_number_id de la configuración, no hardcodeado
+        phone_number_id = config['phone_number_id']
         
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
             'user_numbers': f'[{numero}]',
-            'access_token': 'whatsapp_token'
+            'access_token': config['whatsapp_token']  # ✅ Usar token de la configuración
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -1313,7 +1325,7 @@ def webhook():
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
             # Obtener imagen
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)  # ✅ Pasar config
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
@@ -1336,7 +1348,7 @@ def webhook():
             app.logger.info(f"🎵 ID de audio: {audio_id}")
             
             # Obtener y transcribir audio
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id)
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)  # ✅ Pasar config
             
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
@@ -1554,22 +1566,21 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    conn = get_db_connection(config)
     try:
         # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Usar el endpoint correcto de WhatsApp Business API
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
+        # ✅ Usar el phone_number_id de la configuración
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
             'fields': 'profile_picture',
-            'access_token': 'whatsapp_token'
+            'access_token': config['whatsapp_token']  # ✅ Usar token de la configuración
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {'whatsapp_token'}'
+            'Authorization': f'Bearer {config['whatsapp_token']}'  # ✅ Usar token de la configuración
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
@@ -1584,11 +1595,11 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
                 app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
         
         # Fallback al método alternativo
-        return obtener_imagen_perfil_alternativo(numero_formateado)
+        return obtener_imagen_perfil_alternativo(numero_formateado, config)
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None 
+        return None
  #............................................................................................   
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
