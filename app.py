@@ -80,9 +80,6 @@ PREFIJOS_PAIS = {
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
-    if config is None:
-        # ❌ PROBLEMA: Esto está hardcodeado a Mektia
-        config = NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
     
     # ✅ SOLUCIÓN: Debe usar obtener_configuracion_por_host()
     if config is None:
