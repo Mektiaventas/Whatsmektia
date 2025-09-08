@@ -1243,6 +1243,16 @@ def webhook_verification():
         return request.args.get('hub.challenge')
     return 'Token inválido', 403
 
+def obtener_configuracion_por_phone_number_id(phone_number_id):
+    """Obtiene la configuración basada en el phone_number_id que recibió el mensaje"""
+    for numero, config in NUMEROS_CONFIG.items():
+        if config['phone_number_id'] == phone_number_id:
+            return config
+    
+    # Fallback a configuración por defecto
+    app.logger.warning(f"⚠️ Phone number ID {phone_number_id} no encontrado en configuración")
+    return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -1259,13 +1269,21 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
 
-        # OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE ENVÍA EL MENSAJE
-        config = obtener_configuracion_numero(numero)
+        # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
+        phone_number_id = change.get('metadata', {}).get('phone_number_id')
         
-        app.logger.info(f"📱 Mensaje recibido de: {numero}")
-        app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
+        # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
+        config = None
+        app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
+        for numero_config, config_data in NUMEROS_CONFIG.items():
+            app.logger.info(f"   ➡️ {numero_config}: {config_data['phone_number_id']}")
+                
+        if not config:
+            # Fallback si no encuentra la configuración
+            app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
+            config = obtener_configuracion_por_host()  # Fallback al host actual
+        
         app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
-        
         # Detectar tipo de mensaje
         es_imagen = False
         es_audio = False
