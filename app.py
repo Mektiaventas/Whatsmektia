@@ -57,7 +57,12 @@ NUMEROS_CONFIG = {
         'numero_whatsapp': '524812372326'  # Número asociado
     }
 }
-
+# Al inicio, después de definir NUMEROS_CONFIG
+for config_id, config in NUMEROS_CONFIG.items():
+    if 'phone_number_id' not in config:
+        config['phone_number_id'] = config_id  # Usar la clave como phone_number_id
+        app.logger.info(f"✅ Añadido phone_number_id a configuración de {config.get('dominio')}")
+        
 # Configuración por defecto (para backward compatibility)
 WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
 DB_HOST = os.getenv("MEKTIA_DB_HOST")
