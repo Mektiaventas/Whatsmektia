@@ -62,7 +62,7 @@ for config_id, config in NUMEROS_CONFIG.items():
     if 'phone_number_id' not in config:
         config['phone_number_id'] = config_id  # Usar la clave como phone_number_id
         app.logger.info(f"✅ Añadido phone_number_id a configuración de {config.get('dominio')}")
-        
+
 # Configuración por defecto (para backward compatibility)
 WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
 DB_HOST = os.getenv("MEKTIA_DB_HOST")
@@ -262,6 +262,23 @@ def detectar_solicitud_cita(mensaje):
             return True
     
     return False
+
+@app.route('/debug-phone-id')
+def debug_phone_id():
+    """Debug endpoint para probar la detección por Phone Number ID"""
+    # Simular diferentes phone_number_ids
+    test_phone_ids = ['799540293238176', '638096866063629', 'invalid_id']
+    
+    results = {}
+    for phone_id in test_phone_ids:
+        config = obtener_configuracion_por_phone_id(phone_id)
+        results[phone_id] = {
+            'config_encontrada': config.get('dominio', 'none'),
+            'db_usada': config.get('db_name', 'none'),
+            'phone_number_id_config': config.get('phone_number_id', 'none')
+        }
+    
+    return jsonify(results)
 
 @app.route('/debug-dominio')
 def debug_dominio():
