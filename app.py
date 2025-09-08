@@ -1015,7 +1015,8 @@ def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     app.logger.info(f"📤 Enviando mensaje usando configuración: {config['dominio']}")
-    
+    app.logger.info(f"📤 Phone Number ID: {config['phone_number_id']}")
+    app.logger.info(f"📤 Token: {config['whatsapp_token'][:10]}...")
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config['whatsapp_token']}',
@@ -1248,8 +1249,12 @@ def webhook_verification():
 
 def obtener_configuracion_por_phone_number_id(phone_number_id):
     """Obtiene la configuración basada en el phone_number_id que recibió el mensaje"""
+    app.logger.info(f"🔍 Buscando configuración para phone_number_id: {phone_number_id}")
+    
     for numero, config in NUMEROS_CONFIG.items():
-        if config['phone_number_id'] == phone_number_id:
+        app.logger.info(f"   ➡️ Comparando: {config['phone_number_id']} == {phone_number_id}")
+        if str(config['phone_number_id']) == str(phone_number_id):
+            app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
             return config
     
     # Fallback a configuración por defecto
@@ -1276,7 +1281,9 @@ def webhook():
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         
                 # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
-        config = None
+        # 🔥 CORRECCIÓN: Obtener la configuración correcta
+        config = obtener_configuracion_por_phone_number_id(phone_number_id)
+        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
         app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
 
         # 🔥 CORRECCIÓN: Buscar y asignar la configuración correcta
