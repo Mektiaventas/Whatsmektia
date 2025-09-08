@@ -36,25 +36,23 @@ IA_ESTADOS = {}
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
-    '524495486142': {  # Número de Mektia (usa el número como clave)
-        'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
+    '799540293238176': {  # Phone Number ID de Mektia
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com',
-        'numero_whatsapp': '524495486142'
+        'numero_whatsapp': '524495486142'  # Número asociado
     },
-    '524812372326': {  # Número de La Porfirianna (usa el número como clave)
-        'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
+    '638096866063629': {  # Phone Number ID de La Porfirianna
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com',
-        'numero_whatsapp': '524812372326'
+        'numero_whatsapp': '524812372326'  # Número asociado
     }
 }
 
@@ -93,7 +91,39 @@ def get_db_connection(config=None):
         password=config['db_password'],
         database=config['db_name']
     )
-    
+
+def obtener_configuracion_por_phone_id(phone_number_id):
+    """
+    Obtiene la configuración basada en el Phone Number ID
+    Args:
+        phone_number_id: El ID del número de teléfono de WhatsApp Business
+    Returns:
+        dict: Configuración correspondiente al phone_number_id
+    """
+    try:
+        app.logger.info(f"🔍 Buscando configuración para Phone ID: {phone_number_id}")
+        
+        # Buscar en la configuración multi-tenant por phone_number_id
+        if phone_number_id in NUMEROS_CONFIG:
+            config = NUMEROS_CONFIG[phone_number_id]
+            app.logger.info(f"✅ Configuración encontrada: {config.get('dominio', 'desconocido')}")
+            return config
+        
+        # Si no se encuentra, buscar por coincidencia parcial
+        for config_id, config_data in NUMEROS_CONFIG.items():
+            if config_data.get('phone_number_id') == phone_number_id:
+                app.logger.info(f"✅ Configuración encontrada por phone_number_id: {config_data.get('dominio', 'desconocido')}")
+                return config_data
+        
+        # Fallback a configuración por defecto (Mektia)
+        app.logger.warning(f"⚠️ Phone ID {phone_number_id} no encontrado, usando Mektia por defecto")
+        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo configuración por Phone ID: {e}")
+        # Fallback extremo a Mektia
+        return NUMEROS_CONFIG['799540293238176']
+
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -999,12 +1029,12 @@ def obtener_configuracion_numero(numero_whatsapp):
         
         # Fallback a configuración por defecto (Mektia)
         app.logger.warning(f"⚠️ Número {numero_whatsapp} no encontrado, usando Mektia por defecto")
-        return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
+        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo configuración por número: {e}")
         # Fallback extremo a Mektia
-        return NUMEROS_CONFIG['524812372326']
+        return NUMEROS_CONFIG['799540293238176']
 
 def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
@@ -1612,12 +1642,12 @@ def obtener_configuracion_por_host():
         
         # Fallback a Mektia por defecto
         app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-        return NUMEROS_CONFIG['524495486142']
+        return NUMEROS_CONFIG['799540293238176']
             
     except RuntimeError:
         # ⚠️ Fuera de contexto de request - usar configuración por defecto
         app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-        return NUMEROS_CONFIG['524495486142']
+        return NUMEROS_CONFIG['799540293238176']
         
 def obtener_configuracion_por_phone_id(phone_number_id):
     """
