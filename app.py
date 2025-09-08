@@ -1732,7 +1732,7 @@ def ver_chats():
         chats=chats, 
         mensajes=None,
         selected=None, 
-        IA_ESTADOS=IA_ESTADOS
+        IA_ESTADOS=IA_ESTADOS,
         tenant_config=config  # ✅ ¡AGREGA ESTO!
     )
 
@@ -1782,7 +1782,7 @@ def ver_chat(numero):
         chats=chats, 
         mensajes=msgs,
         selected=numero, 
-        IA_ESTADOS=IA_ESTADOS
+        IA_ESTADOS=IA_ESTADOS,
         tenant_config=config  # ✅ ¡AGREGA ESTO!
     )        
 
