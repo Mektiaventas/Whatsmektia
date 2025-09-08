@@ -1729,6 +1729,7 @@ def ver_chat(numero, config=None):
         mensajes=msgs,
         selected=numero, 
         IA_ESTADOS=IA_ESTADOS
+        tenant_config=config  # ← 🔥 AÑADE ESTA LÍNEA
     )        
 
 @app.before_request
