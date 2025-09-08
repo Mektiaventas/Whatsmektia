@@ -1680,6 +1680,7 @@ def ver_chats():
         mensajes=None,
         selected=None, 
         IA_ESTADOS=IA_ESTADOS
+        tenant_config=config
     )
 
 @app.route('/chats/<numero>')
