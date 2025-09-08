@@ -740,7 +740,7 @@ def obtener_imagen_whatsapp(image_id):
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {'whatsapp_token'}',
+            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar el token de la configuración,
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
@@ -866,13 +866,13 @@ def procesar_mensaje(texto, image_base64=None, filename=None):
         app.logger.error(f"🔴 Error en procesar_mensaje: {str(e)}")
         return "Lo siento, hubo un error al procesar tu mensaje."  
 
-def obtener_audio_whatsapp(audio_id):
+def obtener_audio_whatsapp(audio_id, config=None):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
     try:
         # 1. Obtener la URL del audio con autenticación
         url = f"https://graph.facebook.com/v23.0/{audio_id}"
         headers = {
-            'Authorization': f'Bearer {'whatsapp_token'}',
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
@@ -1307,7 +1307,7 @@ def webhook():
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
             # Obtener imagen
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
