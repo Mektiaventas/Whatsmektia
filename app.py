@@ -1014,12 +1014,14 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
+    
     app.logger.info(f"📤 Enviando mensaje usando configuración: {config['dominio']}")
     app.logger.info(f"📤 Phone Number ID: {config['phone_number_id']}")
     app.logger.info(f"📤 Token: {config['whatsapp_token'][:10]}...")
+    
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
-        'Authorization': f'Bearer {config['whatsapp_token']}',
+        'Authorization': f'Bearer {config["whatsapp_token"]}',  # 🔥 Corregido: comillas dobles
         'Content-Type': 'application/json'
     }
     payload = {
@@ -1029,16 +1031,15 @@ def enviar_mensaje(numero, texto, config=None):
         'text': {'body': texto}
     }
 
-    app.logger.info("➡️ [WA SEND] URL: %s", url)
-    app.logger.info("➡️ [WA SEND] HEADERS: %s", headers)
-    app.logger.info("➡️ [WA SEND] PAYLOAD: %s", payload)
     try:
         r = requests.post(url, headers=headers, json=payload, timeout=10)
-        app.logger.info("⬅️ [WA SEND] STATUS: %s", r.status_code)
-        app.logger.info("⬅️ [WA SEND] RESPONSE: %s", r.text)
+        app.logger.info(f"⬅️ [WA SEND] STATUS: {r.status_code}")
+        app.logger.info(f"⬅️ [WA SEND] RESPONSE: {r.text}")
+        return r.status_code == 200
     except Exception as e:
-        app.logger.error("🔴 [WA SEND] EXCEPTION: %s", e)
-
+        app.logger.error(f"🔴 [WA SEND] EXCEPTION: {e}")
+        return False
+    
 def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False, config=None):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
