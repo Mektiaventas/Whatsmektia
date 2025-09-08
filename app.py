@@ -1272,19 +1272,25 @@ def webhook():
         # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         
-        # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
+                # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
         config = None
         app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
+
+        # 🔥 CORRECCIÓN: Buscar y asignar la configuración correcta
         for numero_config, config_data in NUMEROS_CONFIG.items():
             app.logger.info(f"   ➡️ {numero_config}: {config_data['phone_number_id']}")
+            if config_data['phone_number_id'] == phone_number_id:
+                config = config_data
+                app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
+                break  # Salir del bucle una vez encontrado
                 
         if not config:
             # Fallback si no encuentra la configuración
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
             config = obtener_configuracion_por_host()  # Fallback al host actual
-        
-        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
-        # Detectar tipo de mensaje
+            app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
+            app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
+                # Detectar tipo de mensaje
         es_imagen = False
         es_audio = False
         imagen_base64 = None
