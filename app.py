@@ -1248,19 +1248,19 @@ def webhook_verification():
         return request.args.get('hub.challenge')
     return 'Token inválido', 403
 
+# Modifica la función obtener_configuracion_por_phone_number_id
 def obtener_configuracion_por_phone_number_id(phone_number_id):
-    """Obtiene la configuración basada en el phone_number_id que recibió el mensaje"""
+    """Obtiene la configuración basada en el phone_number_id"""
     app.logger.info(f"🔍 Buscando configuración para phone_number_id: {phone_number_id}")
     
     for numero, config in NUMEROS_CONFIG.items():
-        app.logger.info(f"   ➡️ Comparando: {config['phone_number_id']} == {phone_number_id}")
         if str(config['phone_number_id']) == str(phone_number_id):
             app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
             return config
     
-    # Fallback a configuración por defecto
-    app.logger.warning(f"⚠️ Phone number ID {phone_number_id} no encontrado en configuración")
-    return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
+    # Si no encuentra, usar configuración por defecto del primer número
+    app.logger.warning(f"⚠️ Phone number ID {phone_number_id} no encontrado, usando default")
+    return list(NUMEROS_CONFIG.values())[0]
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
