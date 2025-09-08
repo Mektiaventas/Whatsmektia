@@ -34,9 +34,10 @@ OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
 
-# ——— Configuración Multi-Tenant ———
+# ——— Configuración Multi-Tenant ——— (ACTUALIZAR ESTO)
 NUMEROS_CONFIG = {
     '799540293238176': {  # Phone Number ID de Mektia
+        'phone_number_id': '799540293238176',  # ✅ AÑADIR ESTO
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
         'db_user': os.getenv("MEKTIA_DB_USER"),
@@ -46,6 +47,7 @@ NUMEROS_CONFIG = {
         'numero_whatsapp': '524495486142'  # Número asociado
     },
     '638096866063629': {  # Phone Number ID de La Porfirianna
+        'phone_number_id': '638096866063629',  # ✅ AÑADIR ESTO
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
@@ -103,13 +105,13 @@ def obtener_configuracion_por_phone_id(phone_number_id):
     try:
         app.logger.info(f"🔍 Buscando configuración para Phone ID: {phone_number_id}")
         
-        # Buscar en la configuración multi-tenant por phone_number_id
+        # ✅ CORREGIR: Buscar por la clave del diccionario (que es el phone_number_id)
         if phone_number_id in NUMEROS_CONFIG:
             config = NUMEROS_CONFIG[phone_number_id]
             app.logger.info(f"✅ Configuración encontrada: {config.get('dominio', 'desconocido')}")
             return config
         
-        # Si no se encuentra, buscar por coincidencia parcial
+        # ✅ BUSCAR EN VALORES por si acaso
         for config_id, config_data in NUMEROS_CONFIG.items():
             if config_data.get('phone_number_id') == phone_number_id:
                 app.logger.info(f"✅ Configuración encontrada por phone_number_id: {config_data.get('dominio', 'desconocido')}")
