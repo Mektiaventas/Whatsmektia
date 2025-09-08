@@ -1,7 +1,21 @@
 {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
+
 {% block content %}
+{% set es_porfirianna = tenant_config.dominio == 'laporfirianna.mektia.com' %}
+{% set negocio_nombre = 'La Porfirianna' if es_porfirianna else 'Mektia' %}
+
+<div class="chat-list-header">
+  <h2>Conversaciones - {{ negocio_nombre }}</h2>
+  <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
+    {{ negocio_nombre }}
+  </span>
+  <span style="font-size: 12px; color: #666; margin-left: 15px;">
+    (Base de datos: {{ tenant_config.db_name }})
+  </span>
+</div>
+
 <div class="chat-list-header">
   <h2>Conversaciones</h2>
 </div>

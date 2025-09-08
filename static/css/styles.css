@@ -1278,3 +1278,30 @@ body {
     background: rgba(30, 30, 47, 0.9) !important;
   }
 }
+
+
+.tenant-badge {
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    margin-left: 15px;
+}
+
+.mektia-badge {
+    background: linear-gradient(45deg, #3498db, #2980b9);
+}
+
+.porfirianna-badge {
+    background: linear-gradient(45deg, #e74c3c, #c0392b);
+}
+
+.chat-list-header {
+    display: flex;
+    align-items: center;
+    padding: 20px;
+    background: #2c3e50;
+    color: white;
+    margin-bottom: 20px;
+}
