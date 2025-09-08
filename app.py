@@ -734,17 +734,20 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
-def obtener_imagen_whatsapp(image_id):
+def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     try:
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar el token de la configuración,
+            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar el token de la configuración
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp: {url}")
+        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp con token: {config['whatsapp_token'][:10]}...")
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
@@ -788,7 +791,7 @@ def obtener_imagen_whatsapp(image_id):
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         return None, None
-
+    
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1330,7 +1333,7 @@ def webhook():
             app.logger.info(f"🎵 ID de audio: {audio_id}")
             
             # Obtener y transcribir audio
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id)
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
             
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
