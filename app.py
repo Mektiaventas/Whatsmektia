@@ -1250,17 +1250,12 @@ def webhook_verification():
 
 # Modifica la función obtener_configuracion_por_phone_number_id
 def obtener_configuracion_por_phone_number_id(phone_number_id):
-    """Obtiene la configuración basada en el phone_number_id"""
-    app.logger.info(f"🔍 Buscando configuración para phone_number_id: {phone_number_id}")
-    
+    """Detecta automáticamente la configuración basada en el phone_number_id recibido"""
     for numero, config in NUMEROS_CONFIG.items():
         if str(config['phone_number_id']) == str(phone_number_id):
-            app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
             return config
-    
-    # Si no encuentra, usar configuración por defecto del primer número
-    app.logger.warning(f"⚠️ Phone number ID {phone_number_id} no encontrado, usando default")
-    return list(NUMEROS_CONFIG.values())[0]
+    # Fallback to default
+    return NUMEROS_CONFIG['524495486142']
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
