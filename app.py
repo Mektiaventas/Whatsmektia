@@ -1,5 +1,4 @@
 # Agrega esto con los otros imports al inicio
-import uuid  # ✅ Asegúrate de tener esta importación al inicio del archivo
 import traceback
 import pytz
 import os
@@ -36,25 +35,23 @@ IA_ESTADOS = {}
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
-    '799540293238176': {  # Número de Mektia
+    '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
-        'dominio': 'mektia.com',
-        'numero_whatsapp': '524495486142'  # Número asociado
-    },  # ✅ ¡AQUÍ FALTABA LA COMA!
-    '638096866063629': {  # Número de La Porfirianna
+        'dominio': 'mektia.com'
+    },
+    '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
-        'dominio': 'laporfirianna.mektia.com',
-        'numero_whatsapp': '524812372326'  # Número asociado
+        'dominio': 'laporfirianna.mektia.com'
     }
 }
 
@@ -80,9 +77,8 @@ PREFIJOS_PAIS = {
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
-    
-    # ✅ SOLUCIÓN: Debe usar obtener_configuracion_por_host()
     if config is None:
+        # Detectar configuración basada en el host
         config = obtener_configuracion_por_host()
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
@@ -93,7 +89,7 @@ def get_db_connection(config=None):
         password=config['db_password'],
         database=config['db_name']
     )
-    
+
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -738,21 +734,17 @@ Mantén siempre un tono profesional y conciso.
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
-def obtener_imagen_whatsapp(image_id, config=None):
+def obtener_imagen_whatsapp(image_id):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
     try:
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar token de la configuración
+            'Authorization': f'Bearer {'whatsapp_token'}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         app.logger.info(f"🖼️ Obteniendo imagen WhatsApp: {url}")
-        app.logger.info(f"🖼️ Usando token: {config['whatsapp_token'][:10]}...")  # Log parcial del token
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
@@ -771,7 +763,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
             
         app.logger.info(f"🖼️ URL de descarga imagen: {download_url}")
         
-        # 3. Descargar la imagen con autenticación (usar mismo token)
+        # 3. Descargar la imagen con autenticación
         image_response = requests.get(download_url, headers=headers, timeout=30)
         
         if image_response.status_code != 200:
@@ -874,21 +866,17 @@ def procesar_mensaje(texto, image_base64=None, filename=None):
         app.logger.error(f"🔴 Error en procesar_mensaje: {str(e)}")
         return "Lo siento, hubo un error al procesar tu mensaje."  
 
-def obtener_audio_whatsapp(audio_id, config=None):
+def obtener_audio_whatsapp(audio_id):
     """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
     try:
         # 1. Obtener la URL del audio con autenticación
         url = f"https://graph.facebook.com/v23.0/{audio_id}"
         headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar token de la configuración
+            'Authorization': f'Bearer {'whatsapp_token'}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
         app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
-        app.logger.info(f"🎵 Usando token: {config['whatsapp_token'][:10]}...")  # Log parcial del token
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
@@ -907,7 +895,7 @@ def obtener_audio_whatsapp(audio_id, config=None):
             
         app.logger.info(f"🎵 URL de descarga audio: {download_url}")
         
-        # 3. Descargar el audio con autenticación (usar mismo token)
+        # 3. Descargar el audio con autenticación
         audio_response = requests.get(download_url, headers=headers, timeout=30)
         
         if audio_response.status_code != 200:
@@ -979,48 +967,30 @@ def transcribir_audio_con_openai(audio_file_path):
 
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
-    try:
-        app.logger.info(f"🔍 Buscando configuración para número: {numero_whatsapp}")
-        
-        # Normalizar el número (eliminar el + si existe)
-        numero_normalizado = numero_whatsapp.replace('+', '')
-        
-        # Buscar en la configuración multi-tenant por número asociado
-        for config_id, config_data in NUMEROS_CONFIG.items():
-            if config_data.get('numero_whatsapp') == numero_normalizado:
-                app.logger.info(f"✅ Configuración encontrada por número: {config_data.get('dominio', 'desconocido')}")
-                return config_data
-        
-        # Buscar por coincidencia parcial del número
-        for config_id, config_data in NUMEROS_CONFIG.items():
-            if numero_normalizado.endswith(config_data.get('numero_whatsapp', '')):
-                app.logger.info(f"✅ Configuración encontrada por coincidencia parcial: {config_data.get('dominio', 'desconocido')}")
-                return config_data
-        
-        # Fallback a configuración por defecto (Mektia)
-        app.logger.warning(f"⚠️ Número {numero_whatsapp} no encontrado, usando Mektia por defecto")
-        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo configuración por número: {e}")
-        # Fallback extremo a Mektia
-        return NUMEROS_CONFIG['799540293238176']
+    # Buscar en la configuración multi-tenant
+    for numero_config, config in NUMEROS_CONFIG.items():
+        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
+            return config
+    
+    # Fallback a configuración por defecto (Mektia)
+    return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero, config=None):
+def obtener_imagen_perfil_alternativo(numero, config = None):
     """Método alternativo para obtener la imagen de perfil"""
     if config is None:
         config = obtener_configuracion_por_host()
     
+    conn = get_db_connection(config)
     try:
-        # ✅ Usar el phone_number_id de la configuración, no hardcodeado
-        phone_number_id = config['phone_number_id']
+        # Intentar con el endpoint específico para contactos
+        phone_number_id = "799540293238176"
         
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
             'user_numbers': f'[{numero}]',
-            'access_token': config['whatsapp_token']  # ✅ Usar token de la configuración
+            'access_token': 'whatsapp_token'
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -1289,20 +1259,11 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
 
-        # 🔍 OBTENER EL PHONE NUMBER ID DEL WEBHOOK
-        metadata = change.get('metadata', {})
-        phone_number_id = metadata.get('phone_number_id')
+        # OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE ENVÍA EL MENSAJE
+        config = obtener_configuracion_numero(numero)
         
-        app.logger.info(f"📱 Phone Number ID del webhook: {phone_number_id}")
-        
-        # 🎯 OBTENER CONFIGURACIÓN CORRECTA USANDO LA NUEVA FUNCIÓN
-        if phone_number_id:
-            config = obtener_configuracion_por_phone_id(phone_number_id)
-        else:
-            # Fallback: usar detección por número de teléfono (función existente)
-            app.logger.warning("⚠️ No se pudo obtener phone_number_id, usando detección por número")
-            config = obtener_configuracion_numero(numero)
-        
+        app.logger.info(f"📱 Mensaje recibido de: {numero}")
+        app.logger.info(f"📦 Tipo de mensaje: {list(msg.keys())}")
         app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
         
         # Detectar tipo de mensaje
@@ -1322,7 +1283,7 @@ def webhook():
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
             # Obtener imagen
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)  # ✅ Pasar config
+            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id)
             
             if not imagen_base64:
                 app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
@@ -1345,7 +1306,7 @@ def webhook():
             app.logger.info(f"🎵 ID de audio: {audio_id}")
             
             # Obtener y transcribir audio
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)  # ✅ Pasar config
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id)
             
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
@@ -1472,7 +1433,7 @@ def webhook():
                 
                 if cita_id:
                     enviar_confirmacion_cita(numero, info_cita, cita_id)
-                    enviar_alerta_cita_administrador(info_cita, cita_id)
+                    enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
                     app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
                     guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
                     return 'OK', 200
@@ -1563,21 +1524,22 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
+    conn = get_db_connection(config)
     try:
         # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # ✅ Usar el phone_number_id de la configuración
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        # Usar el endpoint correcto de WhatsApp Business API
+        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
         
         params = {
             'fields': 'profile_picture',
-            'access_token': config['whatsapp_token']  # ✅ Usar token de la configuración
+            'access_token': 'whatsapp_token'
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {config['whatsapp_token']}'  # ✅ Usar token de la configuración
+            'Authorization': f'Bearer {'whatsapp_token'}'
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
@@ -1592,69 +1554,32 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
                 app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
         
         # Fallback al método alternativo
-        return obtener_imagen_perfil_alternativo(numero_formateado, config)
+        return obtener_imagen_perfil_alternativo(numero_formateado)
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
- #............................................................................................   
+        return None 
+    
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
-        host = request.headers.get('Host', '').lower()
+        host = request.headers.get('Host', '')
         app.logger.info(f"🌐 Host detectado: {host}")
         
-        # Buscar configuración por dominio
-        for config_id, config_data in NUMEROS_CONFIG.items():
-            if config_data.get('dominio', '') in host:
-                app.logger.info(f"✅ Configuración encontrada: {config_data.get('dominio')}")
-                return config_data
-        
-        # Fallback a Mektia por defecto
-        app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-        return NUMEROS_CONFIG['799540293238176']
+        if 'laporfirianna' in host:
+            app.logger.info("🔧 Usando configuración de La Porfirianna")
+            return NUMEROS_CONFIG['524812372326']
+        else:
+            app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
+            return NUMEROS_CONFIG['524495486142']
             
     except RuntimeError:
         # ⚠️ Fuera de contexto de request - usar configuración por defecto
         app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-        return NUMEROS_CONFIG['799540293238176']
-        
-def obtener_configuracion_por_phone_id(phone_number_id):
-    """
-    Obtiene la configuración basada en el Phone Number ID
-    Args:
-        phone_number_id: El ID del número de teléfono de WhatsApp Business
-    Returns:
-        dict: Configuración correspondiente al phone_number_id
-    """
-    try:
-        app.logger.info(f"🔍 Buscando configuración para Phone ID: {phone_number_id}")
-        
-        # Buscar en la configuración multi-tenant por phone_number_id
-        for config_id, config_data in NUMEROS_CONFIG.items():
-            if config_data.get('phone_number_id') == phone_number_id:
-                app.logger.info(f"✅ Configuración encontrada: {config_data.get('dominio', 'desconocido')}")
-                return config_data
-        
-        # Si no se encuentra, buscar por clave (por si acaso)
-        if phone_number_id in NUMEROS_CONFIG:
-            config = NUMEROS_CONFIG[phone_number_id]
-            app.logger.info(f"✅ Configuración encontrada por clave: {config.get('dominio', 'desconocido')}")
-            return config
-        
-        # Fallback a configuración por defecto (Mektia)
-        app.logger.warning(f"⚠️ Phone ID {phone_number_id} no encontrado, usando Mektia por defecto")
-        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo configuración por Phone ID: {e}")
-        # Fallback extremo a Mektia
-        return NUMEROS_CONFIG['799540293238176']
+        return NUMEROS_CONFIG['524495486142']
 
 @app.route('/home')
 def home():
-    
-    # Usar configuración por defecto para la UI (Mektia)
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
     now    = datetime.now()
@@ -1699,8 +1624,6 @@ def home():
 
 @app.route('/chats')
 def ver_chats():
-    
-    # Usar configuración por defecto para la UI (Mektia)
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
@@ -1733,12 +1656,10 @@ def ver_chats():
         mensajes=None,
         selected=None, 
         IA_ESTADOS=IA_ESTADOS
-        tenant_config=config  # ✅ ¡AGREGA ESTO!
     )
 
 @app.route('/chats/<numero>')
-def ver_chat(numero):
-    config = obtener_configuracion_por_host()
+def ver_chat(numero, config=None):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
@@ -1783,9 +1704,14 @@ def ver_chat(numero):
         mensajes=msgs,
         selected=numero, 
         IA_ESTADOS=IA_ESTADOS
-        tenant_config=config  # ✅ ¡AGREGA ESTO!
     )        
 
+@app.before_request
+def log_configuracion():
+    if request.endpoint and request.endpoint != 'static':
+        host = request.headers.get('Host', '')
+        config = obtener_configuracion_por_host()
+        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | BD: {config['db_name']}")
 
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero, config=None):
