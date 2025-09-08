@@ -36,7 +36,7 @@ IA_ESTADOS = {}
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
-    '799540293238176': {  # Número de Mektia
+    '524495486142': {  # Número de Mektia (usa el número como clave)
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -44,9 +44,9 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com',
-        'numero_whatsapp': '524495486142'  # Número asociado
-    },  # ✅ ¡AQUÍ FALTABA LA COMA!
-    '638096866063629': {  # Número de La Porfirianna
+        'numero_whatsapp': '524495486142'
+    },
+    '524812372326': {  # Número de La Porfirianna (usa el número como clave)
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
@@ -54,7 +54,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com',
-        'numero_whatsapp': '524812372326'  # Número asociado
+        'numero_whatsapp': '524812372326'
     }
 }
 
@@ -1612,12 +1612,12 @@ def obtener_configuracion_por_host():
         
         # Fallback a Mektia por defecto
         app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-        return NUMEROS_CONFIG['799540293238176']
+        return NUMEROS_CONFIG['524495486142']
             
     except RuntimeError:
         # ⚠️ Fuera de contexto de request - usar configuración por defecto
         app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-        return NUMEROS_CONFIG['799540293238176']
+        return NUMEROS_CONFIG['524495486142']
         
 def obtener_configuracion_por_phone_id(phone_number_id):
     """
