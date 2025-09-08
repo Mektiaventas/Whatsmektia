@@ -999,12 +999,12 @@ def obtener_configuracion_numero(numero_whatsapp):
         
         # Fallback a configuración por defecto (Mektia)
         app.logger.warning(f"⚠️ Número {numero_whatsapp} no encontrado, usando Mektia por defecto")
-        return NUMEROS_CONFIG['799540293238176']  # Mektia por defecto
+        return NUMEROS_CONFIG['524495486142']  # Mektia por defecto
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo configuración por número: {e}")
         # Fallback extremo a Mektia
-        return NUMEROS_CONFIG['799540293238176']
+        return NUMEROS_CONFIG['524812372326']
 
 def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
