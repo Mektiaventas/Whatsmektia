@@ -1679,7 +1679,7 @@ def ver_chats():
         chats=chats, 
         mensajes=None,
         selected=None, 
-        IA_ESTADOS=IA_ESTADOS
+        IA_ESTADOS=IA_ESTADOS,
         tenant_config=config
     )
 
@@ -1728,7 +1728,7 @@ def ver_chat(numero, config=None):
         chats=chats, 
         mensajes=msgs,
         selected=numero, 
-        IA_ESTADOS=IA_ESTADOS
+        IA_ESTADOS=IA_ESTADOS,
         tenant_config=config  # ← 🔥 AÑADE ESTA LÍNEA
     )        
 
