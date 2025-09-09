@@ -613,86 +613,20 @@ def obtener_historial(numero, limite=10, config=None):
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-    cfg = load_config(config)
-    neg = cfg['negocio']
-    ia_nombre = neg.get('ia_nombre', 'Asistente')
-    negocio_nombre = neg.get('negocio_nombre', '')
-    descripcion = neg.get('descripcion', '')
-    que_hace = neg.get('que_hace', '')
-
-    precios = obtener_todos_los_precios(config)
-    lista_precios = "\n".join(
-        f"- {p['servicio']}: {p['precio']} {p['moneda']}"
-        for p in precios
-    )
-
-    system_prompt = f"""
-Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
-Descripción del negocio:
-{descripcion}
-
-Tus responsabilidades:
-{que_hace}
-
-Servicios y tarifas actuales:
-{lista_precios}
-
-Mantén siempre un tono profesional y conciso.
-""".strip()
-
-    historial = obtener_historial(numero, config=config)  # ✅ Pasar config
-    messages_chain = [{'role': 'system', 'content': system_prompt}]
     
-    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
-    for entry in historial:
-        # Solo agregar mensajes de usuario con contenido válido
-        if entry['mensaje'] and str(entry['mensaje']).strip() != '':
-            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        
-        # Solo agregar respuestas de IA con contenido válido
-        if entry['respuesta'] and str(entry['respuesta']).strip() != '':
-            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+    # ... (código existente hasta el try) ...
     
-    # Agregar el mensaje actual (si es válido)
-    if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        if es_imagen and imagen_base64:
-            # Para imágenes: usar base64 en lugar de URL
-            messages_chain.append({
-                'role': 'user',
-                'content': [
-                    {"type": "text", "text": mensaje_usuario},
-                    {
-                        "type": "image_url", 
-                        "image_url": {
-                            "url": imagen_base64,
-                            "detail": "auto"
-                        }
-                    }
-                ]
-            })
-        elif es_audio and transcripcion_audio:
-            # Para audio: incluir la transcripción
-            messages_chain.append({
-                'role': 'user',
-                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
-            })
-        else:
-            # Para texto normal
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
-
     try:
-        if len(messages_chain) <= 1:
-            return "¡Hola! ¿En qué puedo ayudarte hoy?"
-        
-        if es_imagen:
-            # Usar OpenAI para imágenes
+        if es_imagen and imagen_base64:
+            # Usar OpenAI para imágenes con el modelo correcto
             headers = {
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json"
             }
             
+            # Estructura correcta para GPT-4o con imágenes
             payload = {
-                "model": "gpt-4o",
+                "model": "gpt-4o",  # Modelo actualizado
                 "messages": messages_chain,
                 "temperature": 0.7,
                 "max_tokens": 1000,
@@ -732,8 +666,9 @@ Mantén siempre un tono profesional y conciso.
         return 'Lo siento, hubo un error con la IA.'
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
+        app.logger.error(traceback.format_exc())
         return 'Lo siento, hubo un error con la IA.'
-
+    
 def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
     if config is None:
@@ -743,14 +678,13 @@ def obtener_imagen_whatsapp(image_id, config=None):
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',  # ✅ Usar el token de la configuración
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp con token: {config['whatsapp_token'][:10]}...")
+        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
         
         response = requests.get(url, headers=headers, timeout=30)
-        app.logger.info(f"🖼️ Status obtención imagen: {response.status_code}")
         
         if response.status_code != 200:
             app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
@@ -764,8 +698,6 @@ def obtener_imagen_whatsapp(image_id, config=None):
             app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
             return None, None
             
-        app.logger.info(f"🖼️ URL de descarga imagen: {download_url}")
-        
         # 3. Descargar la imagen con autenticación
         image_response = requests.get(download_url, headers=headers, timeout=30)
         
@@ -773,7 +705,10 @@ def obtener_imagen_whatsapp(image_id, config=None):
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 4. Guardar la imagen localmente
+        # 4. Convertir a base64 para OpenAI (formato correcto)
+        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
+        
+        # 5. Guardar la imagen localmente (opcional)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"whatsapp_image_{timestamp}.jpg"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
@@ -781,17 +716,15 @@ def obtener_imagen_whatsapp(image_id, config=None):
         with open(filepath, "wb") as f:
             f.write(image_response.content)
         
-        app.logger.info(f"✅ Imagen guardada: {filepath}")
+        app.logger.info(f"✅ Imagen procesada: {filepath}")
         
-        # 5. Convertir a base64
-        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        
-        return image_base64, filename
+        return f"data:image/jpeg;base64,{image_base64}", filename
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
+        app.logger.error(traceback.format_exc())
         return None, None
-    
+        
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1306,13 +1239,8 @@ def webhook():
         texto = ""
         transcripcion_audio = None
         
-        if 'image' in msg:
-            app.logger.info(f"🖼️ Mensaje de imagen detectado")
-            es_imagen = True
-            image_id = msg['image']['id']
-            app.logger.info(f"🖼️ ID de imagen: {image_id}")
-            
-            # Obtener imagen
+        # En el webhook, después de obtener la imagen:
+        if es_imagen:
             imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)
             
             if not imagen_base64:
@@ -1322,13 +1250,11 @@ def webhook():
                 guardar_conversacion(numero, texto, "Error al procesar imagen", False, None, config=config)
                 return 'OK', 200
             
+            # Usar el texto del caption o un prompt por defecto
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
-                app.logger.info(f"🖼️ Leyenda de imagen: {texto}")
             else:
-                texto = "Analiza esta imagen"
-                app.logger.info(f"🖼️ Sin leyenda, usando texto por defecto")
-                
+                texto = "Analiza esta imagen y describe lo que ves"
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
