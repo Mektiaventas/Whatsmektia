@@ -1299,6 +1299,7 @@ def webhook():
             app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
             app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
                 # Detectar tipo de mensaje
+        # Detectar tipo de mensaje
         es_imagen = False
         es_audio = False
         imagen_base64 = None
@@ -1307,6 +1308,7 @@ def webhook():
         audio_url = None
         texto = ""
         transcripcion_audio = None
+        respuesta = ""  # 🔥 INICIALIZAR RESPUESTA
         
         # En el webhook, después de obtener la imagen:
         if 'image' in msg:
@@ -1323,11 +1325,15 @@ def webhook():
                 texto = msg['image']['caption']
             else:
                 texto = "Analiza esta imagen y describe lo que ves"
-            # En el webhook, después de procesar la imagen:
-            if es_imagen:
-                guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
-            else:
-                guardar_conversacion(numero, texto, respuesta, es_imagen, None, config=config)
+            
+            # 🔥 GENERAR RESPUESTA INMEDIATAMENTE
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, config=config)
+            
+            # 🔥 ENVIAR RESPUESTA
+            enviar_mensaje(numero, respuesta, config)
+            
+            # 🔥 GUARDAR CONVERSACIÓN (esta línea reemplaza la que causaba el error)
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
@@ -1346,6 +1352,15 @@ def webhook():
                     texto = "No pude transcribir el audio"
             else:
                 texto = "No pude procesar el audio"
+            
+            # 🔥 GENERAR RESPUESTA INMEDIATAMENTE
+            respuesta = responder_con_ia(texto, numero, es_audio=False, transcripcion_audio=transcripcion_audio, config=config)
+            
+            # 🔥 ENVIAR RESPUESTA
+            enviar_mensaje(numero, respuesta, config)
+            
+            # 🔥 GUARDAR CONVERSACIÓN
+            guardar_conversacion(numero, texto, respuesta, es_audio, audio_url, config=config)
                 
         elif 'text' in msg:
             app.logger.info(f"📝 Mensaje de texto detectado")
