@@ -658,7 +658,7 @@ Mantén siempre un tono profesional y conciso.
     # Agregar el mensaje actual (si es válido)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
-            # Para imágenes: usar base64 en lugar de URL
+            # ✅ Asegúrate de que imagen_base64 ya incluye el prefijo
             messages_chain.append({
                 'role': 'user',
                 'content': [
@@ -666,7 +666,7 @@ Mantén siempre un tono profesional y conciso.
                     {
                         "type": "image_url", 
                         "image_url": {
-                            "url": imagen_base64,
+                            "url": imagen_base64,  # Ya debería incluir "data:image/jpeg;base64,"
                             "detail": "auto"
                         }
                     }
@@ -1308,17 +1308,16 @@ def webhook():
         transcripcion_audio = None
         
         # En el webhook, después de obtener la imagen:
-        if es_imagen:
+        if 'image' in msg:
+            app.logger.info(f"🖼️ Mensaje de imagen detectado")
+            es_imagen = True
+            image_id = msg['image']['id']
+            app.logger.info(f"🖼️ ID de imagen: {image_id}")
+            
+            # Obtener la imagen
             imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)
             
-            if not imagen_base64:
-                app.logger.error("🔴 No se pudo obtener la imagen, enviando mensaje de error")
-                texto = "No pude procesar la imagen. Por favor, intenta con otra imagen o envía tu consulta como texto."
-                enviar_mensaje(numero, texto, config)
-                guardar_conversacion(numero, texto, "Error al procesar imagen", False, None, config=config)
-                return 'OK', 200
-            
-            # Usar el texto del caption o un prompt por defecto
+            # Usar caption si existe, sino texto por defecto
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
             else:
