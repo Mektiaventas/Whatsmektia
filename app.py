@@ -1550,6 +1550,40 @@ def serve_uploaded_file(filename):
     except FileNotFoundError:
         abort(404)
 
+
+def actualizar_estructura_tabla(config=None):
+    """Actualiza la estructura de la tabla conversaciones para añadir campos nuevos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    try:
+        # Verificar si existe la columna imagen_url
+        cursor.execute("""
+            SELECT COUNT(*) 
+            FROM information_schema.columns 
+            WHERE table_name = 'conversaciones' 
+            AND column_name = 'imagen_url'
+            AND table_schema = DATABASE()
+        """)
+        existe_imagen_url = cursor.fetchone()[0] > 0
+        
+        if not existe_imagen_url:
+            cursor.execute("ALTER TABLE conversaciones ADD COLUMN imagen_url TEXT AFTER transcripcion_audio")
+            app.logger.info("✅ Columna imagen_url añadida a la tabla conversaciones")
+        
+        conn.commit()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando estructura de tabla: {e}")
+        conn.rollback()
+    
+    finally:
+        cursor.close()
+        conn.close()
+
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -2153,5 +2187,6 @@ if __name__ == '__main__':
     
     # Crear tablas necesarias
     crear_tabla_citas()
-    
+    # Llama esta función al inicio de la aplicación
+    actualizar_estructura_tabla()
     app.run(host='0.0.0.0', port=args.port, debug=False)
