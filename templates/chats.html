@@ -134,9 +134,15 @@
                    <!-- Mostrar imagen -->
             <div class="message-image">
                 {% if msg.imagen_url %}
-                  <img src="{{ url_for('serve_uploaded_file', filename=msg.imagen_url.split('/')[-1]) }}"
-                      alt="Imagen enviada" class="chat-image">
-                {% endif %}
+    {% if msg.imagen_url.startswith('data:image') %}
+        <!-- Mostrar directamente desde base64 -->
+        <img src="{{ msg.imagen_url }}" alt="Imagen enviada" class="chat-image">
+    {% else %}
+        <!-- Mostrar desde archivo -->
+        <img src="{{ url_for('serve_uploaded_file', filename=msg.imagen_url) }}"
+             alt="Imagen enviada" class="chat-image">
+    {% endif %}
+{% endif %}
                 {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen y describe lo que ves' %}
                     <p class="image-caption">{{ msg.mensaje }}</p>
                 {% endif %}
