@@ -1317,9 +1317,7 @@ def webhook():
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
-            # Obtener la imagen
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)
-            
+            imagen_base64, imagen_filename = obtener_imagen_whatsapp(image_id, config)
             # Usar caption si existe, sino texto por defecto
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
@@ -1333,7 +1331,7 @@ def webhook():
             enviar_mensaje(numero, respuesta, config)
             
             # 🔥 GUARDAR CONVERSACIÓN (esta línea reemplaza la que causaba el error)
-            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
+            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_filename, config=config)
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
