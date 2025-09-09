@@ -1075,7 +1075,8 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
             timestamp DATETIME,
             tipo_mensaje VARCHAR(10) DEFAULT 'texto',
             contenido_extra TEXT,
-            transcripcion_audio TEXT  -- 🆕 NUEVO CAMPO para guardar transcripción
+            transcripcion_audio TEXT,  -- 🆕 NUEVO CAMPO para guardar transcripción
+            imagen_url TEXT  -- 🆕 NUEVO CAMPO para guardar URL de imagen
         ) ENGINE=InnoDB;
     ''')
 
@@ -1085,8 +1086,8 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     timestamp_utc = datetime.utcnow()
 
     cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio) VALUES (%s, %s, %s, %s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion)
+        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio, imagen_url) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);",
+        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion, contenido_extra if es_imagen else None)  # 🆕 Guardar URL de imagen
     )
 
     conn.commit()
@@ -1322,6 +1323,11 @@ def webhook():
                 texto = msg['image']['caption']
             else:
                 texto = "Analiza esta imagen y describe lo que ves"
+            # En el webhook, después de procesar la imagen:
+            if es_imagen:
+                guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
+            else:
+                guardar_conversacion(numero, texto, respuesta, es_imagen, None, config=config)
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
@@ -1536,6 +1542,14 @@ def webhook():
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
     
+@app.route('/uploads/<filename>')
+def serve_uploaded_file(filename):
+    """Sirve archivos subidos desde el directorio uploads"""
+    try:
+        return send_from_directory(UPLOAD_FOLDER, filename)
+    except FileNotFoundError:
+        abort(404)
+
 # ——— UI ———
 @app.route('/')
 def inicio():
