@@ -613,21 +613,89 @@ def obtener_historial(numero, limite=10, config=None):
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
+    cfg = load_config(config)
+    neg = cfg['negocio']
+    ia_nombre = neg.get('ia_nombre', 'Asistente')
+    negocio_nombre = neg.get('negocio_nombre', '')
+    descripcion = neg.get('descripcion', '')
+    que_hace = neg.get('que_hace', '')
+
+    precios = obtener_todos_los_precios(config)
+    lista_precios = "\n".join(
+        f"- {p['servicio']}: {p['precio']} {p['moneda']}"
+        for p in precios
+    )
+
+    system_prompt = f"""
+Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
+Descripción del negocio:
+{descripcion}
+
+Tus responsabilidades:
+{que_hace}
+
+Servicios y tarifas actuales:
+{lista_precios}
+
+Mantén siempre un tono profesional y conciso.
+""".strip()
+
+    historial = obtener_historial(numero, config=config)
     
-    # ... (código existente hasta el try) ...
+    # 🔥 CORRECCIÓN: Definir messages_chain correctamente
+    messages_chain = [{'role': 'system', 'content': system_prompt}]
     
-    try:
+    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
+    for entry in historial:
+        # Solo agregar mensajes de usuario con contenido válido
+        if entry['mensaje'] and str(entry['mensaje']).strip() != '':
+            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
+        
+        # Solo agregar respuestas de IA con contenido válido
+        if entry['respuesta'] and str(entry['respuesta']).strip() != '':
+            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+    
+    # Agregar el mensaje actual (si es válido)
+    if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
-            # Usar OpenAI para imágenes con el modelo correcto
+            # Para imágenes: usar base64 en lugar de URL
+            messages_chain.append({
+                'role': 'user',
+                'content': [
+                    {"type": "text", "text": mensaje_usuario},
+                    {
+                        "type": "image_url", 
+                        "image_url": {
+                            "url": imagen_base64,
+                            "detail": "auto"
+                        }
+                    }
+                ]
+            })
+        elif es_audio and transcripcion_audio:
+            # Para audio: incluir la transcripción
+            messages_chain.append({
+                'role': 'user',
+                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
+            })
+        else:
+            # Para texto normal
+            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+
+    try:
+        if len(messages_chain) <= 1:
+            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        
+        if es_imagen:
+            # Usar OpenAI para imágenes
             headers = {
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json"
             }
             
-            # Estructura correcta para GPT-4o con imágenes
             payload = {
-                "model": "gpt-4o",  # Modelo actualizado
-                "messages": messages_chain,
+                "model": "gpt-4o",
+                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
                 "temperature": 0.7,
                 "max_tokens": 1000,
             }
@@ -648,7 +716,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             
             payload = {
                 "model": "deepseek-chat",
-                "messages": messages_chain,
+                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
                 "temperature": 0.7,
                 "max_tokens": 2000
             }
@@ -666,9 +734,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         return 'Lo siento, hubo un error con la IA.'
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
-        app.logger.error(traceback.format_exc())
         return 'Lo siento, hubo un error con la IA.'
-    
+        
 def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
     if config is None:
@@ -718,13 +785,14 @@ def obtener_imagen_whatsapp(image_id, config=None):
         
         app.logger.info(f"✅ Imagen procesada: {filepath}")
         
+        # 🔥 FORMATO CORRECTO para OpenAI: data:image/jpeg;base64,{base64_string}
         return f"data:image/jpeg;base64,{image_base64}", filename
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-        
+            
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
