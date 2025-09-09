@@ -76,42 +76,19 @@ PREFIJOS_PAIS = {
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
-# Agrega esto cerca de tus otras configuraciones
-DB_CONFIG = {
-    'pool_name': 'whatsapp_pool',
-    'pool_size': 5,
-    'pool_reset_session': True,
-    'host': DB_HOST,
-    'user': DB_USER,
-    'password': DB_PASSWORD,
-    'database': DB_NAME
-}
-
 def get_db_connection(config=None):
     if config is None:
+        # Detectar configuración basada en el host
         config = obtener_configuracion_por_host()
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
     
-    try:
-        # Usar pool de conexiones
-        return mysql.connector.connect(
-            host=config['db_host'],
-            user=config['db_user'],
-            password=config['db_password'],
-            database=config['db_name'],
-            pool_name='whatsapp_pool',
-            pool_size=5
-        )
-    except mysql.connector.Error as e:
-        app.logger.error(f"🔴 Error de conexión BD: {e}")
-        # Reintentar con conexión simple
-        return mysql.connector.connect(
-            host=config['db_host'],
-            user=config['db_user'],
-            password=config['db_password'],
-            database=config['db_name']
-        )
+    return mysql.connector.connect(
+        host=config['db_host'],
+        user=config['db_user'],
+        password=config['db_password'],
+        database=config['db_name']
+    )
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
@@ -760,24 +737,24 @@ Mantén siempre un tono profesional y conciso.
         return 'Lo siento, hubo un error con la IA.'
         
 def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp y la convierte a base64"""
+    """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        app.logger.info(f"🖼️ Procesando imagen ID: {image_id}")
-        
         # 1. Obtener la URL de la imagen con autenticación
         url = f"https://graph.facebook.com/v23.0/{image_id}"
         headers = {
             'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
         
-        response = requests.get(url, headers=headers, timeout=15)
+        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
+        
+        response = requests.get(url, headers=headers, timeout=30)
         
         if response.status_code != 200:
-            app.logger.error(f"🔴 Error obteniendo metadatos imagen: {response.status_code}")
+            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
             return None, None
         
         # 2. Obtener la URL de descarga real
@@ -785,59 +762,37 @@ def obtener_imagen_whatsapp(image_id, config=None):
         download_url = image_data.get('url')
         
         if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga: {image_data}")
+            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
             return None, None
             
-        # 3. Descargar la imagen
-        image_response = requests.get(download_url, headers=headers, timeout=20)
+        # 3. Descargar la imagen con autenticación
+        image_response = requests.get(download_url, headers=headers, timeout=30)
         
         if image_response.status_code != 200:
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 4. Convertir a base64 para OpenAI
+        # 4. Convertir a base64 para OpenAI (formato correcto)
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         
-        # 5. Opcional: guardar localmente
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"whatsapp_image_{timestamp}.jpg"
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            with open(filepath, "wb") as f:
-                f.write(image_response.content)
-            
-            app.logger.info(f"✅ Imagen guardada: {filename}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo guardar imagen local: {e}")
+        # 5. Guardar la imagen localmente (opcional)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"whatsapp_image_{timestamp}.jpg"
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         
+        with open(filepath, "wb") as f:
+            f.write(image_response.content)
+        
+        app.logger.info(f"✅ Imagen procesada: {filepath}")
+        
+        # 🔥 FORMATO CORRECTO para OpenAI: data:image/jpeg;base64,{base64_string}
         return f"data:image/jpeg;base64,{image_base64}", filename
         
-    except requests.exceptions.Timeout:
-        app.logger.error("🔴 Timeout obteniendo imagen de WhatsApp")
-        return None, None
     except Exception as e:
-        app.logger.error(f"🔴 Error inesperado en obtener_imagen_whatsapp: {str(e)}")
+        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
+        app.logger.error(traceback.format_exc())
         return None, None
-
-# Agrega esta función para manejar conexiones con timeout
-def get_db_connection_with_timeout(config=None, timeout=5):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = mysql.connector.connect(
-            host=config['db_host'],
-            user=config['db_user'],
-            password=config['db_password'],
-            database=config['db_name'],
-            connection_timeout=timeout
-        )
-        return conn
-    except mysql.connector.Error as e:
-        app.logger.error(f"🔴 Timeout conexión BD: {e}")
-        return None  
-
+            
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1393,18 +1348,9 @@ def webhook():
             app.logger.info(f"📝 Texto: {texto}")
             
         else:
-            # Detección más precisa del tipo de mensaje
-            tipo_mensaje = next((key for key in msg.keys() if key not in ['from', 'id', 'timestamp']), "desconocido")
+            tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
+            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
-            
-    if tipo_mensaje == 'image':
-        # Si es imagen pero no se detectó correctamente, procesar como imagen
-        es_imagen = True
-        image_id = msg['image']['id']
-        app.logger.info(f"🖼️ Mensaje de imagen detectado (corrección)")
-        # ... [agrega aquí el código para procesar imágenes]
-    else:
-        texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
 
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
