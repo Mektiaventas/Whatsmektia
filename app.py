@@ -1932,7 +1932,6 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    conn = get_db_connection(config)
     try:
         # Formatear el número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
