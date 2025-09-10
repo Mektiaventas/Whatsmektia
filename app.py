@@ -132,7 +132,7 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.rise_for_status()
+        response.raise_for_status()
         app.logger.info(f"✅ Audio enviado a {numero}")
         return True
     except Exception as e:
@@ -260,7 +260,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.rise_for_status()
+        response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
@@ -322,7 +322,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.rise_for_status()
+        response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
@@ -432,7 +432,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.rise_for_status()
+        response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
@@ -941,7 +941,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             
             app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
             response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            response.rise_for_status()
+            response.raise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
@@ -961,7 +961,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             }
             
             response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.rise_for_status()
+            response.raise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
@@ -1205,7 +1205,7 @@ def transcribir_audio_con_openai(audio_file_path):
             app.logger.info(f"🎵 Respuesta Whisper Status: {response.status_code}")
             app.logger.info(f"🎵 Respuesta Whisper Text: {response.text}")
             
-            response.rise_for_status()
+            response.raise_for_status()
             
             data = response.json()
             return data.get('text', '').strip()
@@ -1398,7 +1398,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.rise_for_status()
+        response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
@@ -1477,7 +1477,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.rise_for_status()
+        response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
