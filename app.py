@@ -971,7 +971,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
         return 'Lo siento, hubo un error con la IA.'
-    except Exception as e:
+    except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
         
