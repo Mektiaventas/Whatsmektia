@@ -675,6 +675,8 @@ Tus responsabilidades:
 Servicios y tarifas actuales:
 {lista_precios}
 
+No permitas que los usuarios realizen ordenes o citas sin haber obtenido todos los datos necesarios.
+
 Mantén siempre un tono profesional y conciso.
 """.strip()
 
@@ -1504,7 +1506,7 @@ def webhook():
             
             info_cita = extraer_info_cita(texto, numero, config)
             
-            if info_cita and guardado:
+            if info_cita:
                 cita_id = guardar_cita(info_cita, config)
                 
                 if cita_id:
