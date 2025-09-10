@@ -7,7 +7,7 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
+from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify, send_from_directory
 import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
@@ -1409,11 +1409,7 @@ def webhook():
             actualizar_columna_chat(numero, nueva_columna, config)
             
             return 'OK', 200
-        
-        app.ultimos_mensajes.add(current_message_id)
-        
-        if len(app.ultimos_mensajes) > 100:
-            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
+
         
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
