@@ -1125,7 +1125,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
         'no entiendo', 'no me queda claro', 'explicame mejor',
         'duda', 'pregunta', 'consultar', 'información', 'hablar con humano',
         'hablar con alguien', 'quiero un humano', 'atención personalizada', 
-        'hablar con un humano'
+        'hablar con un humano', 'quiero hablar con un humano', 'dame tu número',
+        'número de teléfono', 'llamar', 'me marcas', 'te marco'
     ]
     
     for frase in disparadores:
