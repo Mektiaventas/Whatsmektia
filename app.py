@@ -900,7 +900,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     Descripción del negocio:
     {descripcion}
 
-    Tus responsabilidades: 
+    Tus responsabilidades:  
     {que_hace} 
 
     Servicios y tarifas actuales:
