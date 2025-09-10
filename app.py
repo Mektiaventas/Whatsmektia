@@ -829,7 +829,7 @@ Descripción del negocio:
 {descripcion}
 
 Tus responsabilidades:
-{que_hace}
+{que_hace} 
 
 Servicios y tarifas actuales:
 {lista_precios}
