@@ -1124,7 +1124,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
         'contactar con', 'quiero contactar', 'asesor humano',
         'no entiendo', 'no me queda claro', 'explicame mejor',
         'duda', 'pregunta', 'consultar', 'información', 'hablar con humano',
-        'hablar con alguien', 'quiero un humano', 'atención personalizada'
+        'hablar con alguien', 'quiero un humano', 'atención personalizada', 
+        'hablar con un humano'
     ]
     
     for frase in disparadores:
@@ -1172,6 +1173,8 @@ def resumen_rafa(numero,config=None):
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
+
+    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
     
     """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
@@ -1180,6 +1183,8 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
     mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
     mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
+    mensaje += f"{contexto_consulta}\n\n"
     mensaje += f"_________________________________________\n"
     mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
     
@@ -2144,7 +2149,70 @@ def test_imagen():
             "error": str(e), 
             "status": "error"
         })
+
+def obtener_contexto_consulta(numero, config=None):
+    """Obtiene el contexto de la consulta o proyecto del cliente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Obtener los últimos mensajes para entender el contexto
+        cursor.execute("""
+            SELECT mensaje, respuesta 
+            FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp DESC 
+            LIMIT 5
+        """, (numero,))
+        
+        mensajes = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        if not mensajes:
+            return "No hay historial de conversación reciente."
+        
+        # Analizar el contexto de la conversación
+        contexto = ""
+        servicios_clave = [
+            'página web', 'sitio web', 'ecommerce', 'tienda online',
+            'aplicación', 'app', 'software', 'sistema',
+            'marketing', 'seo', 'redes sociales', 'publicidad',
+            'diseño', 'branding', 'logo', 'identidad visual',
+            'hosting', 'dominio', 'mantenimiento', 'soporte'
+        ]
+        
+        # Buscar menciones de servicios/proyectos
+        servicios_mencionados = []
+        for msg in mensajes:
+            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""
+            
+            for servicio in servicios_clave:
+                if servicio in mensaje_texto and servicio not in servicios_mencionados:
+                    servicios_mencionados.append(servicio)
+        
+        if servicios_mencionados:
+            contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
+        
+        # Extraer información específica del último mensaje
+        ultimo_mensaje = mensajes[0]['mensaje'] or ""
+        if len(ultimo_mensaje) > 10:  # Solo si tiene contenido
+            contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
+        
+        # Intentar detectar urgencia o tipo de consulta
+        palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
+        if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
+            contexto += "🚨 *Tono:* Urgente\n"
+        
+        return contexto if contexto else "Contexto no determinado a partir del historial."
+        
+    except Exception as e:
+        app.logger.error(f"Error obteniendo contexto: {e}")
+        return "Error al obtener contexto"
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
