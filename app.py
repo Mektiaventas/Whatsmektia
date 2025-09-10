@@ -1921,6 +1921,28 @@ def webhook():
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
     
+def detectar_solicitud_cita_keywords(mensaje):
+    """
+    Detección rápida por palabras clave de solicitud de cita/pedido
+    """
+    mensaje_lower = mensaje.lower()
+    
+    # Palabras clave para detección de citas/pedidos
+    palabras_clave = [
+        'cita', 'agendar', 'reservar', 'programar', 'consulta', 'sesión',
+        'servicio', 'cotización', 'presupuesto', 'contratar', 'asesoría',
+        'evaluación', 'horario', 'disponibilidad', 'turno', 'ordenar',
+        'pedido', 'encargar', 'comprar', 'menú', 'precio', 'qué tienes',
+        'qué ofrecen', 'quiero', 'necesito', 'me interesa'
+    ]
+    
+    # Verificar si alguna palabra clave está en el mensaje
+    for palabra in palabras_clave:
+        if palabra in mensaje_lower:
+            return True
+    
+    return False
+
 # ——— UI ———
 @app.route('/')
 def inicio():
