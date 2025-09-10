@@ -69,11 +69,7 @@ else:
     soli = "orden"
     servicios_clave = [
             'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
-            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
-            'antojitos', 'antojitos mexicanos', 'comida tradicional', 'comida casera',
-            'comida para eventos', 'comida para fiestas', 'comida para reuniones',
-            'comida para llevar', 'comida para llevar', 'servicio a domicilio', 'delivery',
-            'menú', 'precios', 'horarios', 'ubicación', 'reservaciones', 'eventos',
+            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos'
         ]
 
 # Configuración por defecto (para backward compatibility)
