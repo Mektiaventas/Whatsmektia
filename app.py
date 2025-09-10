@@ -55,6 +55,25 @@ NUMEROS_CONFIG = {
     }
 }
 
+if not NUMEROS_CONFIG['524495486142']:
+    servicios_clave = [
+            'página web', 'sitio web', 'ecommerce', 'tienda online',
+            'aplicación', 'app', 'software', 'sistema',
+            'marketing', 'seo', 'redes sociales', 'publicidad',
+            'diseño', 'branding', 'logo', 'identidad visual',
+            'hosting', 'dominio', 'mantenimiento', 'soporte',
+            'electronica', 'hardware', 'iot', 'internet de las cosas',
+        ]
+else:
+    servicios_clave = [
+            'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
+            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
+            'antojitos', 'antojitos mexicanos', 'comida tradicional', 'comida casera',
+            'comida para eventos', 'comida para fiestas', 'comida para reuniones',
+            'comida para llevar', 'comida para llevar', 'servicio a domicilio', 'delivery',
+            'menú', 'precios', 'horarios', 'ubicación', 'reservaciones', 'eventos',
+        ]
+
 # Configuración por defecto (para backward compatibility)
 WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
 DB_HOST = os.getenv("MEKTIA_DB_HOST")
@@ -2187,14 +2206,8 @@ def obtener_contexto_consulta(numero, config=None):
         
         # Analizar el contexto de la conversación
         contexto = ""
-        servicios_clave = [
-            'página web', 'sitio web', 'ecommerce', 'tienda online',
-            'aplicación', 'app', 'software', 'sistema',
-            'marketing', 'seo', 'redes sociales', 'publicidad',
-            'diseño', 'branding', 'logo', 'identidad visual',
-            'hosting', 'dominio', 'mantenimiento', 'soporte',
-            'electronica', 'hardware', 'iot', 'internet de las cosas',
-        ]
+        
+        
         
         # Buscar menciones de servicios/proyectos
         servicios_mencionados = []
