@@ -222,6 +222,26 @@ def detectar_solicitud_cita(mensaje):
     
     return False
 
+
+@app.route('/debug-images')
+def debug_images():
+    """Página de diagnóstico para ver imágenes guardadas"""
+    images = []
+    try:
+        for filename in os.listdir(UPLOAD_FOLDER):
+            if filename.startswith('whatsapp_image_') and filename.endswith('.jpg'):
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                file_size = os.path.getsize(filepath)
+                images.append({
+                    'name': filename,
+                    'size': file_size,
+                    'url': url_for('serve_uploaded_file', filename=filename)
+                })
+    except Exception as e:
+        app.logger.error(f"Error listando imágenes: {e}")
+    
+    return render_template('debug_images.html', images=images)
+
 @app.route('/debug-dominio')
 def debug_dominio():
     host = request.headers.get('Host', 'desconocido')
@@ -775,7 +795,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
         # 4. Convertir a base64 para OpenAI (formato correcto)
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         
-        # 5. Guardar la imagen localmente (opcional)
+        # 5. Guardar la imagen localmente con nombre único
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"whatsapp_image_{timestamp}.jpg"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
@@ -783,16 +803,16 @@ def obtener_imagen_whatsapp(image_id, config=None):
         with open(filepath, "wb") as f:
             f.write(image_response.content)
         
-        app.logger.info(f"✅ Imagen procesada: {filepath}")
+        app.logger.info(f"✅ Imagen guardada en: {filepath}")
         
-        # 🔥 FORMATO CORRECTO para OpenAI: data:image/jpeg;base64,{base64_string}
+        # 🔥 CORRECCIÓN: Devolver base64 para OpenAI y nombre de archivo para la web
         return f"data:image/jpeg;base64,{image_base64}", filename
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-            
+                
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1309,11 +1329,13 @@ def webhook():
         texto = ""
         transcripcion_audio = None
         respuesta = ""  # 🔥 INICIALIZAR RESPUESTA
+        mensaje_procesado = False
         
         # En el webhook, después de obtener la imagen:
-        if 'image' in msg:
+        if 'image' in msg and not mensaje_procesado:
             app.logger.info(f"🖼️ Mensaje de imagen detectado")
             es_imagen = True
+            mensaje_procesado = True  # 🔥 MARCA COMO PROCESADO
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
@@ -1330,10 +1352,11 @@ def webhook():
             # 🔥 ENVIAR RESPUESTA
             enviar_mensaje(numero, respuesta, config)
             
-            # 🔥 GUARDAR CONVERSACIÓN (esta línea reemplaza la que causaba el error)
+            # 🔥 GUARDAR CONVERSACIÓN
             guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_filename, config=config)
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
+            mensaje_procesado = True  # 🔥 MARCA COMO PROCESADO
             es_audio = True
             audio_id = msg['audio']['id']
             app.logger.info(f"🎵 ID de audio: {audio_id}")
@@ -1360,24 +1383,27 @@ def webhook():
             # 🔥 GUARDAR CONVERSACIÓN
             guardar_conversacion(numero, texto, respuesta, es_audio, audio_url, config=config)
                 
-        elif 'text' in msg:
-            app.logger.info(f"📝 Mensaje de texto detectado")
-            texto = msg['text']['body']
-            app.logger.info(f"📝 Texto: {texto}")
+        elif 'text' in msg and not mensaje_procesado:
+                app.logger.info(f"📝 Mensaje de texto detectado")
+                texto = msg['text']['body']
+                app.logger.info(f"📝 Texto: {texto}")
             
         else:
-            tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
-            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
-            app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
+            if not mensaje_procesado:  # 🔥 SOLO SI NO SE HA PROCESADO
+                tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
+                texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
+                app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
 
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
-        
-        if not hasattr(app, 'ultimos_mensajes'):
-            app.ultimos_mensajes = set()
-        
-        if current_message_id in app.ultimos_mensajes:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+        # 🔥 SI YA SE PROCESÓ EL MENSAJE (imagen/audio), SALIR AQUÍ
+        if mensaje_procesado:
+            # KANBAN AUTOMÁTICO (solo si es necesario)
+            meta = obtener_chat_meta(numero, config)
+            if not meta:
+                inicializar_chat_meta(numero, config)
+            
+            nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
+            actualizar_columna_chat(numero, nueva_columna, config)
+            
             return 'OK', 200
         
         app.ultimos_mensajes.add(current_message_id)
