@@ -235,13 +235,12 @@ def debug_images():
                 images.append({
                     'name': filename,
                     'size': file_size,
-                    'url': url_for('serve_uploaded_file', filename=filename),
-                    'exists': os.path.exists(filepath)
+                    'url': url_for('serve_uploaded_file', filename=filename)
                 })
     except Exception as e:
         app.logger.error(f"Error listando imágenes: {e}")
     
-    return jsonify(images)
+    return render_template('debug_images.html', images=images)
 
 @app.route('/debug-dominio')
 def debug_dominio():
@@ -803,9 +802,6 @@ def obtener_imagen_whatsapp(image_id, config=None):
         
         with open(filepath, "wb") as f:
             f.write(image_response.content)
-
-        app.logger.info(f"✅ Imagen guardada en: {filepath}")
-        app.logger.info(f"✅ URL accesible: {url_for('serve_uploaded_file', filename=filename, _external=True)}")
         
         app.logger.info(f"✅ Imagen guardada en: {filepath}")
         
@@ -1589,18 +1585,10 @@ def webhook():
 def serve_uploaded_file(filename):
     """Sirve archivos subidos desde el directorio uploads"""
     try:
-        # 🔥 AGREGAR LOGGING PARA DEBUG
-        app.logger.info(f"📤 Sirviendo archivo: {filename}")
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        if not os.path.exists(filepath):
-            app.logger.error(f"🔴 Archivo no encontrado: {filepath}")
-            abort(404)
-            
         return send_from_directory(UPLOAD_FOLDER, filename)
     except FileNotFoundError:
-        app.logger.error(f"🔴 Error sirviendo archivo: {filename}")
         abort(404)
+
 
 def actualizar_estructura_tabla(config=None):
     """Actualiza la estructura de la tabla conversaciones para añadir campos nuevos"""
@@ -1782,8 +1770,7 @@ def ver_chats():
     )
 
 @app.route('/chats/<numero>')
-def ver_chat(numero):
-    config = obtener_configuracion_por_host()  # ← Obtener config aquí
+def ver_chat(numero, config=None):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
