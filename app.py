@@ -132,7 +132,7 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
     
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
+        response.rise_for_status()
         app.logger.info(f"✅ Audio enviado a {numero}")
         return True
     except Exception as e:
@@ -260,7 +260,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
+        response.rise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
@@ -322,7 +322,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
+        response.rise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
@@ -335,43 +335,6 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         app.logger.error(f"Error en detección IA de {soli}: {e}")
         # Fallback a detección por keywords si la IA falla
         return detectar_solicitud_cita_keywords(mensaje)
-
-def validar_datos_cita_completos(info_cita, config=None):
-    """
-    Valida que la información de la cita/pedido tenga todos los datos necesarios
-    Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Determinar el tipo de negocio
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
-    datos_requeridos = []
-    
-    # Validar servicio solicitado (siempre requerido)
-    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if es_porfirianna:
-            datos_requeridos.append("qué platillo deseas ordenar")
-        else:
-            datos_requeridos.append("qué servicio necesitas")
-    
-    # Validar fecha (solo requerido para Mektia)
-    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_requeridos.append("fecha preferida")
-    
-    # Validar nombre del cliente (siempre requerido)
-    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_requeridos.append("tu nombre")
-    
-    if datos_requeridos:
-        if es_porfirianna:
-            mensaje_error = f"Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_requeridos)}."
-        else:
-            mensaje_error = f"Para agendar tu cita, necesito que me proporciones: {', '.join(datos_requeridos)}."
-        return False, mensaje_error
-    
-    return True, None
 
 def validar_datos_cita_completos(info_cita, config=None):
     """
@@ -469,7 +432,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
+        response.rise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
@@ -672,11 +635,10 @@ def guardar_cita(info_cita, config=None):
             info_cita.get('telefono'),
             'pendiente'
         ))
-        if info_cita.get('servicio_solicitado') == None:
+        
+        # Corregir esta parte - eliminar la referencia a guardado no definida
+        if info_cita.get('servicio_solicitado') is None:
             app.logger.warning(f"⚠️ Guardando cita sin servicio solicitado: {info_cita}")
-            guardado = False
-        else:
-            guardado = True
 
         conn.commit()
         cita_id = cursor.lastrowid
@@ -688,6 +650,7 @@ def guardar_cita(info_cita, config=None):
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
         return None
+
     
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
@@ -978,7 +941,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             
             app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
             response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
+            response.rise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
@@ -998,7 +961,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             }
             
             response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
+            response.rise_for_status()
             
             data = response.json()
             return data['choices'][0]['message']['content'].strip()
@@ -1018,11 +981,17 @@ def obtener_imagen_whatsapp(image_id, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # 1. Obtener la URL de la imagen con autenticación
-        url = f"https://graph.facebook.com/v23.0/{image_id}"
+        # Usar la configuración correcta
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        
+        params = {
+            'fields': 'profile_picture',
+            'access_token': config['whatsapp_token']  # ← Usar variable de configuración
+        }
+        
         headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {config["whatsapp_token"]}'  # ← Usar variable
         }
         
         app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
@@ -1236,7 +1205,7 @@ def transcribir_audio_con_openai(audio_file_path):
             app.logger.info(f"🎵 Respuesta Whisper Status: {response.status_code}")
             app.logger.info(f"🎵 Respuesta Whisper Text: {response.text}")
             
-            response.raise_for_status()
+            response.rise_for_status()
             
             data = response.json()
             return data.get('text', '').strip()
@@ -1508,7 +1477,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
+        response.rise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
