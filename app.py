@@ -1652,16 +1652,16 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Usar el endpoint correcto de WhatsApp Business API
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
             'fields': 'profile_picture',
-            'access_token': 'whatsapp_token'
+            'access_token': config['whatsapp_token']
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {'whatsapp_token'}'
+            'Authorization': f'Bearer {config['whatsapp_token']}'
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
