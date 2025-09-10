@@ -1128,10 +1128,13 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     conn.close()
 
 # ——— Detección y alerta ———
-def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero, config = None):
+def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
+    """
+    Usa DeepSeek para detectar si el usuario quiere hablar con un humano
+    Devuelve True si la IA detecta que se solicita intervención humana
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    """Detección mejorada que previene loops"""
     
     # ⚠️ EVITAR DETECTAR ALERTAS DEL MISMO SISTEMA
     alertas_sistema = [
@@ -1147,22 +1150,82 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero, config =
     if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201']:
         return False
     
-    # 📋 DETECCIÓN NORMAL (tu código actual)
-    texto = mensaje_usuario.lower()
-    if 'hablar con ' in texto or 'ponme con ' in texto:
+    # Primero verificar con la lista de palabras clave existente (más rápida)
+    if detectar_intervencion_humana_keywords(mensaje_usuario):
         return True
+    
+    # Si no se detectó con keywords, usar IA para análisis semántico
+    try:
+        prompt = f"""
+        Evalúa si el siguiente mensaje indica que el usuario quiere hablar con una persona humana en lugar de un chatbot. 
+        Responde SOLO con "SI" o "NO".
         
+        Mensaje: "{mensaje_usuario}"
+        
+        Considera que podría ser una solicitud de intervención humana si:
+        - Pide explícitamente hablar con una persona, humano, asesor, agente, etc.
+        - Expresa frustración con respuestas automatizadas
+        - Dice que no está obteniendo la ayuda que necesita
+        - Solicita contacto telefónico, número de atención, etc.
+        - Menciona que tiene un problema complejo o urgente
+        - Pide cotización, presupuesto o información comercial específica
+        - Quiere hacer una compra, pedido o transacción
+        - Necesita aclarar dudas técnicas complejas
+        
+        Responde "SI" solo si hay una clara intención de hablar con humano.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,  # Baja temperatura para respuestas más determinísticas
+            "max_tokens": 10
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
+        
+        app.logger.info(f"🔍 IA detectó intervención humana: {respuesta_ia} para mensaje: {mensaje_usuario[:50]}...")
+        
+        return "SI" in respuesta_ia
+        
+    except Exception as e:
+        app.logger.error(f"Error en detección IA de intervención humana: {e}")
+        # Fallback a detección por keywords si la IA falla
+        return detectar_intervencion_humana_keywords(mensaje_usuario)
+    
+def detectar_intervencion_humana_keywords(mensaje_usuario):
+    """
+    Detección basada en palabras clave (versión original mejorada)
+    """
+    texto = mensaje_usuario.lower()
+    
+    # Lista ampliada de palabras clave
     disparadores = [
-        'hablar con persona', 'hablar con asesor', 'hablar con agente',
-        'quiero asesor', 'atención humana', 'soporte técnico',
-        'es urgente', 'necesito ayuda humana', 'presupuesto',
-        'cotización', 'quiero comprar', 'me interesa', 'quiero hablar',
-        'contactar con', 'quiero contactar', 'asesor humano',
-        'no entiendo', 'no me queda claro', 'explicame mejor',
-        'duda', 'pregunta', 'consultar', 'información', 'hablar con humano',
-        'hablar con alguien', 'quiero un humano', 'atención personalizada', 
-        'hablar con un humano', 'quiero hablar con un humano', 'dame tu número',
-        'número de teléfono', 'llamar', 'me marcas', 'te marco'
+        'hablar con persona', 'hablar con asesor', 'hablar con agente', 'hablar con humano',
+        'quiero asesor', 'atención humana', 'soporte técnico', 'soporte humano',
+        'es urgente', 'necesito ayuda humana', 'presupuesto', 'cotización',
+        'quiero comprar', 'me interesa', 'quiero hablar', 'contactar con',
+        'quiero contactar', 'asesor humano', 'no entiendo', 'no me queda claro',
+        'explicame mejor', 'duda', 'pregunta', 'consultar', 'información',
+        'hablar con alguien', 'quiero un humano', 'atención personalizada',
+        'hablar con un humano', 'dame tu número', 'número de teléfono', 'llamar',
+        'me marcas', 'te marco', 'representante', 'ejecutivo', 'vendedor',
+        'asesoría', 'no resuelve', 'no solucionas', 'problema complejo',
+        'quiero ordenar', 'hacer pedido', 'realizar compra', 'quiero pagar',
+        'no me ayudas', 'no me entiendes', 'quiero que me llames', 'llámame',
+        'necesito que me contacten', 'contacto directo', 'atención directa',
+        'que me llamen', 'hablar por teléfono', 'comunicarme con', 'no es lo que necesito',
+        'no resuelve mi duda', 'no satisface mi necesidad', 'quiero más información',
+        'información detallada', 'necesito asesoría personalizada'
     ]
     
     for frase in disparadores:
@@ -1170,17 +1233,8 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero, config =
             app.logger.info(f"🎯 Detección por palabra clave: {frase}")
             return True
             
-    respuesta = respuesta_ia.lower()
-    canalizaciones = [
-        'te canalizaré', 'asesor te contactará', 'te paso con'
-    ]
-    
-    for tag in canalizaciones:
-        if tag in respuesta:
-            return True
-            
     return False
-
+    
 def resumen_rafa(numero,config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1568,7 +1622,7 @@ def webhook():
             app.logger.info(f"🔍 Verificando intervención humana para {numero}")
             app.logger.info(f"📝 Mensaje: {texto[:100]}...")
             app.logger.info(f"🤖 Respuesta: {respuesta[:100]}...")
-            detectado = detectar_intervencion_humana(texto, respuesta, numero)
+            detectado = detectar_intervencion_humana(texto,numero)
             app.logger.info(f"🎯 Detección resultado: {detectado}")
 
             if detectado and numero != ALERT_NUMBER:
