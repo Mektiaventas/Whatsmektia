@@ -56,6 +56,7 @@ NUMEROS_CONFIG = {
 }
 
 if not NUMEROS_CONFIG['524495486142']:
+    soli = "cita"
     servicios_clave = [
             'página web', 'sitio web', 'ecommerce', 'tienda online',
             'aplicación', 'app', 'software', 'sistema',
@@ -65,6 +66,7 @@ if not NUMEROS_CONFIG['524495486142']:
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]
 else:
+    soli = "orden"
     servicios_clave = [
             'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
             'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
@@ -235,7 +237,13 @@ def detectar_solicitud_cita(mensaje):
         'consulta', 'turno', 'horario', 'agenda', 'programar', 'reservar',
         'agendar', 'solicitar', 'necesito', 'disponibilidad', 'atender',
         'paciente', 'tratamiento', 'terapia', 'sesión', 'evaluación',
-        'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento'
+        'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento', 
+        'orden', 'pedido', 'comprar', 'ordenar', 'hacer un pedido', 'realizar un pedido',
+        'quiero ordenar', 'quiero comprar', 'hacer un encargo', 'encargar',
+        'servicio a domicilio', 'delivery', 'menú', 'precios', 'horarios', 'ubicación', 'reservaciones', 'eventos',
+        'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
+        'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
+        'antojitos', 'antojitos mexicanos', 'comida tradicional', 'comida casera',
     ]
     
     mensaje_lower = mensaje.lower()
@@ -480,7 +488,7 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         config = obtener_configuracion_por_host()
     try:
         mensaje_alerta = f"""
-        🚨 *NUEVA SOLICITUD DE CITA* - ID: #{cita_id}
+        🚨 *NUEVA SOLICITUD DE {soli}* - ID: #{cita_id}
 
         *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
         *Teléfono:* {info_cita.get('telefono')}
