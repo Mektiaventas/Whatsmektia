@@ -1094,7 +1094,9 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     conn.close()
 
 # ——— Detección y alerta ———
-def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
+def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero, config = None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     """Detección mejorada que previene loops"""
     
     # ⚠️ EVITAR DETECTAR ALERTAS DEL MISMO SISTEMA
@@ -1238,8 +1240,8 @@ def enviar_informacion_completa(numero_cliente, config=None):
                 mensaje_completo += f"\n   🤖: {msg['respuesta'][:60]}"
         
         # Enviar mensaje completo a ambos números
-        enviar_mensaje(ALERT_NUMBER, mensaje_completo)  # Número original
-        enviar_mensaje("5214491182201", mensaje_completo)  # Nuevo número
+        enviar_mensaje(ALERT_NUMBER, mensaje_completo, config)  # Número original
+        enviar_mensaje("5214491182201", mensaje_completo, config)  # Nuevo número
         
         app.logger.info(f"📤 Información completa enviada para {numero_cliente} a ambos números")
         
