@@ -111,40 +111,6 @@ def get_db_connection(config=None):
         database=config['db_name']
     )
 
-def generar_mensaje_solicitud_datos(campos_faltantes, datos_actuales):
-    """Genera mensaje para solicitar datos faltantes"""
-    mensajes = {
-        'servicio_solicitado': "📋 *¿Para qué servicio necesitas la cita?*\nPor ejemplo: Consulta médica, Corte de cabello, Masaje, etc.",
-        'fecha_sugerida': "📅 *¿Qué fecha te gustaría?*\nPor favor, escribe la fecha en formato DD/MM/AAAA\nPor ejemplo: 15/12/2024",
-        'hora_sugerida': "⏰ *¿A qué hora prefieres?*\nPor favor, escribe la hora en formato HH:MM\nPor ejemplo: 14:30",
-        'nombre_cliente': "👤 *¿Cuál es tu nombre completo?*"
-    }
-    
-    if not campos_faltantes:
-        return None
-    
-    mensaje = "ℹ️ *Para agendar tu cita necesito algunos datos más:*\n\n"
-    
-    for campo in campos_faltantes:
-        mensaje += f"{mensajes[campo]}\n\n"
-    
-    # Mostrar datos que ya tenemos
-    if any(datos_actuales.values()):
-        mensaje += "📝 *Datos que ya tengo:*\n"
-        if datos_actuales.get('servicio_solicitado'):
-            mensaje += f"• Servicio: {datos_actuales['servicio_solicitado']}\n"
-        if datos_actuales.get('fecha_sugerida'):
-            mensaje += f"• Fecha: {datos_actuales['fecha_sugerida']}\n"
-        if datos_actuales.get('hora_sugerida'):
-            mensaje += f"• Hora: {datos_actuales['hora_sugerida']}\n"
-        if datos_actuales.get('nombre_cliente'):
-            mensaje += f"• Nombre: {datos_actuales['nombre_cliente']}\n"
-    
-    mensaje += "\n💡 *Responde con la información que falta.*"
-    
-    return mensaje
-
-
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -260,76 +226,6 @@ def extraer_info_cita(mensaje, numero, config=None):
     except Exception as e:
         app.logger.error(f"Error extrayendo info de cita: {e}")
         return None
-
-def extraer_datos_de_respuesta(mensaje, campo_solicitado, datos_actuales):
-    """Extrae datos específicos de la respuesta del usuario"""
-    try:
-        if campo_solicitado == 'fecha_sugerida':
-            # Buscar patrones de fecha
-            patrones_fecha = [
-                r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})',  # DD/MM/YYYY
-                r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})',  # YYYY/MM/DD
-                r'(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})'  # 15 de diciembre de 2024
-            ]
-            
-            for patron in patrones_fecha:
-                match = re.search(patron, mensaje, re.IGNORECASE)
-                if match:
-                    if len(match.groups()) == 3:
-                        if patron == patrones_fecha[0]:  # DD/MM/YYYY
-                            dia, mes, anio = match.groups()
-                        elif patron == patrones_fecha[1]:  # YYYY/MM/DD
-                            anio, mes, dia = match.groups()
-                        else:  # texto
-                            dia, mes_texto, anio = match.groups()
-                            meses = {
-                                'enero': '01', 'febrero': '02', 'marzo': '03',
-                                'abril': '04', 'mayo': '05', 'junio': '06',
-                                'julio': '07', 'agosto': '08', 'septiembre': '09',
-                                'octubre': '10', 'noviembre': '11', 'diciembre': '12'
-                            }
-                            mes = meses.get(mes_texto.lower(), '01')
-                        
-                        return f"{anio}-{mes.zfill(2)}-{dia.zfill(2)}"
-        
-        elif campo_solicitado == 'hora_sugerida':
-            # Buscar patrones de hora
-            patrones_hora = [
-                r'(\d{1,2})[:](\d{2})',  # HH:MM
-                r'(\d{1,2})\s*[hH]\s*(\d{2})',  # 14 h 30
-                r'(\d{1,2})\s*(?:am|pm|AM|PM)',  # 2 pm
-            ]
-            
-            for patron in patrones_hora:
-                match = re.search(patron, mensaje, re.IGNORECASE)
-                if match:
-                    if len(match.groups()) == 2:
-                        hora, minuto = match.groups()
-                        return f"{hora.zfill(2)}:{minuto.zfill(2)}"
-                    else:
-                        hora = match.group(1)
-                        if 'pm' in mensaje.lower() and int(hora) < 12:
-                            hora = str(int(hora) + 12)
-                        elif 'am' in mensaje.lower() and int(hora) == 12:
-                            hora = '00'
-                        return f"{hora.zfill(2)}:00"
-        
-        elif campo_solicitado == 'nombre_cliente':
-            # Buscar nombres (palabras con mayúsculas)
-            palabras = mensaje.split()
-            nombres = [p for p in palabras if p.istitle() and len(p) > 2]
-            if nombres:
-                return ' '.join(nombres[:3])  # Tomar hasta 3 palabras como nombre
-        
-        elif campo_solicitado == 'servicio_solicitado':
-            # Usar todo el mensaje como servicio si no hay otro contexto
-            return mensaje.strip()
-            
-    except Exception as e:
-        app.logger.error(f"Error extrayendo datos: {e}")
-    
-    return None
-
 
 def detectar_solicitud_cita(mensaje):
     """Detecta si el mensaje es una solicitud de cita"""
@@ -555,94 +451,7 @@ def guardar_cita(info_cita, config=None):
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
         return None
-
-# Agrega esta función para manejar el estado de la cita
-def obtener_estado_cita(numero, config=None):
-    """Obtiene el estado actual de la cita en progreso"""
-    if config is None:
-        config = obtener_configuracion_por_host()
     
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("""
-        SELECT * FROM citas_pendientes 
-        WHERE numero_cliente = %s AND estado = 'en_progreso'
-        ORDER BY fecha_creacion DESC LIMIT 1
-    """, (numero,))
-    estado = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return estado
-
-def guardar_estado_cita(numero, datos_cita, config=None):
-    """Guarda o actualiza el estado de la cita en progreso"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    # Crear tabla para citas pendientes si no existe
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS citas_pendientes (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero_cliente VARCHAR(20),
-            servicio_solicitado VARCHAR(200),
-            fecha_propuesta DATE,
-            hora_propuesta TIME,
-            nombre_cliente VARCHAR(100),
-            telefono VARCHAR(20),
-            estado ENUM('en_progreso', 'completada') DEFAULT 'en_progreso',
-            datos_faltantes TEXT,
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
-            fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    
-    # Verificar si ya existe una cita en progreso
-    cursor.execute("SELECT id FROM citas_pendientes WHERE numero_cliente = %s AND estado = 'en_progreso'", (numero,))
-    existe = cursor.fetchone()
-    
-    if existe:
-        # Actualizar cita existente
-        cursor.execute('''
-            UPDATE citas_pendientes SET
-                servicio_solicitado = COALESCE(%s, servicio_solicitado),
-                fecha_propuesta = COALESCE(%s, fecha_propuesta),
-                hora_propuesta = COALESCE(%s, hora_propuesta),
-                nombre_cliente = COALESCE(%s, nombre_cliente),
-                telefono = COALESCE(%s, telefono),
-                fecha_actualizacion = NOW()
-            WHERE numero_cliente = %s AND estado = 'en_progreso'
-        ''', (
-            datos_cita.get('servicio_solicitado'),
-            datos_cita.get('fecha_sugerida'),
-            datos_cita.get('hora_sugerida'),
-            datos_cita.get('nombre_cliente'),
-            datos_cita.get('telefono'),
-            numero
-        ))
-    else:
-        # Insertar nueva cita
-        cursor.execute('''
-            INSERT INTO citas_pendientes (
-                numero_cliente, servicio_solicitado, fecha_propuesta,
-                hora_propuesta, nombre_cliente, telefono, estado
-            ) VALUES (%s, %s, %s, %s, %s, %s, 'en_progreso')
-        ''', (
-            numero,
-            datos_cita.get('servicio_solicitado'),
-            datos_cita.get('fecha_sugerida'),
-            datos_cita.get('hora_sugerida'),
-            datos_cita.get('nombre_cliente'),
-            datos_cita.get('telefono')
-        ))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-    
-
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
     if config is None:
@@ -1496,129 +1305,16 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
-# Agrega esta función para procesar respuestas de citas
-def procesar_respuesta_cita(numero, mensaje, estado_cita, config=None):
-    """Procesa las respuestas durante el flujo de agendado de cita"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Obtener campos faltantes actuales
-    datos_actuales = {
-        'servicio_solicitado': estado_cita.get('servicio_solicitado'),
-        'fecha_sugerida': estado_cita.get('fecha_propuesta'),
-        'hora_sugerida': estado_cita.get('hora_propuesta'),
-        'nombre_cliente': estado_cita.get('nombre_cliente')
-    }
-    
-    datos_completos, campos_faltantes = verificar_datos_completos(datos_actuales)
-    
-    if datos_completos:
-        # Todos los datos están completos, agendar cita
-        cita_id = guardar_cita(datos_actuales, config)
-        
-        if cita_id:
-            enviar_confirmacion_cita(numero, datos_actuales, cita_id, config)
-            enviar_alerta_cita_administrador(datos_actuales, cita_id, config)
-            completar_cita_pendiente(numero, estado_cita['id'], config)
-            app.logger.info(f"✅ Cita agendada desde flujo - ID: {cita_id}")
-        else:
-            enviar_mensaje(numero, "❌ Lo siento, hubo un error al agendar tu cita. Por favor, intenta de nuevo.", config)
-        
-        return
-    
-    # Determinar qué campo estamos solicitando actualmente
-    campo_actual = campos_faltantes[0] if campos_faltantes else None
-    
-    if campo_actual:
-        # Extraer dato de la respuesta
-        dato_extraido = extraer_datos_de_respuesta(mensaje, campo_actual, datos_actuales)
-        
-        if dato_extraido:
-            # Actualizar el dato en el estado de la cita
-            datos_actuales[campo_actual] = dato_extraido
-            guardar_estado_cita(numero, datos_actuales, config)
-            
-            # Verificar si ahora están todos los datos
-            datos_completos, nuevos_campos_faltantes = verificar_datos_completos(datos_actuales)
-            
-            if datos_completos:
-                # Agendar cita
-                cita_id = guardar_cita(datos_actuales, config)
-                
-                if cita_id:
-                    enviar_confirmacion_cita(numero, datos_actuales, cita_id, config)
-                    enviar_alerta_cita_administrador(datos_actuales, cita_id, config)
-                    completar_cita_pendiente(numero, estado_cita['id'], config)
-                    app.logger.info(f"✅ Cita agendada desde flujo - ID: {cita_id}")
-                else:
-                    enviar_mensaje(numero, "❌ Lo siento, hubo un error al agendar tu cita. Por favor, intenta de nuevo.", config)
-            else:
-                # Solicitar siguiente campo faltante
-                mensaje_solicitud = generar_mensaje_solicitud_datos(nuevos_campos_faltantes, datos_actuales)
-                if mensaje_solicitud:
-                    enviar_mensaje(numero, mensaje_solicitud, config)
-        else:
-            # No se pudo extraer el dato, pedir de nuevo
-            mensaje_error = f"❌ No pude entender la información. {generar_mensaje_solicitud_datos([campo_actual], datos_actuales)}"
-            enviar_mensaje(numero, mensaje_error, config)
-    else:
-        # Estado inconsistente, reiniciar flujo
-        enviar_mensaje(numero, "Parece que hubo un error con tu solicitud de cita. ¿Podrías empezar de nuevo?", config)
-        completar_cita_pendiente(numero, estado_cita['id'], config)
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
         app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)}")
-        estado_cita = obtener_estado_cita(numero, config)
+        
         entry = payload['entry'][0]
         change = entry['changes'][0]['value']
         mensajes = change.get('messages')
-        if estado_cita:
-            # Continuar con cita en progreso
-            procesar_respuesta_cita(numero, texto, estado_cita, config)
-            return 'OK', 200
-            
-        elif detectar_solicitud_cita(texto):
-            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
-            
-            info_cita = extraer_info_cita(texto, numero, config)
-            
-            if info_cita:
-                # Guardar estado inicial de la cita
-                guardar_estado_cita(numero, info_cita, config)
-                
-                # Verificar datos completos
-                datos_completos, campos_faltantes = verificar_datos_completos(info_cita)
-                
-                if datos_completos:
-                    # Todos los datos están completos, agendar cita
-                    cita_id = guardar_cita(info_cita, config)
-                    
-                    if cita_id:
-                        enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                        enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                        completar_cita_pendiente(numero, estado_cita['id'], config)
-                        app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
-                        guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
-                    else:
-                        enviar_mensaje(numero, "❌ Lo siento, hubo un error al agendar tu cita. Por favor, intenta de nuevo.", config)
-                else:
-                    # Solicitar datos faltantes
-                    mensaje_solicitud = generar_mensaje_solicitud_datos(campos_faltantes, info_cita)
-                    if mensaje_solicitud:
-                        enviar_mensaje(numero, mensaje_solicitud, config)
-                        guardar_conversacion(numero, texto, "Solicitando datos faltantes para cita", config=config)
-            
-            return 'OK', 200
-
-        # ... (resto del código del webhook) ...
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en webhook: {e}")
-        app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
-        return 'Error interno', 500
+        
         if not mensajes:
             return 'OK', 200
             
@@ -2198,18 +1894,6 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
-def completar_cita_pendiente(numero, cita_id, config=None):
-    """Marca una cita pendiente como completada"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE citas_pendientes SET estado = 'completada' WHERE numero_cliente = %s AND id = %s", (numero, cita_id))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
 
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
@@ -2361,17 +2045,6 @@ def ver_kanban(config=None):
     conn.close()
 
     return render_template('kanban.html', columnas=columnas, chats=chats)     
-
-def verificar_datos_completos(datos_cita):
-    """Verifica si todos los datos necesarios para la cita están completos"""
-    campos_requeridos = ['servicio_solicitado', 'fecha_sugerida', 'hora_sugerida', 'nombre_cliente']
-    campos_faltantes = []
-    
-    for campo in campos_requeridos:
-        if not datos_cita.get(campo) or datos_cita[campo] == 'null' or datos_cita[campo] is None:
-            campos_faltantes.append(campo)
-    
-    return len(campos_faltantes) == 0, campos_faltantes
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
