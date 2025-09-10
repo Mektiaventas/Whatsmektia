@@ -1639,7 +1639,7 @@ def actualizar_estructura_tabla(config=None):
 @app.route('/')
 def inicio():
     config = obtener_configuracion_por_host()
-    return redirect(url_for('home'))
+    return redirect(url_for('home', config=config))
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp"""
