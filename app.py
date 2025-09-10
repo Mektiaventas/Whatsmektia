@@ -1180,6 +1180,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     
     # Enviar mensaje normal (sin template) a tu número personal
     enviar_mensaje(ALERT_NUMBER, mensaje, config)
+    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente}")
 
 def enviar_informacion_completa(numero_cliente, config=None):
@@ -1227,7 +1228,7 @@ def enviar_informacion_completa(numero_cliente, config=None):
         
         # Enviar mensaje completo a ambos números
         enviar_mensaje(ALERT_NUMBER, mensaje_completo)  # Número original
-        enviar_mensaje("524491182201", mensaje_completo)  # Nuevo número
+        enviar_mensaje("5214491182201", mensaje_completo)  # Nuevo número
         
         app.logger.info(f"📤 Información completa enviada para {numero_cliente} a ambos números")
         
