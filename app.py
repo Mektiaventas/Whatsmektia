@@ -2185,7 +2185,7 @@ def obtener_contexto_consulta(numero, config=None):
             'aplicación', 'app', 'software', 'sistema',
             'marketing', 'seo', 'redes sociales', 'publicidad',
             'diseño', 'branding', 'logo', 'identidad visual',
-            'hosting', 'dominio', 'mantenimiento', 'soporte'
+            'hosting', 'dominio', 'mantenimiento', 'soporte','gordita'
         ]
         
         # Buscar menciones de servicios/proyectos
