@@ -223,32 +223,197 @@ def extraer_info_cita(mensaje, numero, config=None):
         app.logger.error(f"Error extrayendo info de cita: {e}")
         return None
 
-def detectar_solicitud_cita(mensaje):
-    """Detecta si el mensaje es una solicitud de cita"""
-    palabras_clave = [
-        'agendar cita', 'quiero cita', 'solicitar cita', 'reservar cita',
-        'cita para', 'necesito cita', 'disponibilidad para', 'horario para',
-        'agenda una cita', 'programar cita', 'reservar una cita', 'agendar una cita',
-        'cita', 'consultorio', 'doctor', 'médico', 'servicio', 'atención',
-        'consulta', 'turno', 'horario', 'agenda', 'programar', 'reservar',
-        'agendar', 'solicitar', 'necesito', 'disponibilidad', 'atender',
-        'paciente', 'tratamiento', 'terapia', 'sesión', 'evaluación',
-        'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento', 
-        'orden', 'pedido', 'comprar', 'ordenar', 'hacer un pedido', 'realizar un pedido',
-        'quiero ordenar', 'quiero comprar', 'hacer un encargo', 'encargar',
-        'servicio a domicilio', 'delivery', 'menú', 'precios', 'horarios', 'ubicación', 'reservaciones', 'eventos',
-        'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
-        'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
-        'antojitos', 'antojitos mexicanos', 'comida tradicional', 'comida casera',
-    ]
+def detectar_solicitud_cita_ia(mensaje, numero, config=None):
+    """
+    Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
+    Devuelve True si la IA detecta intención de agendar cita/hacer pedido
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    mensaje_lower = mensaje.lower()
+    # Primero verificar con la lista de palabras clave existente (más rápida)
+    if detectar_solicitud_cita_keywords(mensaje):
+        return True
     
-    for palabra in palabras_clave:
-        if palabra in mensaje_lower:
-            return True
+    # Si no se detectó con keywords, usar IA para análisis semántico
+    try:
+        prompt = f"""
+        Evalúa si el siguiente mensaje indica que el usuario quiere agendar una {soli} o hacer un pedido.
+        Responde SOLO con "SI" o "NO".
+        
+        Mensaje: "{mensaje}"
+        
+        Considera que podría ser una solicitud de {soli} si:
+        - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
+        - Solicita horarios, disponibilidad, turnos
+        - Quiere hacer un pedido, ordenar, comprar, encargar
+        - Pregunta por menú, precios, servicios disponibles
+        - Menciona necesidad de atención, evaluación, asesoría
+        - Solicita información para contratar un servicio
+        - Pide cotización, presupuesto o información comercial
+        
+        Responde "SI" solo si hay una clara intención de agendar {soli} o hacer pedido.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 10
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
+        
+        app.logger.info(f"🔍 IA detectó solicitud de {soli}: {respuesta_ia} para mensaje: {mensaje[:50]}...")
+        
+        return "SI" in respuesta_ia
+        
+    except Exception as e:
+        app.logger.error(f"Error en detección IA de {soli}: {e}")
+        # Fallback a detección por keywords si la IA falla
+        return detectar_solicitud_cita_keywords(mensaje)
+
+def validar_datos_cita_completos(info_cita, config=None):
+    """
+    Valida que la información de la cita tenga todos los datos necesarios
+    Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    datos_requeridos = []
+    
+    # Validar servicio solicitado
+    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
+        datos_requeridos.append("servicio solicitado")
+    
+    # Validar fecha (dependiendo del negocio)
+    if soli == "cita" and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
+        datos_requeridos.append("fecha")
+    
+    # Validar nombre del cliente
+    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
+        datos_requeridos.append("nombre")
+    
+    if datos_requeridos:
+        mensaje_error = f"Para agendar tu {soli}, necesito que me proporciones: {', '.join(datos_requeridos)}."
+        return False, mensaje_error
+    
+    return True, None
+
+def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
+    """
+    Solicita al usuario los datos faltantes para completar la cita
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    mensajes_solicitud = []
+    
+    # Solicitar servicio si falta
+    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
+        if soli == "cita":
+            mensajes_solicitud.append("¿Qué servicio necesitas? (página web, app, marketing, etc.)")
+        else:
+            mensajes_solicitud.append("¿Qué te gustaría ordenar? (gorditas, tacos, antojitos, etc.)")
+    
+    # Solicitar fecha si falta y es cita
+    if soli == "cita" and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
+        mensajes_solicitud.append("¿Para qué fecha te gustaría agendar?")
+    
+    # Solicitar nombre si falta
+    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
+        mensajes_solicitud.append("¿Cuál es tu nombre?")
+    
+    if mensajes_solicitud:
+        mensaje = f"📋 Para agendar tu {soli}, necesito algunos datos:\n\n" + "\n".join(f"• {msg}" for msg in mensajes_solicitud)
+        enviar_mensaje(numero, mensaje, config)
+        return True
     
     return False
+
+def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
+    """
+    Versión mejorada que usa el historial de conversación para extraer información
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    if historial is None:
+        historial = obtener_historial(numero, limite=5, config=config)
+    
+    # Construir contexto del historial
+    contexto_historial = ""
+    for i, msg in enumerate(historial):
+        if msg['mensaje']:
+            contexto_historial += f"Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            contexto_historial += f"Asistente: {msg['respuesta']}\n"
+    
+    try:
+        prompt_cita = f"""
+        Extrae la información de la {soli} solicitada basándote en este mensaje y el historial de conversación.
+        
+        MENSAJE ACTUAL: "{mensaje}"
+        
+        HISTORIAL DE CONVERSACIÓN:
+        {contexto_historial}
+        
+        Devuélvelo en formato JSON con estos campos:
+        - servicio_solicitado (string o null si no se especifica)
+        - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
+        - hora_sugerida (string en formato HH:MM o null si no se especifica)
+        - nombre_cliente (string o null si no se especifica)
+        - telefono (string, usar este número: {numero})
+        - estado (siempre "pendiente")
+        - datos_completos (boolean: true si tiene todos los datos necesarios)
+        
+        Datos necesarios para considerar completa una {soli}:
+        - servicio_solicitado: siempre requerido
+        - fecha_sugerida: requerido para citas, opcional para pedidos
+        - nombre_cliente: siempre requerido
+        
+        Si no se puede determinar algún campo, usa null.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt_cita}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            info_cita = json.loads(json_match.group())
+            return info_cita
+        else:
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"Error extrayendo info de {soli}: {e}")
+        return None
 
 @app.route('/debug-dominio')
 def debug_dominio():
@@ -669,9 +834,14 @@ Tus responsabilidades:
 Servicios y tarifas actuales:
 {lista_precios}
 
-No permitas que los usuarios realizen ordenes o citas sin haber obtenido todos los datos necesarios.
-
-Mantén siempre un tono profesional y conciso.
+INSTRUCCIONES IMPORTANTES:
+1. No permitas que los usuarios agenden {soli}s sin haber obtenido todos los datos necesarios
+2. Los datos obligatorios para una {soli} son:
+   - Servicio solicitado (siempre requerido)
+   - Fecha sugerida (requerido para citas, opcional para pedidos) 
+   - Nombre del cliente (siempre requerido)
+3. Si el usuario quiere agendar una {soli} pero faltan datos, pídelos amablemente
+4. Mantén siempre un tono profesional y conciso
 """.strip()
 
     historial = obtener_historial(numero, config=config)
@@ -1202,37 +1372,44 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         # Fallback a detección por keywords si la IA falla
         return detectar_intervencion_humana_keywords(mensaje_usuario)
     
-def detectar_intervencion_humana_keywords(mensaje_usuario):
-    """
-    Detección basada en palabras clave (versión original mejorada)
-    """
-    texto = mensaje_usuario.lower()
+def detectar_solicitud_cita_keywords(mensaje):
+    """Detección mejorada basada en palabras clave"""
+    mensaje_lower = mensaje.lower()
     
-    # Lista ampliada de palabras clave
-    disparadores = [
-        'hablar con persona', 'hablar con asesor', 'hablar con agente', 'hablar con humano',
-        'quiero asesor', 'atención humana', 'soporte técnico', 'soporte humano',
-        'es urgente', 'necesito ayuda humana', 'presupuesto', 'cotización',
-        'quiero comprar', 'me interesa', 'quiero hablar', 'contactar con',
-        'quiero contactar', 'asesor humano', 'no entiendo', 'no me queda claro',
-        'explicame mejor', 'duda', 'pregunta', 'consultar', 'información',
-        'hablar con alguien', 'quiero un humano', 'atención personalizada',
-        'hablar con un humano', 'dame tu número', 'número de teléfono', 'llamar',
-        'me marcas', 'te marco', 'representante', 'ejecutivo', 'vendedor',
-        'asesoría', 'no resuelve', 'no solucionas', 'problema complejo',
-        'quiero ordenar', 'hacer pedido', 'realizar compra', 'quiero pagar',
-        'no me ayudas', 'no me entiendes', 'quiero que me llames', 'llámame',
-        'necesito que me contacten', 'contacto directo', 'atención directa',
-        'que me llamen', 'hablar por teléfono', 'comunicarme con', 'no es lo que necesito',
-        'no resuelve mi duda', 'no satisface mi necesidad', 'quiero más información',
-        'información detallada', 'necesito asesoría personalizada'
+    # Palabras clave generales para ambos tipos de negocio
+    palabras_generales = [
+        'agendar', 'reservar', 'programar', 'solicitar', 'necesito', 'quiero',
+        'disponibilidad', 'horario', 'turno', 'consulta'
     ]
     
-    for frase in disparadores:
-        if frase in texto:
-            app.logger.info(f"🎯 Detección por palabra clave: {frase}")
+    # Palabras específicas según el tipo de negocio
+    if soli == "cita":
+        palabras_especificas = [
+            'cita', 'consultorio', 'doctor', 'médico', 'servicio', 'atención',
+            'paciente', 'tratamiento', 'terapia', 'sesión', 'evaluación',
+            'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento',
+            'página web', 'sitio web', 'ecommerce', 'tienda online',
+            'aplicación', 'app', 'software', 'sistema', 'marketing',
+            'seo', 'redes sociales', 'publicidad', 'diseño', 'branding',
+            'logo', 'identidad visual', 'hosting', 'dominio'
+        ]
+    else:
+        palabras_especificas = [
+            'orden', 'pedido', 'comprar', 'ordenar', 'hacer un pedido', 
+            'realizar un pedido', 'hacer un encargo', 'encargar',
+            'servicio a domicilio', 'delivery', 'menú', 'precios',
+            'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering',
+            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
+            'comida tradicional', 'comida casera', 'reservaciones', 'eventos'
+        ]
+    
+    # Combinar todas las palabras clave
+    todas_palabras = palabras_generales + palabras_especificas
+    
+    for palabra in todas_palabras:
+        if palabra in mensaje_lower:
             return True
-            
+    
     return False
     
 def resumen_rafa(numero,config=None):
@@ -1549,27 +1726,46 @@ def webhook():
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
-        if detectar_solicitud_cita(texto):
-            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
+            # 🆕 DETECCIÓN DE CITAS MEJORADA
+        if detectar_solicitud_cita_ia(texto, numero, config):
+            app.logger.info(f"📅 Solicitud de {soli} detectada de {numero}")
             
-            info_cita = extraer_info_cita(texto, numero, config)
+            # Obtener historial para contexto
+            historial = obtener_historial(numero, limite=5, config=config)
+            
+            # Extraer información con contexto
+            info_cita = extraer_info_cita_mejorado(texto, numero, historial, config)
             
             if info_cita:
-                cita_id = guardar_cita(info_cita, config)
+                # Validar si los datos están completos
+                es_valida, mensaje_error = validar_datos_cita_completos(info_cita, config)
                 
-                if cita_id:
-                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)  # ✅ ENVÍA ALERTA
-                    app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
-                    guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
-                    return 'OK', 200
+                if es_valida:
+                    # Datos completos, guardar cita
+                    cita_id = guardar_cita(info_cita, config)
+                    
+                    if cita_id:
+                        enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                        enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                        app.logger.info(f"✅ {soli.capitalize()} agendada - ID: {cita_id}")
+                        guardar_conversacion(numero, texto, f"{soli.capitalize()} agendada - ID: #{cita_id}", config=config)
+                        return 'OK', 200
+                    else:
+                        app.logger.error(f"❌ Error guardando {soli} en BD")
+                        enviar_mensaje(numero, f"Lo siento, hubo un error al guardar tu {soli}. Por favor intenta nuevamente.", config)
                 else:
-                    app.logger.error("❌ Error guardando cita en BD")
+                    # Datos incompletos, solicitar información faltante
+                    app.logger.info(f"⚠️ {soli.capitalize()} con datos incompletos, solicitando información")
+                    solicitar_datos_faltantes_cita(numero, info_cita, config)
+                    
+                    # Guardar conversación indicando que está en proceso de agendar
+                    guardar_conversacion(numero, texto, f"Procesando {soli} - solicitando datos faltantes", config=config)
+                    return 'OK', 200
             else:
-                app.logger.error("❌ Error extrayendo información de cita")
+                app.logger.error(f"❌ Error extrayendo información de {soli}")
+                enviar_mensaje(numero, f"No pude entender la información de tu {soli}. ¿Podrías proporcionar más detalles?", config)
             
-            app.logger.warning("⚠️ Falló detección de cita, continuando con IA normal")
-        
+            app.logger.warning(f"⚠️ Falló detección de {soli}, continuando con IA normal")
         # IA normal
         IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
