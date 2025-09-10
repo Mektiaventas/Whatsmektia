@@ -211,7 +211,12 @@ def detectar_solicitud_cita(mensaje):
     palabras_clave = [
         'agendar cita', 'quiero cita', 'solicitar cita', 'reservar cita',
         'cita para', 'necesito cita', 'disponibilidad para', 'horario para',
-        'agenda una cita', 'programar cita'
+        'agenda una cita', 'programar cita', 'reservar una cita', 'agendar una cita',
+        'cita', 'consultorio', 'doctor', 'médico', 'servicio', 'atención',
+        'consulta', 'turno', 'horario', 'agenda', 'programar', 'reservar',
+        'agendar', 'solicitar', 'necesito', 'disponibilidad', 'atender',
+        'paciente', 'tratamiento', 'terapia', 'sesión', 'evaluación',
+        'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento'
     ]
     
     mensaje_lower = mensaje.lower()
@@ -1457,6 +1462,7 @@ def webhook():
                 respuesta = f"No encontré tarifa para *{servicio}*."
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None, config=config)
+            enviar_confirmacion_cita(numero, None, None)  # Enviar confirmación genérica
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
@@ -2185,7 +2191,7 @@ def obtener_contexto_consulta(numero, config=None):
             'aplicación', 'app', 'software', 'sistema',
             'marketing', 'seo', 'redes sociales', 'publicidad',
             'diseño', 'branding', 'logo', 'identidad visual',
-            'hosting', 'dominio', 'mantenimiento', 'soporte','gordita'
+            'hosting', 'dominio', 'mantenimiento', 'soporte'
         ]
         
         # Buscar menciones de servicios/proyectos
