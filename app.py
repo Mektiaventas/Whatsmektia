@@ -1710,8 +1710,13 @@ def webhook():
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
 
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        current_message_id = f"{numero}_{msg['id']}" if 'id' in msg else f"{numero}_{texto}_{'image' if es_imagen else 'text'}"
-        
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
+        if 'id' in msg:
+            current_message_id = f"{numero}_{msg['id']}"
+        else:
+            # For messages without ID, use timestamp + text to avoid false duplicates
+            timestamp = msg.get('timestamp', '')
+            current_message_id = f"{numero}_{timestamp}_{texto}_{'image' if es_imagen else 'text'}"
         if not hasattr(app, 'ultimos_mensajes'):
             app.ultimos_mensajes = set()
         
@@ -1722,7 +1727,7 @@ def webhook():
         app.ultimos_mensajes.add(current_message_id)
         
         if len(app.ultimos_mensajes) > 100:
-            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-50:])
+            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-100:])
         
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
