@@ -1546,7 +1546,7 @@ def webhook():
             if detectado and numero != ALERT_NUMBER:
                 app.logger.info(f"🚨 Intervención humana detectada para {numero}")
                 resumen = resumen_rafa(numero, config)
-                enviar_alerta_humana(numero, texto, resumen)
+                enviar_alerta_humana(numero, texto, resumen, config)
                 enviar_informacion_completa(numero, config)
         
         # KANBAN AUTOMÁTICO
