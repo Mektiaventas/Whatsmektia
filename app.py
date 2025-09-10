@@ -458,7 +458,7 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         config = obtener_configuracion_por_host()
     try:
         mensaje_confirmacion = f"""
-        📅 *Confirmación de Cita* - ID: #{cita_id}
+        📅 *Confirmación de {soli}* - ID: #{cita_id}
 
         ¡Hola! Hemos recibido tu solicitud de cita:
 
