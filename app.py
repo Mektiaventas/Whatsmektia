@@ -1153,7 +1153,6 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     # Primero verificar con la lista de palabras clave existente (más rápida)
     if detectar_intervencion_humana_keywords(mensaje_usuario):
         return True
-    
     # Si no se detectó con keywords, usar IA para análisis semántico
     try:
         prompt = f"""
@@ -1188,7 +1187,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
+        response.rise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
@@ -1622,7 +1621,7 @@ def webhook():
             app.logger.info(f"🔍 Verificando intervención humana para {numero}")
             app.logger.info(f"📝 Mensaje: {texto[:100]}...")
             app.logger.info(f"🤖 Respuesta: {respuesta[:100]}...")
-            detectado = detectar_intervencion_humana(texto,numero)
+            detectado = detectar_intervencion_humana_ia(texto,numero)
             app.logger.info(f"🎯 Detección resultado: {detectado}")
 
             if detectado and numero != ALERT_NUMBER:
