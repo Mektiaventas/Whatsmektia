@@ -2207,8 +2207,12 @@ def obtener_contexto_consulta(numero, config=None):
         palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
         if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
             contexto += "🚨 *Tono:* Urgente\n"
-        
-        return contexto if contexto else "Contexto no determinado a partir del historial."
+        if contexto:
+            return contexto 
+        else:
+            contexto = ""
+            "Contexto no determinado a partir del historial."
+            return contexto 
         
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
