@@ -131,15 +131,17 @@
             <div class="msg-box msg-user">
               <div class="message-content">
                 {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
-                   <!-- Mostrar imagen -->
-            <div class="message-image">
-                <img src="{{ url_for('serve_uploaded_file', filename=msg.imagen_url.split('/')[-1]) }}" 
-                     alt="Imagen enviada" style="max-width: 300px; max-height: 300px; border-radius: 8px;">
-                {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen y describe lo que ves' %}
-                    <p class="image-caption">{{ msg.mensaje }}</p>
-                {% endif %}
-            </div>
-        {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                  <!-- Mostrar imagen -->
+                  <div class="image-message">
+                    <img src="{{ msg.contenido_extra }}" alt="Imagen enviada" class="whatsapp-image">
+                    {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                      <div class="image-caption">
+                        {{ msg.mensaje }}
+                      </div>
+                    {% endif %}
+                  </div>
+
+                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
 <!-- Mostrar audio con reproductor funcional -->
 <div class="audio-player">
     <!-- Reproductor nativo (oculto pero funcional) -->
