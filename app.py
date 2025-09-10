@@ -478,7 +478,7 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         # Enviar a ambos números
         enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
         enviar_mensaje('5214493432744', mensaje_alerta, config)
-        enviar_mensaje("5214491182201", mensaje_alerta, config)
+        enviar_mensaje('5214491182201', mensaje_alerta, config)
         
         app.logger.info(f"✅ Alerta de cita enviada a ambos administradores, ID: {cita_id}")
         
@@ -1470,14 +1470,14 @@ def webhook():
         if detectar_solicitud_cita(texto):
             app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
             
-            info_cita = extraer_info_cita(texto, numero)
+            info_cita = extraer_info_cita(texto, numero, config)
             
             if info_cita:
                 cita_id = guardar_cita(info_cita, config)
                 
                 if cita_id:
-                    enviar_confirmacion_cita(numero, info_cita, cita_id)
-                    enviar_alerta_cita_administrador(info_cita, cita_id)  # ✅ ENVÍA ALERTA
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)  # ✅ ENVÍA ALERTA
                     app.logger.info(f"✅ Cita agendada - ID: {cita_id}")
                     guardar_conversacion(numero, texto, f"Cita agendada - ID: #{cita_id}", config=config)
                     return 'OK', 200
