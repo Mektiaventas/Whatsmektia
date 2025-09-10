@@ -675,8 +675,6 @@ Tus responsabilidades:
 Servicios y tarifas actuales:
 {lista_precios}
 
-No permitas que los usuarios realizen ordenes o citas sin haber obtenido todos los datos necesarios.
-
 Mantén siempre un tono profesional y conciso.
 """.strip()
 
