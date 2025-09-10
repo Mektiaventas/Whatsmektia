@@ -840,6 +840,7 @@ INSTRUCCIONES IMPORTANTES:
    - Servicio solicitado (siempre requerido)
    - Fecha sugerida (requerido para citas, opcional para pedidos) 
    - Nombre del cliente (siempre requerido)
+   - Una descripcion del servicio solicitado (muy importante)
 3. Si el usuario quiere agendar una {soli} pero faltan datos, pídelos amablemente
 4. Mantén siempre un tono profesional y conciso
 """.strip()
