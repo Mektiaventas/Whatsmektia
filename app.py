@@ -174,24 +174,78 @@ def texto_a_voz(texto, filename,config=None):
         app.logger.error(f"Error en texto a voz: {e}")
         return None
 
-def extraer_info_cita(mensaje, numero, config=None):
-    """Extrae información de la cita del mensaje usando IA"""
+def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
+    """
+    Versión mejorada que usa el historial de conversación para extraer información
+    """
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    if historial is None:
+        historial = obtener_historial(numero, limite=5, config=config)
+    
+    # Construir contexto del historial
+    contexto_historial = ""
+    for i, msg in enumerate(historial):
+        if msg['mensaje']:
+            contexto_historial += f"Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            contexto_historial += f"Asistente: {msg['respuesta']}\n"
+    
     try:
-        prompt_cita = f"""
-        Extrae la información de la cita solicitada en este mensaje: "{mensaje}"
-        
-        Devuélvelo en formato JSON con estos campos:
-        - servicio_solicitado (string)
-        - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
-        - hora_sugerida (string en formato HH:MM o null si no se especifica)
-        - nombre_cliente (string si se menciona)
-        - telefono (string, usar este número: {numero})
-        - estado (siempre "pendiente")
-        
-        Si no se puede determinar algún campo, usa null.
-        """
+        if es_porfirianna:
+            prompt_cita = f"""
+            Extrae la información del pedido solicitado basándote en este mensaje y el historial de conversación.
+            
+            MENSAJE ACTUAL: "{mensaje}"
+            
+            HISTORIAL DE CONVERSACIÓN:
+            {contexto_historial}
+            
+            Devuélvelo en formato JSON con estos campos:
+            - servicio_solicitado (string: el platillo o comida solicitada, o null si no se especifica)
+            - fecha_sugerida (string en formato YYYY-MM-DD o null - opcional para pedidos)
+            - hora_sugerida (string en formato HH:MM o null - opcional para pedidos)
+            - nombre_cliente (string o null si no se especifica)
+            - telefono (string, usar este número: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            
+            Datos necesarios para considerar completo un pedido:
+            - servicio_solicitado: siempre requerido (qué platillo quiere)
+            - nombre_cliente: siempre requerido
+            
+            Para La Porfirianna (comida), los campos de fecha y hora son opcionales.
+            """
+        else:
+            prompt_cita = f"""
+            Extrae la información de la cita solicitada basándote en este mensaje y el historial de conversación.
+            
+            MENSAJE ACTUAL: "{mensaje}"
+            
+            HISTORIAL DE CONVERSACIÓN:
+            {contexto_historial}
+            
+            Devuélvelo en formato JSON con estos campos:
+            - servicio_solicitado (string: tipo de servicio solicitado o null si no se especifica)
+            - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
+            - hora_sugerida (string en formato HH:MM o null si no se especifica)
+            - nombre_cliente (string o null si no se especifica)
+            - telefono (string, usar este número: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            
+            Datos necesarios para considerar completa una cita:
+            - servicio_solicitado: siempre requerido
+            - fecha_sugerida: requerido para citas
+            - nombre_cliente: siempre requerido
+            - hora_sugerida: opcional pero recomendado
+            
+            Para Mektia (servicios), se necesitan todos los datos básicos.
+            """
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -220,9 +274,9 @@ def extraer_info_cita(mensaje, numero, config=None):
             return None
             
     except Exception as e:
-        app.logger.error(f"Error extrayendo info de cita: {e}")
+        app.logger.error(f"Error extrayendo info de {'pedido' if es_porfirianna else 'cita'}: {e}")
         return None
-
+    
 def detectar_solicitud_cita_ia(mensaje, numero, config=None):
     """
     Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
@@ -284,62 +338,77 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
 
 def validar_datos_cita_completos(info_cita, config=None):
     """
-    Valida que la información de la cita tenga todos los datos necesarios
+    Valida que la información de la cita/pedido tenga todos los datos necesarios
     Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
     datos_requeridos = []
     
-    # Validar servicio solicitado
+    # Validar servicio solicitado (siempre requerido)
     if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        datos_requeridos.append("servicio solicitado")
+        if es_porfirianna:
+            datos_requeridos.append("qué platillo deseas ordenar")
+        else:
+            datos_requeridos.append("qué servicio necesitas")
     
-    # Validar fecha (dependiendo del negocio)
-    if soli == "cita" and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_requeridos.append("fecha")
+    # Validar fecha (solo requerido para Mektia)
+    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
+        datos_requeridos.append("fecha preferida")
     
-    # Validar nombre del cliente
+    # Validar nombre del cliente (siempre requerido)
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_requeridos.append("nombre")
+        datos_requeridos.append("tu nombre")
     
     if datos_requeridos:
-        mensaje_error = f"Para agendar tu {soli}, necesito que me proporciones: {', '.join(datos_requeridos)}."
+        if es_porfirianna:
+            mensaje_error = f"Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_requeridos)}."
+        else:
+            mensaje_error = f"Para agendar tu cita, necesito que me proporciones: {', '.join(datos_requeridos)}."
         return False, mensaje_error
     
     return True, None
 
-def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
+def validar_datos_cita_completos(info_cita, config=None):
     """
-    Solicita al usuario los datos faltantes para completar la cita
+    Valida que la información de la cita/pedido tenga todos los datos necesarios
+    Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    mensajes_solicitud = []
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    # Solicitar servicio si falta
+    datos_requeridos = []
+    
+    # Validar servicio solicitado (siempre requerido)
     if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if soli == "cita":
-            mensajes_solicitud.append("¿Qué servicio necesitas? (página web, app, marketing, etc.)")
+        if es_porfirianna:
+            datos_requeridos.append("qué platillo deseas ordenar")
         else:
-            mensajes_solicitud.append("¿Qué te gustaría ordenar? (gorditas, tacos, antojitos, etc.)")
+            datos_requeridos.append("qué servicio necesitas")
     
-    # Solicitar fecha si falta y es cita
-    if soli == "cita" and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        mensajes_solicitud.append("¿Para qué fecha te gustaría agendar?")
+    # Validar fecha (solo requerido para Mektia)
+    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
+        datos_requeridos.append("fecha preferida")
     
-    # Solicitar nombre si falta
+    # Validar nombre del cliente (siempre requerido)
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        mensajes_solicitud.append("¿Cuál es tu nombre?")
+        datos_requeridos.append("tu nombre")
     
-    if mensajes_solicitud:
-        mensaje = f"📋 Para agendar tu {soli}, necesito algunos datos:\n\n" + "\n".join(f"• {msg}" for msg in mensajes_solicitud)
-        enviar_mensaje(numero, mensaje, config)
-        return True
+    if datos_requeridos:
+        if es_porfirianna:
+            mensaje_error = f"Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_requeridos)}."
+        else:
+            mensaje_error = f"Para agendar tu cita, necesito que me proporciones: {', '.join(datos_requeridos)}."
+        return False, mensaje_error
     
-    return False
+    return True, None
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """
@@ -825,27 +894,27 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         for p in precios
     )
 
+    # En la función responder_con_ia, modifica el system_prompt:
     system_prompt = f"""
-Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
-Descripción del negocio:
-{descripcion}
+    Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
+    Descripción del negocio:
+    {descripcion}
 
-Tus responsabilidades:
-{que_hace} 
+    Tus responsabilidades:
+    {que_hace} 
 
-Servicios y tarifas actuales:
-{lista_precios}
+    Servicios y tarifas actuales:
+    {lista_precios}
 
-INSTRUCCIONES IMPORTANTES:
-1. No permitas que los usuarios agenden {soli}s sin haber obtenido todos los datos necesarios
-2. Los datos obligatorios para una {soli} son:
-   - Servicio solicitado (siempre requerido)
-   - Fecha sugerida (requerido para citas, opcional para pedidos) 
-   - Nombre del cliente (siempre requerido)
-   - Una descripcion del servicio solicitado (muy importante)
-3. Si el usuario quiere agendar una {soli} pero faltan datos, pídelos amablemente
-4. Mantén siempre un tono profesional y conciso
-""".strip()
+    INSTRUCCIONES IMPORTANTES:
+    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios
+    2. Los datos obligatorios para un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'cita'} son:
+    - Servicio solicitado (siempre requerido)
+    {'- Fecha sugerida (requerido)' if not 'laporfirianna' in config.get('dominio', '') else ''}
+    - Nombre del cliente (siempre requerido)
+    3. Si el usuario quiere hacer un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'agendar una cita'} pero faltan datos, pídelos amablemente
+    4. Mantén siempre un tono profesional y conciso
+    """.strip()
 
     historial = obtener_historial(numero, config=config)
     
@@ -1374,46 +1443,85 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         # Fallback a detección por keywords si la IA falla
         return detectar_intervencion_humana_keywords(mensaje_usuario)
     
-def detectar_solicitud_cita_keywords(mensaje):
-    """Detección mejorada basada en palabras clave"""
-    mensaje_lower = mensaje.lower()
+def detectar_solicitud_cita_ia(mensaje, numero, config=None):
+    """
+    Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
+    Devuelve True si la IA detecta intención de agendar cita/hacer pedido
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    # Palabras clave generales para ambos tipos de negocio
-    palabras_generales = [
-        'agendar', 'reservar', 'programar', 'solicitar', 'necesito', 'quiero',
-        'disponibilidad', 'horario', 'turno', 'consulta'
-    ]
+    # Determinar el tipo de negocio basado en la configuración
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    # Palabras específicas según el tipo de negocio
-    if soli == "cita":
-        palabras_especificas = [
-            'cita', 'consultorio', 'doctor', 'médico', 'servicio', 'atención',
-            'paciente', 'tratamiento', 'terapia', 'sesión', 'evaluación',
-            'valoración', 'examen', 'prueba', 'diagnóstico', 'seguimiento',
-            'página web', 'sitio web', 'ecommerce', 'tienda online',
-            'aplicación', 'app', 'software', 'sistema', 'marketing',
-            'seo', 'redes sociales', 'publicidad', 'diseño', 'branding',
-            'logo', 'identidad visual', 'hosting', 'dominio'
-        ]
-    else:
-        palabras_especificas = [
-            'orden', 'pedido', 'comprar', 'ordenar', 'hacer un pedido', 
-            'realizar un pedido', 'hacer un encargo', 'encargar',
-            'servicio a domicilio', 'delivery', 'menú', 'precios',
-            'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering',
-            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos',
-            'comida tradicional', 'comida casera', 'reservaciones', 'eventos'
-        ]
+    # Primero verificar con la lista de palabras clave existente (más rápida)
+    if detectar_solicitud_cita_keywords(mensaje):
+        return True
     
-    # Combinar todas las palabras clave
-    todas_palabras = palabras_generales + palabras_especificas
-    
-    for palabra in todas_palabras:
-        if palabra in mensaje_lower:
-            return True
-    
-    return False
-    
+    # Si no se detectó con keywords, usar IA para análisis semántico
+    try:
+        if es_porfirianna:
+            prompt = f"""
+            Evalúa si el siguiente mensaje indica que el usuario quiere hacer un pedido de comida.
+            Responde SOLO con "SI" o "NO".
+            
+            Mensaje: "{mensaje}"
+            
+            Considera que podría ser una solicitud de pedido si:
+            - Pide ordenar, pedir, encargar comida
+            - Solicita menú, platillos, comidas disponibles
+            - Quiere hacer un pedido para llevar o a domicilio
+            - Pregunta por precios de platillos
+            - Menciona nombres de platillos específicos (gorditas, tacos, etc.)
+            - Solicita información sobre horarios de servicio o entrega
+            
+            Responde "SI" solo si hay una clara intención de hacer un pedido.
+            """
+        else:
+            prompt = f"""
+            Evalúa si el siguiente mensaje indica que el usuario quiere agendar una cita o solicitar un servicio.
+            Responde SOLO con "SI" o "NO".
+            
+            Mensaje: "{mensaje}"
+            
+            Considera que podría ser una solicitud de cita si:
+            - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
+            - Solicita horarios, disponibilidad, turnos
+            - Quiere cotización, presupuesto o información comercial
+            - Pregunta por servicios disponibles (páginas web, apps, marketing, etc.)
+            - Menciona necesidad de atención, evaluación, asesoría
+            - Solicita información para contratar un servicio
+            
+            Responde "SI" solo si hay una clara intención de agendar cita.
+            """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 10
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
+        
+        app.logger.info(f"🔍 IA detectó solicitud de {'pedido' if es_porfirianna else 'cita'}: {respuesta_ia} para mensaje: {mensaje[:50]}...")
+        
+        return "SI" in respuesta_ia
+        
+    except Exception as e:
+        app.logger.error(f"Error en detección IA de {'pedido' if es_porfirianna else 'cita'}: {e}")
+        # Fallback a detección por keywords si la IA falla
+        return detectar_solicitud_cita_keywords(mensaje)
+        
 def resumen_rafa(numero,config=None):
     if config is None:
         config = obtener_configuracion_por_host()
