@@ -133,10 +133,8 @@
                 {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
                    <!-- Mostrar imagen -->
             <div class="message-image">
-                {% if msg.imagen_url %}
-                  <img src="{{ url_for('serve_uploaded_file', filename=msg.imagen_url.split('/')[-1]) }}"
-                      alt="Imagen enviada" class="chat-image">
-                {% endif %}
+                <img src="{{ url_for('serve_uploaded_file', filename=msg.imagen_url.split('/')[-1]) }}"
+                alt="Imagen enviada" class="chat-image">
                 {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen y describe lo que ves' %}
                     <p class="image-caption">{{ msg.mensaje }}</p>
                 {% endif %}
