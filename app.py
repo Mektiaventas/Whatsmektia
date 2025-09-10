@@ -1120,11 +1120,16 @@ def detectar_intervencion_humana(mensaje_usuario, respuesta_ia, numero):
         'hablar con persona', 'hablar con asesor', 'hablar con agente',
         'quiero asesor', 'atención humana', 'soporte técnico',
         'es urgente', 'necesito ayuda humana', 'presupuesto',
-        'cotización', 'quiero comprar', 'me interesa'
+        'cotización', 'quiero comprar', 'me interesa', 'quiero hablar',
+        'contactar con', 'quiero contactar', 'asesor humano',
+        'no entiendo', 'no me queda claro', 'explicame mejor',
+        'duda', 'pregunta', 'consultar', 'información', 'hablar con humano',
+        'hablar con alguien', 'quiero un humano', 'atención personalizada'
     ]
     
     for frase in disparadores:
         if frase in texto:
+            app.logger.info(f"🎯 Detección por palabra clave: {frase}")
             return True
             
     respuesta = respuesta_ia.lower()
@@ -1517,7 +1522,14 @@ def webhook():
                     guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
             
             # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA
-            if detectar_intervencion_humana(texto, respuesta, numero) and numero != ALERT_NUMBER:
+            app.logger.info(f"🔍 Verificando intervención humana para {numero}")
+            app.logger.info(f"📝 Mensaje: {texto[:100]}...")
+            app.logger.info(f"🤖 Respuesta: {respuesta[:100]}...")
+            detectado = detectar_intervencion_humana(texto, respuesta, numero)
+            app.logger.info(f"🎯 Detección resultado: {detectado}")
+
+            if detectado and numero != ALERT_NUMBER:
+                app.logger.info(f"🚨 Intervención humana detectada para {numero}")
                 resumen = resumen_rafa(numero, config)
                 enviar_alerta_humana(numero, texto, resumen)
                 enviar_informacion_completa(numero, config)
