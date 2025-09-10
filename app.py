@@ -17,7 +17,7 @@ import io
 from PIL import Image
 
 tz_mx = pytz.timezone('America/Mexico_City')
-
+guardado = True
 load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
@@ -440,7 +440,12 @@ def guardar_cita(info_cita, config=None):
             info_cita.get('telefono'),
             'pendiente'
         ))
-        
+        if info_cita.get('servicio_solicitado') == None:
+            app.logger.warning(f"⚠️ Guardando cita sin servicio solicitado: {info_cita}")
+            guardado = False
+        else:
+            guardado = True
+
         conn.commit()
         cita_id = cursor.lastrowid
         cursor.close()
@@ -1501,7 +1506,7 @@ def webhook():
             
             info_cita = extraer_info_cita(texto, numero, config)
             
-            if info_cita:
+            if info_cita and guardado:
                 cita_id = guardar_cita(info_cita, config)
                 
                 if cita_id:
