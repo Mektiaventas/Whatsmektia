@@ -7,7 +7,7 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify, Response
+from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
 import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
@@ -15,122 +15,6 @@ from decimal import Decimal
 import re
 import io
 from PIL import Image
-import openai
-import whisper  # pip install openai-whisper
-from pathlib import Path
-from dateutil.relativedelta import relativedelta  # pip install python-dateutil
-from dateutil.parser import parse
-from flask import Response
-
-
-def procesar_fecha_relativa(fecha_str):
-    try:
-        if not fecha_str or fecha_str == 'null':
-            return None
-        # Parsear fecha sugerida
-        fecha_base = parse(fecha_str, fuzzy=True)
-        hoy = datetime.now(tz_mx).date()
-        if fecha_base.date() < hoy:
-            # Si es pasada, agregar 1 año (ajusta según prompt)
-            fecha_base = fecha_base + relativedelta(years=1)
-        return fecha_base.strftime('%Y-%m-%d')
-    except:
-        return None
-
-def get_country_flag(numero):
-    numero_str = str(numero).replace('+', '')
-    for prefijo, pais in PREFIJOS_PAIS.items():
-        if numero_str.startswith(prefijo):
-            return f"🇲🇽" if pais == 'mx' else f"🇺🇸" if pais == 'us' else "🌍"  # Simple fallback
-    return "🌍" 
-
-def obtener_configuracion_numero(numero):
-    numero_str = str(numero).replace('+', '')
-    for key, conf in NUMEROS_CONFIG.items():
-        if numero_str.startswith(key):
-            return conf
-    return NUMEROS_CONFIG['524495486142']  # Default
-
-def crear_tabla_citas(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS citas (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero_cliente VARCHAR(20),
-            servicio_solicitado VARCHAR(200),
-            fecha_sugerida DATE,
-            hora_sugerida TIME,
-            nombre_cliente VARCHAR(100),
-            estado ENUM('pendiente', 'confirmada', 'cancelada') DEFAULT 'pendiente',
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (numero_cliente) REFERENCES contactos(numero_telefono)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def save_config(cfg, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO configuracion (id, ia_nombre, negocio_nombre, descripcion, url, direccion, telefono, correo, que_hace, tono, lenguaje)
-        VALUES (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-        ia_nombre=VALUES(ia_nombre), negocio_nombre=VALUES(negocio_nombre), descripcion=VALUES(descripcion),
-        url=VALUES(url), direccion=VALUES(direccion), telefono=VALUES(telefono), correo=VALUES(correo),
-        que_hace=VALUES(que_hace), tono=VALUES(tono), lenguaje=VALUES(lenguaje)
-    ''', (
-        cfg['negocio'].get('ia_nombre'), cfg['negocio'].get('negocio_nombre'), cfg['negocio'].get('descripcion'),
-        cfg['negocio'].get('url'), cfg['negocio'].get('direccion'), cfg['negocio'].get('telefono'),
-        cfg['negocio'].get('correo'), cfg['negocio'].get('que_hace'), cfg['personalizacion'].get('tono'),
-        cfg['personalizacion'].get('lenguaje')
-    ))
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def obtener_todos_los_precios(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM precios ORDER BY servicio;")
-    precios = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return precios
-
-def obtener_precio_por_id(pid, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute("SELECT * FROM precios WHERE id = %s;", (pid,))
-    precio = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return precio
-
-def ia_activada_para_numero(numero, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s;", (numero,))
-    result = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    return result[0] if result else True  # Default on
-
-def obtener_imagen_perfil_alternativo(numero):
-    # Fallback simple: URL genérica o de BD
-    return None  # O query a BD si tienes
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
@@ -437,29 +321,6 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         # Fallback a detección por keywords si la IA falla
         return detectar_solicitud_cita_keywords(mensaje)
 
-def validar_datos_pedido_completos(info_pedido, config=None):
-    """
-    Valida que la información del pedido tenga todos los datos necesarios
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    datos_requeridos = []
-    
-    # Validar platillo solicitado (siempre requerido)
-    if not info_pedido.get('platillo_solicitado'):
-        datos_requeridos.append("qué platillo deseas ordenar")
-    
-    # Validar método de pago (siempre requerido)
-    if not info_pedido.get('metodo_pago'):
-        datos_requeridos.append("cómo deseas pagar (efectivo/transferencia/tarjeta)")
-    
-    if datos_requeridos:
-        mensaje_error = f"Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_requeridos)}."
-        return False, mensaje_error
-    
-    return True, None
-
 def validar_datos_cita_completos(info_cita, config=None):
     """
     Valida que la información de la cita/pedido tenga todos los datos necesarios
@@ -496,109 +357,6 @@ def validar_datos_cita_completos(info_cita, config=None):
         return False, mensaje_error
     
     return True, None
-
-def extraer_info_pedido_mejorado(mensaje, numero, historial=None, config=None):
-    """
-    Versión mejorada que usa el historial de conversación para extraer información
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    if historial is None:
-        historial = obtener_historial(numero, limite=5, config=config)
-    
-    # Construir contexto del historial
-    contexto_historial = ""
-    for i, msg in enumerate(historial):
-        if msg['mensaje']:
-            contexto_historial += f"Usuario: {msg['mensaje']}\n"
-        if msg['respuesta']:
-            contexto_historial += f"Asistente: {msg['respuesta']}\n"
-    
-    try:
-        prompt_pedido = f"""
-        Extrae la información del pedido de comida basándote en este mensaje.
-
-        MENSAJE: "{mensaje}"
-
-        Devuélvelo en formato JSON con estos campos:
-        - platillo_solicitado (string o null si no se especifica)
-        - cantidad (int o null si no se especifica)
-        - instrucciones_especiales (string o null)
-        - metodo_entrega (string: 'recoger' o 'domicilio' o null)
-        - metodo_pago (string: 'efectivo', 'transferencia', 'tarjeta' o null)
-        - direccion_entrega (string o null)
-        - datos_completos (boolean: true si tiene platillo y método de pago)
-
-        Ejemplo si dice "quiero 2 órdenes de chilaquiles con arrachera para llevar y pago en efectivo":
-        {{
-          "platillo_solicitado": "chilaquiles con arrachera",
-          "cantidad": 2,
-          "instrucciones_especiales": null,
-          "metodo_entrega": "recoger",
-          "metodo_pago": "efectivo",
-          "direccion_entrega": null,
-          "datos_completos": true
-        }}
-        """
-        
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt_pedido}],
-            "temperature": 0.3,
-            "max_tokens": 500
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        respuesta_ia = data['choices'][0]['message']['content'].strip()
-        
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
-        if json_match:
-            info_cita = json.loads(json_match.group())
-            return info_cita
-        else:
-            return None
-            
-    except Exception as e:
-        app.logger.error(f"Error extrayendo info de {soli}: {e}")
-        return None
-
-def crear_tabla_pedidos(config=None):
-    """Crea la tabla para almacenar los pedidos de restaurante"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS pedidos (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero_cliente VARCHAR(20),
-            platillo_solicitado VARCHAR(200),
-            cantidad INT DEFAULT 1,
-            metodo_pago VARCHAR(50),
-            metodo_entrega VARCHAR(50),
-            direccion_entrega TEXT,
-            estado ENUM('pendiente', 'confirmado', 'entregado') DEFAULT 'pendiente',
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    conn.commit()
-    cursor.close()
-    conn.close()
-
-def detectar_solicitud_cita_keywords(mensaje):
-    palabras_clave = ['cita', 'agendar', 'reservar', 'pedir', 'ordenar', 'quiero', 'menu'] + servicios_clave
-    return any(palabra in mensaje.lower() for palabra in palabras_clave)
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """
@@ -850,74 +608,6 @@ def crear_tabla_citas(config=None):
     conn.commit()
     cursor.close()
     conn.close()
-
-def guardar_pedido(info_pedido, config=None):
-    """Guarda el pedido en la base de datos específica para restaurante"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO pedidos (
-                numero_cliente, platillo, cantidad, instrucciones_especiales,
-                metodo_entrega, metodo_pago, direccion_entrega, estado
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            info_pedido.get('telefono'),
-            info_pedido.get('platillo_solicitado'),
-            info_pedido.get('cantidad', 1),
-            info_pedido.get('instrucciones_especiales'),
-            info_pedido.get('metodo_entrega'),
-            info_pedido.get('metodo_pago'),
-            info_pedido.get('direccion_entrega'),
-            'pendiente'
-        ))
-        
-        conn.commit()
-        pedido_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
-        
-        return pedido_id
-        
-    except Exception as e:
-        app.logger.error(f"Error guardando pedido: {e}")
-        return None
-
-def enviar_confirmacion_pedido(numero, info_pedido, pedido_id, config=None):
-    """Envía confirmación de pedido por WhatsApp"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        mensaje_confirmacion = f"""
-        🍽️ *Confirmación de Pedido* - ID: #{pedido_id}
-
-        ¡Hola! Hemos recibido tu pedido:
-
-        *Platillo:* {info_pedido.get('platillo_solicitado', 'Por confirmar')}
-        *Cantidad:* {info_pedido.get('cantidad', 1)}
-        *Método de entrega:* {info_pedido.get('metodo_entrega', 'Por confirmar')}
-        *Método de pago:* {info_pedido.get('metodo_pago', 'Por confirmar')}
-
-        📞 *Tu número:* {numero}
-
-        ⏰ *Tiempo estimado:* 30-45 minutos
-        *¡Tu pedido está en preparación!* 🧑🍳🔥
-
-        ¿Necesitas hacer algún cambio? Responde a este mensaje.
-
-        ¡Gracias por preferir La Porfirianna! 🧡
-        """
-        
-        enviar_mensaje(numero, mensaje_confirmacion, config)
-        app.logger.info(f"✅ Confirmación de pedido enviada a {numero}, ID: {pedido_id}")
-        
-    except Exception as e:
-        app.logger.error(f"Error enviando confirmación de pedido: {e}")
 
 def guardar_cita(info_cita, config=None):
     """Guarda la cita en la base de datos"""
@@ -1412,57 +1102,6 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(traceback.format_exc())
         return None, None
 
-def obtener_audio_whatsapp(audio_id, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}/{audio_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-        }
-        params = {'access_token': config["whatsapp_token"]}
-        
-        response = requests.get(url, headers=headers, params=params, timeout=30)
-        response.raise_for_status()
-        
-        audio_data = response.json()
-        download_url = audio_data.get('url')
-        if not download_url:
-            return None, None
-        
-        audio_response = requests.get(download_url, headers=headers, timeout=30)
-        audio_response.raise_for_status()
-        
-        # Guardar localmente
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"whatsapp_audio_{timestamp}.ogg"  # WhatsApp usa OGG
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        with open(filepath, "wb") as f:
-            f.write(audio_response.content)
-        
-        # URL pública (ajusta a tu dominio)
-        audio_url = f"https://{config['dominio']}/uploads/{filename}"
-        app.logger.info(f"🎵 Audio guardado: {filepath}")
-        return filepath, audio_url
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo audio: {e}")
-        return None, None
-    
-def transcribir_audio_con_openai(audio_path):
-    try:
-        # Opción 1: Usar Whisper local (más rápido y privado)
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_path, language='es')  # Asume español
-        return result["text"]
-        
-        # Opción 2: Si prefieres API de OpenAI (más preciso pero cuesta)
-        # with open(audio_path, "rb") as f:
-        #     transcript = openai.Audio.transcribe("whisper-1", f, language="es")
-        # return transcript["text"]
-    except Exception as e:
-        app.logger.error(f"🔴 Error transcribiendo audio: {e}")
-        return None
-
 def procesar_fecha_relativa(fecha_str):
     """
     Convierte fechas relativas como "próximo lunes" a fechas reales
@@ -1904,9 +1543,8 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
             - Solicita menú, platillos, comidas disponibles
             - Quiere hacer un pedido para llevar o a domicilio
             - Pregunta por precios de platillos
-            - Menciona nombres de platillos específicos (gorditas, tacos, chilaquiles, etc.)
+            - Menciona nombres de platillos específicos (gorditas, tacos, etc.)
             - Solicita información sobre horarios de servicio o entrega
-            - Dice "quiero ordenar", "deseo pedir", "me gustaría comer"
             
             Responde "SI" solo si hay una clara intención de hacer un pedido.
             """
@@ -3113,5 +2751,5 @@ if __name__ == '__main__':
     
     # Crear tablas necesarias
     crear_tabla_citas()
-    crear_tabla_pedidos()
+    
     app.run(host='0.0.0.0', port=args.port, debug=False)
