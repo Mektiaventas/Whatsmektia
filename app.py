@@ -176,13 +176,10 @@ def texto_a_voz(texto, filename,config=None):
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """
-    Versión mejorada que usa el historial de conversación para extraer información
+    Versión mejorada que extrae información de citas con más precisión
     """
     if config is None:
         config = obtener_configuracion_por_host()
-    
-    # Determinar el tipo de negocio
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
     if historial is None:
         historial = obtener_historial(numero, limite=5, config=config)
@@ -196,56 +193,41 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
     try:
-        if es_porfirianna:
-            prompt_cita = f"""
-            Extrae la información del pedido solicitado basándote en este mensaje y el historial de conversación.
-            
-            MENSAJE ACTUAL: "{mensaje}"
-            
-            HISTORIAL DE CONVERSACIÓN:
-            {contexto_historial}
-            
-            Devuélvelo en formato JSON con estos campos:
-            - servicio_solicitado (string: el platillo o comida solicitada, o null si no se especifica)
-            - fecha_sugerida (string en formato YYYY-MM-DD o null - opcional para pedidos)
-            - hora_sugerida (string en formato HH:MM o null - opcional para pedidos)
-            - nombre_cliente (string o null si no se especifica)
-            - telefono (string, usar este número: {numero})
-            - estado (siempre "pendiente")
-            - datos_completos (boolean: true si tiene todos los datos necesarios)
-            
-            Datos necesarios para considerar completo un pedido:
-            - servicio_solicitado: siempre requerido (qué platillo quiere)
-            - nombre_cliente: siempre requerido
-            - direccion de entrega (obligatorio)
-            """
-        else:
-            prompt_cita = f"""
-            Extrae la información de la cita solicitada basándote en este mensaje y el historial de conversación.
-            
-            MENSAJE ACTUAL: "{mensaje}"
-            
-            HISTORIAL DE CONVERSACIÓN:
-            {contexto_historial}
-            
-            Devuélvelo en formato JSON con estos campos:
-            - servicio_solicitado (string: tipo de servicio solicitado o null si no se especifica)
-            - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
-            - hora_sugerida (string en formato HH:MM o null si no se especifica)
-            - nombre_cliente (string o null si no se especifica)
-            - telefono (string, usar este número: {numero})
-            - estado (siempre "pendiente")
-            - datos_completos (boolean: true si tiene todos los datos necesarios)
-            
-            Datos necesarios para considerar completa una cita:
-            - servicio_solicitado: siempre requerido
-            - fecha_sugerida: requerido para citas
-            - nombre_cliente: siempre requerido
-            - hora_sugerida: opcional pero recomendado
-            
-            Para Mektia (servicios), se necesitan todos los datos básicos.
-            """
+        prompt_cita = f"""
+        ANALIZA este mensaje y extrae TODA la información relevante para una cita:
+
+        MENSAJE ACTUAL: "{mensaje}"
         
+        HISTORIAL RECIENTE:
+        {contexto_historial}
+
+        EXTRAE en formato JSON:
+        - servicio_solicitado (string: qué servicio/proyecto específico)
+        - fecha_sugerida (string YYYY-MM-DD o null si no está clara)
+        - hora_sugerida (string HH:MM o null si no está clara)  
+        - nombre_cliente (string o null)
+        - telefono (string: {numero})
+        - estado (siempre "pendiente")
+        - datos_completos (boolean: true si tiene servicio, fecha y nombre)
+
+        INSTRUCCIONES ESPECIALES:
+        1. Si el mensaje dice "próximo lunes", calcula la fecha real
+        2. Si menciona "9:00 AM", conviértelo a "09:00"
+        3. Si el nombre aparece en el historial, úsalo
+        4. Para proyectos: si dice "diseño electrónico", usa eso como servicio
+
+        EJEMPLO si dice "nueva cita para el próximo lunes a las 9am para Jesús Eduardo":
+        {{
+          "servicio_solicitado": "Consulta general",
+          "fecha_sugerida": "2025-09-15",  // próximo lunes
+          "hora_sugerida": "09:00",
+          "nombre_cliente": "Jesús Eduardo",
+          "telefono": "{numero}",
+          "estado": "pendiente",
+          "datos_completos": true
+        }}
+        """
+
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -268,14 +250,19 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
             info_cita = json.loads(json_match.group())
+            
+            # 🔥 CORRECCIÓN CRÍTICA: Procesar fechas relativas
+            if info_cita.get('fecha_sugerida'):
+                info_cita['fecha_sugerida'] = procesar_fecha_relativa(info_cita['fecha_sugerida'])
+                
             return info_cita
         else:
             return None
             
     except Exception as e:
-        app.logger.error(f"Error extrayendo info de {'pedido' if es_porfirianna else 'cita'}: {e}")
+        app.logger.error(f"Error extrayendo info de cita: {e}")
         return None
-    
+        
 def detectar_solicitud_cita_ia(mensaje, numero, config=None):
     """
     Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
@@ -696,7 +683,7 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
-        
+
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     """Envía alerta al administrador sobre nueva cita"""
     if config is None:
@@ -1115,7 +1102,49 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-            
+
+def procesar_fecha_relativa(fecha_str):
+    """
+    Convierte fechas relativas como "próximo lunes" a fechas reales
+    """
+    if not fecha_str or fecha_str == 'null':
+        return None
+    
+    # Si ya es una fecha en formato YYYY-MM-DD, devolverla tal cual
+    if re.match(r'\d{4}-\d{2}-\d{2}', fecha_str):
+        return fecha_str
+    
+    try:
+        from dateutil import parser
+        from dateutil.relativedelta import relativedelta
+        
+        # Mapeo de términos en español
+        mapping = {
+            'próximo lunes': 'next monday',
+            'próximo martes': 'next tuesday', 
+            'próximo miércoles': 'next wednesday',
+            'próximo jueves': 'next thursday',
+            'próximo viernes': 'next friday',
+            'próximo sábado': 'next saturday',
+            'próximo domingo': 'next sunday',
+            'lunes próximo': 'next monday',
+            'mañana': 'tomorrow',
+            'pasado mañana': 'day after tomorrow'
+        }
+        
+        # Reemplazar términos en español
+        fecha_ingles = fecha_str.lower()
+        for es, en in mapping.items():
+            fecha_ingles = fecha_ingles.replace(es, en)
+        
+        # Parsear la fecha
+        fecha_parsed = parser.parse(fecha_ingles, fuzzy=True)
+        return fecha_parsed.strftime('%Y-%m-%d')
+        
+    except Exception as e:
+        app.logger.error(f"Error procesando fecha relativa '{fecha_str}': {e}")
+        return None    
+
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1439,9 +1468,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201']:
         return False
     
-    # Primero verificar con la lista de palabras clave existente (más rápida)
-    if detectar_intervencion_humana_keywords(mensaje_usuario):
-        return True
+
     # Si no se detectó con keywords, usar IA para análisis semántico
     try:
         prompt = f"""
@@ -1487,8 +1514,6 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         
     except Exception as e:
         app.logger.error(f"Error en detección IA de intervención humana: {e}")
-        # Fallback a detección por keywords si la IA falla
-        return detectar_intervencion_humana_keywords(mensaje_usuario)
     
 def detectar_solicitud_cita_ia(mensaje, numero, config=None):
     """
@@ -1694,7 +1719,6 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
-@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -1713,13 +1737,11 @@ def webhook():
         # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         
-                # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
-        # 🔥 CORRECCIÓN: Obtener la configuración correcta
-        config = obtener_configuracion_por_phone_number_id(phone_number_id)
-        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
+        # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
         app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
-
+        
         # 🔥 CORRECCIÓN: Buscar y asignar la configuración correcta
+        config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
             app.logger.info(f"   ➡️ {numero_config}: {config_data['phone_number_id']}")
             if config_data['phone_number_id'] == phone_number_id:
@@ -1732,8 +1754,10 @@ def webhook():
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
             config = obtener_configuracion_por_host()  # Fallback al host actual
             app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
-            app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
-                # Detectar tipo de mensaje
+        
+        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
+        
+        # Detectar tipo de mensaje
         es_imagen = False
         es_audio = False
         imagen_base64 = None
@@ -1758,6 +1782,7 @@ def webhook():
                 texto = msg['image']['caption']
             else:
                 texto = "Analiza esta imagen y describe lo que ves"
+                
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
@@ -1788,18 +1813,18 @@ def webhook():
             app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
 
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         if 'id' in msg:
             current_message_id = f"{numero}_{msg['id']}"
         else:
             # For messages without ID, use timestamp + text to avoid false duplicates
             timestamp = msg.get('timestamp', '')
             current_message_id = f"{numero}_{timestamp}_{texto}_{'image' if es_imagen else 'text'}"
+            
         if not hasattr(app, 'ultimos_mensajes'):
             app.ultimos_mensajes = set()
         
-        #mensajes duplicados
-        #if current_message_id in app.ultimos_mensajes:
+        # Mensajes duplicados
+        # if current_message_id in app.ultimos_mensajes:
         #    app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
         #    return 'OK', 200
         
@@ -1885,12 +1910,12 @@ def webhook():
                 respuesta = f"No encontré tarifa para *{servicio}*."
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None, config=config)
-            enviar_confirmacion_cita(numero, None, None)  # Enviar confirmación genérica
+            enviar_confirmacion_cita(numero, None, None, config)  # Enviar confirmación genérica
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
-            # 🆕 DETECCIÓN DE CITAS MEJORADA
-        if detectar_solicitud_cita_ia(texto, numero, config):
+        if detectar_solicitud_cita_keywords(texto):
+            soli = "cita" if any(palabra in texto.lower() for palabra in ['cita', 'agendar', 'reservar']) else "pedido"
             app.logger.info(f"📅 Solicitud de {soli} detectada de {numero}")
             
             # Obtener historial para contexto
@@ -1900,6 +1925,8 @@ def webhook():
             info_cita = extraer_info_cita_mejorado(texto, numero, historial, config)
             
             if info_cita:
+                app.logger.info(f"📋 Información extraída: {json.dumps(info_cita, indent=2)}")
+                
                 # Validar si los datos están completos
                 es_valida, mensaje_error = validar_datos_cita_completos(info_cita, config)
                 
@@ -1912,23 +1939,23 @@ def webhook():
                         enviar_alerta_cita_administrador(info_cita, cita_id, config)
                         app.logger.info(f"✅ {soli.capitalize()} agendada - ID: {cita_id}")
                         guardar_conversacion(numero, texto, f"{soli.capitalize()} agendada - ID: #{cita_id}", config=config)
+                        
+                        # 🆕 EVITAR PROCESAMIENTO ADICIONAL
                         return 'OK', 200
                     else:
-                        app.logger.error(f"❌ Error guardando {soli} en BD")
-                        enviar_mensaje(numero, f"Lo siento, hubo un error al guardar tu {soli}. Por favor intenta nuevamente.", config)
+                        app.logger.error(f"❌ Error guardando {soli}")
+                        enviar_mensaje(numero, f"Hubo un error al guardar tu {soli}. Por favor, intenta de nuevo.", config)
                 else:
                     # Datos incompletos, solicitar información faltante
-                    app.logger.info(f"⚠️ {soli.capitalize()} con datos incompletos, solicitando información")
-                    solicitar_datos_faltantes_cita(numero, info_cita, config)
-                    
-                    # Guardar conversación indicando que está en proceso de agendar
-                    guardar_conversacion(numero, texto, f"Procesando {soli} - solicitando datos faltantes", config=config)
-                    return 'OK', 200
+                    enviar_mensaje(numero, mensaje_error, config)
+                    app.logger.info(f"📝 Solicitando información faltante para {soli}")
             else:
                 app.logger.error(f"❌ Error extrayendo información de {soli}")
-                enviar_mensaje(numero, f"No pude entender la información de tu {soli}. ¿Podrías proporcionar más detalles?", config)
+                enviar_mensaje(numero, f"No pude entender la información de tu {soli}. ¿Podrías ser más específico?", config)
             
-            app.logger.warning(f"⚠️ Falló detección de {soli}, continuando con IA normal")
+            # 🆕 IMPORTANTE: Salir del procesamiento después de manejar la cita
+            return 'OK', 200
+        
         # IA normal
         IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
@@ -1954,7 +1981,7 @@ def webhook():
                     # URL pública del audio (ajusta según tu configuración)
                     audio_url_publica = f"https://mektia.com{audio_url_local}"
                     
-                    if enviar_mensaje_voz(numero, audio_url_publica):
+                    if enviar_mensaje_voz(numero, audio_url_publica, config):
                         app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
                         guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True, config=config)
                     else:
@@ -1981,7 +2008,7 @@ def webhook():
             app.logger.info(f"🔍 Verificando intervención humana para {numero}")
             app.logger.info(f"📝 Mensaje: {texto[:100]}...")
             app.logger.info(f"🤖 Respuesta: {respuesta[:100]}...")
-            detectado = detectar_intervencion_humana_ia(texto,numero)
+            detectado = detectar_intervencion_humana_ia(texto, numero, config)
             app.logger.info(f"🎯 Detección resultado: {detectado}")
 
             if detectado and numero != ALERT_NUMBER:
@@ -1995,7 +2022,7 @@ def webhook():
         if not meta:
             inicializar_chat_meta(numero, config)
         
-        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta)
+        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
         actualizar_columna_chat(numero, nueva_columna, config)
         
         return 'OK', 200
@@ -2004,7 +2031,8 @@ def webhook():
         app.logger.error(f"🔴 Error en webhook: {e}")
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
-    
+
+
 def detectar_solicitud_cita_keywords(mensaje):
     """
     Detección rápida por palabras clave de solicitud de cita/pedido
