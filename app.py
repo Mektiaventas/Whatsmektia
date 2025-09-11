@@ -398,8 +398,6 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         - servicio_solicitado: siempre requerido
         - fecha_sugerida: requerido para citas, opcional para pedidos
         - nombre_cliente: siempre requerido
-        - hora_sugerida: opcional
-        - fecha_sugerida: opcional para pedidos
         
         Si no se puede determinar algún campo, usa null.
         """
