@@ -666,13 +666,18 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    tipo_solicitud = "pedido" if es_porfirianna else "cita"
+    
     try:
         mensaje_confirmacion = f"""
-        📅 *Confirmación de {soli}* - ID: #{cita_id}
+        📅 *Confirmación de {tipo_solicitud}* - ID: #{cita_id}
 
-        ¡Hola! Hemos recibido tu solicitud de cita:
+        ¡Hola! Hemos recibido tu solicitud de {tipo_solicitud}:
 
-        *Servicio:* {info_cita.get('servicio_solicitado', 'Por confirmar')}
+        *{'Platillo' if es_porfirianna else 'Servicio'}:* {info_cita.get('servicio_solicitado', 'Por confirmar')}
         *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'Por confirmar')}
         *Hora sugerida:* {info_cita.get('hora_sugerida', 'Por confirmar')}
 
@@ -687,23 +692,28 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         """
         
         enviar_mensaje(numero, mensaje_confirmacion, config)
-        app.logger.info(f"✅ Confirmación de cita enviada a {numero}, ID: {cita_id}")
+        app.logger.info(f"✅ Confirmación de {tipo_solicitud} enviada a {numero}, ID: {cita_id}")
         
     except Exception as e:
-        app.logger.error(f"Error enviando confirmación de cita: {e}")
-
+        app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
+        
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     """Envía alerta al administrador sobre nueva cita"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    tipo_solicitud = "pedido" if es_porfirianna else "cita"
+    
     try:
         mensaje_alerta = f"""
-        🚨 *NUEVA SOLICITUD DE {soli}* - ID: #{cita_id}
+        🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
 
         *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
         *Teléfono:* {info_cita.get('telefono')}
 
-        *Servicio solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
         *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
         *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
 
@@ -715,10 +725,68 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         # Enviar a ambos números
         enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
         enviar_mensaje('5214493432744', mensaje_alerta, config)
-        app.logger.info(f"✅ Alerta de cita enviada a ambos administradores, ID: {cita_id}")
+        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
         
     except Exception as e:
-        app.logger.error(f"Error enviando alerta de cita: {e}")
+        app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
+
+def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
+    """
+    Solicita al usuario los datos faltantes para completar la cita/pedido
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    # Determinar el tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    # Identificar qué datos faltan
+    datos_faltantes = []
+    
+    # Validar servicio solicitado (siempre requerido)
+    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
+        if es_porfirianna:
+            datos_faltantes.append("qué platillo deseas ordenar")
+        else:
+            datos_faltantes.append("qué servicio necesitas")
+    
+    # Validar fecha (solo requerido para Mektia)
+    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
+        datos_faltantes.append("fecha preferida")
+    
+    # Validar nombre del cliente (siempre requerido)
+    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
+        datos_faltantes.append("tu nombre")
+    
+    # Construir mensaje personalizado según lo que falte
+    if datos_faltantes:
+        if es_porfirianna:
+            mensaje = f"¡Perfecto! Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_faltantes)}."
+        else:
+            mensaje = f"¡Excelente! Para agendar tu cita, necesito que me proporciones: {', '.join(datos_faltantes)}."
+        
+        # Agregar ejemplos según lo que falte
+        if "qué platillo deseas ordenar" in datos_faltantes or "qué servicio necesitas" in datos_faltantes:
+            if es_porfirianna:
+                mensaje += "\n\nPor ejemplo: 'Quiero ordenar 4 gorditas de chicharrón y 2 tacos'"
+            else:
+                mensaje += "\n\nPor ejemplo: 'Necesito una página web para mi negocio'"
+        
+        if "fecha preferida" in datos_faltantes:
+            mensaje += "\n\nPor ejemplo: 'El próximo lunes' o 'Para el 15 de octubre'"
+        
+        if "tu nombre" in datos_faltantes:
+            mensaje += "\n\nPor ejemplo: 'Mi nombre es Juan Pérez'"
+        
+        enviar_mensaje(numero, mensaje, config)
+        app.logger.info(f"📋 Solicitando datos faltantes a {numero}: {', '.join(datos_faltantes)}")
+    else:
+        # Todos los datos están completos (no debería llegar aquí)
+        if es_porfirianna:
+            enviar_mensaje(numero, "¡Gracias! He registrado tu pedido y nos pondremos en contacto contigo pronto.", config)
+        else:
+            enviar_mensaje(numero, "¡Gracias! He agendado tu cita y nos pondremos en contacto contigo pronto.", config)
+
 
 @app.route('/citas')
 def ver_citas(config=None):
