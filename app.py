@@ -631,8 +631,7 @@ def guardar_cita(info_cita, config=None):
         ))
         
         # Corregir esta parte - eliminar la referencia a guardado no definida
-        if info_cita.get('servicio_solicitado') is None:
-            app.logger.warning(f"⚠️ Guardando cita sin servicio solicitado: {info_cita}")
+        app.logger.warning(f"⚠️ Guardando cita sin servicio solicitado: {info_cita}")
 
         conn.commit()
         cita_id = cursor.lastrowid
@@ -1046,7 +1045,7 @@ def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=
         config = obtener_configuracion_por_host()
     
     conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor()
     
     # Crear tabla de estados si no existe
     cursor.execute('''
@@ -1063,16 +1062,16 @@ def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=
     ''')
     
     # Insertar o actualizar estado
+    # Insertar o actualizar estado
     cursor.execute('''
-        INSERT INTO estados_conversacion (numero, contexto, accion, datos)
-        VALUES (%s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            contexto = VALUES(contexto),
-            accion = VALUES(accion),
-            datos = VALUES(datos),
-            timestamp = CURRENT_TIMESTAMP
-    ''', (numero, contexto, accion, json.dumps(datos) if datos else None))
-    
+            INSERT INTO estados_conversacion (numero, contexto, accion, datos)
+            VALUES (%s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                contexto = VALUES(contexto),
+                accion = VALUES(accion),
+                datos = VALUES(datos),
+                timestamp = CURRENT_TIMESTAMP
+        ''', (numero, contexto, accion, json.dumps(datos) if datos else None))
     conn.commit()
     cursor.close()
     conn.close()
@@ -1111,17 +1110,14 @@ def obtener_imagen_whatsapp(image_id, config=None):
     
     try:
         # Usar la configuración correcta
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': 'profile_picture',
-            'access_token': config['whatsapp_token']  # ← Usar variable de configuración
-        }
+        url = f"https://graph.facebook.com/v18.0/{config[image_id]}"
         
         headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {config["whatsapp_token"]}'  # ← Usar variable
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
         }
+        
+        response = requests.get(url, headers=headers, timeout=30)
         
         app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
         
@@ -1167,93 +1163,32 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(traceback.format_exc())
         return None, None
 
-def procesar_fecha_relativa_mejorado(fecha_str, contexto=None):
+def procesar_fecha_relativa(fecha_str):
     """
-    Procesamiento mejorado de fechas relativas con contexto
+    Función simple de procesamiento de fechas relativas
     """
     if not fecha_str or fecha_str == 'null':
         return None
     
-    # Si ya es una fecha en formato YYYY-MM-DD, devolverla tal cual
+    # Si ya es formato YYYY-MM-DD, devolver tal cual
     if re.match(r'\d{4}-\d{2}-\d{2}', fecha_str):
         return fecha_str
     
-    try:
-        from dateutil import parser
-        from dateutil.relativedelta import relativedelta
-        import calendar
-        
-        hoy = datetime.now()
-        
-        # Mapeo de términos en español con contexto
-        mapping = {
-            'próximo lunes': 'next monday',
-            'próximo martes': 'next tuesday', 
-            'próximo miércoles': 'next wednesday',
-            'próximo jueves': 'next thursday',
-            'próximo viernes': 'next friday',
-            'próximo sábado': 'next saturday',
-            'próximo domingo': 'next sunday',
-            'lunes próximo': 'next monday',
-            'mañana': 'tomorrow',
-            'pasado mañana': 'day after tomorrow'
-        }
-        
-        # Manejar "8 de diciembre" considerando el año actual
-        if re.match(r'(\d{1,2})\s+de\s+([a-z]+)', fecha_str.lower()):
-            match = re.match(r'(\d{1,2})\s+de\s+([a-z]+)', fecha_str.lower())
-            dia = int(match.group(1))
-            mes_texto = match.group(2)
-            
-            # Mapear meses en español
-            meses = {
-                'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
-                'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
-                'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
-            }
-            
-            if mes_texto in meses:
-                mes = meses[mes_texto]
-                año = hoy.year
-                
-                # Si el mes ya pasó este año, usar próximo año
-                if mes < hoy.month or (mes == hoy.month and dia < hoy.day):
-                    año += 1
-                
-                try:
-                    fecha = datetime(año, mes, dia)
-                    return fecha.strftime('%Y-%m-%d')
-                except ValueError:
-                    # Día inválido para el mes (ej: 31 de febrero)
-                    pass
-        
-        # Reemplazar términos en español
-        fecha_ingles = fecha_str.lower()
-        for es, en in mapping.items():
-            fecha_ingles = fecha_ingles.replace(es, en)
-        
-        # Parsear la fecha
-        fecha_parsed = parser.parse(fecha_ingles, fuzzy=True)
-        
-        # Ajustar año si la fecha parseada es anterior a hoy
-        if fecha_parsed < hoy:
-            if fecha_parsed.month == 12 and hoy.month == 1:
-                # Caso especial: diciembre -> enero del próximo año
-                fecha_parsed = fecha_parsed.replace(year=hoy.year + 1)
-            else:
-                # Para otros meses, asumir próximo año
-                fecha_parsed = fecha_parsed.replace(year=hoy.year)
-                
-                # Si aún es anterior, sumar un año
-                if fecha_parsed < hoy:
-                    fecha_parsed = fecha_parsed.replace(year=hoy.year + 1)
-        
-        return fecha_parsed.strftime('%Y-%m-%d')
-        
-    except Exception as e:
-        app.logger.error(f"Error procesando fecha relativa '{fecha_str}': {e}")
-        return None
+    # Lógica básica de procesamiento
+    hoy = datetime.now()
+    mapping = {
+        'próximo lunes': hoy + timedelta(days=(7 - hoy.weekday()) % 7),
+        'mañana': hoy + timedelta(days=1),
+        'pasado mañana': hoy + timedelta(days=2),
+    }
     
+    fecha_lower = fecha_str.lower()
+    for termino, fecha_calculada in mapping.items():
+        if termino in fecha_lower:
+            return fecha_calculada.strftime('%Y-%m-%d')
+    
+    return None
+
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1894,31 +1829,38 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         # Fallback a detección por keywords si la IA falla
         return detectar_solicitud_cita_keywords(mensaje)
         
-def resumen_rafa(numero,config=None):
+def resumen_rafa(numero, config=None):
+    """Resumen más completo y eficiente"""
     if config is None:
         config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 10;",
-        (numero,)
-    )
-    historial = cursor.fetchall()
-    cursor.close()
-    conn.close()
     
-    # Resumen más completo y estructurado
-    resumen = "🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    resumen += f"📞 *Cliente:* {numero}\n"
-    resumen += f"🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
-    resumen += "📋 *Últimas interacciones:*\n"
-    
-    for i, msg in enumerate(historial[:5]):  # Solo últimos 5 mensajes
-        resumen += f"\n{i+1}. 👤 *Usuario:* {msg['mensaje'][:100]}"
-        if msg['respuesta']:
-            resumen += f"\n   🤖 *IA:* {msg['respuesta'][:100]}"
-    
-    return resumen
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT mensaje, respuesta, timestamp FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 8;",
+            (numero,)
+        )
+        historial = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        resumen = "🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+        resumen += f"📞 *Cliente:* {numero}\n"
+        resumen += f"🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        resumen += "📋 *Últimas interacciones:*\n"
+        
+        for i, msg in enumerate(historial):
+            hora = msg['timestamp'].strftime('%H:%M') if msg.get('timestamp') else 'N/A'
+            resumen += f"\n{i+1}. [{hora}] 👤: {msg['mensaje'][:80] if msg['mensaje'] else '[Sin mensaje]'}"
+            if msg['respuesta']:
+                resumen += f"\n   🤖: {msg['respuesta'][:80]}"
+        
+        return resumen
+        
+    except Exception as e:
+        app.logger.error(f"Error generando resumen: {e}")
+        return f"Error generando resumen para {numero}"
     
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
