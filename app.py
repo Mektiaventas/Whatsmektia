@@ -1694,7 +1694,7 @@ def enviar_informacion_completa(numero_cliente, config=None):
         
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
-        
+
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -1719,6 +1719,7 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
+@app.route('/webhook', methods=['POST'])
 def webhook():
     try:
         payload = request.get_json()
@@ -2032,6 +2033,28 @@ def webhook():
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
 
+
+def detectar_solicitud_cita_keywords(mensaje):
+    """
+    Detección rápida por palabras clave de solicitud de cita/pedido
+    """
+    mensaje_lower = mensaje.lower()
+    
+    # Palabras clave para detección de citas/pedidos
+    palabras_clave = [
+        'cita', 'agendar', 'reservar', 'programar', 'consulta', 'sesión',
+        'servicio', 'cotización', 'presupuesto', 'contratar', 'asesoría',
+        'evaluación', 'horario', 'disponibilidad', 'turno', 'ordenar',
+        'pedido', 'encargar', 'comprar', 'menú', 'precio', 'qué tienes',
+        'qué ofrecen', 'quiero', 'necesito', 'me interesa'
+    ]
+    
+    # Verificar si alguna palabra clave está en el mensaje
+    for palabra in palabras_clave:
+        if palabra in mensaje_lower:
+            return True
+    
+    return False
 
 def detectar_solicitud_cita_keywords(mensaje):
     """
