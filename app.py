@@ -932,7 +932,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     {lista_precios}
 
     INSTRUCCIONES IMPORTANTES:
-    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios
+    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios, si no los tienes no insistas solo manda un mensaje para recordar y ya no le digas de nuevo
     2. Los datos obligatorios para un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'cita'} son:
     - Servicio solicitado (siempre requerido)
     {'- Fecha sugerida (requerido)' if not 'laporfirianna' in config.get('dominio', '') else ''}
@@ -1481,7 +1481,6 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         - Solicita contacto telefónico, número de atención, etc.
         - Menciona que tiene un problema complejo o urgente
         - Pide cotización, presupuesto o información comercial específica
-        - Quiere hacer una compra, pedido o transacción
         - Necesita aclarar dudas técnicas complejas
         
         Responde "SI" solo si hay una clara intención de hablar con humano.
