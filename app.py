@@ -67,10 +67,13 @@ if not NUMEROS_CONFIG['524495486142']:
         ]
 else:
     soli = "orden"
+    # En servicios_clave para La Porfirianna, agrega:
     servicios_clave = [
-            'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 'gordita',
-            'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'antojitos mexicanos'
-        ]
+        'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 
+        'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'chilaquiles',
+        'arrachera', 'papas', 'torta', 'milanesa', 'ordenar', 'pedir',
+        'quiero', 'deseo', 'menu', 'comida'
+    ]
 
 # Configuración por defecto (para backward compatibility)
 WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
@@ -2654,7 +2657,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
             return 1  # Nuevos
         
         # Si hay intervención humana, mover a "Esperando Respuesta"
-        if detectar_intervencion_humana(mensaje, respuesta, numero):
+        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
             return 3  # Esperando Respuesta
         
         # Si tiene más de 2 mensajes, mover a "En Conversación"
@@ -2722,7 +2725,7 @@ def obtener_contexto_consulta(numero, config=None):
         servicios_mencionados = []
         for msg in mensajes:
             mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""
-            
+            # En servicios_clave para La Porfirianna, agrega:
             for servicio in servicios_clave:
                 if servicio in mensaje_texto and servicio not in servicios_mencionados:
                     servicios_mencionados.append(servicio)
