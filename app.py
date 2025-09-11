@@ -1036,7 +1036,74 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-        
+
+# Agregar esta función para manejar el estado de la conversación
+def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
+    """
+    Actualiza el estado de la conversación para mantener contexto
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Crear tabla de estados si no existe
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS estados_conversacion (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            numero VARCHAR(20),
+            contexto VARCHAR(50),
+            accion VARCHAR(50),
+            datos JSON,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_numero (numero),
+            INDEX idx_contexto (contexto)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    
+    # Insertar o actualizar estado
+    cursor.execute('''
+        INSERT INTO estados_conversacion (numero, contexto, accion, datos)
+        VALUES (%s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            contexto = VALUES(contexto),
+            accion = VALUES(accion),
+            datos = VALUES(datos),
+            timestamp = CURRENT_TIMESTAMP
+    ''', (numero, contexto, accion, json.dumps(datos) if datos else None))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+def obtener_estado_conversacion(numero, config=None):
+    """
+    Obtiene el estado actual de la conversación
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT contexto, accion, datos 
+        FROM estados_conversacion 
+        WHERE numero = %s 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    ''', (numero,))
+    
+    estado = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if estado and estado['datos']:
+        estado['datos'] = json.loads(estado['datos'])
+    
+    return estado 
+
 def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
     if config is None:
@@ -1100,9 +1167,9 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(traceback.format_exc())
         return None, None
 
-def procesar_fecha_relativa(fecha_str):
+def procesar_fecha_relativa_mejorado(fecha_str, contexto=None):
     """
-    Convierte fechas relativas como "próximo lunes" a fechas reales
+    Procesamiento mejorado de fechas relativas con contexto
     """
     if not fecha_str or fecha_str == 'null':
         return None
@@ -1114,8 +1181,11 @@ def procesar_fecha_relativa(fecha_str):
     try:
         from dateutil import parser
         from dateutil.relativedelta import relativedelta
+        import calendar
         
-        # Mapeo de términos en español
+        hoy = datetime.now()
+        
+        # Mapeo de términos en español con contexto
         mapping = {
             'próximo lunes': 'next monday',
             'próximo martes': 'next tuesday', 
@@ -1129,6 +1199,34 @@ def procesar_fecha_relativa(fecha_str):
             'pasado mañana': 'day after tomorrow'
         }
         
+        # Manejar "8 de diciembre" considerando el año actual
+        if re.match(r'(\d{1,2})\s+de\s+([a-z]+)', fecha_str.lower()):
+            match = re.match(r'(\d{1,2})\s+de\s+([a-z]+)', fecha_str.lower())
+            dia = int(match.group(1))
+            mes_texto = match.group(2)
+            
+            # Mapear meses en español
+            meses = {
+                'enero': 1, 'febrero': 2, 'marzo': 3, 'abril': 4,
+                'mayo': 5, 'junio': 6, 'julio': 7, 'agosto': 8,
+                'septiembre': 9, 'octubre': 10, 'noviembre': 11, 'diciembre': 12
+            }
+            
+            if mes_texto in meses:
+                mes = meses[mes_texto]
+                año = hoy.year
+                
+                # Si el mes ya pasó este año, usar próximo año
+                if mes < hoy.month or (mes == hoy.month and dia < hoy.day):
+                    año += 1
+                
+                try:
+                    fecha = datetime(año, mes, dia)
+                    return fecha.strftime('%Y-%m-%d')
+                except ValueError:
+                    # Día inválido para el mes (ej: 31 de febrero)
+                    pass
+        
         # Reemplazar términos en español
         fecha_ingles = fecha_str.lower()
         for es, en in mapping.items():
@@ -1136,12 +1234,26 @@ def procesar_fecha_relativa(fecha_str):
         
         # Parsear la fecha
         fecha_parsed = parser.parse(fecha_ingles, fuzzy=True)
+        
+        # Ajustar año si la fecha parseada es anterior a hoy
+        if fecha_parsed < hoy:
+            if fecha_parsed.month == 12 and hoy.month == 1:
+                # Caso especial: diciembre -> enero del próximo año
+                fecha_parsed = fecha_parsed.replace(year=hoy.year + 1)
+            else:
+                # Para otros meses, asumir próximo año
+                fecha_parsed = fecha_parsed.replace(year=hoy.year)
+                
+                # Si aún es anterior, sumar un año
+                if fecha_parsed < hoy:
+                    fecha_parsed = fecha_parsed.replace(year=hoy.year + 1)
+        
         return fecha_parsed.strftime('%Y-%m-%d')
         
     except Exception as e:
         app.logger.error(f"Error procesando fecha relativa '{fecha_str}': {e}")
-        return None    
-
+        return None
+    
 def procesar_mensaje(texto, image_base64=None, filename=None):
     """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
     try:
@@ -1441,6 +1553,198 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     conn.commit()
     cursor.close()
     conn.close()
+
+def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
+    """
+    Detección mejorada de intenciones con contexto
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    if historial is None:
+        historial = obtener_historial(numero, limite=5, config=config)
+    
+    # Obtener estado actual de la conversación
+    estado_actual = obtener_estado_conversacion(numero, config)
+    
+    # Construir contexto del historial
+    contexto_historial = ""
+    for i, msg in enumerate(historial):
+        if msg['mensaje']:
+            contexto_historial += f"Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            contexto_historial += f"Asistente: {msg['respuesta']}\n"
+    
+    try:
+        prompt_intencion = f"""
+        Analiza el mensaje del usuario y determina su intención principal considerando el historial de conversación.
+
+        HISTORIAL DE CONVERSACIÓN:
+        {contexto_historial}
+
+        MENSAJE ACTUAL: "{mensaje}"
+
+        ESTADO ACTUAL: {estado_actual['contexto'] if estado_actual else 'Sin estado previo'}
+
+        OPCIONES DE INTENCIÓN:
+        - NUEVA_CITA: El usuario quiere crear una cita completamente nueva
+        - MODIFICAR_CITA: El usuario quiere modificar una cita existente
+        - CONSULTAR_SERVICIOS: El usuario pregunta sobre servicios disponibles
+        - CANCELAR_CITA: El usuario quiere cancelar una cita
+        - OTRO: Otra intención no relacionada con citas
+
+        Responde en formato JSON:
+        {{
+            "intencion": "NUEVA_CITA|MODIFICAR_CITA|CONSULTAR_SERVICIOS|CANCELAR_CITA|OTRO",
+            "confianza": 0.0-1.0,
+            "detalles": {{...}}  // Información adicional relevante
+        }}
+
+        Ejemplo si dice "quiero hacer otro pedido" después de tener una cita:
+        {{
+            "intencion": "NUEVA_CITA",
+            "confianza": 0.9,
+            "detalles": {{"tipo": "nueva_solicitud"}}
+        }}
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt_intencion}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
+        else:
+            return {"intencion": "OTRO", "confianza": 0.0, "detalles": {}}
+            
+    except Exception as e:
+        app.logger.error(f"Error detectando intención: {e}")
+        return {"intencion": "OTRO", "confianza": 0.0, "detalles": {}}
+
+def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
+    """
+    Manejo mejorado de solicitudes de cita con detección de intenciones
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    # Detectar intención
+    intencion = detectar_intencion_mejorado(mensaje, numero, config=config)
+    
+    # Verificar si hay citas existentes
+    citas_existentes = obtener_citas_pendientes(numero, config)
+    
+    app.logger.info(f"🎯 Intención detectada: {intencion['intencion']} (confianza: {intencion['confianza']})")
+    app.logger.info(f"📋 Citas existentes: {len(citas_existentes)}")
+    
+    # Manejar según la intención detectada
+    if intencion['intencion'] == 'NUEVA_CITA' and intencion['confianza'] > 0.7:
+        # Crear nueva cita
+        cita_id = guardar_cita(info_cita, config)
+        if cita_id:
+            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+            enviar_alerta_cita_administrador(info_cita, cita_id, config)
+            actualizar_estado_conversacion(numero, "CITA_AGENDADA", "nueva_cita", 
+                                         {"cita_id": cita_id, "info": info_cita}, config)
+            return f"✅ Nueva cita agendada - ID: #{cita_id}"
+    
+    elif intencion['intencion'] == 'MODIFICAR_CITA' and intencion['confianza'] > 0.6 and citas_existentes:
+        # Modificar cita existente (la más reciente)
+        cita_id = citas_existentes[0]['id']
+        if modificar_cita(cita_id, info_cita, config):
+            enviar_confirmacion_modificacion(numero, info_cita, cita_id, config)
+            actualizar_estado_conversacion(numero, "CITA_MODIFICADA", "modificar_cita", 
+                                         {"cita_id": cita_id, "info": info_cita}, config)
+            return f"✅ Cita modificada - ID: #{cita_id}"
+    
+    # Si no se detecta intención clara o falla la detección, usar lógica original
+    es_valida, mensaje_error = validar_datos_cita_completos(info_cita, config)
+    
+    if es_valida:
+        cita_id = guardar_cita(info_cita, config)
+        if cita_id:
+            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+            enviar_alerta_cita_administrador(info_cita, cita_id, config)
+            return f"✅ Cita agendada - ID: #{cita_id}"
+    else:
+        return mensaje_error
+    
+    return "No pude procesar tu solicitud de cita. Por favor, intenta de nuevo."
+
+def obtener_citas_pendientes(numero, config=None):
+    """
+    Obtiene las citas pendientes de un cliente
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT * FROM citas 
+        WHERE numero_cliente = %s AND estado = 'pendiente'
+        ORDER BY fecha_creacion DESC
+    ''', (numero,))
+    
+    citas = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return citas
+
+def modificar_cita(cita_id, nueva_info, config=None):
+    """
+    Modifica una cita existente
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE citas SET
+                servicio_solicitado = %s,
+                fecha_propuesta = %s,
+                hora_propuesta = %s,
+                nombre_cliente = %s,
+                fecha_creacion = CURRENT_TIMESTAMP
+            WHERE id = %s
+        ''', (
+            nueva_info.get('servicio_solicitado'),
+            nueva_info.get('fecha_sugerida'),
+            nueva_info.get('hora_sugerida'),
+            nueva_info.get('nombre_cliente'),
+            cita_id
+        ))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Error modificando cita {cita_id}: {e}")
+        return False
 
 # ——— Detección y alerta ———
 def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
@@ -1911,9 +2215,9 @@ def webhook():
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
-        if detectar_solicitud_cita_keywords(texto):
-            soli = "cita" if any(palabra in texto.lower() for palabra in ['cita', 'agendar', 'reservar']) else "pedido"
-            app.logger.info(f"📅 Solicitud de {soli} detectada de {numero}")
+        # En el webhook, modificar la sección de detección de citas:
+        if detectar_solicitud_cita_keywords(texto) or detectar_solicitud_cita_ia(texto, numero, config):
+            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
             
             # Obtener historial para contexto
             historial = obtener_historial(numero, limite=5, config=config)
@@ -1924,33 +2228,18 @@ def webhook():
             if info_cita:
                 app.logger.info(f"📋 Información extraída: {json.dumps(info_cita, indent=2)}")
                 
-                # Validar si los datos están completos
-                es_valida, mensaje_error = validar_datos_cita_completos(info_cita, config)
+                # Usar el nuevo manejador mejorado
+                resultado = manejar_solicitud_cita_mejorado(numero, texto, info_cita, config)
                 
-                if es_valida:
-                    # Datos completos, guardar cita
-                    cita_id = guardar_cita(info_cita, config)
-                    
-                    if cita_id:
-                        enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                        enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                        app.logger.info(f"✅ {soli.capitalize()} agendada - ID: {cita_id}")
-                        guardar_conversacion(numero, texto, f"{soli.capitalize()} agendada - ID: #{cita_id}", config=config)
-                        
-                        # 🆕 EVITAR PROCESAMIENTO ADICIONAL
-                        return 'OK', 200
-                    else:
-                        app.logger.error(f"❌ Error guardando {soli}")
-                        enviar_mensaje(numero, f"Hubo un error al guardar tu {soli}. Por favor, intenta de nuevo.", config)
-                else:
-                    # Datos incompletos, solicitar información faltante
-                    enviar_mensaje(numero, mensaje_error, config)
-                    app.logger.info(f"📝 Solicitando información faltante para {soli}")
+                # Enviar respuesta al usuario
+                enviar_mensaje(numero, resultado, config)
+                guardar_conversacion(numero, texto, resultado, config=config)
+                
+                return 'OK', 200
             else:
-                app.logger.error(f"❌ Error extrayendo información de {soli}")
-                enviar_mensaje(numero, f"No pude entender la información de tu {soli}. ¿Podrías ser más específico?", config)
+                app.logger.error(f"❌ Error extrayendo información de cita")
+                enviar_mensaje(numero, "No pude entender la información de tu cita. ¿Podrías ser más específico?", config)
             
-            # 🆕 IMPORTANTE: Salir del procesamiento después de manejar la cita
             return 'OK', 200
         
         # IA normal
