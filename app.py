@@ -1,5 +1,11 @@
 # Agrega esto con los otros imports al inicio
 import traceback
+# Agrega estos imports al inicio del archivo
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 import pytz
 import os
 import logging
@@ -15,6 +21,7 @@ from decimal import Decimal
 import re
 import io
 from PIL import Image
+# Configurar Gemini
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
@@ -24,6 +31,7 @@ app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
 
 # ——— Env vars ———
+GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -55,25 +63,15 @@ NUMEROS_CONFIG = {
     }
 }
 
-if not NUMEROS_CONFIG['524495486142']:
-    soli = "cita"
-    servicios_clave = [
+soli = "cita"
+servicios_clave = [
             'página web', 'sitio web', 'ecommerce', 'tienda online',
             'aplicación', 'app', 'software', 'sistema',
             'marketing', 'seo', 'redes sociales', 'publicidad',
             'diseño', 'branding', 'logo', 'identidad visual',
             'hosting', 'dominio', 'mantenimiento', 'soporte',
             'electronica', 'hardware', 'iot', 'internet de las cosas',
-        ]
-else:
-    soli = "orden"
-    # En servicios_clave para La Porfirianna, agrega:
-    servicios_clave = [
-        'gorditas', 'antojitos', 'tacos', 'comida mexicana', 'catering', 
-        'sopes', 'quesadillas', 'tlacoyos', 'huaraches', 'chilaquiles',
-        'arrachera', 'papas', 'torta', 'milanesa', 'ordenar', 'pedir',
-        'quiero', 'deseo', 'menu', 'comida'
-    ]
+        ]    
 
 # Configuración por defecto (para backward compatibility)
 WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
@@ -320,6 +318,89 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         app.logger.error(f"Error en detección IA de {soli}: {e}")
         # Fallback a detección por keywords si la IA falla
         return detectar_solicitud_cita_keywords(mensaje)
+
+def autenticar_google_calendar(config=None):
+    """Autentica y devuelve el servicio de Google Calendar"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    SCOPES = ['https://www.googleapis.com/auth/calendar']
+    creds = None
+    
+    # El token.json almacena los tokens de acceso y actualización
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    
+    # Si no hay credenciales válidas, permite que el usuario inicie sesión
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file(
+                os.getenv('GOOGLE_CLIENT_SECRET_FILE', 'client_secret.json'), SCOPES)
+            creds = flow.run_local_server(port=0)
+        
+        # Guarda las credenciales para la próxima vez
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    
+    try:
+        service = build('calendar', 'v3', credentials=creds)
+        return service
+    except HttpError as error:
+        app.logger.error(f'Error al construir el servicio de Calendar: {error}')
+        return None
+
+def crear_evento_calendar(service, cita_info, config=None):
+    """Crea un evento en Google Calendar para la cita"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar el tipo de negocio
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        
+        # Formatear fecha y hora
+        start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
+        end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
+                                      "%Y-%m-%d %H:%M") + timedelta(hours=1)
+        end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+        
+        # Crear el evento
+        event = {
+            'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']}",
+            'description': f"""
+Servicio: {cita_info.get('servicio_solicitado', 'No especificado')}
+Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
+Teléfono: {cita_info.get('telefono', 'No especificado')}
+Notas: Cita agendada automáticamente desde WhatsApp
+            """.strip(),
+            'start': {
+                'dateTime': start_time,
+                'timeZone': 'America/Mexico_City',
+            },
+            'end': {
+                'dateTime': end_time,
+                'timeZone': 'America/Mexico_City',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 30},
+                    {'method': 'email', 'minutes': 24 * 60},  # 1 día antes
+                ],
+            },
+        }
+        
+        calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+        event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        
+        app.logger.info(f'Evento creado: {event.get("htmlLink")}')
+        return event.get('id')  # Retorna el ID del evento
+        
+    except HttpError as error:
+        app.logger.error(f'Error al crear evento: {error}')
+        return None
 
 def validar_datos_cita_completos(info_cita, config=None):
     """
@@ -608,9 +689,10 @@ def crear_tabla_citas(config=None):
     conn.close()
 
 def guardar_cita(info_cita, config=None):
-    """Guarda la cita en la base de datos"""
+    """Guarda la cita en la base de datos y agenda en Google Calendar"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -630,20 +712,32 @@ def guardar_cita(info_cita, config=None):
             'pendiente'
         ))
         
-        # Corregir esta parte - eliminar la referencia a guardado no definida
-        app.logger.warning(f"⚠️ Guardando cita sin servicio solicitado: {info_cita}")
-
         conn.commit()
         cita_id = cursor.lastrowid
         cursor.close()
         conn.close()
+        
+        # Agendar en Google Calendar
+        service = autenticar_google_calendar(config)
+        if service:
+            evento_id = crear_evento_calendar(service, info_cita, config)
+            if evento_id:
+                # Guardar el ID del evento en la base de datos
+                conn = get_db_connection(config)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                ''', (evento_id, cita_id))
+                conn.commit()
+                cursor.close()
+                conn.close()
+                app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
         
         return cita_id
         
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
         return None
-
     
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
@@ -770,6 +864,15 @@ def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
         else:
             enviar_mensaje(numero, "¡Gracias! He agendado tu cita y nos pondremos en contacto contigo pronto.", config)
 
+@app.route('/autorizar-google')
+def autorizar_google():
+    """Endpoint para autorizar manualmente con Google"""
+    service = autenticar_google_calendar()
+    if service:
+        flash('✅ Autorización con Google Calendar exitosa', 'success')
+    else:
+        flash('❌ Error en la autorización con Google Calendar', 'error')
+    return redirect(url_for('configuracion_tab', tab='negocio'))
 
 @app.route('/citas')
 def ver_citas(config=None):
@@ -2322,16 +2425,16 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Usar el endpoint correcto de WhatsApp Business API
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}"
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
             'fields': 'profile_picture',
-            'access_token': 'whatsapp_token'
+            'access_token': config['whatsapp_token']
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {'whatsapp_token'}'
+            'Authorization': f'Bearer {config["whatsapp_token"]}'
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)

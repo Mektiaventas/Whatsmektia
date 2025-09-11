@@ -16,7 +16,19 @@
       </li>
     {% endfor %}
   </ul>
-
+  {% if active == 'negocio' %}
+<div class="form-group">
+    <label>Integración con Google Calendar</label>
+    <div>
+        <a href="{{ url_for('autorizar_google') }}" class="btn btn-primary">
+            Autorizar con Google Calendar
+        </a>
+        <small class="form-text text-muted">
+            Permite agendar citas automáticamente en tu calendario
+        </small>
+    </div>
+</div>
+{% endif %}
   <!-- Contenido de la subpestaña -->
   {% if active == 'negocio' %}
     <form class="config-form" method="POST">
