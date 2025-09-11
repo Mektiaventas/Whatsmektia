@@ -217,8 +217,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             Datos necesarios para considerar completo un pedido:
             - servicio_solicitado: siempre requerido (qué platillo quiere)
             - nombre_cliente: siempre requerido
-            
-            Para La Porfirianna (comida), los campos de fecha y hora son opcionales.
+            - direccion de entrega (obligatorio)
             """
         else:
             prompt_cita = f"""
@@ -256,7 +255,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt_cita}],
             "temperature": 0.3,
-            "max_tokens": 500
+            "max_tokens": 600
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
@@ -299,8 +298,8 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         
         Considera que podría ser una solicitud de {soli} si:
         - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
-        - Solicita horarios, disponibilidad, turnos
-        - Quiere hacer un pedido, ordenar, comprar, encargar
+        - Solicita horarios, disponibilidad, turnos 
+        - Quiere hacer un pedido, ordenar, comprar, encargar, reservar comida
         - Pregunta por menú, precios, servicios disponibles
         - Menciona necesidad de atención, evaluación, asesoría
         - Solicita información para contratar un servicio
@@ -1720,9 +1719,10 @@ def webhook():
         if not hasattr(app, 'ultimos_mensajes'):
             app.ultimos_mensajes = set()
         
-        if current_message_id in app.ultimos_mensajes:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
-            return 'OK', 200
+        #mensajes duplicados
+        #if current_message_id in app.ultimos_mensajes:
+        #    app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+        #    return 'OK', 200
         
         app.ultimos_mensajes.add(current_message_id)
         
@@ -2058,9 +2058,9 @@ def home():
     )
 
 @app.route('/chats')
-def ver_chats(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
+def ver_chats():
+    config = obtener_configuracion_por_host()
+    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocido')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
