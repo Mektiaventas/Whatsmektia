@@ -448,6 +448,17 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         app.logger.error(f"Error extrayendo info de {soli}: {e}")
         return None
 
+@app.route('/debug-headers')
+def debug_headers():
+    headers = {k: v for k, v in request.headers.items()}
+    config = obtener_configuracion_por_host()
+    return jsonify({
+        'headers': headers,
+        'detected_host': request.headers.get('Host'),
+        'config_dominio': config.get('dominio'),
+        'config_db_name': config.get('db_name')
+    })
+
 @app.route('/debug-dominio')
 def debug_dominio():
     host = request.headers.get('Host', 'desconocido')
@@ -1998,12 +2009,16 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
-        host = request.headers.get('Host', '')
+        host = request.headers.get('Host', '').lower()
         app.logger.info(f"🌐 Host detectado: {host}")
         
+        # 🔥 DETECCIÓN MEJORADA - busca específicamente laporfirianna
         if 'laporfirianna' in host:
             app.logger.info("🔧 Usando configuración de La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
+        elif 'mektia' in host:
+            app.logger.info("🔧 Usando configuración de Mektia")
+            return NUMEROS_CONFIG['524495486142']
         else:
             app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
             return NUMEROS_CONFIG['524495486142']
@@ -2155,9 +2170,10 @@ def ver_chat(numero, config=None):
 @app.before_request
 def log_configuracion():
     if request.endpoint and request.endpoint != 'static':
-        host = request.headers.get('Host', '')
+        host = request.headers.get('Host', '').lower()
+        referer = request.headers.get('Referer', '')
         config = obtener_configuracion_por_host()
-        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | BD: {config['db_name']}")
+        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | Referer: {referer} | BD: {config['db_name']}")
 
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero, config=None):
