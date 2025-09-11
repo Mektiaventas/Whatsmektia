@@ -214,15 +214,15 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         - datos_completos (boolean: true si tiene servicio, fecha y nombre)
 
         INSTRUCCIONES ESPECIALES:
-        1. Si el mensaje dice "próximo lunes", calcula la fecha real
-        2. Si menciona "9:00 AM", conviértelo a "09:00"
+        1. Si el mensaje dice "próximo lunes", calcula la fecha real, si es mayo entonces "2026-05-xx" porque ya paso mayo este año
+        2. Si menciona "9:00 AM"
         3. Si el nombre aparece en el historial, úsalo
         4. Para proyectos: si dice "diseño electrónico", usa eso como servicio
 
         EJEMPLO si dice "nueva cita para el próximo lunes a las 9am para Jesús Eduardo":
         {{
           "servicio_solicitado": "Consulta general",
-          "fecha_sugerida": "2025-09-15",  // próximo lunes
+          "fecha_sugerida": "2026-09-15",  // próximo lunes
           "hora_sugerida": "09:00",
           "nombre_cliente": "Jesús Eduardo",
           "telefono": "{numero}",
@@ -290,10 +290,6 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
         - Solicita horarios, disponibilidad, turnos 
         - Quiere hacer un pedido, ordenar, comprar, encargar, reservar comida
-        - Pregunta por menú, precios, servicios disponibles
-        - Menciona necesidad de atención, evaluación, asesoría
-        - Solicita información para contratar un servicio
-        - Pide cotización, presupuesto o información comercial
         
         Responde "SI" solo si hay una clara intención de agendar {soli} o hacer pedido.
         """
