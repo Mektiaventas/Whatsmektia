@@ -2058,8 +2058,9 @@ def home():
     )
 
 @app.route('/chats')
-def ver_chats():
-    config = obtener_configuracion_por_host()
+def ver_chats(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
