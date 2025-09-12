@@ -2453,8 +2453,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
-    if host is None:
-        try:
+    try:
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
             
@@ -2469,7 +2468,7 @@ def obtener_configuracion_por_host():
                 app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
                 return NUMEROS_CONFIG['524495486142']
                 
-        except RuntimeError:
+    except RuntimeError:
             # ⚠️ Fuera de contexto de request - usar configuración por defecto
             app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
             return NUMEROS_CONFIG['524495486142']
