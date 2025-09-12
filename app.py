@@ -24,6 +24,10 @@ from flask import current_app as app
 from werkzeug.utils import secure_filename
 from pydub import AudioSegment
 from PIL import Image
+from openai import OpenAI
+client = OpenAI(api_key="your-api-key")
+
+
 # Configurar Gemini
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -43,6 +47,15 @@ SECRET_KEY = os.getenv("SECRET_KEY", "cualquier-cosa")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+with open("/home/ubuntu/Whatsmektia/uploads/audio_676805618144215.mp3", "rb") as audio_file:
+    transcription = client.audio.transcriptions.create(
+        model="whisper-1",
+        file=audio_file,
+        language="es"
+    )
+    print(transcription.text)
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
@@ -2265,16 +2278,14 @@ def webhook():
             
             return 'OK', 200
                 
-        elif 'audio' in msg:
+        if 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
             es_audio = True
             audio_id = msg['audio']['id']
             app.logger.info(f"🎵 ID de audio: {audio_id}")
             
-            # Obtener y transcribir audio
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
             if audio_path:
-                # Convertir audio si es necesario
                 converted_path = convertir_audio(audio_path) if audio_path.endswith('.ogg') else audio_path
                 if converted_path:
                     transcripcion_audio = transcribir_audio_con_openai(converted_path)
@@ -2282,42 +2293,15 @@ def webhook():
                     if transcripcion_audio:
                         texto = transcripcion_audio
                     else:
-                        texto = "No pude transcribir el audio"
+                        app.logger.error(f"🔴 Transcripción vacía para audio_id: {audio_id}")
+                        enviar_alerta_humana(numero, "Fallo en transcripción", f"Audio ID: {audio_id}", config)
+                        texto = "No pude entender el audio. Por favor, envía tu mensaje como texto."
                 else:
-                    texto = "No pude procesar el audio (error de conversión)"
+                    app.logger.error(f"🔴 Error convirtiendo audio_id: {audio_id}")
+                    texto = "No pude procesar el audio (error de conversión)."
             else:
-                texto = "No pude procesar el audio"
-            # En el webhook, después de obtener la transcripción:
-            if not texto or texto.strip() == '':
-                app.logger.error("🔴 Transcripción vacía, no se puede procesar")
-                # Enviar mensaje de error al usuario
-                enviar_mensaje(numero, "No pude entender el audio. ¿Podrías intentarlo de nuevo?", config)
-                return 'OK', 200
-            if audio_path:
-                transcripcion_audio = transcribir_audio_con_openai(audio_path)
-                app.logger.info(f"🔍 Iniciando detección de pedido...")
-                if transcripcion_audio:
-                    texto = transcripcion_audio
-                    # 🔥 SOLUCIÓN TEMPORAL: Forzar detección para mensajes específicos
-                    if any(keyword in texto.lower() for keyword in ['chilaquil', 'taco', 'gordita', 'efectivo', 'transferencia']):
-                        app.logger.info(f"🔥 Forzando detección de pedido por contenido específico")
-                        # Aquí procesar como pedido aunque la IA falle
-                    app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
-                else:
-                    texto = "No pude transcribir el audio"
-            else:
-                texto = "No pude procesar el audio"
-                
-        elif 'text' in msg:
-            app.logger.info(f"📝 Mensaje de texto detectado")
-            texto = msg['text']['body']
-            app.logger.info(f"📝 Texto: {texto}")
-            
-        else:
-            tipo_mensaje = list(msg.keys())[1] if len(msg.keys()) > 1 else "desconocido"
-            texto = f"Recibí un mensaje {tipo_mensaje}. Por favor, envía texto, audio o imagen."
-            app.logger.info(f"📦 Mensaje de tipo: {tipo_mensaje}")
-
+                app.logger.error(f"🔴 Error descargando audio_id: {audio_id}")
+                texto = "No pude procesar el audio."
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         if 'id' in msg:
             current_message_id = f"{numero}_{msg['id']}"
