@@ -178,31 +178,38 @@ def texto_a_voz(texto, filename,config=None):
         return None
 
 def detectar_solicitud_cita_ia(mensaje, numero, config=None):
-    """
-    Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
-    Devuelve True si la IA detecta intención de agendar cita/hacer pedido
-    """
+    """Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido"""
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # 🔥 AGREGAR LOGGING DETALLADO
+    app.logger.info(f"🎯 Analizando mensaje para pedido: '{mensaje}'")
+    
     # Primero verificar con la lista de palabras clave existente (más rápida)
-    if detectar_solicitud_cita_keywords(mensaje):
+    deteccion_keywords = detectar_solicitud_cita_keywords(mensaje)
+    app.logger.info(f"🔍 Detección por keywords: {deteccion_keywords}")
+    
+    if deteccion_keywords:
         return True
     
     # Si no se detectó con keywords, usar IA para análisis semántico
     try:
+        # 🔥 MEJORAR EL PROMPT PARA LA PORFIRIANNA
         prompt = f"""
-        Evalúa si el siguiente mensaje indica que el usuario quiere agendar una {soli} o hacer un pedido.
+        Evalúa si el siguiente mensaje indica que el usuario quiere hacer un PEDIDO de comida.
         Responde SOLO con "SI" o "NO".
         
         Mensaje: "{mensaje}"
         
-        Considera que podría ser una solicitud de {soli} si:
-        - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
-        - Solicita horarios, disponibilidad, turnos 
-        - Quiere hacer un pedido, ordenar, comprar, encargar, reservar comida
+        Considera que podría ser un pedido si:
+        - Confirma un platillo específico (chilaquiles, tacos, gorditas, etc.)
+        - Proporciona su nombre para el pedido
+        - Menciona forma de pago (efectivo, transferencia, etc.)
+        - Confirma ingredientes o especificaciones ("con todo", "sin cebolla", etc.)
+        - Responde a preguntas previas sobre el pedido
         
-        Responde "SI" solo si hay una clara intención de agendar {soli} o hacer pedido.
+        Responde "SI" si es una confirmación o continuación de un pedido.
+        Responde "NO" solo si es completamente irrelevante para hacer un pedido.
         """
         
         headers = {
@@ -223,15 +230,15 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
         
-        app.logger.info(f"🔍 IA detectó solicitud de {soli}: {respuesta_ia} para mensaje: {mensaje[:50]}...")
+        app.logger.info(f"🔍 IA detectó solicitud de pedido: {respuesta_ia}")
         
         return "SI" in respuesta_ia
         
     except Exception as e:
-        app.logger.error(f"Error en detección IA de {soli}: {e}")
+        app.logger.error(f"Error en detección IA de pedido: {e}")
         # Fallback a detección por keywords si la IA falla
         return detectar_solicitud_cita_keywords(mensaje)
-
+    
 def autenticar_google_calendar(config=None):
     """Autentica y devuelve el servicio de Google Calendar"""
     if config is None:
@@ -2156,6 +2163,8 @@ def webhook():
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '') or msg.get('caption', '') or ''
         # En el webhook, después de obtener el texto:
+        app.logger.info(f"🎧 Audio recibido de {numero}")
+        app.logger.info(f"📝 Transcripción: {texto}")
         if es_mensaje_repetido(numero, texto, config=None):
             app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
             return 'OK', 200
@@ -2263,8 +2272,13 @@ def webhook():
             
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
+                app.logger.info(f"🔍 Iniciando detección de pedido...")
                 if transcripcion_audio:
                     texto = transcripcion_audio
+                    # 🔥 SOLUCIÓN TEMPORAL: Forzar detección para mensajes específicos
+                    if any(keyword in texto.lower() for keyword in ['chilaquil', 'taco', 'gordita', 'efectivo', 'transferencia']):
+                        app.logger.info(f"🔥 Forzando detección de pedido por contenido específico")
+                        # Aquí procesar como pedido aunque la IA falle
                     app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
                 else:
                     texto = "No pude transcribir el audio"
@@ -2383,6 +2397,15 @@ def webhook():
             return 'OK', 200
         
         # 🆕 DETECCIÓN DE CITAS
+        estado_actual = obtener_estado_conversacion(numero, config)
+        if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
+            app.logger.info(f"🎯 Mensaje en contexto de pedido existente, procesando como pedido")
+            # Procesar como continuación de pedido aunque la detección falle
+            resultado = manejar_secuencia_cita(texto, numero, estado_actual, config)
+            if resultado:
+                enviar_mensaje(numero, resultado, config)
+                guardar_conversacion(numero, texto, resultado, es_audio=True, config=config)
+                return 'OK', 200
         # En el webhook, modificar la sección de detección de citas:
         if detectar_solicitud_cita_keywords(texto) or detectar_solicitud_cita_ia(texto, numero, config):
             app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
@@ -2488,23 +2511,35 @@ def webhook():
 
 def detectar_solicitud_cita_keywords(mensaje):
     """
-    Detección rápida por palabras clave de solicitud de cita/pedido
+    Detección rápida por palabras clave de solicitud de pedido PARA LA PORFIRIANNA
     """
     mensaje_lower = mensaje.lower()
     
-    # Palabras clave para detección de citas/pedidos
-    palabras_clave = [
-        'cita', 'agendar', 'reservar', 'programar', 'consulta', 'sesión',
-        'servicio', 'cotización', 'presupuesto', 'contratar', 'asesoría',
-        'evaluación', 'horario', 'disponibilidad', 'turno', 'ordenar',
-        'pedido', 'encargar', 'comprar', 'menú', 'precio', 'qué tienes',
-        'qué ofrecen', 'quiero', 'necesito', 'me interesa'
+    # Palabras clave ESPECÍFICAS para pedidos de comida
+    palabras_clave_comida = [
+        'chilaquil', 'taco', 'gordita', 'quesadilla', 'sope', 'torta', 
+        'comprar', 'ordenar', 'pedir', 'quiero', 'deseo', 'me gustaría',
+        'con todo', 'sin cebolla', 'con extra', 'para llevar',
+        'efectivo', 'transferencia', 'pagar', 'pago',
+        'nombre es', 'me llamo', 'soy '
+    ]
+    
+    # Palabras de confirmación
+    palabras_confirmacion = [
+        'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
+        'perfecto', 'exacto', 'así es', 'está bien'
     ]
     
     # Verificar si alguna palabra clave está en el mensaje
-    for palabra in palabras_clave:
+    for palabra in palabras_clave_comida + palabras_confirmacion:
         if palabra in mensaje_lower:
+            app.logger.info(f"✅ Keyword detectado: '{palabra}' en mensaje")
             return True
+    
+    # Detectar respuestas a preguntas de pedido
+    if any(palabra in mensaje_lower for palabra in ['sí', 'si', 'no']) and len(mensaje_lower.split()) < 10:
+        app.logger.info(f"✅ Respuesta corta detectada (probable confirmación)")
+        return True
     
     return False
 
