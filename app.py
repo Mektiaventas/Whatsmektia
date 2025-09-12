@@ -719,7 +719,6 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)

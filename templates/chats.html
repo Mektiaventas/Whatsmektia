@@ -133,10 +133,7 @@
                 <div class="msg-box msg-user">
                     <div class="message-content">
                         <div class="image-message">
-                            <img src="{{ msg.contenido_extra }}" 
-                                alt="Imagen enviada" 
-                                class="whatsapp-image"
-                                onerror="this.style.display='none';">
+                            <img src="{{ msg.imagen_url }}" alt="Imagen" class="chat-image">
                             
                             {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                             <div class="image-caption">
