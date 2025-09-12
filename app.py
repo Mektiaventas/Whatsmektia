@@ -1999,7 +1999,8 @@ def es_mensaje_repetido(numero, mensaje_actual, config=None):
         cursor.close()
         conn.close()
         
-        if ultimo_mensaje and ultimo_mensaje['mensaje']:
+        # ✅ VERIFICAR SI HAY MENSAJE Y NO ES NONE
+        if ultimo_mensaje and ultimo_mensaje.get('mensaje'):
             # Comparar similitud de mensajes
             similitud = calcular_similitud(mensaje_actual, ultimo_mensaje['mensaje'])
             return similitud > 0.8  # Si son más del 80% similares
@@ -2045,7 +2046,12 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
         config = obtener_configuracion_por_host()
 
     contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
+    if config is None:
+        app.logger.error("🔴 Configuración no disponible para enviar alerta")
+        return
     
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     mensaje += f"👤 *Cliente:* {numero_cliente}\n"
@@ -2626,14 +2632,14 @@ def obtener_configuracion_por_host():
                 config = NUMEROS_CONFIG['524495486142']
             
             # Verificar también el referer por si acaso
-            if not config:
+            if config is None:  # ✅ CORREGIDO - verificar explícitamente None
                 referer = request.headers.get('Referer', '')
                 if 'porfirianna' in referer:
                     app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
                     config = NUMEROS_CONFIG['524812372326']
         
         # Si no se detectó configuración o está fuera de contexto
-        if not config:
+        if config is None:
             app.logger.info("🔧 Usando configuración por defecto: Mektia")
             config = NUMEROS_CONFIG['524495486142']
             
@@ -2642,7 +2648,7 @@ def obtener_configuracion_por_host():
     except Exception as e:
         app.logger.error(f"Error obteniendo configuración: {e}")
         return NUMEROS_CONFIG['524495486142']
-           
+             
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -2786,10 +2792,13 @@ def ver_chat(numero):
 @app.before_request
 def log_configuracion():
     if request.endpoint and request.endpoint != 'static':
-        host = request.headers.get('Host', '').lower()
-        referer = request.headers.get('Referer', '')
-        config = obtener_configuracion_por_host()
-        app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | Referer: {referer} | BD: {config['db_name']}")
+        try:
+            host = request.headers.get('Host', '').lower()
+            referer = request.headers.get('Referer', '')
+            config = obtener_configuracion_por_host()
+            app.logger.info(f"🌐 [{request.endpoint}] Host: {host} | Referer: {referer} | BD: {config.get('db_name', 'desconocida')}")
+        except Exception as e:
+            app.logger.error(f"🔴 Error en log_configuracion: {e}")
 
 @app.route('/toggle_ai/<numero>', methods=['POST'])
 def toggle_ai(numero, config=None):
