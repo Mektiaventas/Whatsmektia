@@ -1242,9 +1242,7 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             return "Por favor responde 'sí' para confirmar o 'no' para modificar."
 
 def obtener_estado_conversacion(numero, config=None):
-    """
-    Obtiene el estado actual de la conversación
-    """
+    """Obtiene el estado actual de la conversación"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1252,7 +1250,7 @@ def obtener_estado_conversacion(numero, config=None):
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute('''
-        SELECT contexto, accion, datos 
+        SELECT contexto, accion, datos, timestamp 
         FROM estados_conversacion 
         WHERE numero = %s 
         ORDER BY timestamp DESC 
@@ -1264,9 +1262,18 @@ def obtener_estado_conversacion(numero, config=None):
     conn.close()
     
     if estado and estado['datos']:
-        estado['datos'] = json.loads(estado['datos'])
+        try:
+            estado['datos'] = json.loads(estado['datos'])
+        except:
+            estado['datos'] = {}
     
-    return estado 
+    # Si el estado es muy viejo (más de 1 hora), ignorarlo
+    if estado and estado.get('timestamp'):
+        tiempo_transcurrido = datetime.now() - estado['timestamp']
+        if tiempo_transcurrido.total_seconds() > 3600:  # 1 hora
+            return None
+    
+    return estado
 
 def obtener_imagen_whatsapp(image_id, config=None):
     """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente si es posible.
@@ -1972,6 +1979,41 @@ def resumen_rafa(numero, config=None):
         app.logger.error(f"Error generando resumen: {e}")
         return f"Error generando resumen para {numero}"
 
+def es_mensaje_repetido(numero, mensaje_actual, config=None):
+    """Verifica si el mensaje actual es muy similar al anterior"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute('''
+            SELECT mensaje FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        ''', (numero,))
+        
+        ultimo_mensaje = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if ultimo_mensaje and ultimo_mensaje['mensaje']:
+            # Comparar similitud de mensajes
+            similitud = calcular_similitud(mensaje_actual, ultimo_mensaje['mensaje'])
+            return similitud > 0.8  # Si son más del 80% similares
+            
+    except Exception as e:
+        app.logger.error(f"Error verificando mensaje repetido: {e}")
+    
+    return False
+
+def calcular_similitud(texto1, texto2):
+    """Calcula similitud entre dos textos (simple)"""
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, texto1.lower(), texto2.lower()).ratio()
+
 def es_respuesta_a_pregunta(mensaje):
     """
     Detecta si el mensaje es una respuesta a una pregunta previa del asistente
@@ -2112,6 +2154,42 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+        texto = msg.get('text', {}).get('body', '') or msg.get('caption', '') or ''
+        # En el webhook, después de obtener el texto:
+        if es_mensaje_repetido(numero, texto, config):
+            app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
+            return 'OK', 200
+
+        # Verificar estado actual de conversación
+        estado_actual = obtener_estado_conversacion(numero, config)
+        if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
+            # Si ya estamos en proceso de pedido, usar lógica de continuación
+            respuesta = continuar_proceso_pedido(numero, texto, estado_actual, config)
+            if respuesta:
+                enviar_mensaje(numero, respuesta, config)
+                guardar_conversacion(numero, texto, respuesta, config=config)
+                return 'OK', 200
+
+        # Agrega esto al inicio del webhook, después de obtener el mensaje
+        if 'id' in msg:
+            current_message_id = f"{numero}_{msg['id']}"
+        else:
+            # For messages without ID, use timestamp + text
+            timestamp = msg.get('timestamp', '')
+            current_message_id = f"{numero}_{timestamp}_{texto}"
+
+        # Evitar procesar el mismo mensaje múltiples veces
+        if not hasattr(app, 'processed_messages'):
+            app.processed_messages = set()
+
+        if current_message_id in app.processed_messages:
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+            return 'OK', 200
+
+        app.processed_messages.add(current_message_id)
+        # Limitar el tamaño del conjunto para no consumir mucha memoria
+        if len(app.processed_messages) > 1000:
+            app.processed_messages = set(list(app.processed_messages)[-500:])
 
         # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
@@ -2749,6 +2827,55 @@ def eliminar_chat(numero):
 
     # ——— Configuración ———
 
+def limpiar_estados_antiguos():
+    """Limpia estados de conversación con más de 2 horas"""
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute('''
+            DELETE FROM estados_conversacion 
+            WHERE timestamp < NOW() - INTERVAL 2 HOUR
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("🧹 Estados antiguos limpiados")
+    except Exception as e:
+        app.logger.error(f"Error limpiando estados: {e}")
+
+# Ejecutar esta función periódicamente (puedes usar un scheduler)
+def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
+    """Maneja la continuación de un pedido en proceso"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    datos = estado_actual.get('datos', {})
+    paso_actual = datos.get('paso', 0)
+    
+    app.logger.info(f"🔄 Continuando pedido paso {paso_actual} para {numero}")
+    
+    if paso_actual == 1:  # Esperando dirección
+        if any(palabra in mensaje.lower() for palabra in ['calle', 'avenida', 'número', 'colonia', 'casa', 'departamento']):
+            datos['direccion'] = mensaje
+            datos['paso'] = 2
+            actualizar_estado_conversacion(numero, "EN_PEDIDO", "solicitar_cambio", datos, config)
+            return "✅ Dirección registrada. ¿Necesitas que te llevemos cambio? Si sí, ¿con cuánto vas a pagar?"
+        else:
+            return "🗺️ Por favor, proporciona tu dirección completa (calle, número, colonia)"
+    
+    elif paso_actual == 2:  # Esperando información de cambio
+        datos['info_cambio'] = mensaje
+        datos['paso'] = 3
+        datos['completado'] = True
+        actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_finalizado", datos, config)
+        
+        # Guardar pedido completo
+        guardar_cita(datos, config)
+        
+        return "🎉 ¡Pedido completado! Tu orden está en proceso. Te enviaremos un mensaje cuando salga para entrega. ¡Gracias!"
+    
+    # Si no coincide con ningún paso conocido
+    return None
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
         config = obtener_configuracion_por_host()
