@@ -103,18 +103,26 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 def get_db_connection(config=None):
     if config is None:
-        # Detectar configuración basada en el host
-        config = obtener_configuracion_por_host()
+        try:
+            config = obtener_configuracion_por_host()
+        except Exception as e:
+            app.logger.error(f"Error obteniendo configuración: {e}")
+            # Fallback a configuración por defecto
+            config = NUMEROS_CONFIG['524495486142']
     
     app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
     
-    return mysql.connector.connect(
-        host=config['db_host'],
-        user=config['db_user'],
-        password=config['db_password'],
-        database=config['db_name']
-    )
-
+    try:
+        return mysql.connector.connect(
+            host=config['db_host'],
+            user=config['db_user'],
+            password=config['db_password'],
+            database=config['db_name']
+        )
+    except Exception as e:
+        app.logger.error(f"Error conectando a BD {config['db_name']}: {e}")
+        raise
+    
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -2603,6 +2611,8 @@ def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
         from flask import has_request_context
+        config = None
+        
         if has_request_context():
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
@@ -2610,25 +2620,29 @@ def obtener_configuracion_por_host():
             # DETECCIÓN MEJORADA - verificar subdominios exactos
             if 'porfirianna' in host:
                 app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
-                return NUMEROS_CONFIG['524812372326']
+                config = NUMEROS_CONFIG['524812372326']
             elif 'mektia' in host:
                 app.logger.info("✅ Configuración detectada: Mektia (por host)")
-                return NUMEROS_CONFIG['524495486142']
+                config = NUMEROS_CONFIG['524495486142']
             
             # Verificar también el referer por si acaso
-            referer = request.headers.get('Referer', '')
-            if 'porfirianna' in referer:
-                app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
-                return NUMEROS_CONFIG['524812372326']
+            if not config:
+                referer = request.headers.get('Referer', '')
+                if 'porfirianna' in referer:
+                    app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
+                    config = NUMEROS_CONFIG['524812372326']
         
-        # Default o fuera de contexto de request
-        app.logger.info("🔧 Usando configuración por defecto: Mektia")
-        return NUMEROS_CONFIG['524495486142']
+        # Si no se detectó configuración o está fuera de contexto
+        if not config:
+            app.logger.info("🔧 Usando configuración por defecto: Mektia")
+            config = NUMEROS_CONFIG['524495486142']
+            
+        return config
             
     except Exception as e:
         app.logger.error(f"Error obteniendo configuración: {e}")
         return NUMEROS_CONFIG['524495486142']
-        
+           
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
