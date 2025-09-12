@@ -733,6 +733,12 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
+
+
+@app.route('/uploads/<filename>')
+def serve_uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -2196,7 +2202,11 @@ def webhook():
 
         # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
-        
+        config = None
+        for numero_config, config_data in NUMEROS_CONFIG.items():
+            if config_data['phone_number_id'] == phone_number_id:
+                config = config_data
+                break
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
         app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
         
