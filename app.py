@@ -122,7 +122,7 @@ def get_db_connection(config=None):
     except Exception as e:
         app.logger.error(f"Error conectando a BD {config['db_name']}: {e}")
         raise
-    
+
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Envía un mensaje de voz por WhatsApp"""
@@ -2734,9 +2734,9 @@ def ver_chats():
     )
 
 @app.route('/chats/<numero>')
-def ver_chat(numero, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
+@app.route('/chats/<numero>')
+def ver_chat(numero):
+    config = obtener_configuracion_por_host()
     
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
@@ -2783,7 +2783,6 @@ def ver_chat(numero, config=None):
         IA_ESTADOS=IA_ESTADOS,
         tenant_config=config
     )
-
 @app.before_request
 def log_configuracion():
     if request.endpoint and request.endpoint != 'static':
