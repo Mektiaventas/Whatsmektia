@@ -1488,12 +1488,20 @@ def obtener_audio_whatsapp(audio_id, config=None):
             'Authorization': f'Bearer {config["whatsapp_token"]}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        
+        base_url = "https://mektia.com"  # Asegurar que sea HTTPS
+        public_url = f"{base_url}/static/audio/whatsapp/{filename}"
         app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
-        
+        try:
+            response = requests.head(public_url, timeout=5)
+            if response.status_code != 200:
+                app.logger.error(f"🔴 URL no accesible: {public_url}")
+                return None, None
+        except:
+            app.logger.error(f"🔴 Error verificando URL: {public_url}")
+            return None, None
         if response.status_code != 200:
             app.logger.error(f"🔴 Error descargando audio: {response.status_code} - {response.text}")
             return None, None
@@ -1532,7 +1540,7 @@ def obtener_audio_whatsapp(audio_id, config=None):
         
         app.logger.info(f"✅ Audio guardado: {filepath}")
         
-        return filepath, f"/{filepath}"
+        return filepath, public_url
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {e}")
