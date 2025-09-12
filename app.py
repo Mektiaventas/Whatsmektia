@@ -1636,58 +1636,22 @@ def enviar_mensaje(numero, texto, config=None):
         app.logger.error(f"🔴 [WA SEND] EXCEPTION: {e}")
         return False
     
-def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False, config=None):
-    # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
-    if mensaje is None:
-        mensaje = '[Mensaje vacío]'
-    elif isinstance(mensaje, str) and mensaje.strip() == '':
-        mensaje = '[Mensaje vacío]'
-    
-    if respuesta is None:
-        respuesta = '[Respuesta vacía]'  
-    elif isinstance(respuesta, str) and respuesta.strip() == '':
-        respuesta = '[Respuesta vacía]'
-    
-    # Determinar tipo de mensaje
-    if es_imagen:
-        tipo_mensaje = 'imagen'
-    elif es_audio:
-        tipo_mensaje = 'audio'
-    else:
-        tipo_mensaje = 'texto'
-    
+def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, imagen_url=None, es_audio=False, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS conversaciones (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero VARCHAR(20),
-            mensaje TEXT,
-            respuesta TEXT,
-            timestamp DATETIME,
-            tipo_mensaje VARCHAR(10) DEFAULT 'texto',
-            contenido_extra TEXT,
-            transcripcion_audio TEXT
-        ) ENGINE=InnoDB;
-    ''')
-
-    # 🆕 Guardar transcripción si es audio
-    transcripcion = mensaje if es_audio and mensaje.startswith('Transcripción del audio:') else None
-
-    timestamp_utc = datetime.utcnow()
-
-    cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio) VALUES (%s, %s, %s, %s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion)
-    )
-
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (numero, mensaje, respuesta, datetime.now(tz_mx), imagen_url, es_imagen))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info(f"✅ Guardado: {numero}, imagen_url={imagen_url}, es_imagen={es_imagen}")
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando: {e}")
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
@@ -2149,6 +2113,7 @@ def webhook():
         # En el webhook, después de obtener la imagen:
         if 'image' in msg:
             app.logger.info(f"🖼️ Mensaje de imagen detectado")
+            imagen_url = obtener_imagen_whatsapp(msg["image"]["id"])  # Devuelve la URL directa
             es_imagen = True
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
@@ -2168,7 +2133,15 @@ def webhook():
                 enviar_mensaje(numero, respuesta_imagen, config)
                 
                 # Guardar en base de datos con URL pública
-                guardar_conversacion(numero, texto, respuesta_imagen, True, imagen_url_publica, False, config=config)
+                guardar_conversacion(
+                    numero=msg["from"],
+                    mensaje="Analiza esta imagen",
+                    respuesta="",
+                    es_imagen=True,
+                    imagen_url=imagen_url,
+                    config=config
+                )
+                app.logger.info(f"Guardando imagen: numero={numero}, url={imagen_url}, es_imagen={es_imagen}")
             else:
                 enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
             
