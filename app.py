@@ -1621,35 +1621,49 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
+# REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    app.logger.info(f"📤 Enviando mensaje usando configuración: {config['dominio']}")
-    app.logger.info(f"📤 Phone Number ID: {config['phone_number_id']}")
-    app.logger.info(f"📤 Token: {config['whatsapp_token'][:10]}...")
+    # Validar texto
+    if not texto or str(texto).strip() == '':
+        app.logger.error("🔴 ERROR: Texto de mensaje vacío")
+        return False
+    
+    texto_limpio = str(texto).strip()
     
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
-        'Authorization': f'Bearer {config["whatsapp_token"]}',  # 🔥 Corregido: comillas dobles
+        'Authorization': f'Bearer {config["whatsapp_token"]}',
         'Content-Type': 'application/json'
     }
+    
+    # ✅ PAYLOAD CORRECTO
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
         'type': 'text',
-        'text': {'body': texto}
+        'text': {
+            'body': texto_limpio
+        }
     }
 
     try:
+        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
         r = requests.post(url, headers=headers, json=payload, timeout=10)
-        app.logger.info(f"⬅️ [WA SEND] STATUS: {r.status_code}")
-        app.logger.info(f"⬅️ [WA SEND] RESPONSE: {r.text}")
-        return r.status_code == 200
+        
+        if r.status_code == 200:
+            app.logger.info("✅ Mensaje enviado")
+            return True
+        else:
+            app.logger.error(f"🔴 Error {r.status_code}: {r.text}")
+            return False
+            
     except Exception as e:
-        app.logger.error(f"🔴 [WA SEND] EXCEPTION: {e}")
+        app.logger.error(f"🔴 Exception: {e}")
         return False
-    
+       
 def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False, config=None):
     # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
     if mensaje is None:
@@ -2174,6 +2188,25 @@ def webhook():
         if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
             # Si ya estamos en proceso de pedido, usar lógica de continuación
             respuesta = continuar_proceso_pedido(numero, texto, estado_actual, config)
+            # En el webhook, después de generar la respuesta:
+            if respuesta and respuesta.strip():
+                enviado = enviar_mensaje(numero, respuesta, config)
+                if enviado:
+                    guardar_conversacion(numero, texto, respuesta, es_audio=True, config=config)
+                else:
+                    app.logger.error("🔴 NO se pudo enviar el mensaje a WhatsApp")
+                    # Opcional: enviar un mensaje de error genérico
+                    mensaje_error = "⚠️ Lo siento, hubo un problema al procesar tu mensaje. Por favor, intenta de nuevo."
+                    enviar_mensaje(numero, mensaje_error, config)
+                    # Después de generar la respuesta
+                    app.logger.info(f"🤖 Respuesta generada: '{respuesta}'")
+                    app.logger.info(f"📏 Longitud: {len(respuesta) if respuesta else 0}")
+
+                    if not respuesta or respuesta.strip() == '':
+                        app.logger.error("🔴 La respuesta está vacía, usando mensaje por defecto")
+                        respuesta = "¡Hola! ¿En qué puedo ayudarte hoy?"
+            else:
+                app.logger.warning("⚠️ Respuesta vacía, no se envía mensaje")
             if respuesta:
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
