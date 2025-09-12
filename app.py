@@ -2154,34 +2154,41 @@ def webhook():
         entry = payload['entry'][0]
         change = entry['changes'][0]['value']
         mensajes = change.get('messages')
-         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+        
+        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
+        
         if not mensajes:
             return 'OK', 200
             
         msg = mensajes[0]
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '') or msg.get('caption', '') or ''
-        # En el webhook, después de obtener el texto:
-        app.logger.info(f"🎧 Audio recibido de {numero}")
-        app.logger.info(f"📝 Transcripción: {texto}")
-        if es_mensaje_repetido(numero, texto, config=None):
-            app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
-            return 'OK', 200
+        
+        # 🔥 OBTENER CONFIGURACIÓN CORRECTA
+        config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
             if str(config_data['phone_number_id']) == str(phone_number_id):
                 config = config_data
                 app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
                 break
-        
-        if not config:
-            # Fallback si no encuentra la configuración
+                
+        if config is None:
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()  # Fallback al host actual
-            app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
+            config = obtener_configuracion_por_host()
+            app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
+        
+        # En el webhook, después de obtener el texto:
+        app.logger.info(f"🎧 Audio recibido de {numero}")
+        app.logger.info(f"📝 Transcripción: {texto}")
+        
+        if es_mensaje_repetido(numero, texto, config):
+            app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
+            return 'OK', 200
+            
         # Verificar estado actual de conversación
-        estado_actual = obtener_estado_conversacion(numero, config=None)
+        estado_actual = obtener_estado_conversacion(numero, config)
         if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
             # Si ya estamos en proceso de pedido, usar lógica de continuación
             respuesta = continuar_proceso_pedido(numero, texto, estado_actual, config)
@@ -2230,33 +2237,6 @@ def webhook():
         if len(app.processed_messages) > 1000:
             app.processed_messages = set(list(app.processed_messages)[-500:])
 
-        # 🔥 CORRECCIÓN: Obtener el phone_number_id que RECIBIÓ el mensaje
-        phone_number_id = change.get('metadata', {}).get('phone_number_id')
-        config = None
-        for numero_config, config_data in NUMEROS_CONFIG.items():
-            if config_data['phone_number_id'] == phone_number_id:
-                config = config_data
-                break
-        # 🔥 OBTENER CONFIGURACIÓN CORRECTA BASADA EN EL NÚMERO QUE RECIBIÓ EL MENSAJE
-        app.logger.info(f"🔍 Mapeando phone_number_id: {phone_number_id}")
-        
-        # 🔥 CORRECCIÓN: Buscar y asignar la configuración correcta
-        config = None
-        for numero_config, config_data in NUMEROS_CONFIG.items():
-            app.logger.info(f"   ➡️ {numero_config}: {config_data['phone_number_id']}")
-            if config_data['phone_number_id'] == phone_number_id:
-                config = config_data
-                app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
-                break  # Salir del bucle una vez encontrado
-                
-        if not config:
-            # Fallback si no encuentra la configuración
-            app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()  # Fallback al host actual
-            app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
-        
-        app.logger.info(f"🔧 Usando configuración para: {config.get('dominio', 'desconocido')}")
-        
         # Detectar tipo de mensaje
         es_imagen = False
         es_audio = False
@@ -2319,6 +2299,7 @@ def webhook():
             else:
                 app.logger.error(f"🔴 Error descargando audio_id: {audio_id}")
                 texto = "No pude procesar el audio."
+        
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         if 'id' in msg:
             current_message_id = f"{numero}_{msg['id']}"
@@ -2331,9 +2312,9 @@ def webhook():
             app.ultimos_mensajes = set()
         
         # Mensajes duplicados
-        # if current_message_id in app.ultimos_mensajes:
-        #    app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
-        #    return 'OK', 200
+        if current_message_id in app.ultimos_mensajes:
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+            return 'OK', 200
         
         app.ultimos_mensajes.add(current_message_id)
         
@@ -2359,7 +2340,7 @@ def webhook():
             wa_id = contactos[0].get('wa_id')
             if profile_name and wa_id:
                 try:
-                    imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id)
+                    imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id, config)
                     
                     conn = get_db_connection(config)
                     cursor = conn.cursor()
@@ -2430,6 +2411,7 @@ def webhook():
                 enviar_mensaje(numero, resultado, config)
                 guardar_conversacion(numero, texto, resultado, es_audio=True, config=config)
                 return 'OK', 200
+                
         # En el webhook, modificar la sección de detección de citas:
         if detectar_solicitud_cita_keywords(texto) or detectar_solicitud_cita_ia(texto, numero, config):
             app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
@@ -2476,11 +2458,11 @@ def webhook():
             if responder_con_voz:
                 # Intentar enviar respuesta de voz
                 audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename)
+                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
                 
                 if audio_url_local:
                     # URL pública del audio (ajusta según tu configuración)
-                    audio_url_publica = f"https://mektia.com{audio_url_local}"
+                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}{audio_url_local}"
                     
                     if enviar_mensaje_voz(numero, audio_url_publica, config):
                         app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
@@ -2532,7 +2514,7 @@ def webhook():
         app.logger.error(f"🔴 Error en webhook: {e}")
         app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return 'Error interno', 500
-
+    
 def detectar_solicitud_cita_keywords(mensaje):
     """
     Detección rápida por palabras clave de solicitud de pedido PARA LA PORFIRIANNA
