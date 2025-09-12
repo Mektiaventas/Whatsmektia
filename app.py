@@ -2140,7 +2140,9 @@ def webhook():
         entry = payload['entry'][0]
         change = entry['changes'][0]['value']
         mensajes = change.get('messages')
-        
+         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+        phone_number_id = change.get('metadata', {}).get('phone_number_id')
+        app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         if not mensajes:
             return 'OK', 200
             
@@ -2153,7 +2155,17 @@ def webhook():
         if es_mensaje_repetido(numero, texto, config=None):
             app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
             return 'OK', 200
-
+        for numero_config, config_data in NUMEROS_CONFIG.items():
+            if str(config_data['phone_number_id']) == str(phone_number_id):
+                config = config_data
+                app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
+                break
+        
+        if not config:
+            # Fallback si no encuentra la configuración
+            app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
+            config = obtener_configuracion_por_host()  # Fallback al host actual
+            app.logger.info(f"🔄 Usando configuración de fallback: {config['dominio']}")
         # Verificar estado actual de conversación
         estado_actual = obtener_estado_conversacion(numero, config=None)
         if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
@@ -2595,22 +2607,22 @@ def obtener_configuracion_por_host():
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
             
-            # Verificar también el referer para mayor precisión
-            referer = request.headers.get('Referer', '')
-            app.logger.info(f"🌐 Referer detectado: {referer}")
-            
-            if 'laporfirianna' in host or 'laporfirianna' in referer:
+            # DETECCIÓN MEJORADA - verificar subdominios específicos
+            if 'laporfirianna' in host:
+                app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
                 return NUMEROS_CONFIG['524812372326']
-            elif 'mektia' in host or 'mektia' in referer:
+            elif 'mektia' in host:
+                app.logger.info("✅ Configuración detectada: Mektia (por host)")
                 return NUMEROS_CONFIG['524495486142']
         
         # Default o fuera de contexto de request
+        app.logger.info("🔧 Usando configuración por defecto: Mektia")
         return NUMEROS_CONFIG['524495486142']
             
     except Exception as e:
         app.logger.error(f"Error obteniendo configuración: {e}")
         return NUMEROS_CONFIG['524495486142']
-
+    
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
