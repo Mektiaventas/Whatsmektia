@@ -1475,105 +1475,56 @@ def procesar_mensaje(texto, image_base64=None, filename=None):
         return "Lo siento, hubo un error al procesar tu mensaje."  
 
 def obtener_audio_whatsapp(audio_id, config=None):
-    """Descarga el audio de WhatsApp y lo convierte a formato compatible con OpenAI"""
     try:
-        # 1. Obtener la URL del audio con autenticación
-        url = f"https://graph.facebook.com/v23.0/{audio_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
-        
+        url = f"https://graph.facebook.com/v18.0/{audio_id}"
+        headers = {'Authorization': f'Bearer {config["whatsapp_token"]}'}
+        app.logger.info(f"📥 Solicitando metadata de audio: {url}")
         response = requests.get(url, headers=headers, timeout=30)
-        app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
+        response.raise_for_status()
+        metadata = response.json()
+        download_url = metadata.get('url')
+        app.logger.info(f"🔗 URL de descarga: {download_url}")
         
-        if response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando audio: {response.status_code} - {response.text}")
-            return None, None
-        
-        # 2. Obtener la URL de descarga real
-        audio_data = response.json()
-        download_url = audio_data.get('url')
-        
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga de audio: {audio_data}")
-            return None, None
-            
-        app.logger.info(f"🎵 URL de descarga audio: {download_url}")
-        
-        # 3. Descargar el audio con autenticación
         audio_response = requests.get(download_url, headers=headers, timeout=30)
+        audio_response.raise_for_status()
         
-        if audio_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando audio: {audio_response.status_code}")
+        # Verificar tipo de contenido
+        content_type = audio_response.headers.get('content-type')
+        app.logger.info(f"🎧 Tipo de contenido: {content_type}")
+        if 'audio' not in content_type:
+            app.logger.error(f"🔴 Archivo no es audio: {content_type}")
             return None, None
         
-        # 4. Guardar audio en sistema de archivos
-        import uuid
-        import os
-        
-        # Crear directorio si no existe
-        os.makedirs('static/audio/whatsapp', exist_ok=True)
-        
-        # 🔥 CORREGIR: Definir filename ANTES de usarlo
-        filename = f"{uuid.uuid4().hex}.ogg"  # WhatsApp usa formato OGG
-        filepath = f"static/audio/whatsapp/{filename}"
-        
-        # Guardar audio
-        with open(filepath, 'wb') as f:
+        # Guardar archivo
+        audio_path = os.path.join(UPLOAD_FOLDER, f"audio_{audio_id}.ogg")
+        with open(audio_path, 'wb') as f:
             f.write(audio_response.content)
+        app.logger.info(f"💾 Audio guardado en: {audio_path}")
         
-        app.logger.info(f"✅ Audio guardado: {filepath}")
-        
-        return filepath, f"/{filepath}"
-        
+        # Generar URL pública
+        audio_url = f"https://{config['dominio']}/uploads/audio_{audio_id}.ogg"
+        return audio_path, audio_url
     except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {e}")
-        app.logger.error(traceback.format_exc())
+        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {str(e)}")
         return None, None
-    
-def transcribir_audio_con_openai(audio_file_path):
-    """Transcribe audio usando Whisper de OpenAI"""
+      
+def transcribir_audio_con_openai(audio_path):
     try:
-        # Verificar que el archivo existe
-        if not os.path.exists(audio_file_path):
-            app.logger.error(f"🔴 Archivo de audio no encontrado: {audio_file_path}")
-            return None
-        
-        # OpenAI Whisper endpoint
-        whisper_url = "https://api.openai.com/v1/audio/transcriptions"
-        
-        headers = {
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-        }
-        
-        # Preparar el archivo para enviar
-        with open(audio_file_path, 'rb') as audio_file:
-            files = {
-                'file': (os.path.basename(audio_file_path), audio_file, 'audio/ogg')
-            }
-            data = {
-                'model': 'whisper-1',
-                'language': 'es'  # Opcional: especificar idioma
-            }
-            
-            app.logger.info(f"🎵 Enviando audio a Whisper: {audio_file_path}")
-            response = requests.post(whisper_url, headers=headers, files=files, data=data, timeout=60)
-            
-            app.logger.info(f"🎵 Respuesta Whisper Status: {response.status_code}")
-            app.logger.info(f"🎵 Respuesta Whisper Text: {response.text}")
-            
-            response.raise_for_status()
-            
-            data = response.json()
-            return data.get('text', '').strip()
-            
+        import openai
+        openai.api_key = OPENAI_API_KEY
+        with open(audio_path, 'rb') as audio_file:
+            app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
+            transcription = openai.Audio.transcriptions.create(
+                model="whisper-1",
+                file=audio_file,
+                language="es"
+            )
+            app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
+            return transcription.text
     except Exception as e:
-        app.logger.error(f"🔴 Error transcribiendo audio: {e}")
+        app.logger.error(f"🔴 Error en transcripción: {str(e)}")
         return None
-
+    
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
     # Buscar en la configuración multi-tenant
@@ -2626,24 +2577,23 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
+        # Verificar si estamos en contexto de request
+        from flask import has_request_context
+        if has_request_context():
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
             
-            # 🔥 DETECCIÓN MEJORADA - busca específicamente laporfirianna
             if 'laporfirianna' in host:
-                app.logger.info("🔧 Usando configuración de La Porfirianna")
                 return NUMEROS_CONFIG['524812372326']
             elif 'mektia' in host:
-                app.logger.info("🔧 Usando configuración de Mektia")
                 return NUMEROS_CONFIG['524495486142']
-            else:
-                app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-                return NUMEROS_CONFIG['524495486142']
-                
-    except RuntimeError:
-            # ⚠️ Fuera de contexto de request - usar configuración por defecto
-            app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-            return NUMEROS_CONFIG['524495486142']
+        
+        # Default o fuera de contexto de request
+        return NUMEROS_CONFIG['524495486142']
+            
+    except Exception as e:
+        app.logger.error(f"Error obteniendo configuración: {e}")
+        return NUMEROS_CONFIG['524495486142']
 
 @app.route('/home')
 def home():
