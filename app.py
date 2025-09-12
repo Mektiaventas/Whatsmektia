@@ -2142,7 +2142,7 @@ def webhook():
                     config=config
                 )
                 app.logger.info(f"Guardando imagen: numero={numero}, url={imagen_url}, es_imagen={es_imagen}")
-            else:
+            else:  
                 enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
             
             return 'OK', 200
