@@ -2182,8 +2182,17 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
-        texto = msg.get('text', {}).get('body', '') or msg.get('caption', '') or ''
-        
+        # CORRECCIÓN: Manejo robusto de texto
+        texto = ''
+        if 'text' in msg and 'body' in msg['text']:
+            texto = msg['text']['body'].strip()
+        elif 'caption' in msg:
+            texto = msg['caption'].strip()
+        else:
+            # Para otros tipos de mensaje (imagen, audio, etc.)
+            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
+            
+        app.logger.info(f"📝 Texto procesado: '{texto}'")
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
