@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
-
 {% block content %}
 {% set es_porfirianna = tenant_config.dominio == 'laporfirianna.mektia.com' %}
 {% set negocio_nombre = 'La Porfirianna' if es_porfirianna else 'Mektia' %}
@@ -123,112 +122,56 @@
     </div>
     {% endif %}
     <div class="msgs-wrap-v2" id="msgs">
-  {% if mensajes %}
-    {% for msg in mensajes %}
-      <!-- Mensaje del USUARIO (siempre a la izquierda) -->
-      {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-        <div class="msg-box msg-user">
-          <div class="message-content">
-            {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
-              <div class="image-message">
-                <img src="{{ msg.contenido_extra }}" alt="Imagen enviada" class="chat-image" 
-                     onerror="this.onerror=null; this.src='{{ url_for('static', filename='icons/image-error.png') }}';">
-                {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
-                <div class="image-caption">
-                  {{ msg.mensaje }}
-                </div>
-                {% endif %}
-              </div>
-            {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
-              <!-- Código de audio existente -->
-            {% else %}
-              <div class="text-message">
-                {{ msg.mensaje }}
-              </div>
-            {% endif %}
-          </div>
-          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-        </div>
-      {% endif %}
-
-      <!-- Respuesta de la IA (siempre a la derecha) -->
-      {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-        <div class="msg-box msg-ai">
-          <div class="message-content">
-            <!-- Verificar si la respuesta es sobre una imagen -->
-            {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
-              <div class="image-response">
-                <div class="text-message">
-                  {{ msg.respuesta }}
-                </div>
-                <small style="color: #666; font-style: italic;">
-                  (Respuesta basada en imagen enviada)
-                </small>
-              </div>
-            {% else %}
-              <div class="text-message">
-                {{ msg.respuesta }}
-              </div>
-            {% endif %}
-          </div>
-          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-        </div>
-      {% endif %}
-
-      <!-- Mensaje manual desde web (derecha) -->
-      {% if msg.mensaje and msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
-        <div class="msg-box msg-manual">
-          <div class="message-content">
-            <div class="manual-indicator">📤 Mensaje enviado:</div>
-            <div class="text-message">
-              {{ msg.respuesta }}
-            </div>
-          </div>
-          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-        </div>
-      {% endif %}
-    {% endfor %}
-  {% else %}
-    <div class="no-chat-selected">
-      <p>Selecciona un chat para ver mensajes.</p>
-    </div>
-  {% endif %}
-</div>
-<!-- Mostrar audio con reproductor funcional -->
-<div class="audio-player">
-    <!-- Reproductor nativo (oculto pero funcional) -->
-    <audio id="audio-{{ msg.id }}" class="whatsapp-audio">
-        <source src="{{ msg.contenido_extra }}" type="audio/ogg">
-        <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
-        Tu navegador no soporta el elemento de audio.
-    </audio>
-    
-    <!-- Controles personalizados -->
-    <div class="audio-controls">
-        <button class="audio-play-btn" onclick="toggleAudio('audio-{{ msg.id }}', this)">
-            ▶️
-        </button>
-        <div class="audio-progress" onclick="seekAudio('audio-{{ msg.id }}', this, event)">
-            <div class="audio-progress-bar"></div>
-        </div>
-        <span class="audio-duration" id="duration-{{ msg.id }}">0:00</span>
-        <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
-            ⬇️
-        </a>
-    </div>
-    
-    <!-- Transcripción -->
-    {% if msg.transcripcion_audio %}
-    <div class="audio-transcription">
-        <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
-    </div>
-    {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-    <div class="audio-transcription">
-        <strong>Mensaje:</strong> {{ msg.mensaje }}
-    </div>
-    {% endif %}
-</div>
-
+      {% if mensajes %}
+        {% for msg in mensajes %}
+          <!-- Mensaje del usuario (con imagen a la izquierda) -->
+          {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-user">
+              <div class="message-content">
+                {% if msg.es_imagen and msg.imagen_url %}
+                  <div class="image-message">
+                    <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
+                    {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                      <div class="image-caption">
+                        {{ msg.mensaje }}
+                      </div>
+                    {% endif %}
+                  </div>
+                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                  <!-- Mostrar audio con reproductor funcional -->
+                  <div class="audio-player">
+                    <!-- Reproductor nativo (oculto pero funcional) -->
+                    <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
+                      <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                      <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+                      Tu navegador no soporta el elemento de audio.
+                    </audio>
+                    
+                    <!-- Controles personalizados -->
+                    <div class="audio-controls">
+                      <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
+                        ▶️
+                      </button>
+                      <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
+                        <div class="audio-progress-bar"></div>
+                      </div>
+                      <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
+                      <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+                        ⬇️
+                      </a>
+                    </div>
+                    
+                    <!-- Transcripción -->
+                    {% if msg.transcripcion_audio %}
+                      <div class="audio-transcription">
+                        <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                      </div>
+                    {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+                      <div class="audio-transcription">
+                        <strong>Mensaje:</strong> {{ msg.mensaje }}
+                      </div>
+                    {% endif %}
+                  </div>
                 {% else %}
                   <!-- Mostrar texto normal -->
                   <div class="text-message">
@@ -253,7 +196,7 @@
             </div>
           {% endif %}
 
-          <!-- Respuesta de la IA -->
+          <!-- Respuesta de la IA (a la derecha) -->
           {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai">
               <div class="message-content">
@@ -275,7 +218,7 @@
     <!-- FORMULARIO DE MENSAJE MANUAL -->
     {% if selected %}
         {% if not IA_ESTADOS.get(selected, True) %}
-        <form method="POST", action="/send-manual" class="reply-form">
+        <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
                 <input type="text" name="texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
@@ -442,7 +385,46 @@
     color: #333;
   }
 
-  /* ESTILOS PARA AUDIO PLAYER */
+  /* Estilos para mensajes */
+  .msg-box {
+    display: flex;
+    flex-direction: column;
+    margin: 10px 0;
+    max-width: 70%;
+  }
+
+  .msg-user {
+    align-self: flex-start; /* Izquierda para usuario */
+    background-color: #e3f2fd; /* Azul claro */
+  }
+
+  .msg-ai {
+    align-self: flex-end; /* Derecha para IA */
+    background-color: #d1e7dd; /* Verde claro */
+  }
+
+  .msg-manual {
+    align-self: flex-end; /* Derecha para mensajes manuales */
+    background-color: #f8f9fa; /* Gris claro */
+  }
+
+  .message-content {
+    padding: 10px;
+    border-radius: 10px;
+  }
+
+  .text-message {
+    word-wrap: break-word;
+  }
+
+  .msg-meta {
+    font-size: 12px;
+    color: #666;
+    text-align: right;
+    margin-top: 4px;
+  }
+
+  /* Estilos para audio */
   .audio-player {
     background: #f8f9fa;
     border-radius: 12px;
@@ -453,7 +435,7 @@
   }
 
   .whatsapp-audio {
-    display: none; /* Ocultamos el reproductor nativo */
+    display: none;
   }
 
   .audio-controls {
@@ -563,7 +545,7 @@
       fetch(`/contactos/${input.dataset.num}/alias`, {
         method: 'POST',
         body: new URLSearchParams({alias: input.value}),
-        headers: {'Content-Type':'application/x-www-form-urlencoded'}
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'}
       }).then(() => {
         parent.querySelector('.alias-edit').style.display = 'none';
         parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
@@ -571,7 +553,7 @@
 
         // Actualizar en lista también
         document.querySelectorAll('.chat-name').forEach(function(chatName) {
-          if(chatName.dataset.num === input.dataset.num) {
+          if (chatName.dataset.num === input.dataset.num) {
             chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
           }
         });
@@ -591,219 +573,52 @@
     };
   }
 
-  // Controlador de audio personalizado
-// Controlador de audio mejorado - FUNCIÓN CORREGIDA
-// Controlador de audio mejorado
-function toggleAudio(audioId, button) {
+  // Controlador de audio
+  function toggleAudio(audioId, button) {
     const audioPlayer = document.getElementById(audioId);
     const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
     const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
     
     if (audioPlayer.paused) {
-        audioPlayer.play().then(() => {
-            button.textContent = '⏸️';
-            
-            // Actualizar barra de progreso
-            audioPlayer.ontimeupdate = function() {
-                if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
-                    const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
-                    progressBar.style.width = progress + '%';
-                    
-                    // Actualizar tiempo actual
-                    const minutes = Math.floor(audioPlayer.currentTime / 60);
-                    const seconds = Math.floor(audioPlayer.currentTime % 60);
-                    durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                }
-            };
-        }).catch(error => {
-            console.error('Error al reproducir audio:', error);
-        });
+      audioPlayer.play().then(() => {
+        button.textContent = '⏸️';
+        audioPlayer.ontimeupdate = function() {
+          if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+            const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+            progressBar.style.width = progress + '%';
+            const minutes = Math.floor(audioPlayer.currentTime / 60);
+            const seconds = Math.floor(audioPlayer.currentTime % 60);
+            durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+          }
+        };
+      }).catch(error => console.error('Error al reproducir audio:', error));
     } else {
-        audioPlayer.pause();
-        button.textContent = '▶️';
-    }
-}
-
-// Función para buscar en el audio
-function seekAudio(audioId, progressBar, event) {
-    const audioPlayer = document.getElementById(audioId);
-    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const width = rect.width;
-    
-    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
-        const clickTime = (clickX / width) * audioPlayer.duration;
-        audioPlayer.currentTime = clickTime;
-        progressBarInner.style.width = (clickX / width) * 100 + '%';
-        
-        // Actualizar tiempo visualmente
-        const minutes = Math.floor(audioPlayer.currentTime / 60);
-        const seconds = Math.floor(audioPlayer.currentTime % 60);
-        const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
-        durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
-}
-
-// Inicializar todos los audios al cargar la página
-document.addEventListener('DOMContentLoaded', function() {
-    // Configurar duración de audios
-    document.querySelectorAll('.audio-player audio').forEach(audio => {
-        audio.addEventListener('loadedmetadata', function() {
-            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
-            if (this.duration && isFinite(this.duration)) {
-                const minutes = Math.floor(this.duration / 60);
-                const seconds = Math.floor(this.duration % 60);
-                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        });
-        
-        // Forzar carga de metadata
-        if (audio.readyState < 1) {
-            audio.load();
-        }
-        
-        // Manejar el final de la reproducción
-        audio.addEventListener('ended', function() {
-            const button = this.closest('.audio-player').querySelector('.audio-play-btn');
-            if (button) button.textContent = '▶️';
-            
-            const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
-            if (progressBar) progressBar.style.width = '0%';
-        });
-    });
-
-    // MutationObserver mejorado (ignora cambios de audio)
-    const observer = new MutationObserver(function(mutations) {
-        mutations.forEach(function(mutation) {
-            // Ignorar cambios en elementos de audio
-            const isAudioRelated = mutation.target.closest('.audio-player') || 
-                                 mutation.target.classList.contains('audio-progress-bar') ||
-                                 mutation.target.classList.contains('audio-duration');
-            
-            if (mutation.addedNodes.length > 0 && !isAudioRelated) {
-                let shouldScroll = true;
-                
-                // Verificar que los nodos añadidos no sean de audio
-                mutation.addedNodes.forEach(node => {
-                    if (node.nodeType === 1 && ( // Element nodes only
-                        node.classList.contains('audio-player') || 
-                        node.closest('.audio-player') ||
-                        node.querySelector('.audio-player')
-                    )) {
-                        shouldScroll = false;
-                    }
-                });
-                
-                if (shouldScroll) {
-                    setTimeout(scrollToBottom, 100);
-                }
-            }
-        });
-    });
-    
-    const msgsContainer = document.getElementById('msgs');
-    if (msgsContainer) {
-        observer.observe(msgsContainer, { 
-            childList: true, 
-            subtree: true 
-        });
-    }
-});
-// Función para buscar en el audio - FUNCIÓN CORREGIDA
-function seekAudio(audioId, progressBar, event) {
-    const audioPlayer = document.getElementById(audioId);
-    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const width = rect.width;
-    
-    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
-        const clickTime = (clickX / width) * audioPlayer.duration;
-        audioPlayer.currentTime = clickTime;
-        progressBarInner.style.width = (clickX / width) * 100 + '%';
-        
-        // Actualizar tiempo visualmente
-        const minutes = Math.floor(audioPlayer.currentTime / 60);
-        const seconds = Math.floor(audioPlayer.currentTime % 60);
-        const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
-        durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
-}
-
-// ELIMINA la función downloadAudio - ya no es necesaria porque usamos enlace HTML
-// function downloadAudio(button) { ... }
-
-// Inicializar todos los audios al cargar la página - FUNCIÓN ACTUALIZADA
-document.addEventListener('DOMContentLoaded', function() {
-    // Configurar duración de audios
-    document.querySelectorAll('.audio-player audio').forEach(audio => {
-        audio.addEventListener('loadedmetadata', function() {
-            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
-            if (this.duration && isFinite(this.duration)) {
-                const minutes = Math.floor(this.duration / 60);
-                const seconds = Math.floor(this.duration % 60);
-                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        });
-        
-        // Forzar carga de metadata si es necesario
-        if (audio.readyState < 1) {
-            audio.load();
-        }
-        
-        // También cargar cuando el audio se puede reproducir
-        audio.addEventListener('canplay', function() {
-            const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
-            if (this.duration && isFinite(this.duration)) {
-                const minutes = Math.floor(this.duration / 60);
-                const seconds = Math.floor(this.duration % 60);
-                durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-        });
-        
-        // Manejar el final de la reproducción
-        audio.addEventListener('ended', function() {
-            const button = this.closest('.audio-player').querySelector('.audio-play-btn');
-            if (button) button.textContent = '▶️';
-            
-            const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
-            if (progressBar) progressBar.style.width = '0%';
-        });
-    });
-
-    // ... el resto de tu código de inicialización ...
-});
-  // Función para buscar en el audio
-  function seekAudio(progressBar, event) {
-    const audioPlayer = progressBar.closest('.audio-player').querySelector('audio');
-    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const width = rect.width;
-    
-    if (audioPlayer.duration) {
-      const clickTime = (clickX / width) * audioPlayer.duration;
-      audioPlayer.currentTime = clickTime;
-      progressBarInner.style.width = (clickX / width) * 100 + '%';
+      audioPlayer.pause();
+      button.textContent = '▶️';
     }
   }
 
-  // Función para descargar audio
-  function downloadAudio(button) {
-    const audioPlayer = button.closest('.audio-player').querySelector('audio');
-    const source = audioPlayer.querySelector('source').src;
-    const link = document.createElement('a');
-    link.href = source;
-    link.download = 'audio-mensaje.ogg';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+  // Función para buscar en el audio
+  function seekAudio(audioId, progressBar, event) {
+    const audioPlayer = document.getElementById(audioId);
+    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const width = rect.width;
+    
+    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+      const clickTime = (clickX / width) * audioPlayer.duration;
+      audioPlayer.currentTime = clickTime;
+      progressBarInner.style.width = (clickX / width) * 100 + '%';
+      const minutes = Math.floor(audioPlayer.currentTime / 60);
+      const seconds = Math.floor(audioPlayer.currentTime % 60);
+      const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
+      durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
   }
 
   // Inicializar todos los audios al cargar la página
   document.addEventListener('DOMContentLoaded', function() {
-    // Configurar duración de audios
     document.querySelectorAll('.audio-player audio').forEach(audio => {
       audio.addEventListener('loadedmetadata', function() {
         const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
@@ -813,14 +628,23 @@ document.addEventListener('DOMContentLoaded', function() {
           durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
         }
       });
-      
-      // Cargar metadata si no se cargó automáticamente
-      if (audio.readyState >= 1) {
-        audio.dispatchEvent(new Event('loadedmetadata'));
-      }
+      if (audio.readyState < 1) audio.load();
+      audio.addEventListener('canplay', function() {
+        const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+        if (this.duration && isFinite(this.duration)) {
+          const minutes = Math.floor(this.duration / 60);
+          const seconds = Math.floor(this.duration % 60);
+          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+        }
+      });
+      audio.addEventListener('ended', function() {
+        const button = this.closest('.audio-player').querySelector('.audio-play-btn');
+        if (button) button.textContent = '▶️';
+        const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
+        if (progressBar) progressBar.style.width = '0%';
+      });
     });
 
-    // Activar edición en todos los botones ✏️
     document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
       btn.addEventListener('click', function(e) {
         e.preventDefault();
@@ -830,43 +654,25 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     });
 
-    // Scroll automático al cargar la página
     scrollToBottom();
-    
-    // También scroll cuando hay nuevos mensajes
-    // También scroll cuando hay nuevos mensajes
-const observer = new MutationObserver(function(mutations) {
-    mutations.forEach(function(mutation) {
-        // IGNORAR cambios en elementos de audio y barras de progreso
+
+    const observer = new MutationObserver(function(mutations) {
+      mutations.forEach(function(mutation) {
         const isAudioChange = mutation.target.closest('.audio-player') || 
                              mutation.target.classList.contains('audio-progress-bar');
-        
         if (mutation.addedNodes.length > 0 && !isAudioChange) {
-            // Verificar que no sean cambios de audio
-            let shouldScroll = true;
-            mutation.addedNodes.forEach(node => {
-                if (node.classList && (
-                    node.classList.contains('audio-player') || 
-                    node.closest('.audio-player')
-                )) {
-                    shouldScroll = false;
-                }
-            });
-            
-            if (shouldScroll) {
-                setTimeout(scrollToBottom, 100);
+          let shouldScroll = true;
+          mutation.addedNodes.forEach(node => {
+            if (node.classList && (node.classList.contains('audio-player') || node.closest('.audio-player'))) {
+              shouldScroll = false;
             }
+          });
+          if (shouldScroll) setTimeout(scrollToBottom, 100);
         }
-    });
-});
-    
-    const msgsContainer = document.getElementById('msgs');
-    if (msgsContainer) {
-      observer.observe(msgsContainer, { 
-        childList: true, 
-        subtree: true 
       });
-    }
+    });
+    const msgsContainer = document.getElementById('msgs');
+    if (msgsContainer) observer.observe(msgsContainer, { childList: true, subtree: true });
   });
 
   // Toggle lista de chats en móvil
