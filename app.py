@@ -2607,13 +2607,19 @@ def obtener_configuracion_por_host():
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
             
-            # DETECCIÓN MEJORADA - verificar subdominios específicos
-            if 'laporfirianna' in host:
+            # DETECCIÓN MEJORADA - verificar subdominios exactos
+            if 'porfirianna' in host:
                 app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
                 return NUMEROS_CONFIG['524812372326']
             elif 'mektia' in host:
                 app.logger.info("✅ Configuración detectada: Mektia (por host)")
                 return NUMEROS_CONFIG['524495486142']
+            
+            # Verificar también el referer por si acaso
+            referer = request.headers.get('Referer', '')
+            if 'porfirianna' in referer:
+                app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
+                return NUMEROS_CONFIG['524812372326']
         
         # Default o fuera de contexto de request
         app.logger.info("🔧 Usando configuración por defecto: Mektia")
@@ -2622,7 +2628,7 @@ def obtener_configuracion_por_host():
     except Exception as e:
         app.logger.error(f"Error obteniendo configuración: {e}")
         return NUMEROS_CONFIG['524495486142']
-    
+        
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
