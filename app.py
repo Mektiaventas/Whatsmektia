@@ -2152,7 +2152,8 @@ def webhook():
         
         # En el webhook, después de obtener la imagen:
         if 'image' in msg:
-            app.logger.info(f"🖼️ Mensaje de imagen detectado desde {numero}")
+            app.logger.info(f"🖼️ Mensaje de imagen detectado")
+            es_imagen = True
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
@@ -2161,41 +2162,21 @@ def webhook():
             
             if imagen_base64:
                 # Usar caption si existe, sino texto por defecto
-                texto = msg['image'].get('caption', 'Analiza esta imagen y describe lo que ves')
+                if 'caption' in msg['image']:
+                    texto = msg['image']['caption']
+                else:
+                    texto = "Analiza esta imagen y describe lo que ves"
                 
                 # Procesar con OpenAI para análisis de imagen
-                try:
-                    respuesta_imagen = responder_con_ia(
-                        texto, 
-                        numero, 
-                        procesar_imagen=True, 
-                        imagen_url=imagen_base64, 
-                        es_audio=False,  # Ajustado según tu firma
-                        audio_url=None, 
-                        config=config
-                    )
-                    enviar_mensaje(numero, respuesta_imagen, config)
-                    
-                    # Guardar en base de datos con URL pública
-                    guardar_conversacion(
-                        numero, 
-                        texto, 
-                        respuesta_imagen, 
-                        es_imagen=True, 
-                        imagen_url=imagen_url_publica, 
-                        es_audio=False, 
-                        config=config
-                    )
-                except Exception as e:
-                    app.logger.error(f"🔴 Error procesando imagen con IA: {e}")
-                    enviar_mensaje(numero, "No pude analizar la imagen. Por favor, describe lo que contiene.", config)
+                respuesta_imagen = responder_con_ia(texto, numero, True, imagen_base64, False, None, config)
+                enviar_mensaje(numero, respuesta_imagen, config)
+                
+                # Guardar en base de datos con URL pública
+                guardar_conversacion(numero, texto, respuesta_imagen, True, imagen_url_publica, False, config=config)
             else:
-                app.logger.error(f"🔴 Falló obtención de imagen para ID: {image_id}")
                 enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
-        
-        # ... manejar otros tipos de mensajes (texto, audio, etc.)
-        
-            return jsonify({'status': 'success'}), 200
+            
+            return 'OK', 200
                 
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")
