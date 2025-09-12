@@ -2437,46 +2437,45 @@ def inicio():
     return redirect(url_for('home', config=config))
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Obtiene la URL de la imagen de perfil de WhatsApp"""
+    """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
-    conn = get_db_connection(config)
     try:
-        # Formatear el número correctamente
+        # Formatear el número correctamente (eliminar + y espacios)
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Usar el endpoint correcto de WhatsApp Business API
+        # Usar el endpoint CORRECTO para obtener imagen de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': 'profile_picture',
+            'fields': f'contacts({numero_formateado}){{profile}}',
             'access_token': config['whatsapp_token']
         }
         
         headers = {
             'Content-Type': 'application/json',
-            'Authorization': f'Bearer {config["whatsapp_token"]}'
         }
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
-            if 'profile_picture' in data and 'url' in data['profile_picture']:
-                imagen_url = data['profile_picture']['url']
-                app.logger.info(f"✅ Imagen obtenida: {imagen_url}")
-                return imagen_url
-            else:
-                app.logger.warning(f"⚠️ No se encontró profile_picture en la respuesta: {data}")
+            app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
+            
+            # Verificar la estructura de la respuesta
+            if 'contacts' in data and data['contacts']:
+                contacto = data['contacts'][0]
+                if 'profile' in contacto and 'picture_url' in contacto['profile']:
+                    return contacto['profile']['picture_url']
         
-        # Fallback al método alternativo
-        return obtener_imagen_perfil_alternativo(numero_formateado)
+        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
+        return None
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None 
-    
+        return None
+       
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
