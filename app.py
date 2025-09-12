@@ -55,7 +55,7 @@ with open("/home/ubuntu/Whatsmektia/uploads/audio_676805618144215.mp3", "rb") as
         file=audio_file,
         language="es"
     )
-    print(transcription.text)
+    print(transcription.text) 
 
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
