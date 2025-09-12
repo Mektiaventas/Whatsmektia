@@ -2116,7 +2116,33 @@ def resumen_rafa(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error generando resumen: {e}")
         return f"Error generando resumen para {numero}"
+
+def es_respuesta_a_pregunta(mensaje):
+    """
+    Detecta si el mensaje es una respuesta a una pregunta previa del asistente
+    en lugar de una nueva solicitud de cita/pedido.
+    """
+    mensaje_lower = mensaje.lower()
     
+    # Patrones que indican que es una respuesta, no una nueva solicitud
+    patrones_respuesta = [
+        'sí', 'si', 'no', 'claro', 'ok', 'vale', 'correcto',
+        'está bien', 'de acuerdo', 'perfecto', 'sip', 'nop',
+        'mañana', 'hoy', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes',
+        'sábado', 'domingo', 'la semana', 'el próximo', 'a las'
+    ]
+    
+    # Si el mensaje contiene alguna de estas palabras, probablemente es una respuesta
+    for patron in patrones_respuesta:
+        if patron in mensaje_lower:
+            return True
+    
+    # Si es muy corto, probablemente es una respuesta
+    if len(mensaje_lower.split()) <= 3:
+        return True
+    
+    return False
+
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()

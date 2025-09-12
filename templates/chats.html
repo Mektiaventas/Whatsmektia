@@ -122,18 +122,6 @@
       <span>Selecciona un chat</span>
     </div>
     {% endif %}
-<!-- Botón para análisis avanzado -->
-            <div class="image-actions">
-                <button class="analyze-btn" 
-                        onclick="analyzeImage('{{ msg.contenido_extra }}', '{{ msg.numero }}')">
-                    🔍 Analizar con IA
-                </button>
-            </div>
-        </div>
-    </div>
-    <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-</div>
-{% endif %}
     <div class="msgs-wrap-v2" id="msgs">
       {% if mensajes %}
         {% for msg in mensajes %}
