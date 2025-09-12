@@ -1279,7 +1279,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Usar la configuración correcta
+        # 1. Obtener metadata de la imagen
         url_metadata = f"https://graph.facebook.com/v18.0/{image_id}"
         
         headers = {
@@ -1287,32 +1287,30 @@ def obtener_imagen_whatsapp(image_id, config=None):
             'Content-Type': 'application/json'
         }
         
+        app.logger.info(f"🖼️ Obteniendo metadata de imagen WhatsApp: {url_metadata}")
+        
         response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
-        
-        app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
-        
-        response = requests.get(url, headers=headers, timeout=30)
-        
-        if response.status_code != 200:
-            app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
-            return None, None
+        response_metadata.raise_for_status()
         
         metadata = response_metadata.json()
         download_url = metadata.get('url')
         
         if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
+            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {metadata}")
             return None, None
             
+        app.logger.info(f"🖼️ URL de descarga: {download_url}")
+        
+        # 2. Descargar la imagen
         image_response = requests.get(download_url, headers=headers, timeout=30)
         if image_response.status_code != 200:
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 4. Convertir a base64 para OpenAI (formato correcto)
+        # 3. Convertir a base64 para OpenAI
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         
-        # 5. Guardar la imagen localmente (opcional)
+        # 4. Guardar la imagen localmente
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"whatsapp_image_{timestamp}.jpg"
         filepath = os.path.join(UPLOAD_FOLDER, filename)
@@ -1320,12 +1318,11 @@ def obtener_imagen_whatsapp(image_id, config=None):
         with open(filepath, "wb") as f:
             f.write(image_response.content)
         
-        app.logger.info(f"✅ Imagen procesada: {filepath}")
-        # 5. Crear URL pública para mostrar en web
+        # 5. Crear URL pública
         base_url = config.get('dominio', 'https://mektia.com')
         if not base_url.startswith('http'):
             base_url = f'https://{base_url}'
-            imagen_url_publica = f"{base_url}/uploads/{filename}"
+        imagen_url_publica = f"{base_url}/uploads/{filename}"
         
         app.logger.info(f"✅ Imagen procesada: {filepath}")
         app.logger.info(f"🌐 URL pública: {imagen_url_publica}")
@@ -1336,7 +1333,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-
+    
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas
@@ -2130,13 +2127,14 @@ def webhook():
             # Obtener la imagen
             imagen_base64, imagen_url_publica = obtener_imagen_whatsapp(image_id, config)
             
-            # Usar caption si existe, sino texto por defecto
-            if 'caption' in msg['image']:
-                texto = msg['image']['caption']
-            else:
-                texto = "Analiza esta imagen y describe lo que ves"
-            # Procesar con OpenAI para análisis de imagen
             if imagen_base64:
+                # Usar caption si existe, sino texto por defecto
+                if 'caption' in msg['image']:
+                    texto = msg['image']['caption']
+                else:
+                    texto = "Analiza esta imagen y describe lo que ves"
+                
+                # Procesar con OpenAI para análisis de imagen
                 respuesta_imagen = responder_con_ia(texto, numero, True, imagen_base64, False, None, config)
                 enviar_mensaje(numero, respuesta_imagen, config)
                 
