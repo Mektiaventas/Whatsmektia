@@ -13,14 +13,14 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, request, render_template, redirect, url_for, abort, flash, jsonify
+from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
 import requests
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
-from flask import send_from_directory, Response
+from flask import current_app as app
 from werkzeug.utils import secure_filename
 from PIL import Image
 # Configurar Gemini
@@ -1274,26 +1274,33 @@ def obtener_estado_conversacion(numero, config=None):
     return estado 
 
 def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp y la convierte a base64 + guarda archivo"""
+    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente si es posible.
+    
+    Args:
+        image_id (str): ID de la imagen de WhatsApp.
+        config (dict, optional): Configuración del tenant. Si None, se obtiene por host.
+    
+    Returns:
+        tuple: (base64_string, public_url) o (None, None) si falla.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
         # 1. Obtener metadata de la imagen
         url_metadata = f"https://graph.facebook.com/v18.0/{image_id}"
-        
         headers = {
             'Authorization': f'Bearer {config["whatsapp_token"]}',
             'Content-Type': 'application/json'
         }
         
         app.logger.info(f"🖼️ Obteniendo metadata de imagen WhatsApp: {url_metadata}")
-        
         response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
         response_metadata.raise_for_status()
         
         metadata = response_metadata.json()
         download_url = metadata.get('url')
+        mime_type = metadata.get('mime_type', 'image/jpeg')
         
         if not download_url:
             app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {metadata}")
@@ -1307,33 +1314,59 @@ def obtener_imagen_whatsapp(image_id, config=None):
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 3. Convertir a base64 para OpenAI
+        # 3. Validar tipo y tamaño de la imagen
+        content_type = image_response.headers.get('content-type', mime_type)
+        if 'image' not in content_type:
+            app.logger.error(f"🔴 El archivo no es una imagen: {content_type}")
+            return None, None
+        
+        image_size = len(image_response.content)
+        if image_size > 5 * 1024 * 1024:  # Límite de 5MB para OpenAI
+            app.logger.error(f"🔴 Imagen demasiado grande: {image_size} bytes")
+            return None, None
+        
+        # 4. Convertir a base64 para OpenAI
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
+        base64_string = f"data:{content_type};base64,{image_base64}"
         
-        # 4. Guardar la imagen localmente
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"whatsapp_image_{timestamp}.jpg"
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        # 5. Guardar la imagen localmente (opcional, con fallback)
+        try:
+            # Asegurar que el directorio exista y tenga permisos
+            UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+            
+            # Usar nombre seguro para evitar path traversal
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            
+            # Verificar permisos de escritura
+            if not os.access(UPLOAD_FOLDER, os.W_OK):
+                app.logger.warning(f"⚠️ Sin permisos de escritura en {UPLOAD_FOLDER}, usando URL directa")
+                public_url = download_url  # Fallback a URL de WhatsApp
+            else:
+                with open(filepath, "wb") as f:
+                    f.write(image_response.content)
+                
+                # 6. Crear URL pública
+                base_url = config.get('dominio', 'https://mektia.com')
+                if not base_url.startswith('http'):
+                    base_url = f'https://{base_url}'
+                public_url = f"{base_url}/uploads/{filename}"
+                app.logger.info(f"✅ Imagen guardada: {filepath}")
+                app.logger.info(f"🌐 URL pública: {public_url}")
         
-        with open(filepath, "wb") as f:
-            f.write(image_response.content)
+        except (OSError, PermissionError) as e:
+            app.logger.warning(f"⚠️ No se pudo guardar la imagen localmente: {e}")
+            public_url = download_url  # Fallback a URL de WhatsApp
         
-        # 5. Crear URL pública
-        base_url = config.get('dominio', 'https://mektia.com')
-        if not base_url.startswith('http'):
-            base_url = f'https://{base_url}'
-        imagen_url_publica = f"{base_url}/uploads/{filename}"
-        
-        app.logger.info(f"✅ Imagen procesada: {filepath}")
-        app.logger.info(f"🌐 URL pública: {imagen_url_publica}")
-        
-        return f"data:image/jpeg;base64,{image_base64}", imagen_url_publica
+        return base64_string, public_url
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-    
+      
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas
@@ -2988,29 +3021,6 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         # Si no cumple nada, mantener donde está
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
-
-@app.route('/test-imagen-personalizada', methods=['GET', 'POST'])
-
-@app.route('/test-imagen')
-def test_imagen():
-    """Ruta para probar el procesamiento de imágenes con una URL pública"""
-    try:
-        # Usar una imagen pública de prueba
-        url_imagen_prueba = "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6d/Good_Food_Display_-_NCI_Visuals_Online.jpg/800px-Good_Food_Display_-_NCI_Visuals_Online.jpg"
-        texto_prueba = "¿Qué alimentos ves en esta imagen?"
-        
-        respuesta = responder_con_ia(texto_prueba, "524491182201", True, url_imagen_prueba)
-        return jsonify({
-            "respuesta": respuesta, 
-            "status": "success",
-            "modelo_utilizado": "gpt-4o"  # ✅ Actualizado
-        })
-        
-    except Exception as e:
-        return jsonify({
-            "error": str(e), 
-            "status": "error"
-        })
 
 def obtener_contexto_consulta(numero, config=None):
     """Obtiene el contexto de la consulta o proyecto del cliente"""
