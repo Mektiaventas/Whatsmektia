@@ -3141,19 +3141,6 @@ def test_alerta():
         enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
         return "🚀 Test alerta disparada."
 
-    # ——— Funciones para Kanban ———
-
-@app.route('/uploads/<filename>')
-def serve_uploaded_file(filename):
-    """Sirve archivos desde el directorio UPLOAD_FOLDER"""
-    try:
-        # Usar secure_filename para evitar path traversal
-        filename = secure_filename(filename)
-        return send_from_directory(UPLOAD_FOLDER, filename)
-    except Exception as e:
-        app.logger.error(f"🔴 Error sirviendo archivo {filename}: {str(e)}")
-        return jsonify({'error': 'Archivo no encontrado'}), 404
-
 def obtener_chat_meta(numero, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
