@@ -2161,7 +2161,7 @@ def webhook():
             return 'OK', 200
 
         # Verificar estado actual de conversación
-        estado_actual = obtener_estado_conversacion(numero, config)
+        estado_actual = obtener_estado_conversacion(numero, config=None)
         if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
             # Si ya estamos en proceso de pedido, usar lógica de continuación
             respuesta = continuar_proceso_pedido(numero, texto, estado_actual, config)
