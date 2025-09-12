@@ -2113,7 +2113,6 @@ def webhook():
         # En el webhook, después de obtener la imagen:
         if 'image' in msg:
             app.logger.info(f"🖼️ Mensaje de imagen detectado")
-            imagen_url = obtener_imagen_whatsapp(msg["image"]["id"])  # Devuelve la URL directa
             es_imagen = True
             image_id = msg['image']['id']
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
@@ -2133,16 +2132,8 @@ def webhook():
                 enviar_mensaje(numero, respuesta_imagen, config)
                 
                 # Guardar en base de datos con URL pública
-                guardar_conversacion(
-                    numero=msg["from"],
-                    mensaje="Analiza esta imagen",
-                    respuesta="",
-                    es_imagen=True,
-                    imagen_url=imagen_url,
-                    config=config
-                )
-                app.logger.info(f"Guardando imagen: numero={numero}, url={imagen_url}, es_imagen={es_imagen}")
-            else:  
+                guardar_conversacion(numero, texto, respuesta_imagen, True, imagen_url_publica, False, config=config)
+            else:
                 enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
             
             return 'OK', 200
