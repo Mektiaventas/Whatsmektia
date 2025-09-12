@@ -1655,6 +1655,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
         tipo_mensaje = 'audio'
     else:
         tipo_mensaje = 'texto'
+    
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -1670,7 +1671,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
             timestamp DATETIME,
             tipo_mensaje VARCHAR(10) DEFAULT 'texto',
             contenido_extra TEXT,
-            transcripcion_audio TEXT  -- 🆕 NUEVO CAMPO para guardar transcripción
+            transcripcion_audio TEXT
         ) ENGINE=InnoDB;
     ''')
 
@@ -1687,7 +1688,7 @@ def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_
     conn.commit()
     cursor.close()
     conn.close()
-
+    
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto

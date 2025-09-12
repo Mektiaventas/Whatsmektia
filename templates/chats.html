@@ -123,26 +123,77 @@
     </div>
     {% endif %}
     <div class="msgs-wrap-v2" id="msgs">
-      {% if mensajes %}
-        {% for msg in mensajes %}
-          <!-- Mensaje del usuario -->
-          {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-user">
-              <div class="message-content">
-                {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
-                <div class="msg-box msg-user">
-                    <div class="message-content">
-                        <div class="image-message">
-                            <img src="{{ msg.imagen_url }}" alt="Imagen" class="chat-image">
-                            
-                            {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
-                            <div class="image-caption">
-                                {{ msg.mensaje }}
-                            </div>
-                            {% endif %}
-                  </div>
+  {% if mensajes %}
+    {% for msg in mensajes %}
+      <!-- Mensaje del USUARIO (siempre a la izquierda) -->
+      {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+        <div class="msg-box msg-user">
+          <div class="message-content">
+            {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
+              <div class="image-message">
+                <img src="{{ msg.contenido_extra }}" alt="Imagen enviada" class="chat-image" 
+                     onerror="this.onerror=null; this.src='{{ url_for('static', filename='icons/image-error.png') }}';">
+                {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                <div class="image-caption">
+                  {{ msg.mensaje }}
+                </div>
+                {% endif %}
+              </div>
+            {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+              <!-- Código de audio existente -->
+            {% else %}
+              <div class="text-message">
+                {{ msg.mensaje }}
+              </div>
+            {% endif %}
+          </div>
+          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+        </div>
+      {% endif %}
 
-                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+      <!-- Respuesta de la IA (siempre a la derecha) -->
+      {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+        <div class="msg-box msg-ai">
+          <div class="message-content">
+            <!-- Verificar si la respuesta es sobre una imagen -->
+            {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
+              <div class="image-response">
+                <div class="text-message">
+                  {{ msg.respuesta }}
+                </div>
+                <small style="color: #666; font-style: italic;">
+                  (Respuesta basada en imagen enviada)
+                </small>
+              </div>
+            {% else %}
+              <div class="text-message">
+                {{ msg.respuesta }}
+              </div>
+            {% endif %}
+          </div>
+          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+        </div>
+      {% endif %}
+
+      <!-- Mensaje manual desde web (derecha) -->
+      {% if msg.mensaje and msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+        <div class="msg-box msg-manual">
+          <div class="message-content">
+            <div class="manual-indicator">📤 Mensaje enviado:</div>
+            <div class="text-message">
+              {{ msg.respuesta }}
+            </div>
+          </div>
+          <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+        </div>
+      {% endif %}
+    {% endfor %}
+  {% else %}
+    <div class="no-chat-selected">
+      <p>Selecciona un chat para ver mensajes.</p>
+    </div>
+  {% endif %}
+</div>
 <!-- Mostrar audio con reproductor funcional -->
 <div class="audio-player">
     <!-- Reproductor nativo (oculto pero funcional) -->
