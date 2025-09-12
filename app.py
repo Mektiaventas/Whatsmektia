@@ -22,6 +22,7 @@ import re
 import io
 from flask import current_app as app
 from werkzeug.utils import secure_filename
+from pydub import AudioSegment
 from PIL import Image
 # Configurar Gemini
 
@@ -358,6 +359,17 @@ def validar_datos_cita_completos(info_cita, config=None):
         return False, mensaje_error
     
     return True, None
+
+def convertir_audio(audio_path):
+    try:
+        output_path = audio_path.replace('.ogg', '.mp3')
+        audio = AudioSegment.from_file(audio_path, format='ogg')
+        audio.export(output_path, format='mp3')
+        app.logger.info(f"🔄 Audio convertido a: {output_path}")
+        return output_path
+    except Exception as e:
+        app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
+        return None
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información"""
@@ -1512,8 +1524,8 @@ def transcribir_audio_con_openai(audio_path):
     try:
         import openai
         openai.api_key = OPENAI_API_KEY
+        app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
         with open(audio_path, 'rb') as audio_file:
-            app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
             transcription = openai.Audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
@@ -1523,6 +1535,8 @@ def transcribir_audio_con_openai(audio_path):
             return transcription.text
     except Exception as e:
         app.logger.error(f"🔴 Error en transcripción: {str(e)}")
+        if hasattr(e, 'response'):
+            app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
         return None
     
 def obtener_configuracion_numero(numero_whatsapp):
@@ -2249,6 +2263,20 @@ def webhook():
             
             # Obtener y transcribir audio
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
+            if audio_path:
+                # Convertir audio si es necesario
+                converted_path = convertir_audio(audio_path) if audio_path.endswith('.ogg') else audio_path
+                if converted_path:
+                    transcripcion_audio = transcribir_audio_con_openai(converted_path)
+                    app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
+                    if transcripcion_audio:
+                        texto = transcripcion_audio
+                    else:
+                        texto = "No pude transcribir el audio"
+                else:
+                    texto = "No pude procesar el audio (error de conversión)"
+            else:
+                texto = "No pude procesar el audio"
             # En el webhook, después de obtener la transcripción:
             if not texto or texto.strip() == '':
                 app.logger.error("🔴 Transcripción vacía, no se puede procesar")
