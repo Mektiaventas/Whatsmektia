@@ -2590,15 +2590,18 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
     try:
-        # Verificar si estamos en contexto de request
         from flask import has_request_context
         if has_request_context():
             host = request.headers.get('Host', '').lower()
             app.logger.info(f"🌐 Host detectado: {host}")
             
-            if 'laporfirianna' in host:
+            # Verificar también el referer para mayor precisión
+            referer = request.headers.get('Referer', '')
+            app.logger.info(f"🌐 Referer detectado: {referer}")
+            
+            if 'laporfirianna' in host or 'laporfirianna' in referer:
                 return NUMEROS_CONFIG['524812372326']
-            elif 'mektia' in host:
+            elif 'mektia' in host or 'mektia' in referer:
                 return NUMEROS_CONFIG['524495486142']
         
         # Default o fuera de contexto de request
