@@ -2591,15 +2591,17 @@ def ver_chats():
 
 @app.route('/chats/<numero>')
 def ver_chat(numero, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # CONSULTA ACTUALIZADA - USAR PRIORIDAD
+    # Consulta para los datos del chat (información del contacto)
     cursor.execute("""
         SELECT DISTINCT
             conv.numero, 
             cont.imagen_url, 
-            -- PRIORIDAD: alias > nombre > número
             COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
             cont.alias,
             cont.nombre
@@ -2610,21 +2612,21 @@ def ver_chat(numero, config=None):
     """, (numero,))
     chats = cursor.fetchall()
 
-    # Esta consulta queda igual (para los mensajes) pero usando CONVERSACIONES
-    cursor.execute(
-        "SELECT * FROM conversaciones WHERE numero=%s ORDER BY timestamp ASC;",
-        (numero,)
-    )
+    # Consulta actualizada para mensajes, incluyendo imagen_url y es_imagen
+    cursor.execute("""
+        SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
+        FROM conversaciones 
+        WHERE numero = %s 
+        ORDER BY timestamp ASC;
+    """, (numero,))
     msgs = cursor.fetchall()
 
     # Convertir timestamps a hora de México
     for msg in msgs:
         if msg.get('timestamp'):
-            # Si el timestamp ya tiene timezone info, convertirlo
             if msg['timestamp'].tzinfo is not None:
                 msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
             else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
                 msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
 
     cursor.close()
@@ -2635,8 +2637,8 @@ def ver_chat(numero, config=None):
         mensajes=msgs,
         selected=numero, 
         IA_ESTADOS=IA_ESTADOS,
-        tenant_config=config  # ← 🔥 AÑADE ESTA LÍNEA
-    )        
+        tenant_config=config
+    )
 
 @app.before_request
 def log_configuracion():
