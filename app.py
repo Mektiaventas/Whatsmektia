@@ -2156,7 +2156,7 @@ def webhook():
         numero = msg['from']
         texto = msg.get('text', {}).get('body', '') or msg.get('caption', '') or ''
         # En el webhook, después de obtener el texto:
-        if es_mensaje_repetido(numero, texto, config):
+        if es_mensaje_repetido(numero, texto, config=None):
             app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
             return 'OK', 200
 
