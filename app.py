@@ -360,9 +360,7 @@ def validar_datos_cita_completos(info_cita, config=None):
     return True, None
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
-    """
-    Versión mejorada que usa el historial de conversación para extraer información
-    """
+    """Versión mejorada que usa el historial de conversación para extraer información"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -378,8 +376,10 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
     try:
+        # 🔥 MEJORAR EL PROMPT PARA LA PORFIRIANNA
         prompt_cita = f"""
-        Extrae la información de la {soli} solicitada basándote en este mensaje y el historial de conversación.
+        Eres un asistente para La Porfirianna (restaurante de comida). 
+        Extrae la información del PEDIDO solicitado basándote en este mensaje.
         
         MENSAJE ACTUAL: "{mensaje}"
         
@@ -387,20 +387,15 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         {contexto_historial}
         
         Devuélvelo en formato JSON con estos campos:
-        - servicio_solicitado (string o null si no se especifica)
-        - fecha_sugerida (string en formato YYYY-MM-DD o null si no se especifica)
-        - hora_sugerida (string en formato HH:MM o null si no se especifica)
-        - nombre_cliente (string o null si no se especifica)
-        - telefono (string, usar este número: {numero})
+        - servicio_solicitado (string: ej. "chilaquiles", "tacos", "caviar", etc.)
+        - fecha_sugerida (null - no aplica para pedidos de comida)
+        - hora_sugerida (null - no aplica para pedidos de comida)  
+        - nombre_cliente (string o null)
+        - telefono (string: {numero})
         - estado (siempre "pendiente")
-        - datos_completos (boolean: true si tiene todos los datos necesarios)
+        - datos_completos (boolean: true si tiene servicio y nombre)
         
-        Datos necesarios para considerar completa una {soli}:
-        - servicio_solicitado: siempre requerido
-        - fecha_sugerida: requerido para citas, opcional para pedidos
-        - nombre_cliente: siempre requerido
-        
-        Si no se puede determinar algún campo, usa null.
+        Si el mensaje es un saludo o no contiene información de pedido, devuelve servicio_solicitado: null.
         """
         
         headers = {
@@ -430,9 +425,9 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             return None
             
     except Exception as e:
-        app.logger.error(f"Error extrayendo info de {soli}: {e}")
+        app.logger.error(f"Error extrayendo info de pedido: {e}")
         return None
-
+    
 @app.route('/debug-headers')
 def debug_headers():
     headers = {k: v for k, v in request.headers.items()}
@@ -1488,20 +1483,12 @@ def obtener_audio_whatsapp(audio_id, config=None):
             'Authorization': f'Bearer {config["whatsapp_token"]}',
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         }
-        base_url = "https://mektia.com"  # Asegurar que sea HTTPS
-        public_url = f"{base_url}/static/audio/whatsapp/{filename}"
+        
         app.logger.info(f"🎵 Descargando audio WhatsApp: {url}")
         
         response = requests.get(url, headers=headers, timeout=30)
         app.logger.info(f"🎵 Status descarga audio: {response.status_code}")
-        try:
-            response = requests.head(public_url, timeout=5)
-            if response.status_code != 200:
-                app.logger.error(f"🔴 URL no accesible: {public_url}")
-                return None, None
-        except:
-            app.logger.error(f"🔴 Error verificando URL: {public_url}")
-            return None, None
+        
         if response.status_code != 200:
             app.logger.error(f"🔴 Error descargando audio: {response.status_code} - {response.text}")
             return None, None
@@ -1530,7 +1517,7 @@ def obtener_audio_whatsapp(audio_id, config=None):
         # Crear directorio si no existe
         os.makedirs('static/audio/whatsapp', exist_ok=True)
         
-        # Generar nombre único para el archivo
+        # 🔥 CORREGIR: Definir filename ANTES de usarlo
         filename = f"{uuid.uuid4().hex}.ogg"  # WhatsApp usa formato OGG
         filepath = f"static/audio/whatsapp/{filename}"
         
@@ -1540,12 +1527,13 @@ def obtener_audio_whatsapp(audio_id, config=None):
         
         app.logger.info(f"✅ Audio guardado: {filepath}")
         
-        return filepath, public_url
+        return filepath, f"/{filepath}"
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {e}")
+        app.logger.error(traceback.format_exc())
         return None, None
-
+    
 def transcribir_audio_con_openai(audio_file_path):
     """Transcribe audio usando Whisper de OpenAI"""
     try:
@@ -2310,7 +2298,12 @@ def webhook():
             
             # Obtener y transcribir audio
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
-            
+            # En el webhook, después de obtener la transcripción:
+            if not texto or texto.strip() == '':
+                app.logger.error("🔴 Transcripción vacía, no se puede procesar")
+                # Enviar mensaje de error al usuario
+                enviar_mensaje(numero, "No pude entender el audio. ¿Podrías intentarlo de nuevo?", config)
+                return 'OK', 200
             if audio_path:
                 transcripcion_audio = transcribir_audio_con_openai(audio_path)
                 app.logger.info(f"🔍 Iniciando detección de pedido...")
