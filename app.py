@@ -2148,10 +2148,28 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
+          # ✅ VERIFICACIÓN CRÍTICA - asegurar que tenemos JSON
+        if not request.is_json:
+            app.logger.error("🔴 Error: No se recibió JSON en el webhook")
+            return 'Invalid content type', 400
+            
         payload = request.get_json()
+        if not payload:
+            app.logger.error("🔴 Error: JSON vacío o inválido")
+            return 'Invalid JSON', 400
+            
         app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)}")
         
+        # ✅ VERIFICAR ESTRUCTURA BÁSICA DEL PAYLOAD
+        if 'entry' not in payload or not payload['entry']:
+            app.logger.error("🔴 Error: Payload sin 'entry'")
+            return 'Invalid payload structure', 400
+            
         entry = payload['entry'][0]
+        if 'changes' not in entry or not entry['changes']:
+            app.logger.error("🔴 Error: Entry sin 'changes'")
+            return 'Invalid entry structure', 400
+            
         change = entry['changes'][0]['value']
         mensajes = change.get('messages')
         
@@ -3265,4 +3283,4 @@ if __name__ == '__main__':
     # Crear tablas necesarias
     crear_tabla_citas(config=None)
     
-    app.run(host='0.0.0.0', port=args.port, debug=False)
+    app.run(host='0.0.0.0', port=args.port, debug=True)  # ← Cambia a True
