@@ -48,15 +48,6 @@ OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
 
-client = OpenAI(api_key=OPENAI_API_KEY)
-with open("/home/ubuntu/Whatsmektia/uploads/audio_676805618144215.mp3", "rb") as audio_file:
-    transcription = client.audio.transcriptions.create(
-        model="whisper-1",
-        file=audio_file,
-        language="es"
-    )
-    print(transcription.text) 
-
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
