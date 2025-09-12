@@ -1279,7 +1279,30 @@ body {
   }
 }
 
+.image-actions {
+    margin-top: 10px;
+}
 
+.analyze-btn {
+    background-color: #25D366;
+    color: white;
+    border: none;
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 12px;
+}
+
+.analyze-btn:hover {
+    background-color: #128C7E;
+}
+
+.whatsapp-image {
+    max-width: 100%;
+    max-height: 400px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
 .tenant-badge {
     padding: 4px 12px;
     border-radius: 20px;

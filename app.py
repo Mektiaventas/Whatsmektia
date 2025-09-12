@@ -807,6 +807,68 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 
+@app.route('/uploads/<filename>')
+def serve_uploaded_file(filename):
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+# Crear directorio de uploads al inicio
+UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+def extraer_servicio_del_mensaje(mensaje, config=None):
+    """Extrae el servicio del mensaje usando keywords simples"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    mensaje_lower = mensaje.lower()
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    if es_porfirianna:
+        # Palabras clave para La Porfirianna
+        platillos = ['gordita', 'taco', 'quesadilla', 'sope', 'torta', 'comida', 'platillo']
+        for platillo in platillos:
+            if platillo in mensaje_lower:
+                return mensaje  # Devolver el mensaje completo como descripción
+        return None
+    else:
+        # Palabras clave para Mektia
+        servicios = ['página web', 'sitio web', 'app', 'aplicación', 'software', 
+                    'marketing', 'diseño', 'hosting', 'ecommerce', 'tienda online']
+        for servicio in servicios:
+            if servicio in mensaje_lower:
+                return servicio
+        return None
+
+def extraer_fecha_del_mensaje(mensaje):
+    """Extrae fechas relativas simples del mensaje"""
+    mensaje_lower = mensaje.lower()
+    
+    hoy = datetime.now()
+    
+    if 'mañana' in mensaje_lower:
+        return (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
+    elif 'pasado mañana' in mensaje_lower:
+        return (hoy + timedelta(days=2)).strftime('%Y-%m-%d')
+    elif 'lunes' in mensaje_lower:
+        # Calcular próximo lunes
+        dias_hasta_lunes = (7 - hoy.weekday()) % 7
+        if dias_hasta_lunes == 0:
+            dias_hasta_lunes = 7
+        return (hoy + timedelta(days=dias_hasta_lunes)).strftime('%Y-%m-%d')
+    # Agregar más patrones según necesites
+    
+    return None
+
+def extraer_nombre_del_mensaje(mensaje):
+    """Intenta extraer un nombre del mensaje"""
+    # Patrón simple para nombres (2-3 palabras)
+    patron_nombre = r'^[A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}( [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?$'
+    
+    if re.match(patron_nombre, mensaje.strip()):
+        return mensaje.strip()
+    
+    return None
+
 def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
     """
     Solicita al usuario los datos faltantes para completar la cita/pedido
@@ -1014,7 +1076,9 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
-
+    estado_actual = obtener_estado_conversacion(numero, config)
+    if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
+        return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
     precios = obtener_todos_los_precios(config)
     lista_precios = "\n".join(
         f"- {p['servicio']}: {p['precio']} {p['moneda']}"
@@ -1179,6 +1243,96 @@ def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=
     cursor.close()
     conn.close()
 
+def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
+    """Maneja la secuencia de solicitud de cita paso a paso"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    paso_actual = estado_actual.get('datos', {}).get('paso', 0)
+    datos_guardados = estado_actual.get('datos', {})
+    
+    # Determinar tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    if paso_actual == 0:  # Primer paso: servicio
+        # Extraer servicio del mensaje
+        servicio = extraer_servicio_del_mensaje(mensaje, config)
+        if servicio:
+            datos_guardados['servicio'] = servicio
+            datos_guardados['paso'] = 1
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_fecha", datos_guardados, config)
+            
+            if es_porfirianna:
+                return "¡Perfecto! ¿Para cuándo quieres tu pedido? (puedes decir 'hoy', 'mañana' o una fecha específica)"
+            else:
+                return "¡Excelente! ¿Qué fecha te viene bien para la cita? (puedes decir 'mañana', 'próximo lunes', etc.)"
+        else:
+            if es_porfirianna:
+                return "No entendí qué platillo quieres ordenar. ¿Podrías ser más específico? Por ejemplo: 'Quiero 4 gorditas de chicharrón'"
+            else:
+                return "No entendí qué servicio necesitas. ¿Podrías ser más específico? Por ejemplo: 'Necesito una página web'"
+    
+    elif paso_actual == 1:  # Segundo paso: fecha
+        fecha = extraer_fecha_del_mensaje(mensaje)
+        if fecha:
+            datos_guardados['fecha'] = fecha
+            datos_guardados['paso'] = 2
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_nombre", datos_guardados, config)
+            return "¡Genial! ¿Cuál es tu nombre completo?"
+        else:
+            return "No entendí la fecha. ¿Podrías intentarlo de nuevo? Por ejemplo: 'mañana a las 3pm' o 'el viernes 15'"
+    
+    elif paso_actual == 2:  # Tercer paso: nombre
+        nombre = extraer_nombre_del_mensaje(mensaje)
+        if nombre:
+            datos_guardados['nombre'] = nombre
+            datos_guardados['paso'] = 3
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "confirmar_datos", datos_guardados, config)
+            
+            # Confirmar todos los datos
+            if es_porfirianna:
+                confirmacion = f"📋 *Resumen de tu pedido:*\n\n"
+                confirmacion += f"🍽️ *Platillo:* {datos_guardados['servicio']}\n"
+                confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
+                confirmacion += f"👤 *Nombre:* {nombre}\n\n"
+                confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
+            else:
+                confirmacion = f"📋 *Resumen de tu cita:*\n\n"
+                confirmacion += f"🛠️ *Servicio:* {datos_guardados['servicio']}\n"
+                confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
+                confirmacion += f"👤 *Nombre:* {nombre}\n\n"
+                confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
+            
+            return confirmacion
+        else:
+            return "No entendí tu nombre. ¿Podrías escribirlo de nuevo?"
+    
+    elif paso_actual == 3:  # Confirmación final
+        if mensaje.lower() in ['sí', 'si', 'sip', 'correcto', 'ok']:
+            # Guardar cita completa
+            info_cita = {
+                'servicio_solicitado': datos_guardados['servicio'],
+                'fecha_sugerida': datos_guardados['fecha'],
+                'nombre_cliente': datos_guardados['nombre'],
+                'telefono': numero,
+                'estado': 'pendiente'
+            }
+            
+            cita_id = guardar_cita(info_cita, config)
+            actualizar_estado_conversacion(numero, "CITA_CONFIRMADA", "cita_agendada", {"cita_id": cita_id}, config)
+            
+            if es_porfirianna:
+                return f"✅ *Pedido confirmado* - ID: #{cita_id}\n\nHemos registrado tu pedido. Nos pondremos en contacto contigo pronto. ¡Gracias!"
+            else:
+                return f"✅ *Cita confirmada* - ID: #{cita_id}\n\nHemos agendado tu cita. Nos pondremos en contacto contigo pronto. ¡Gracias!"
+        
+        elif mensaje.lower() in ['no', 'cancelar', 'modificar']:
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "reiniciar", {}, config)
+            return "De acuerdo, empecemos de nuevo. ¿Qué servicio necesitas?"
+        
+        else:
+            return "Por favor responde 'sí' para confirmar o 'no' para modificar."
+
 def obtener_estado_conversacion(numero, config=None):
     """
     Obtiene el estado actual de la conversación
@@ -1213,14 +1367,14 @@ def obtener_imagen_whatsapp(image_id, config=None):
     
     try:
         # Usar la configuración correcta
-        url = f"https://graph.facebook.com/v18.0/{config[image_id]}"
+        url_metadata = f"https://graph.facebook.com/v18.0/{image_id}"
         
         headers = {
             'Authorization': f'Bearer {config["whatsapp_token"]}',
             'Content-Type': 'application/json'
         }
         
-        response = requests.get(url, headers=headers, timeout=30)
+        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
         
         app.logger.info(f"🖼️ Obteniendo imagen WhatsApp")
         
@@ -1230,17 +1384,14 @@ def obtener_imagen_whatsapp(image_id, config=None):
             app.logger.error(f"🔴 Error obteniendo imagen: {response.status_code} - {response.text}")
             return None, None
         
-        # 2. Obtener la URL de descarga real
-        image_data = response.json()
-        download_url = image_data.get('url')
+        metadata = response_metadata.json()
+        download_url = metadata.get('url')
         
         if not download_url:
             app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {image_data}")
             return None, None
             
-        # 3. Descargar la imagen con autenticación
         image_response = requests.get(download_url, headers=headers, timeout=30)
-        
         if image_response.status_code != 200:
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
@@ -1257,9 +1408,16 @@ def obtener_imagen_whatsapp(image_id, config=None):
             f.write(image_response.content)
         
         app.logger.info(f"✅ Imagen procesada: {filepath}")
+        # 5. Crear URL pública para mostrar en web
+        base_url = config.get('dominio', 'https://mektia.com')
+        if not base_url.startswith('http'):
+            base_url = f'https://{base_url}'
+            imagen_url_publica = f"{base_url}/uploads/{filename}"
         
-        # 🔥 FORMATO CORRECTO para OpenAI: data:image/jpeg;base64,{base64_string}
-        return f"data:image/jpeg;base64,{image_base64}", filename
+        app.logger.info(f"✅ Imagen procesada: {filepath}")
+        app.logger.info(f"🌐 URL pública: {imagen_url_publica}")
+        
+        return f"data:image/jpeg;base64,{image_base64}", imagen_url_publica
         
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
@@ -2121,13 +2279,24 @@ def webhook():
             app.logger.info(f"🖼️ ID de imagen: {image_id}")
             
             # Obtener la imagen
-            imagen_base64, imagen_url = obtener_imagen_whatsapp(image_id, config)
+            imagen_base64, imagen_url_publica = obtener_imagen_whatsapp(image_id, config)
             
             # Usar caption si existe, sino texto por defecto
             if 'caption' in msg['image']:
                 texto = msg['image']['caption']
             else:
                 texto = "Analiza esta imagen y describe lo que ves"
+            # Procesar con OpenAI para análisis de imagen
+            if imagen_base64:
+                respuesta_imagen = responder_con_ia(texto, numero, True, imagen_base64, False, None, config)
+                enviar_mensaje(numero, respuesta_imagen, config)
+                
+                # Guardar en base de datos con URL pública
+                guardar_conversacion(numero, texto, respuesta_imagen, True, imagen_url_publica, False, config=config)
+            else:
+                enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
+            
+            return 'OK', 200
                 
         elif 'audio' in msg:
             app.logger.info(f"🎵 Mensaje de audio detectado")

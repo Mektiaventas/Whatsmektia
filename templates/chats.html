@@ -122,7 +122,18 @@
       <span>Selecciona un chat</span>
     </div>
     {% endif %}
-
+<!-- Botón para análisis avanzado -->
+            <div class="image-actions">
+                <button class="analyze-btn" 
+                        onclick="analyzeImage('{{ msg.contenido_extra }}', '{{ msg.numero }}')">
+                    🔍 Analizar con IA
+                </button>
+            </div>
+        </div>
+    </div>
+    <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+</div>
+{% endif %}
     <div class="msgs-wrap-v2" id="msgs">
       {% if mensajes %}
         {% for msg in mensajes %}
@@ -131,14 +142,19 @@
             <div class="msg-box msg-user">
               <div class="message-content">
                 {% if msg.tipo_mensaje == 'imagen' and msg.contenido_extra %}
-                  <!-- Mostrar imagen -->
-                  <div class="image-message">
-                    <img src="{{ msg.contenido_extra }}" alt="Imagen enviada" class="whatsapp-image">
-                    {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
-                      <div class="image-caption">
-                        {{ msg.mensaje }}
-                      </div>
-                    {% endif %}
+                <div class="msg-box msg-user">
+                    <div class="message-content">
+                        <div class="image-message">
+                            <img src="{{ msg.contenido_extra }}" 
+                                alt="Imagen enviada" 
+                                class="whatsapp-image"
+                                onerror="this.style.display='none';">
+                            
+                            {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                            <div class="image-caption">
+                                {{ msg.mensaje }}
+                            </div>
+                            {% endif %}
                   </div>
 
                 {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
