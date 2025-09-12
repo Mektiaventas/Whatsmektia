@@ -1835,54 +1835,43 @@ def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
 
 def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
     """
-    Manejo mejorado de solicitudes de cita con detección de intenciones
+    Manejo mejorado de solicitudes de cita con prevención de ciclos
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Detectar intención
-    intencion = detectar_intencion_mejorado(mensaje, numero, config=config)
+    # 🔥 VERIFICAR SI ESTAMOS EN MEDIO DE UNA SOLICITUD
+    estado_actual = obtener_estado_conversacion(numero, config)
     
-    # Verificar si hay citas existentes
-    citas_existentes = obtener_citas_pendientes(numero, config)
+    if estado_actual and estado_actual.get('contexto') == 'EN_CITA':
+        # Ya estamos en proceso de cita, usar lógica de continuación
+        return continuar_proceso_cita(numero, mensaje, estado_actual, config)
     
-    app.logger.info(f"🎯 Intención detectada: {intencion['intencion']} (confianza: {intencion['confianza']})")
-    app.logger.info(f"📋 Citas existentes: {len(citas_existentes)}")
+    # 🔥 DETECCIÓN MÁS ESTRICTA DE NUEVAS SOLICITUDES
+    es_nueva_solicitud = (
+        detectar_solicitud_cita_keywords(mensaje) and 
+        not es_respuesta_a_pregunta(mensaje) and
+        not estado_actual  # No hay estado previo
+    )
     
-    # Manejar según la intención detectada
-    if intencion['intencion'] == 'NUEVA_CITA' and intencion['confianza'] > 0.7:
-        # Crear nueva cita
-        cita_id = guardar_cita(info_cita, config)
-        if cita_id:
-            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-            enviar_alerta_cita_administrador(info_cita, cita_id, config)
-            actualizar_estado_conversacion(numero, "CITA_AGENDADA", "nueva_cita", 
-                                         {"cita_id": cita_id, "info": info_cita}, config)
-            return f"✅ Nueva cita agendada - ID: #{cita_id}"
+    if not es_nueva_solicitud:
+        # No es una nueva solicitud, dejar que la IA normal responda
+        return None
     
-    elif intencion['intencion'] == 'MODIFICAR_CITA' and intencion['confianza'] > 0.6 and citas_existentes:
-        # Modificar cita existente (la más reciente)
-        cita_id = citas_existentes[0]['id']
-        if modificar_cita(cita_id, info_cita, config):
-            enviar_confirmacion_modificacion(numero, info_cita, cita_id, config)
-            actualizar_estado_conversacion(numero, "CITA_MODIFICADA", "modificar_cita", 
-                                         {"cita_id": cita_id, "info": info_cita}, config)
-            return f"✅ Cita modificada - ID: #{cita_id}"
+    app.logger.info(f"📅 Nueva solicitud de cita detectada de {numero}")
     
-    # Si no se detecta intención clara o falla la detección, usar lógica original
-    es_valida, mensaje_error = validar_datos_cita_completos(info_cita, config)
+    # Iniciar nuevo proceso de cita
+    actualizar_estado_conversacion(numero, "EN_CITA", "solicitar_servicio", 
+                                 {"paso": 1, "intentos": 0}, config)
     
-    if es_valida:
-        cita_id = guardar_cita(info_cita, config)
-        if cita_id:
-            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-            enviar_alerta_cita_administrador(info_cita, cita_id, config)
-            return f"✅ Cita agendada - ID: #{cita_id}"
+    # Determinar tipo de negocio
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    if es_porfirianna:
+        return "¡Hola! 👋 Para tomar tu pedido, necesito que me digas:\n\n1. ¿Qué platillos deseas ordenar?\n2. ¿Para cuándo lo quieres?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
     else:
-        return mensaje_error
+        return "¡Hola! 👋 Para agendar tu cita, necesito que me digas:\n\n1. ¿Qué servicio necesitas?\n2. ¿Qué fecha te viene bien?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
     
-    return "No pude procesar tu solicitud de cita. Por favor, intenta de nuevo."
-
 def obtener_citas_pendientes(numero, config=None):
     """
     Obtiene las citas pendientes de un cliente
@@ -2021,7 +2010,12 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
     
     # Determinar el tipo de negocio basado en la configuración
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
+     # 🔥 EVITAR DETECTAR RESPUESTAS DE LA IA COMO SOLICITUDES
+    if any(phrase in mensaje for phrase in ["Para agendar tu cita", "necesito que me proporciones", "¿Qué servicio te interesa?"]):
+        return False
+     # 🔥 EVITAR DETECTAR MENSAJES DE CONFIRMACIÓN
+    if any(phrase in mensaje for phrase in ["sí", "si", "correcto", "ok", "confirmo"]):
+        return False
     # Primero verificar con la lista de palabras clave existente (más rápida)
     if detectar_solicitud_cita_keywords(mensaje):
         return True
