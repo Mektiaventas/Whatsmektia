@@ -20,6 +20,8 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
+from flask import send_from_directory, Response
+from werkzeug.utils import secure_filename
 from PIL import Image
 # Configurar Gemini
 
@@ -175,95 +177,6 @@ def texto_a_voz(texto, filename,config=None):
         app.logger.error(f"Error en texto a voz: {e}")
         return None
 
-def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
-    """
-    Versión mejorada que extrae información de citas con más precisión
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    if historial is None:
-        historial = obtener_historial(numero, limite=5, config=config)
-    
-    # Construir contexto del historial
-    contexto_historial = ""
-    for i, msg in enumerate(historial):
-        if msg['mensaje']:
-            contexto_historial += f"Usuario: {msg['mensaje']}\n"
-        if msg['respuesta']:
-            contexto_historial += f"Asistente: {msg['respuesta']}\n"
-    
-    try:
-        prompt_cita = f"""
-        ANALIZA este mensaje y extrae TODA la información relevante para una cita:
-
-        MENSAJE ACTUAL: "{mensaje}"
-        
-        HISTORIAL RECIENTE:
-        {contexto_historial}
-
-        EXTRAE en formato JSON:
-        - servicio_solicitado (string: qué servicio/proyecto específico)
-        - fecha_sugerida (string YYYY-MM-DD o null si no está clara)
-        - hora_sugerida (string HH:MM o null si no está clara)  
-        - nombre_cliente (string o null)
-        - telefono (string: {numero})
-        - estado (siempre "pendiente")
-        - datos_completos (boolean: true si tiene servicio, fecha y nombre)
-
-        INSTRUCCIONES ESPECIALES:
-        1. Si el mensaje dice "próximo lunes", calcula la fecha real, si es mayo entonces "2026-05-xx" porque ya paso mayo este año
-        2. Si menciona "9:00 AM"
-        3. Si el nombre aparece en el historial, úsalo
-        4. Para proyectos: si dice "diseño electrónico", usa eso como servicio
-
-        EJEMPLO si dice "nueva cita para el próximo lunes a las 9am para Jesús Eduardo":
-        {{
-          "servicio_solicitado": "Consulta general",
-          "fecha_sugerida": "2026-09-15",  // próximo lunes
-          "hora_sugerida": "09:00",
-          "nombre_cliente": "Jesús Eduardo",
-          "telefono": "{numero}",
-          "estado": "pendiente",
-          "datos_completos": true
-        }}
-        """
-
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt_cita}],
-            "temperature": 0.3,
-            "max_tokens": 600
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        respuesta_ia = data['choices'][0]['message']['content'].strip()
-        
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
-        if json_match:
-            info_cita = json.loads(json_match.group())
-            
-            # 🔥 CORRECCIÓN CRÍTICA: Procesar fechas relativas
-            if info_cita.get('fecha_sugerida'):
-                info_cita['fecha_sugerida'] = procesar_fecha_relativa(info_cita['fecha_sugerida'])
-                
-            return info_cita
-        else:
-            return None
-            
-    except Exception as e:
-        app.logger.error(f"Error extrayendo info de cita: {e}")
-        return None
-        
 def detectar_solicitud_cita_ia(mensaje, numero, config=None):
     """
     Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
@@ -1999,91 +1912,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
         
     except Exception as e:
         app.logger.error(f"Error en detección IA de intervención humana: {e}")
-    
-def detectar_solicitud_cita_ia(mensaje, numero, config=None):
-    """
-    Usa DeepSeek para detectar si el mensaje es una solicitud de cita/pedido
-    Devuelve True si la IA detecta intención de agendar cita/hacer pedido
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Determinar el tipo de negocio basado en la configuración
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-     # 🔥 EVITAR DETECTAR RESPUESTAS DE LA IA COMO SOLICITUDES
-    if any(phrase in mensaje for phrase in ["Para agendar tu cita", "necesito que me proporciones", "¿Qué servicio te interesa?"]):
-        return False
-     # 🔥 EVITAR DETECTAR MENSAJES DE CONFIRMACIÓN
-    if any(phrase in mensaje for phrase in ["sí", "si", "correcto", "ok", "confirmo"]):
-        return False
-    # Primero verificar con la lista de palabras clave existente (más rápida)
-    if detectar_solicitud_cita_keywords(mensaje):
-        return True
-    
-    # Si no se detectó con keywords, usar IA para análisis semántico
-    try:
-        if es_porfirianna:
-            prompt = f"""
-            Evalúa si el siguiente mensaje indica que el usuario quiere hacer un pedido de comida.
-            Responde SOLO con "SI" o "NO".
-            
-            Mensaje: "{mensaje}"
-            
-            Considera que podría ser una solicitud de pedido si:
-            - Pide ordenar, pedir, encargar comida
-            - Solicita menú, platillos, comidas disponibles
-            - Quiere hacer un pedido para llevar o a domicilio
-            - Pregunta por precios de platillos
-            - Menciona nombres de platillos específicos (gorditas, tacos, etc.)
-            - Solicita información sobre horarios de servicio o entrega
-            
-            Responde "SI" solo si hay una clara intención de hacer un pedido.
-            """
-        else:
-            prompt = f"""
-            Evalúa si el siguiente mensaje indica que el usuario quiere agendar una cita o solicitar un servicio.
-            Responde SOLO con "SI" o "NO".
-            
-            Mensaje: "{mensaje}"
-            
-            Considera que podría ser una solicitud de cita si:
-            - Pide agendar, reservar, programar una cita, consulta, sesión o servicio
-            - Solicita horarios, disponibilidad, turnos
-            - Quiere cotización, presupuesto o información comercial
-            - Pregunta por servicios disponibles (páginas web, apps, marketing, etc.)
-            - Menciona necesidad de atención, evaluación, asesoría
-            - Solicita información para contratar un servicio
-            
-            Responde "SI" solo si hay una clara intención de agendar cita.
-            """
-        
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,
-            "max_tokens": 10
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        
-        data = response.json()
-        respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
-        
-        app.logger.info(f"🔍 IA detectó solicitud de {'pedido' if es_porfirianna else 'cita'}: {respuesta_ia} para mensaje: {mensaje[:50]}...")
-        
-        return "SI" in respuesta_ia
-        
-    except Exception as e:
-        app.logger.error(f"Error en detección IA de {'pedido' if es_porfirianna else 'cita'}: {e}")
-        # Fallback a detección por keywords si la IA falla
-        return detectar_solicitud_cita_keywords(mensaje)
-        
+          
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente"""
     if config is None:
@@ -2575,28 +2404,6 @@ def detectar_solicitud_cita_keywords(mensaje):
     
     return False
 
-def detectar_solicitud_cita_keywords(mensaje):
-    """
-    Detección rápida por palabras clave de solicitud de cita/pedido
-    """
-    mensaje_lower = mensaje.lower()
-    
-    # Palabras clave para detección de citas/pedidos
-    palabras_clave = [
-        'cita', 'agendar', 'reservar', 'programar', 'consulta', 'sesión',
-        'servicio', 'cotización', 'presupuesto', 'contratar', 'asesoría',
-        'evaluación', 'horario', 'disponibilidad', 'turno', 'ordenar',
-        'pedido', 'encargar', 'comprar', 'menú', 'precio', 'qué tienes',
-        'qué ofrecen', 'quiero', 'necesito', 'me interesa'
-    ]
-    
-    # Verificar si alguna palabra clave está en el mensaje
-    for palabra in palabras_clave:
-        if palabra in mensaje_lower:
-            return True
-    
-    return False
-
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -2646,25 +2453,26 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud"""
-    try:
-        host = request.headers.get('Host', '').lower()
-        app.logger.info(f"🌐 Host detectado: {host}")
-        
-        # 🔥 DETECCIÓN MEJORADA - busca específicamente laporfirianna
-        if 'laporfirianna' in host:
-            app.logger.info("🔧 Usando configuración de La Porfirianna")
-            return NUMEROS_CONFIG['524812372326']
-        elif 'mektia' in host:
-            app.logger.info("🔧 Usando configuración de Mektia")
-            return NUMEROS_CONFIG['524495486142']
-        else:
-            app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
-            return NUMEROS_CONFIG['524495486142']
+    if host is None:
+        try:
+            host = request.headers.get('Host', '').lower()
+            app.logger.info(f"🌐 Host detectado: {host}")
             
-    except RuntimeError:
-        # ⚠️ Fuera de contexto de request - usar configuración por defecto
-        app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
-        return NUMEROS_CONFIG['524495486142']
+            # 🔥 DETECCIÓN MEJORADA - busca específicamente laporfirianna
+            if 'laporfirianna' in host:
+                app.logger.info("🔧 Usando configuración de La Porfirianna")
+                return NUMEROS_CONFIG['524812372326']
+            elif 'mektia' in host:
+                app.logger.info("🔧 Usando configuración de Mektia")
+                return NUMEROS_CONFIG['524495486142']
+            else:
+                app.logger.info("🔧 Usando configuración de Mektia (por defecto)")
+                return NUMEROS_CONFIG['524495486142']
+                
+        except RuntimeError:
+            # ⚠️ Fuera de contexto de request - usar configuración por defecto
+            app.logger.warning("⚠️ Fuera de contexto de request, usando Mektia por defecto")
+            return NUMEROS_CONFIG['524495486142']
 
 @app.route('/home')
 def home():
@@ -3270,6 +3078,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Crear tablas necesarias
-    crear_tabla_citas()
+    crear_tabla_citas(config=None)
     
     app.run(host='0.0.0.0', port=args.port, debug=False)
