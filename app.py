@@ -2242,7 +2242,7 @@ def webhook():
         #    return 'OK', 200
             
         # Agregar a mensajes procesados (con timestamp para limpieza posterior)
-        processed_messages[message_hash] = time.time()
+        #processed_messages[message_hash] = time.time()
         
         # Limpiar mensajes antiguos (más de 1 hora)
         current_time = time.time()
