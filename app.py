@@ -262,30 +262,54 @@ def autenticar_google_calendar(config=None):
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     creds = None
     
-    # El token.json almacena los tokens de acceso y actualización
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    
-    # Si no hay credenciales válidas, permite que el usuario inicie sesión
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                os.getenv('GOOGLE_CLIENT_SECRET_FILE', 'client_secret.json'), SCOPES)
-            creds = flow.run_local_server(port=0)
-        
-        # Guarda las credenciales para la próxima vez
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-    
     try:
-        service = build('calendar', 'v3', credentials=creds)
-        return service
-    except HttpError as error:
-        app.logger.error(f'Error al construir el servicio de Calendar: {error}')
+        # Intentar obtener credenciales desde variable de entorno
+        creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+        if creds_json:
+            try:
+                # Parsear el JSON desde la variable de entorno
+                creds_info = json.loads(creds_json)
+                creds = service_account.Credentials.from_service_account_info(
+                    creds_info, scopes=SCOPES
+                )
+                app.logger.info("✅ Credenciales de Google cargadas desde variable de entorno")
+            except json.JSONDecodeError:
+                app.logger.error("❌ Error: GOOGLE_CREDENTIALS_JSON no es un JSON válido")
+                return None
+        
+        # Si no hay credenciales de variable de entorno, intentar con archivo
+        if not creds and os.path.exists('token.json'):
+            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+        
+        # Si no hay credenciales válidas, permite que el usuario inicie sesión
+        if not creds or not creds.valid:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                # Intentar con archivo de client secret
+                client_secret_file = os.getenv('GOOGLE_CLIENT_SECRET_FILE', 'client_secret.json')
+                if os.path.exists(client_secret_file):
+                    flow = InstalledAppFlow.from_client_secrets_file(client_secret_file, SCOPES)
+                    creds = flow.run_local_server(port=0)
+                else:
+                    app.logger.warning("⚠️ No se encontraron credenciales de Google Calendar")
+                    return None
+            
+            # Guardar las credenciales para la próxima vez
+            with open('token.json', 'w') as token:
+                token.write(creds.to_json())
+        
+        try:
+            service = build('calendar', 'v3', credentials=creds)
+            return service
+        except HttpError as error:
+            app.logger.error(f'Error al construir el servicio de Calendar: {error}')
+            return None
+            
+    except Exception as e:
+        app.logger.error(f'Error inesperado en autenticación Google: {e}')
         return None
-
+    
 def crear_evento_calendar(service, cita_info, config=None):
     """Crea un evento en Google Calendar para la cita"""
     if config is None:
