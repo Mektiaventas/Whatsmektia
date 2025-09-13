@@ -2313,6 +2313,7 @@ def webhook():
         es_audio = False
         es_video = False
         es_documento = False
+        es_mi_numero = False  # ← Add this initialization
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
