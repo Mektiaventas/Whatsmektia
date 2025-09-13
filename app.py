@@ -2355,7 +2355,7 @@ def webhook():
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje(texto, es_imagen, es_audio, config)
+        procesar_mensaje(texto, es_imagen, config)
         
         return 'OK', 200
         
