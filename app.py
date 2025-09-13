@@ -2307,7 +2307,12 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
-        
+                # CORRECCIÓN: Manejo robusto de texto
+        texto = ''
+        es_imagen = False
+        es_audio = False
+        es_video = False
+        es_documento = False
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
@@ -2355,10 +2360,7 @@ def webhook():
             if current_time - timestamp > 3600:  # 1 hora
                 del processed_messages[msg_hash]
         
-        # CORRECCIÓN: Manejo robusto de texto
-        texto = ''
-        es_imagen = False
-        es_audio = False
+
         
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
