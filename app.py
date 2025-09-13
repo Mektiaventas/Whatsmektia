@@ -2328,8 +2328,7 @@ def webhook():
             return 'OK', 200
         
         # 2. DETECTAR INTERVENCIÓN HUMANA
-        if (detectar_intervencion_humana_ia(texto, numero, config) or 
-            detectar_intervencion_humana_keywords(texto, config)):
+        if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             
             # Obtener historial para contexto
