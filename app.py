@@ -2234,12 +2234,12 @@ def webhook():
             return 'OK', 200
             
         # Crear un hash único del mensaje para evitar duplicados
-        message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
+        #message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
         
         # Verificar si ya procesamos este mensaje
-        if message_hash in processed_messages:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
-            return 'OK', 200
+        #if message_hash in processed_messages:
+        #    app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
+        #    return 'OK', 200
             
         # Agregar a mensajes procesados (con timestamp para limpieza posterior)
         processed_messages[message_hash] = time.time()
