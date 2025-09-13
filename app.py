@@ -3,6 +3,8 @@ import traceback
 # Agrega estos imports al inicio del archivo
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
+import hashlib
+import time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -26,7 +28,7 @@ from pydub import AudioSegment
 from PIL import Image
 from openai import OpenAI
 client = OpenAI(api_key="your-api-key")
-
+processed_messages = {}
 
 # Configurar Gemini
 
@@ -991,20 +993,37 @@ def obtener_precio(servicio_nombre: str, config):
     return None
 
 # ——— Memoria de conversación ———
-def obtener_historial(numero, limite=10, config=None):
+# REEMPLAZA la función obtener_historial con esta versión mejorada
+def obtener_historial(numero, limite=5, config=None):
+    """Función mejorada para obtener historial de conversaciones"""
     if config is None:
         config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute(
-        "SELECT mensaje, respuesta FROM conversaciones "
-        "WHERE numero=%s ORDER BY timestamp DESC LIMIT %s;",
-        (numero, limite)
-    )
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return list(reversed(rows))
+    
+    try:
+        conn = obtener_conexion_db(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT mensaje_usuario, respuesta_ia, timestamp 
+            FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp DESC 
+            LIMIT %s
+        """, (numero, limite))
+        
+        historial = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        # Invertir el orden para tener cronológico
+        historial.reverse()
+        
+        app.logger.info(f"📚 Historial obtenido para {numero}: {len(historial)} mensajes")
+        return historial
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error al obtener historial: {e}")
+        return []
 
 # ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
@@ -1556,7 +1575,34 @@ def transcribir_audio_con_openai(audio_path):
         if hasattr(e, 'response'):
             app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
         return None
-    
+
+# AGREGAR esta función para gestionar conexiones a BD
+def obtener_conexion_db(config):
+    """Obtiene conexión a la base de datos correcta según la configuración"""
+    try:
+        if 'porfirianna' in config.get('dominio', ''):
+            # Conectar a base de datos de La Porfirianna
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'laporfirianna_db')
+            )
+        else:
+            # Conectar a base de datos de Mektia (por defecto)
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'mektia_db')
+            )
+        
+        return conn
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error conectando a BD {config.get('db_name')}: {e}")
+        raise
+
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
     # Buscar en la configuración multi-tenant
@@ -1643,59 +1689,34 @@ def enviar_mensaje(numero, texto, config=None):
         app.logger.error(f"🔴 Exception: {e}")
         return False
        
-def guardar_conversacion(numero, mensaje, respuesta, es_imagen=False, contenido_extra=None, es_audio=False, config=None):
-    # 🔥 VALIDACIÓN: Prevenir NULL antes de guardar
-    if mensaje is None:
-        mensaje = '[Mensaje vacío]'
-    elif isinstance(mensaje, str) and mensaje.strip() == '':
-        mensaje = '[Mensaje vacío]'
-    
-    if respuesta is None:
-        respuesta = '[Respuesta vacía]'  
-    elif isinstance(respuesta, str) and respuesta.strip() == '':
-        respuesta = '[Respuesta vacía]'
-    
-    # Determinar tipo de mensaje
-    if es_imagen:
-        tipo_mensaje = 'imagen'
-    elif es_audio:
-        tipo_mensaje = 'audio'
-    else:
-        tipo_mensaje = 'texto'
-    
+# REEMPLAZA la función guardar_conversacion con esta versión mejorada
+def guardar_conversacion(numero, mensaje_usuario, respuesta_ia, config=None):
+    """Función mejorada para guardar conversaciones en la base de datos correcta"""
     if config is None:
         config = obtener_configuracion_por_host()
-
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS conversaciones (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero VARCHAR(20),
-            mensaje TEXT,
-            respuesta TEXT,
-            timestamp DATETIME,
-            tipo_mensaje VARCHAR(10) DEFAULT 'texto',
-            contenido_extra TEXT,
-            transcripcion_audio TEXT
-        ) ENGINE=InnoDB;
-    ''')
-
-    # 🆕 Guardar transcripción si es audio
-    transcripcion = mensaje if es_audio and mensaje.startswith('Transcripción del audio:') else None
-
-    timestamp_utc = datetime.utcnow()
-
-    cursor.execute(
-        "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, transcripcion_audio) VALUES (%s, %s, %s, %s, %s, %s, %s);",
-        (numero, mensaje, respuesta, timestamp_utc, tipo_mensaje, contenido_extra, transcripcion)
-    )
-
-    conn.commit()
-    cursor.close()
-    conn.close()
     
+    try:
+        # Obtener conexión a la base de datos correcta
+        conn = obtener_conexion_db(config)
+        cursor = conn.cursor()
+        
+        # Insertar la conversación
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje_usuario, respuesta_ia, timestamp)
+            VALUES (%s, %s, %s, NOW())
+        """, (numero, mensaje_usuario, respuesta_ia))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"💾 Conversación guardada para {numero} en DB: {config.get('db_name', 'default')}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error al guardar conversación: {e}")
+        return False
+       
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
@@ -1878,10 +1899,10 @@ def modificar_cita(cita_id, nueva_info, config=None):
         return False
 
 # ——— Detección y alerta ———
+# REEMPLAZA la función detectar_intervencion_humana_ia con esta versión mejorada
 def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     """
-    Usa DeepSeek para detectar si el usuario quiere hablar con un humano
-    Devuelve True si la IA detecta que se solicita intervención humana
+    Detección mejorada de solicitud de intervención humana usando palabras clave
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1889,7 +1910,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     # ⚠️ EVITAR DETECTAR ALERTAS DEL MISMO SISTEMA
     alertas_sistema = [
         "🚨 ALERTA:", "📋 INFORMACIÓN COMPLETA", "👤 Cliente:", 
-        "📞 Número:", "💬 Mensaje clave:"
+        "📞 Número:", "💬 Mensaje clave:", "🎯 INFORMACIÓN DEL PROYECTO"
     ]
     
     for alerta in alertas_sistema:
@@ -1897,55 +1918,63 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
             return False
     
     # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
-    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201']:
+    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
         return False
     
-
-    # Si no se detectó con keywords, usar IA para análisis semántico
-    try:
-        prompt = f"""
-        Evalúa si el siguiente mensaje indica que el usuario quiere hablar con una persona humana en lugar de un chatbot. 
-        Responde SOLO con "SI" o "NO".
-        
-        Mensaje: "{mensaje_usuario}"
-        
-        Considera que podría ser una solicitud de intervención humana si:
-        - Pide explícitamente hablar con una persona, humano, asesor, agente, etc.
-        - Expresa frustración con respuestas automatizadas
-        - Dice que no está obteniendo la ayuda que necesita
-        - Solicita contacto telefónico, número de atención, etc.
-        - Menciona que tiene un problema complejo o urgente
-        - Pide cotización, presupuesto o información comercial específica
-        - Necesita aclarar dudas técnicas complejas
-        
-        Responde "SI" solo si hay una clara intención de hablar con humano.
-        """
-        
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,  # Baja temperatura para respuestas más determinísticas
-            "max_tokens": 10
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        
-        data = response.json()
-        respuesta_ia = data['choices'][0]['message']['content'].strip().upper()
-        
-        app.logger.info(f"🔍 IA detectó intervención humana: {respuesta_ia} para mensaje: {mensaje_usuario[:50]}...")
-        
-        return "SI" in respuesta_ia
-        
-    except Exception as e:
-        app.logger.error(f"Error en detección IA de intervención humana: {e}")
-          
+    mensaje_lower = mensaje_usuario.lower()
+    
+    # Palabras clave que indican solicitud de humano
+    palabras_clave_humano = [
+        'humano', 'persona', 'asesor', 'agente', 'ejecutivo', 'representante',
+        'operador', 'atendedor', 'atender', 'hablar con alguien', 
+        'no eres humano', 'no me entiendes', 'quiero hablar con una persona',
+        'atención humana', 'servicio humano', 'ayuda humana', 'asistencia humana',
+        'no me ayudas', 'no resuelves', 'no entiendes', 'mejor hablar con',
+        'te cambio', 'otra persona', 'supervisor', 'gerente', 'dueño',
+        'encargado', 'responsable', 'que me llame', 'llámame', 'hablar por teléfono',
+        'número de teléfono', 'contacto directo', 'comunicarme con'
+    ]
+    
+    # Palabras de frustración
+    palabras_frustracion = [
+        'molesto', 'enojado', 'frustrado', 'cansado', 'harto', 'fastidiado',
+        'irritado', 'disgustado', 'no me gusta', 'pésimo servicio', 'mal servicio',
+        'pésima atención', 'mala atención', 'terrible', 'horrible', 'pésimo',
+        'decepcionado', 'insatisfecho', 'no resuelve', 'no sirve', 'no ayuda',
+        'estúpido', 'tonto', 'inútil', 'no funciona', 'no trabaja', 'no sabe'
+    ]
+    
+    # Detectar palabras clave directas
+    for palabra in palabras_clave_humano:
+        if palabra in mensaje_lower:
+            app.logger.info(f"🚨 Intervención humana detectada (palabra clave): {palabra}")
+            return True
+    
+    # Detectar frustración (múltiples palabras de frustración)
+    palabras_encontradas = [p for p in palabras_frustracion if p in mensaje_lower]
+    if len(palabras_encontradas) >= 2:
+        app.logger.info(f"🚨 Intervención humana detectada (frustración): {palabras_encontradas}")
+        return True
+    
+    # Detectar solicitudes explícitas de contacto
+    patrones_contacto = [
+        r'quiero\s+hablar\s+con',
+        r'dame\s+tu\s+número',
+        r'pásame\s+con',
+        r'necesito\s+hablar',
+        r'contacto\s+directo',
+        r'llámenme',
+        r'mar[qc]enme',
+        r'hablemos\s+por\s+teléfono'
+    ]
+    
+    for patron in patrones_contacto:
+        if re.search(patron, mensaje_lower):
+            app.logger.info(f"🚨 Intervención humana detectada (patrón contacto): {patron}")
+            return True
+    
+    return False
+         
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente"""
     if config is None:
@@ -2145,10 +2174,11 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
+# REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-          # ✅ VERIFICACIÓN CRÍTICA - asegurar que tenemos JSON
+        # ✅ VERIFICACIÓN CRÍTICA - asegurar que tenemos JSON
         if not request.is_json:
             app.logger.error("🔴 Error: No se recibió JSON en el webhook")
             return 'Invalid content type', 400
@@ -2158,7 +2188,7 @@ def webhook():
             app.logger.error("🔴 Error: JSON vacío o inválido")
             return 'Invalid JSON', 400
             
-        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)}")
+        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)[:500]}...")
         
         # ✅ VERIFICAR ESTRUCTURA BÁSICA DEL PAYLOAD
         if 'entry' not in payload or not payload['entry']:
@@ -2171,28 +2201,19 @@ def webhook():
             return 'Invalid entry structure', 400
             
         change = entry['changes'][0]['value']
-        mensajes = change.get('messages')
+        mensajes = change.get('messages', [])
+        
+        if not mensajes:
+            app.logger.info("⚠️ No hay mensajes en el payload")
+            return 'OK', 200
+            
+        msg = mensajes[0]
+        numero = msg['from']
         
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
-        if not mensajes:
-            return 'OK', 200
-            
-        msg = mensajes[0]
-        numero = msg['from']
-        # CORRECCIÓN: Manejo robusto de texto
-        texto = ''
-        if 'text' in msg and 'body' in msg['text']:
-            texto = msg['text']['body'].strip()
-        elif 'caption' in msg:
-            texto = msg['caption'].strip()
-        else:
-            # Para otros tipos de mensaje (imagen, audio, etc.)
-            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-            
-        app.logger.info(f"📝 Texto procesado: '{texto}'")
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
@@ -2206,147 +2227,49 @@ def webhook():
             config = obtener_configuracion_por_host()
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
         
-        # En el webhook, después de obtener el texto:
-        app.logger.info(f"🎧 Audio recibido de {numero}")
-        app.logger.info(f"📝 Transcripción: {texto}")
-        
-        if es_mensaje_repetido(numero, texto, config):
-            app.logger.info(f"🔄 Mensaje repetido detectado, ignorando: {texto[:50]}...")
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
+        message_id = msg.get('id')
+        if not message_id:
+            app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
             return 'OK', 200
             
-        # Verificar estado actual de conversación
-        estado_actual = obtener_estado_conversacion(numero, config)
-        if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
-            # Si ya estamos en proceso de pedido, usar lógica de continuación
-            respuesta = continuar_proceso_pedido(numero, texto, estado_actual, config)
-            # En el webhook, después de generar la respuesta:
-            if respuesta and respuesta.strip():
-                enviado = enviar_mensaje(numero, respuesta, config)
-                if enviado:
-                    guardar_conversacion(numero, texto, respuesta, es_audio=True, config=config)
-                else:
-                    app.logger.error("🔴 NO se pudo enviar el mensaje a WhatsApp")
-                    # Opcional: enviar un mensaje de error genérico
-                    mensaje_error = "⚠️ Lo siento, hubo un problema al procesar tu mensaje. Por favor, intenta de nuevo."
-                    enviar_mensaje(numero, mensaje_error, config)
-                    # Después de generar la respuesta
-                    app.logger.info(f"🤖 Respuesta generada: '{respuesta}'")
-                    app.logger.info(f"📏 Longitud: {len(respuesta) if respuesta else 0}")
-
-                    if not respuesta or respuesta.strip() == '':
-                        app.logger.error("🔴 La respuesta está vacía, usando mensaje por defecto")
-                        respuesta = "¡Hola! ¿En qué puedo ayudarte hoy?"
-            else:
-                app.logger.warning("⚠️ Respuesta vacía, no se envía mensaje")
-            if respuesta:
-                enviar_mensaje(numero, respuesta, config)
-                guardar_conversacion(numero, texto, respuesta, config=config)
-                return 'OK', 200
-
-        # Agrega esto al inicio del webhook, después de obtener el mensaje
-        if 'id' in msg:
-            current_message_id = f"{numero}_{msg['id']}"
-        else:
-            # For messages without ID, use timestamp + text
-            timestamp = msg.get('timestamp', '')
-            current_message_id = f"{numero}_{timestamp}_{texto}"
-
-        # Evitar procesar el mismo mensaje múltiples veces
-        if not hasattr(app, 'processed_messages'):
-            app.processed_messages = set()
-
-        if current_message_id in app.processed_messages:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
+        # Crear un hash único del mensaje para evitar duplicados
+        message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
+        
+        # Verificar si ya procesamos este mensaje
+        if message_hash in processed_messages:
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
-
-        app.processed_messages.add(current_message_id)
-        # Limitar el tamaño del conjunto para no consumir mucha memoria
-        if len(app.processed_messages) > 1000:
-            app.processed_messages = set(list(app.processed_messages)[-500:])
-
-        # Detectar tipo de mensaje
+            
+        # Agregar a mensajes procesados (con timestamp para limpieza posterior)
+        processed_messages[message_hash] = time.time()
+        
+        # Limpiar mensajes antiguos (más de 1 hora)
+        current_time = time.time()
+        for msg_hash, timestamp in list(processed_messages.items()):
+            if current_time - timestamp > 3600:  # 1 hora
+                del processed_messages[msg_hash]
+        
+        # CORRECCIÓN: Manejo robusto de texto
+        texto = ''
         es_imagen = False
         es_audio = False
-        imagen_base64 = None
-        imagen_url = None
-        audio_path = None
-        audio_url = None
-        texto = ""
-        transcripcion_audio = None
         
-        # En el webhook, después de obtener la imagen:
-        if 'image' in msg:
-            app.logger.info(f"🖼️ Mensaje de imagen detectado")
+        if 'text' in msg and 'body' in msg['text']:
+            texto = msg['text']['body'].strip()
+        elif 'image' in msg:
             es_imagen = True
-            image_id = msg['image']['id']
-            app.logger.info(f"🖼️ ID de imagen: {image_id}")
-            
-            # Obtener la imagen
-            imagen_base64, imagen_url_publica = obtener_imagen_whatsapp(image_id, config)
-            
-            if imagen_base64:
-                # Usar caption si existe, sino texto por defecto
-                if 'caption' in msg['image']:
-                    texto = msg['image']['caption']
-                else:
-                    texto = "Analiza esta imagen y describe lo que ves"
-                
-                # Procesar con OpenAI para análisis de imagen
-                respuesta_imagen = responder_con_ia(texto, numero, True, imagen_base64, False, None, config)
-                enviar_mensaje(numero, respuesta_imagen, config)
-                
-                # Guardar en base de datos con URL pública
-                guardar_conversacion(numero, texto, respuesta_imagen, True, imagen_url_publica, False, config=config)
-            else:
-                enviar_mensaje(numero, "No pude procesar la imagen. Intenta enviarla de nuevo.", config)
-            
-            return 'OK', 200
-                
-        if 'audio' in msg:
-            app.logger.info(f"🎵 Mensaje de audio detectado")
+            texto = msg['image'].get('caption', '').strip()
+            if not texto:
+                texto = "El usuario envió una imagen"
+        elif 'audio' in msg:
             es_audio = True
-            audio_id = msg['audio']['id']
-            app.logger.info(f"🎵 ID de audio: {audio_id}")
-            
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
-            if audio_path:
-                converted_path = convertir_audio(audio_path) if audio_path.endswith('.ogg') else audio_path
-                if converted_path:
-                    transcripcion_audio = transcribir_audio_con_openai(converted_path)
-                    app.logger.info(f"🎵 Transcripción: {transcripcion_audio}")
-                    if transcripcion_audio:
-                        texto = transcripcion_audio
-                    else:
-                        app.logger.error(f"🔴 Transcripción vacía para audio_id: {audio_id}")
-                        enviar_alerta_humana(numero, "Fallo en transcripción", f"Audio ID: {audio_id}", config)
-                        texto = "No pude entender el audio. Por favor, envía tu mensaje como texto."
-                else:
-                    app.logger.error(f"🔴 Error convirtiendo audio_id: {audio_id}")
-                    texto = "No pude procesar el audio (error de conversión)."
-            else:
-                app.logger.error(f"🔴 Error descargando audio_id: {audio_id}")
-                texto = "No pude procesar el audio."
-        
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        if 'id' in msg:
-            current_message_id = f"{numero}_{msg['id']}"
+            texto = "El usuario envió un audio"
         else:
-            # For messages without ID, use timestamp + text to avoid false duplicates
-            timestamp = msg.get('timestamp', '')
-            current_message_id = f"{numero}_{timestamp}_{texto}_{'image' if es_imagen else 'text'}"
+            # Para otros tipos de mensaje
+            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
             
-        if not hasattr(app, 'ultimos_mensajes'):
-            app.ultimos_mensajes = set()
-        
-        # Mensajes duplicados
-        if current_message_id in app.ultimos_mensajes:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {current_message_id}")
-            return 'OK', 200
-        
-        app.ultimos_mensajes.add(current_message_id)
-        
-        if len(app.ultimos_mensajes) > 100:
-            app.ultimos_mensajes = set(list(app.ultimos_mensajes)[-100:])
+        app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
         
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
@@ -2354,94 +2277,16 @@ def webhook():
             return 'OK', 200
         
         # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
-        es_mi_numero = numero in ['5214491182201', '524491182201']
+        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
         
         if es_mi_numero:
             app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
-        # ========== PROCESAMIENTO NORMAL ==========
-        # Actualizar contacto
-        contactos = change.get('contacts')
-        if contactos and len(contactos) > 0:
-            profile_name = contactos[0].get('profile', {}).get('name')
-            wa_id = contactos[0].get('wa_id')
-            if profile_name and wa_id:
-                try:
-                    imagen_perfil = obtener_imagen_perfil_whatsapp(wa_id, config)
-                    
-                    conn = get_db_connection(config)
-                    cursor = conn.cursor()
-                    
-                    # Eliminar duplicados
-                    cursor.execute("""
-                        DELETE FROM contactos 
-                        WHERE numero_telefono = %s 
-                        AND id NOT IN (
-                            SELECT MAX(id) FROM (
-                                SELECT id FROM contactos WHERE numero_telefono = %s
-                            ) AS temp
-                        )
-                    """, (wa_id, wa_id))
-                    
-                    # Insertar o actualizar
-                    cursor.execute("""
-                        INSERT INTO contactos (numero_telefono, nombre, plataforma, imagen_url)
-                        VALUES (%s, %s, 'whatsapp', %s)
-                        ON DUPLICATE KEY UPDATE 
-                            nombre = VALUES(nombre),
-                            imagen_url = VALUES(imagen_url)
-                    """, (wa_id, profile_name, imagen_perfil))
-                    
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    app.logger.info(f"✅ Contacto actualizado: {wa_id}")
-                    
-                except Exception as e:
-                    app.logger.error(f"🔴 Error actualizando contacto {wa_id}: {e}")
+        # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         
-        # Asegurar que el contacto exista
-        try:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT IGNORE INTO contactos (numero_telefono, plataforma)
-                VALUES (%s, 'whatsapp')
-            """, (numero,))
-            conn.commit()
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            app.logger.error(f"🔴 Error asegurando contacto {numero}: {e}")
-        
-        # Consultas de precio
-        if texto.lower().startswith('precio de '):
-            servicio = texto[10:].strip()
-            info = obtener_precio(servicio, config)
-            if info:
-                precio, moneda = info
-                respuesta = f"El precio de *{servicio}* es {precio} {moneda}."
-            else:
-                respuesta = f"No encontré tarifa para *{servicio}*."
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url if 'imagen_url' in locals() else None, config=config)
-            enviar_confirmacion_cita(numero, None, None, config)  # Enviar confirmación genérica
-            return 'OK', 200
-        
-        # 🆕 DETECCIÓN DE CITAS
-        estado_actual = obtener_estado_conversacion(numero, config)
-        if estado_actual and estado_actual.get('contexto') == 'EN_PEDIDO':
-            app.logger.info(f"🎯 Mensaje en contexto de pedido existente, procesando como pedido")
-            # Procesar como continuación de pedido aunque la detección falle
-            resultado = manejar_secuencia_cita(texto, numero, estado_actual, config)
-            if resultado:
-                enviar_mensaje(numero, resultado, config)
-                guardar_conversacion(numero, texto, resultado, es_audio=True, config=config)
-                return 'OK', 200
-                
-        # En el webhook, modificar la sección de detección de citas:
-        if detectar_solicitud_cita_keywords(texto) or detectar_solicitud_cita_ia(texto, numero, config):
-            app.logger.info(f"📅 Solicitud de cita detectada de {numero}")
+        # 1. DETECTAR SOLICITUD DE CITA/PEDIDO
+        if detectar_solicitud_cita_keywords(texto, config) or detectar_solicitud_cita_ia(texto, numero, config):
+            app.logger.info(f"📅 Solicitud de {'pedido' if 'porfirianna' in config.get('dominio', '') else 'cita'} detectada de {numero}")
             
             # Obtener historial para contexto
             historial = obtener_historial(numero, limite=5, config=config)
@@ -2452,130 +2297,142 @@ def webhook():
             if info_cita:
                 app.logger.info(f"📋 Información extraída: {json.dumps(info_cita, indent=2)}")
                 
-                # Usar el nuevo manejador mejorado
-                resultado = manejar_solicitud_cita_mejorado(numero, texto, info_cita, config)
+                # Validar si tenemos datos completos
+                datos_completos, mensaje_error = validar_datos_cita_completos(info_cita, config)
                 
-                # Enviar respuesta al usuario
-                enviar_mensaje(numero, resultado, config)
-                guardar_conversacion(numero, texto, resultado, config=config)
-                
-                return 'OK', 200
+                if datos_completos:
+                    # Guardar la cita/pedido
+                    cita_id = guardar_cita(info_cita, config)
+                    
+                    if cita_id:
+                        # Enviar confirmación al cliente
+                        enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                        
+                        # Enviar alerta al administrador
+                        enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                        
+                        respuesta = f"✅ ¡{'Pedido' if 'porfirianna' in config.get('dominio', '') else 'Cita'} confirmado! Te hemos enviado los detalles por mensaje. ID: #{cita_id}"
+                    else:
+                        respuesta = "❌ Lo siento, hubo un error al guardar tu solicitud. Por favor, intenta de nuevo."
+                else:
+                    # Faltan datos, solicitarlos
+                    respuesta = mensaje_error
+                    solicitar_datos_faltantes_cita(numero, info_cita, config)
             else:
-                app.logger.error(f"❌ Error extrayendo información de cita")
-                enviar_mensaje(numero, "No pude entender la información de tu cita. ¿Podrías ser más específico?", config)
+                respuesta = "No pude entender la información de tu solicitud. ¿Podrías ser más específico?"
+            
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
             
             return 'OK', 200
         
-        # IA normal
-        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
-        respuesta = ""
-        
-        if IA_ESTADOS[numero]['activa']:
-            # 🆕 DETECTAR PREFERENCIA DE VOZ
-            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
-                IA_ESTADOS[numero]['prefiere_voz'] = True
-                app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
+        # 2. DETECTAR INTERVENCIÓN HUMANA
+        if (detectar_intervencion_humana_ia(texto, numero, config) or 
+            detectar_intervencion_humana_keywords(texto, config)):
+            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             
-            responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
+            # Obtener historial para contexto
+            historial = obtener_historial(numero, limite=5, config=config)
             
-            # Obtener respuesta de IA
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion_audio, config)
+            # Extraer información con contexto
+            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
             
-            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-            if responder_con_voz:
-                # Intentar enviar respuesta de voz
-                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+            if info_intervencion:
+                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
                 
-                if audio_url_local:
-                    # URL pública del audio (ajusta según tu configuración)
-                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}{audio_url_local}"
-                    
-                    if enviar_mensaje_voz(numero, audio_url_publica, config):
-                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, es_audio=True, config=config)
-                    else:
-                        # Fallback a texto
-                        enviar_mensaje(numero, respuesta, config)
-                        app.logger.info(f"✅ Fallback a texto enviado a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, es_imagen, audio_url_local, config=config)
-                else:
-                    # Fallback a texto
-                    enviar_mensaje(numero, respuesta, config)
-                    app.logger.info(f"✅ Fallback a texto (error TTS) enviado a {numero}")
-                    guardar_conversacion(numero, texto, respuesta, es_imagen, None, config=config)
+                # Enviar alerta al administrador
+                enviar_alerta_intervencion_humana(info_intervencion, config)
+                
+                # Responder al cliente
+                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
-                # Respuesta normal de texto
-                enviar_mensaje(numero, respuesta, config)
-                app.logger.info(f"✅ Respuesta de texto enviada a {numero}")
-                
-                if es_audio:
-                    guardar_conversacion(numero, f"[Audio] {texto}", respuesta, False, audio_url, es_audio=True, config=config)
-                else:
-                    guardar_conversacion(numero, texto, respuesta, es_imagen, imagen_url, config=config)
+                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
             
-            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA
-            app.logger.info(f"🔍 Verificando intervención humana para {numero}")
-            app.logger.info(f"📝 Mensaje: {texto[:100]}...")
-            app.logger.info(f"🤖 Respuesta: {respuesta[:100]}...")
-            detectado = detectar_intervencion_humana_ia(texto, numero, config)
-            app.logger.info(f"🎯 Detección resultado: {detectado}")
-
-            if detectado and numero != ALERT_NUMBER:
-                app.logger.info(f"🚨 Intervención humana detectada para {numero}")
-                resumen = resumen_rafa(numero, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
-                enviar_informacion_completa(numero, config)
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
+            
+            return 'OK', 200
         
-        # KANBAN AUTOMÁTICO
-        meta = obtener_chat_meta(numero, config)
-        if not meta:
-            inicializar_chat_meta(numero, config)
-        
-        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
-        actualizar_columna_chat(numero, nueva_columna, config)
+        # 3. PROCESAMIENTO NORMAL DEL MENSAJE
+        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config)
         
         return 'OK', 200
-
+        
     except Exception as e:
-        app.logger.error(f"🔴 Error en webhook: {e}")
-        app.logger.error(f"🔴 Traceback: {traceback.format_exc()}")
-        return 'Error interno', 500
+        app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return 'Error interno del servidor', 500
     
-def detectar_solicitud_cita_keywords(mensaje):
+# REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
+def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección rápida por palabras clave de solicitud de pedido PARA LA PORFIRIANNA
+    Detección mejorada por palabras clave de solicitud de cita/pedido
     """
-    mensaje_lower = mensaje.lower()
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    # Palabras clave ESPECÍFICAS para pedidos de comida
-    palabras_clave_comida = [
-        'chilaquil', 'taco', 'gordita', 'quesadilla', 'sope', 'torta', 
-        'comprar', 'ordenar', 'pedir', 'quiero', 'deseo', 'me gustaría',
-        'con todo', 'sin cebolla', 'con extra', 'para llevar',
-        'efectivo', 'transferencia', 'pagar', 'pago',
-        'nombre es', 'me llamo', 'soy '
+    mensaje_lower = mensaje.lower().strip()
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    # Palabras clave ESPECÍFICAS para cada negocio
+    if es_porfirianna:
+        # Palabras clave para La Porfirianna (pedidos de comida)
+        palabras_clave = [
+            'pedir', 'ordenar', 'quiero', 'deseo', 'me gustaría', 'para llevar',
+            'manden', 'envíen', 'comprar', 'quiero comprar', 'deseo comprar',
+            'chilaquil', 'taco', 'gordita', 'quesadilla', 'sope', 'torta', 'comida',
+            'menú', 'platillo', 'orden', 'pedido'
+        ]
+        
+        # Palabras de confirmación
+        palabras_confirmacion = [
+            'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
+            'perfecto', 'exacto', 'así es', 'está bien', 'de acuerdo'
+        ]
+    else:
+        # Palabras clave para Mektia (servicios digitales)
+        palabras_clave = [
+            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
+            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
+            'necesito', 'requiero', 'me interesa', 'información', 'solicitar'
+        ]
+        
+        palabras_confirmacion = [
+            'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
+            'perfecto', 'exacto', 'así es', 'está bien', 'de acuerdo'
+        ]
+    
+    # Verificar si es una respuesta de confirmación corta
+    es_respuesta_corta = (
+        any(palabra in mensaje_lower for palabra in palabras_confirmacion) and 
+        len(mensaje_lower.split()) <= 3
+    )
+    
+    # Verificar si contiene palabras clave principales
+    contiene_palabras_clave = any(
+        palabra in mensaje_lower for palabra in palabras_clave
+    )
+    
+    # Detectar patrones específicos de solicitud
+    patrones_solicitud = [
+        'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
+        'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
     ]
     
-    # Palabras de confirmación
-    palabras_confirmacion = [
-        'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
-        'perfecto', 'exacto', 'así es', 'está bien'
-    ]
+    contiene_patron = any(
+        patron in mensaje_lower for patron in patrones_solicitud
+    )
     
-    # Verificar si alguna palabra clave está en el mensaje
-    for palabra in palabras_clave_comida + palabras_confirmacion:
-        if palabra in mensaje_lower:
-            app.logger.info(f"✅ Keyword detectado: '{palabra}' en mensaje")
-            return True
+    # Es una solicitud si contiene palabras clave O patrones específicos O es respuesta corta de confirmación
+    es_solicitud = contiene_palabras_clave or contiene_patron or es_respuesta_corta
     
-    # Detectar respuestas a preguntas de pedido
-    if any(palabra in mensaje_lower for palabra in ['sí', 'si', 'no']) and len(mensaje_lower.split()) < 10:
-        app.logger.info(f"✅ Respuesta corta detectada (probable confirmación)")
-        return True
+    if es_solicitud:
+        tipo = "pedido" if es_porfirianna else "cita"
+        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
     
-    return False
-
+    return es_solicitud
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -2622,42 +2479,27 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
        
+# REEMPLAZA la función obtener_configuracion_por_host con esta versión mejorada
 def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host de la solicitud"""
+    """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
-        from flask import has_request_context
-        config = None
+        host = request.headers.get('Host', '').lower()
+        referer = request.headers.get('Referer', '').lower()
         
-        if has_request_context():
-            host = request.headers.get('Host', '').lower()
-            app.logger.info(f"🌐 Host detectado: {host}")
-            
-            # DETECCIÓN MEJORADA - verificar subdominios exactos
-            if 'porfirianna' in host:
-                app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
-                config = NUMEROS_CONFIG['524812372326']
-            elif 'mektia' in host:
-                app.logger.info("✅ Configuración detectada: Mektia (por host)")
-                config = NUMEROS_CONFIG['524495486142']
-            
-            # Verificar también el referer por si acaso
-            if config is None:  # ✅ CORREGIDO - verificar explícitamente None
-                referer = request.headers.get('Referer', '')
-                if 'porfirianna' in referer:
-                    app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
-                    config = NUMEROS_CONFIG['524812372326']
+        app.logger.info(f"🔍 Analizando host: '{host}', referer: '{referer}'")
         
-        # Si no se detectó configuración o está fuera de contexto
-        if config is None:
-            app.logger.info("🔧 Usando configuración por defecto: Mektia")
-            config = NUMEROS_CONFIG['524495486142']
-            
-        return config
+        # Detección más precisa por subdominio
+        if 'porfirianna' in host or 'porfirianna' in referer:
+            app.logger.info("✅ Configuración detectada: La Porfirianna")
+            return NUMEROS_CONFIG['524812372326']
+        else:
+            app.logger.info("✅ Configuración detectada: Mektia (por defecto)")
+            return NUMEROS_CONFIG['524495486142']
             
     except Exception as e:
-        app.logger.error(f"Error obteniendo configuración: {e}")
+        app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
-             
+                
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
