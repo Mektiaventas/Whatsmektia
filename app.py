@@ -995,16 +995,16 @@ def obtener_precio(servicio_nombre: str, config):
 # ——— Memoria de conversación ———
 # REEMPLAZA la función obtener_historial con esta versión mejorada
 def obtener_historial(numero, limite=5, config=None):
-    """Función mejorada para obtener historial de conversaciones"""
+    """Función compatible con la estructura actual de la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        conn = obtener_conexion_db(config)
+        conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
         cursor.execute("""
-            SELECT mensaje_usuario, respuesta_ia, timestamp 
+            SELECT mensaje, respuesta, timestamp 
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp DESC 
@@ -1024,7 +1024,7 @@ def obtener_historial(numero, limite=5, config=None):
     except Exception as e:
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
-
+    
 # ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -1446,82 +1446,181 @@ def procesar_fecha_relativa(fecha_str):
     
     return None
 
-def procesar_mensaje(texto, image_base64=None, filename=None):
-    """Procesa el mensaje con la API de OpenAI, con soporte para imágenes"""
+def extraer_info_intervencion(mensaje, numero, historial, config=None):
+    """Extrae información relevante para intervención humana"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     try:
+        # Construir contexto del historial
+        contexto_historial = "\n".join([
+            f"Usuario: {msg['mensaje']}\nAsistente: {msg['respuesta']}" 
+            for msg in historial if msg['mensaje'] and msg['respuesta']
+        ])
+        
+        prompt = f"""
+        El usuario ha solicitado hablar con un humano. Analiza el mensaje y el historial para extraer información clave.
+        
+        MENSAJE ACTUAL: "{mensaje}"
+        
+        HISTORIAL RECIENTE:
+        {contexto_historial}
+        
+        Extrae esta información:
+        1. ¿Cuál es el problema o necesidad principal?
+        2. ¿Qué ha intentado el usuario hasta ahora?
+        3. ¿Hay urgencia o frustración evidente?
+        4. ¿Qué información sería útil para un agente humano?
+        
+        Devuelve un JSON con esta estructura:
+        {{
+            "problema_principal": "string",
+            "intentos_previos": "string",
+            "urgencia": "alta/media/baja",
+            "informacion_util": "string",
+            "resumen": "string"
+        }}
+        """
+        
         headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
         }
         
-        # Preparar el payload según si hay imagen o no
-        if image_base64:
-            app.logger.info("👁️ Procesando mensaje con imagen...")
-            
-            payload = {
-                "model": "gpt-4-vision-preview",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": texto
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{image_base64}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "max_tokens": 1000
-            }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            return json.loads(json_match.group())
         else:
-            app.logger.info("💬 Procesando mensaje de texto...")
-            
-            payload = {
-                "model": "gpt-3.5-turbo",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "Eres un asistente útil que responde preguntas de manera clara y concisa."
-                    },
-                    {
-                        "role": "user",
-                        "content": texto
-                    }
-                ],
-                "max_tokens": 500,
-                "temperature": 0.7
+            # Fallback si no puede extraer JSON
+            return {
+                "problema_principal": mensaje,
+                "intentos_previos": "No detectados",
+                "urgencia": "media",
+                "informacion_util": f"Usuario {numero} solicita intervención humana",
+                "resumen": f"Usuario solicita humano después de mensaje: {mensaje}"
             }
-        
-        # Realizar la solicitud
-        response = requests.post(
-            "https://api.openai.com/v1/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        if response.status_code != 200:
-            app.logger.error(f"🔴 Error API OpenAI: {response.status_code} - {response.text}")
-            return "Lo siento, hubo un error al procesar tu solicitud."
-        
-        result = response.json()
-        respuesta = result['choices'][0]['message']['content']
-        
-        app.logger.info(f"✅ Respuesta generada: {respuesta[:100]}...")
-        return respuesta
-        
-    except requests.exceptions.Timeout:
-        app.logger.error("🔴 Timeout al conectar con OpenAI API")
-        return "Lo siento, el servicio está tardando más de lo esperado. Por favor, intenta de nuevo."
+            
     except Exception as e:
-        app.logger.error(f"🔴 Error en procesar_mensaje: {str(e)}")
-        return "Lo siento, hubo un error al procesar tu mensaje."  
+        app.logger.error(f"Error extrayendo info de intervención: {e}")
+        return {
+            "problema_principal": mensaje,
+            "intentos_previos": "Error en análisis",
+            "urgencia": "media",
+            "informacion_util": f"Usuario {numero} necesita ayuda humana",
+            "resumen": f"Solicitud de intervención humana: {mensaje}"
+        }
+
+def enviar_alerta_intervencion_humana(info_intervencion, config=None):
+    """Envía alerta de intervención humana al administrador"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        mensaje = f"""🚨 *SOLICITUD DE INTERVENCIÓN HUMANA*
+
+📞 *Cliente:* {info_intervencion.get('telefono', 'Número no disponible')}
+⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+🚨 *Urgencia:* {info_intervencion.get('urgencia', 'media').upper()}
+
+📋 *Problema principal:*
+{info_intervencion.get('problema_principal', 'No especificado')}
+
+🔍 *Intentos previos:*
+{info_intervencion.get('intentos_previos', 'No detectados')}
+
+💡 *Información útil:*
+{info_intervencion.get('informacion_util', 'Sin información adicional')}
+
+📝 *Resumen:*
+{info_intervencion.get('resumen', 'Solicitud de intervención humana')}
+
+⚠️ *Acción requerida:* Contactar al cliente urgentemente.
+"""
+        
+        # Enviar a ambos números de administración
+        enviar_mensaje(ALERT_NUMBER, mensaje, config)
+        enviar_mensaje('5214493432744', mensaje, config)
+        
+        app.logger.info(f"✅ Alerta de intervención humana enviada a administradores")
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando alerta de intervención: {e}")
+
+# REEMPLAZA la llamada a procesar_mensaje en el webhook con:
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config):
+    """Procesa mensajes normales (no citas/intervenciones)"""
+    try:
+        # IA normal
+        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
+        respuesta = ""
+        
+        if IA_ESTADOS[numero]['activa']:
+            # 🆕 DETECTAR PREFERENCIA DE VOZ
+            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
+                IA_ESTADOS[numero]['prefiere_voz'] = True
+                app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
+            
+            responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
+            
+            # Obtener respuesta de IA
+            respuesta = responder_con_ia(texto, numero, es_imagen, None, es_audio, None, config)
+            
+            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+            if responder_con_voz and not es_imagen:
+                # Intentar enviar respuesta de voz
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+                
+                if audio_url_local:
+                    # URL pública del audio (ajusta según tu configuración)
+                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+                    
+                    if enviar_mensaje_voz(numero, audio_url_publica, config):
+                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, config=config)
+                    else:
+                        # Fallback a texto
+                        enviar_mensaje(numero, respuesta, config)
+                        guardar_conversacion(numero, texto, respuesta, config=config)
+                else:
+                    # Fallback a texto
+                    enviar_mensaje(numero, respuesta, config)
+                    guardar_conversacion(numero, texto, respuesta, config=config)
+            else:
+                # Respuesta normal de texto
+                enviar_mensaje(numero, respuesta, config)
+                guardar_conversacion(numero, texto, respuesta, config=config)
+            
+            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+            if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
+                app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+                resumen = resumen_rafa(numero, config)
+                enviar_alerta_humana(numero, texto, resumen, config)
+        
+        # KANBAN AUTOMÁTICO
+        meta = obtener_chat_meta(numero, config)
+        if not meta:
+            inicializar_chat_meta(numero, config)
+        
+        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
+        actualizar_columna_chat(numero, nueva_columna, config)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -1690,33 +1789,32 @@ def enviar_mensaje(numero, texto, config=None):
         return False
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
-def guardar_conversacion(numero, mensaje_usuario, respuesta_ia, config=None):
-    """Función mejorada para guardar conversaciones en la base de datos correcta"""
+def guardar_conversacion(numero, mensaje, respuesta, config=None):
+    """Función compatible con la estructura actual de la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Obtener conexión a la base de datos correcta
-        conn = obtener_conexion_db(config)
+        conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # Insertar la conversación
+        # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje_usuario, respuesta_ia, timestamp)
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
             VALUES (%s, %s, %s, NOW())
-        """, (numero, mensaje_usuario, respuesta_ia))
+        """, (numero, mensaje, respuesta))
         
         conn.commit()
         cursor.close()
         conn.close()
         
-        app.logger.info(f"💾 Conversación guardada para {numero} en DB: {config.get('db_name', 'default')}")
+        app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
         
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
-       
+      
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
@@ -2233,17 +2331,24 @@ def webhook():
             app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
             return 'OK', 200
             
+        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
+        message_id = msg.get('id')
+        if not message_id:
+            # Si no hay ID, crear uno basado en timestamp y contenido
+            timestamp = msg.get('timestamp', '')
+            message_id = f"{numero}_{timestamp}_{texto[:50]}"
+            
         # Crear un hash único del mensaje para evitar duplicados
-        #message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
-        
-        # Verificar si ya procesamos este mensaje
-        #if message_hash in processed_messages:
-        #    app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
-        #    return 'OK', 200
+        message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
+
+        # Verificar si ya procesamos este mensaje (solo si no es un audio/imagen para evitar falsos positivos)
+        if not es_audio and not es_imagen and message_hash in processed_messages:
+            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
+            return 'OK', 200
             
         # Agregar a mensajes procesados (con timestamp para limpieza posterior)
-        #processed_messages[message_hash] = time.time()
-        
+        processed_messages[message_hash] = time.time()
+
         # Limpiar mensajes antiguos (más de 1 hora)
         current_time = time.time()
         for msg_hash, timestamp in list(processed_messages.items()):
@@ -2355,7 +2460,7 @@ def webhook():
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje(texto, es_imagen, config)
+        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config)
         
         return 'OK', 200
         
