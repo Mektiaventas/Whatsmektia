@@ -83,12 +83,14 @@ servicios_clave = [
         ]    
 
 # Configuración por defecto (para backward compatibility)
-WHATSAPP_TOKEN = os.getenv("MEKTIA_WHATSAPP_TOKEN")  # Para funciones que aún no están adaptadas
-DB_HOST = os.getenv("MEKTIA_DB_HOST")
-DB_USER = os.getenv("MEKTIA_DB_USER")
-DB_PASSWORD = os.getenv("MEKTIA_DB_PASSWORD")
-DB_NAME = os.getenv("MEKTIA_DB_NAME")
-MI_NUMERO_BOT = os.getenv("MEKTIA_PHONE_NUMBER_ID")
+# Por esto (valores explícitos en lugar de llamar a la función):
+DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
+WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
+DB_HOST = DEFAULT_CONFIG['db_host']
+DB_USER = DEFAULT_CONFIG['db_user']
+DB_PASSWORD = DEFAULT_CONFIG['db_password']
+DB_NAME = DEFAULT_CONFIG['db_name']
+MI_NUMERO_BOT = DEFAULT_CONFIG['phone_number_id']
 PHONE_NUMBER_ID = MI_NUMERO_BOT
 # Agrega esto después de las otras variables de configuración
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -106,7 +108,12 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 def get_db_connection(config=None):
     if config is None:
         try:
-            config = obtener_configuracion_por_host()
+            # Solo intentar obtener configuración por host si hay contexto de solicitud
+            from flask import has_request_context
+            if has_request_context():
+                config = obtener_configuracion_por_host()
+            else:
+                config = NUMEROS_CONFIG['524495486142']  # Default
         except Exception as e:
             app.logger.error(f"Error obteniendo configuración: {e}")
             # Fallback a configuración por defecto
@@ -2611,16 +2618,22 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
        
-# REEMPLAZA la función obtener_configuracion_por_host con esta versión mejorada
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
+        # Verificar si hay un contexto de solicitud activo
+        from flask import has_request_context
+        if not has_request_context():
+            # Si no hay solicitud activa, usar configuración por defecto
+            app.logger.info("ℹ️  Sin contexto de solicitud, usando configuración por defecto: Mektia")
+            return NUMEROS_CONFIG['524495486142']
+        
         host = request.headers.get('Host', '').lower()
         referer = request.headers.get('Referer', '').lower()
         
         app.logger.info(f"🔍 Analizando host: '{host}', referer: '{referer}'")
         
-        # Detección más precisa por subdominio - CORREGIDO
+        # Detección más precisa por subdominio
         if 'porfirianna' in host or 'porfirianna' in referer or 'laporfirianna' in host or 'laporfirianna' in referer:
             app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
@@ -2640,7 +2653,7 @@ def obtener_configuracion_por_host():
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
-                   
+                      
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -3272,7 +3285,7 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
     args = parser.parse_args()
     
-    # Crear tablas necesarias
-    crear_tabla_citas(config=None)
+    # Crear tablas necesarias - usar configuración por defecto
+    crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
     
-    app.run(host='0.0.0.0', port=args.port, debug=True)  # ← Cambia a True
+    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
