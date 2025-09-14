@@ -2745,7 +2745,6 @@ def ver_chats():
     )
 
 @app.route('/chats/<numero>')
-@app.route('/chats/<numero>')
 def ver_chat(numero):
     config = obtener_configuracion_por_host()
     
