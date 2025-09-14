@@ -2621,39 +2621,68 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
-        # Verificar si hay un contexto de solicitud activo
         from flask import has_request_context
         if not has_request_context():
-            # Si no hay solicitud activa, usar configuración por defecto
-            app.logger.info("ℹ️  Sin contexto de solicitud, usando configuración por defecto: Mektia")
-            return NUMEROS_CONFIG['524495486142']
+            return NUMEROS_CONFIG['524495486142']  # Default
         
         host = request.headers.get('Host', '').lower()
         referer = request.headers.get('Referer', '').lower()
+        url = request.url.lower()
         
-        app.logger.info(f"🔍 Analizando host: '{host}', referer: '{referer}'")
+        app.logger.info(f"🔍 Config detection - Host: '{host}', Referer: '{referer}', URL: '{url}'")
         
-        # Detección más precisa por subdominio
-        if 'porfirianna' in host or 'porfirianna' in referer or 'laporfirianna' in host or 'laporfirianna' in referer:
-            app.logger.info("✅ Configuración detectada: La Porfirianna")
+        # Detección PRIORITARIA por subdominio explícito
+        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
+            app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
             return NUMEROS_CONFIG['524812372326']
-        elif 'mektia' in host or 'mektia' in referer:
-            app.logger.info("✅ Configuración detectada: Mektia")
-            return NUMEROS_CONFIG['524495486142']
-        else:
-            # Por defecto basado en la URL actual si no se detecta
-            current_url = request.url.lower()
-            if 'porfirianna' in current_url:
-                app.logger.info("✅ Configuración detectada por URL: La Porfirianna")
-                return NUMEROS_CONFIG['524812372326']
-            else:
-                app.logger.info("✅ Configuración por defecto: Mektia")
-                return NUMEROS_CONFIG['524495486142']
+        
+        if any(dominio in referer for dominio in ['laporfirianna', 'porfirianna']):
+            app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
+            return NUMEROS_CONFIG['524812372326']
+        
+        if any(dominio in url for dominio in ['laporfirianna', 'porfirianna']):
+            app.logger.info("✅ Configuración detectada: La Porfirianna (por URL)")
+            return NUMEROS_CONFIG['524812372326']
+        
+        # Default a Mektia
+        app.logger.info("✅ Configuración por defecto: Mektia")
+        return NUMEROS_CONFIG['524495486142']
             
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
-                      
+
+@app.route('/diagnostico')
+def diagnostico():
+    """Endpoint completo de diagnóstico"""
+    try:
+        config = obtener_configuracion_por_host()
+        
+        info = {
+            'host': request.headers.get('Host'),
+            'referer': request.headers.get('Referer'),
+            'url': request.url,
+            'config_detectada': config.get('dominio'),
+            'config_db': config.get('db_name'),
+            'timestamp': datetime.now().isoformat()
+        }
+        
+        # Intentar conexión a BD
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            cursor.execute("SELECT 1")
+            info['bd_conexion'] = 'success'
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            info['bd_conexion'] = f'error: {str(e)}'
+        
+        return jsonify(info)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)})    
+
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -2746,53 +2775,92 @@ def ver_chats():
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
-    config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # Consulta para los datos del chat (información del contacto)
-    cursor.execute("""
-        SELECT DISTINCT
-            conv.numero, 
-            cont.imagen_url, 
-            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-            cont.alias,
-            cont.nombre
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-        WHERE conv.numero = %s
-        LIMIT 1;
-    """, (numero,))
-    chats = cursor.fetchall()
+    try:
+        config = obtener_configuracion_por_host()
+        app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Consulta para los datos del chat (información del contacto)
+        cursor.execute("""
+            SELECT DISTINCT
+                conv.numero, 
+                cont.imagen_url, 
+                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+                cont.alias,
+                cont.nombre
+            FROM conversaciones conv
+            LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+            WHERE conv.numero = %s
+            LIMIT 1;
+        """, (numero,))
+        chats = cursor.fetchall()
 
-    # Consulta actualizada para mensajes, incluyendo imagen_url y es_imagen
-    cursor.execute("""
-        SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
-        FROM conversaciones 
-        WHERE numero = %s 
-        ORDER BY timestamp ASC;
-    """, (numero,))
-    msgs = cursor.fetchall()
+        # Consulta actualizada para mensajes, incluyendo imagen_url y es_imagen
+        cursor.execute("""
+            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
+            FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp ASC;
+        """, (numero,))
+        msgs = cursor.fetchall()
 
-    # Convertir timestamps a hora de México
-    for msg in msgs:
-        if msg.get('timestamp'):
-            if msg['timestamp'].tzinfo is not None:
-                msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-            else:
-                msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
+        # Convertir timestamps a hora de México
+        for msg in msgs:
+            if msg.get('timestamp'):
+                if msg['timestamp'].tzinfo is not None:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                else:
+                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
 
-    cursor.close()
-    conn.close()
-    
-    return render_template('chats.html',
-        chats=chats, 
-        mensajes=msgs,
-        selected=numero, 
-        IA_ESTADOS=IA_ESTADOS,
-        tenant_config=config
-    )
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Chat cargado: {len(msgs)} mensajes para {numero}")
+        
+        return render_template('chats.html',
+            chats=chats, 
+            mensajes=msgs,
+            selected=numero, 
+            IA_ESTADOS=IA_ESTADOS,
+            tenant_config=config
+        )
+        
+    except Exception as e:
+        app.logger.error(f"🔴 ERROR en ver_chat para {numero}: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return "Error interno del servidor", 500
+        
+@app.route('/debug-db')
+def debug_db():
+    """Endpoint para verificar la conexión a la base de datos"""
+    try:
+        config = obtener_configuracion_por_host()
+        app.logger.info(f"🔍 Verificando conexión a: {config.get('db_name')}")
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SELECT DATABASE() as db, USER() as user")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'status': 'success',
+            'database': result[0] if result else 'unknown',
+            'user': result[1] if result else 'unknown',
+            'config_db': config.get('db_name'),
+            'host': request.headers.get('Host')
+        })
+    except Exception as e:
+        return jsonify({
+            'status': 'error',
+            'message': str(e),
+            'config_db': config.get('db_name') if 'config' in locals() else 'unknown',
+            'host': request.headers.get('Host')
+        })
+
 @app.before_request
 def log_configuracion():
     if request.endpoint and request.endpoint != 'static':
@@ -3057,6 +3125,42 @@ def configuracion_precio_borrar(pid):
         return redirect(url_for('configuracion_precios'))
 
     # ——— Kanban ———
+
+def verificar_tablas_bd(config):
+    """Verifica que todas las tablas necesarias existan en la base de datos"""
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        tablas_requeridas = ['conversaciones', 'contactos', 'chat_meta']
+        tablas_existentes = []
+        
+        cursor.execute("SHOW TABLES")
+        for (table_name,) in cursor.fetchall():
+            tablas_existentes.append(table_name)
+        
+        cursor.close()
+        conn.close()
+        
+        faltantes = [tabla for tabla in tablas_requeridas if tabla not in tablas_existentes]
+        
+        if faltantes:
+            app.logger.error(f"❌ Tablas faltantes en {config['db_name']}: {faltantes}")
+            return False
+        else:
+            app.logger.info(f"✅ Todas las tablas existen en {config['db_name']}")
+            return True
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error verificando tablas: {e}")
+        return False
+
+# Llama esta función al inicio para ambas bases de datos
+@app.before_first_request
+def verificar_todas_tablas():
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
 
 @app.route('/kanban')
 def ver_kanban(config=None):
