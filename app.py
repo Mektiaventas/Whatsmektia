@@ -2342,17 +2342,18 @@ def webhook():
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
+       
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
             if str(config_data['phone_number_id']) == str(phone_number_id):
                 config = config_data
-                app.logger.info(f"✅ Configuración encontrada: {config['dominio']}")
+                app.logger.info(f"✅ Configuración encontrada por phone_number_id: {config['dominio']}")
                 break
                 
         if config is None:
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()
+            config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
         
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
@@ -2619,18 +2620,27 @@ def obtener_configuracion_por_host():
         
         app.logger.info(f"🔍 Analizando host: '{host}', referer: '{referer}'")
         
-        # Detección más precisa por subdominio
-        if 'porfirianna' in host or 'porfirianna' in referer:
+        # Detección más precisa por subdominio - CORREGIDO
+        if 'porfirianna' in host or 'porfirianna' in referer or 'laporfirianna' in host or 'laporfirianna' in referer:
             app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
-        else:
-            app.logger.info("✅ Configuración detectada: Mektia (por defecto)")
+        elif 'mektia' in host or 'mektia' in referer:
+            app.logger.info("✅ Configuración detectada: Mektia")
             return NUMEROS_CONFIG['524495486142']
+        else:
+            # Por defecto basado en la URL actual si no se detecta
+            current_url = request.url.lower()
+            if 'porfirianna' in current_url:
+                app.logger.info("✅ Configuración detectada por URL: La Porfirianna")
+                return NUMEROS_CONFIG['524812372326']
+            else:
+                app.logger.info("✅ Configuración por defecto: Mektia")
+                return NUMEROS_CONFIG['524495486142']
             
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
-                
+                   
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
