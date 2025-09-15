@@ -8,6 +8,7 @@ import time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.oauth2 import service_account
 import pytz
 import os
 import logging
@@ -315,7 +316,7 @@ def autenticar_google_calendar(config=None):
     except Exception as e:
         app.logger.error(f'Error inesperado en autenticación Google: {e}')
         return None
-    
+   
 def crear_evento_calendar(service, cita_info, config=None):
     """Crea un evento en Google Calendar para la cita"""
     if config is None:
@@ -325,20 +326,26 @@ def crear_evento_calendar(service, cita_info, config=None):
         # Determinar el tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # Formatear fecha y hora
-        start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
-        end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
-                                      "%Y-%m-%d %H:%M") + timedelta(hours=1)
-        end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+        # Formatear fecha y hora (solo para Mektia)
+        if not es_porfirianna:
+            start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
+            end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
+                                          "%Y-%m-%d %H:%M") + timedelta(hours=1)
+            end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+        else:
+            # Para La Porfirianna, usar la hora actual + 1 hora
+            now = datetime.now()
+            start_time = now.isoformat()
+            end_time = (now + timedelta(hours=1)).isoformat()
         
         # Crear el evento
         event = {
             'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']}",
             'description': f"""
-Servicio: {cita_info.get('servicio_solicitado', 'No especificado')}
+{'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
 Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
 Teléfono: {cita_info.get('telefono', 'No especificado')}
-Notas: Cita agendada automáticamente desde WhatsApp
+Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
             """.strip(),
             'start': {
                 'dateTime': start_time,
@@ -366,7 +373,7 @@ Notas: Cita agendada automáticamente desde WhatsApp
     except HttpError as error:
         app.logger.error(f'Error al crear evento: {error}')
         return None
-
+    
 def validar_datos_cita_completos(info_cita, config=None):
     """
     Valida que la información de la cita/pedido tenga todos los datos necesarios

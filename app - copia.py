@@ -1357,15 +1357,7 @@ def obtener_estado_conversacion(numero, config=None):
     return estado
 
 def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente si es posible.
-    
-    Args:
-        image_id (str): ID de la imagen de WhatsApp.
-        config (dict, optional): Configuración del tenant. Si None, se obtiene por host.
-    
-    Returns:
-        tuple: (base64_string, public_url) o (None, None) si falla.
-    """
+    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1397,51 +1389,27 @@ def obtener_imagen_whatsapp(image_id, config=None):
             app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 3. Validar tipo y tamaño de la imagen
-        content_type = image_response.headers.get('content-type', mime_type)
-        if 'image' not in content_type:
-            app.logger.error(f"🔴 El archivo no es una imagen: {content_type}")
-            return None, None
+        # 3. Guardar la imagen en directorio estático para mostrarla en web
+        static_images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images', 'whatsapp')
+        os.makedirs(static_images_dir, exist_ok=True)
         
-        image_size = len(image_response.content)
-        if image_size > 5 * 1024 * 1024:  # Límite de 5MB para OpenAI
-            app.logger.error(f"🔴 Imagen demasiado grande: {image_size} bytes")
-            return None, None
+        # Nombre seguro para el archivo
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
+        filepath = os.path.join(static_images_dir, filename)
         
-        # 4. Convertir a base64 para OpenAI
+        with open(filepath, 'wb') as f:
+            f.write(image_response.content)
+        
+        # 4. Convertir a base64 para OpenAI (si es necesario)
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        base64_string = f"data:{content_type};base64,{image_base64}"
+        base64_string = f"data:{mime_type};base64,{image_base64}"
         
-        # 5. Guardar la imagen localmente (opcional, con fallback)
-        try:
-            # Asegurar que el directorio exista y tenga permisos
-            UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-            os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-            
-            # Usar nombre seguro para evitar path traversal
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
-            filepath = os.path.join(UPLOAD_FOLDER, filename)
-            
-            # Verificar permisos de escritura
-            if not os.access(UPLOAD_FOLDER, os.W_OK):
-                app.logger.warning(f"⚠️ Sin permisos de escritura en {UPLOAD_FOLDER}, usando URL directa")
-                public_url = download_url  # Fallback a URL de WhatsApp
-            else:
-                with open(filepath, "wb") as f:
-                    f.write(image_response.content)
-                
-                # 6. Crear URL pública
-                base_url = config.get('dominio', 'https://mektia.com')
-                if not base_url.startswith('http'):
-                    base_url = f'https://{base_url}'
-                public_url = f"{base_url}/uploads/{filename}"
-                app.logger.info(f"✅ Imagen guardada: {filepath}")
-                app.logger.info(f"🌐 URL pública: {public_url}")
+        # 5. URL pública para mostrar en web
+        public_url = f"/static/images/whatsapp/{filename}"
         
-        except (OSError, PermissionError) as e:
-            app.logger.warning(f"⚠️ No se pudo guardar la imagen localmente: {e}")
-            public_url = download_url  # Fallback a URL de WhatsApp
+        app.logger.info(f"✅ Imagen guardada: {filepath}")
+        app.logger.info(f"🌐 URL web: {public_url}")
         
         return base64_string, public_url
         
@@ -1449,7 +1417,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-      
+         
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas
@@ -1591,7 +1559,7 @@ def enviar_alerta_intervencion_humana(info_intervencion, config=None):
         app.logger.error(f"Error enviando alerta de intervención: {e}")
 
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None):
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
@@ -1608,6 +1576,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
             if responder_con_voz and not es_imagen:
                 # Intentar enviar respuesta de voz
@@ -1687,23 +1656,31 @@ def obtener_audio_whatsapp(audio_id, config=None):
       
 def transcribir_audio_con_openai(audio_path):
     try:
-        import openai
-        openai.api_key = OPENAI_API_KEY
         app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
+        
+        # Usar el cliente OpenAI correctamente (nueva versión)
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
         with open(audio_path, 'rb') as audio_file:
-            transcription = openai.Audio.transcriptions.create(
+            transcription = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 language="es"
             )
-            app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
-            return transcription.text
+            
+        app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
+        return transcription.text
+        
     except Exception as e:
         app.logger.error(f"🔴 Error en transcripción: {str(e)}")
         if hasattr(e, 'response'):
-            app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
+            try:
+                error_response = e.response.json()
+                app.logger.error(f"🔴 Respuesta de OpenAI: {error_response}")
+            except:
+                app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
         return None
-
+    
 # AGREGAR esta función para gestionar conexiones a BD
 def obtener_conexion_db(config):
     """Obtiene conexión a la base de datos correcta según la configuración"""
@@ -1818,7 +1795,7 @@ def enviar_mensaje(numero, texto, config=None):
         return False
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
-def guardar_conversacion(numero, mensaje, respuesta, config=None):
+def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1829,9 +1806,9 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None):
         
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-            VALUES (%s, %s, %s, NOW())
-        """, (numero, mensaje, respuesta))
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, %s, NOW(), %s, %s)
+        """, (numero, mensaje, respuesta, imagen_url, es_imagen))
         
         conn.commit()
         cursor.close()
@@ -2400,11 +2377,14 @@ def webhook():
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
             es_imagen = True
-            image_id = msg['image']['id']  # ✅ DEFINIR image_id aquí
+            image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
             if not texto:
                 texto = "El usuario envió una imagen"
+            
+            # Guardar solo el mensaje del usuario (sin respuesta aún)
+            guardar_conversacion(numero, texto, None, config, public_url, True)
         elif 'audio' in msg:
             es_audio = True
             audio_id = msg['audio']['id']  # ✅ Para audio también
@@ -2503,7 +2483,7 @@ def webhook():
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion)
+        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
         return 'OK', 200
         
     except Exception as e:
@@ -2804,7 +2784,7 @@ def ver_chat(numero):
         """, (numero,))
         chats = cursor.fetchall()
 
-        # Consulta para mensajes
+        # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
             SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
             FROM conversaciones 
@@ -2826,7 +2806,6 @@ def ver_chat(numero):
         
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
         
-        # ✅ Asegúrate de que este return esté DENTRO del try
         return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
@@ -2838,11 +2817,10 @@ def ver_chat(numero):
     except Exception as e:
         app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat: {str(e)}")
         app.logger.error(traceback.format_exc())
-        # ✅ Asegúrate de que este return esté DENTRO del except
         return render_template('error.html', 
                              error_message="Error al cargar el chat", 
                              error_details=str(e)), 500
-               
+                  
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
