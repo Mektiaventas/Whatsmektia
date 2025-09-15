@@ -2820,7 +2820,7 @@ def ver_chat(numero):
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
         
         # ✅ Asegúrate de que este return esté DENTRO del try
-        return render_template('chats.html',
+        return render_template('chat_view.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
