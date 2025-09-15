@@ -2377,12 +2377,14 @@ def webhook():
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
             es_imagen = True
-            image_id = msg['image']['id']  # ✅ DEFINIR image_id aquí
+            image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
             if not texto:
                 texto = "El usuario envió una imagen"
-            guardar_conversacion(numero, texto, respuesta, config, public_url, True)
+            
+            # Guardar solo el mensaje del usuario (sin respuesta aún)
+            guardar_conversacion(numero, texto, None, config, public_url, True)
         elif 'audio' in msg:
             es_audio = True
             audio_id = msg['audio']['id']  # ✅ Para audio también
