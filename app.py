@@ -27,7 +27,6 @@ from werkzeug.utils import secure_filename
 from pydub import AudioSegment
 from PIL import Image
 from openai import OpenAI
-client = OpenAI(api_key="your-api-key")
 processed_messages = {}
 
 # Configurar Gemini
@@ -49,7 +48,7 @@ SECRET_KEY = os.getenv("SECRET_KEY", "cualquier-cosa")
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
-
+client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 # ——— Configuración Multi-Tenant ———
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
@@ -1608,8 +1607,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config):
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
             
             # Obtener respuesta de IA
-            respuesta = responder_con_ia(texto, numero, es_imagen, None, es_audio, None, config)
-            
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
             if responder_con_voz and not es_imagen:
                 # Intentar enviar respuesta de voz
@@ -2399,12 +2397,17 @@ def webhook():
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
             es_imagen = True
+            imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
             if not texto:
                 texto = "El usuario envió una imagen"
         elif 'audio' in msg:
             es_audio = True
-            texto = "El usuario envió un audio"
+            audio_id = msg['audio']['id']
+            # Faltaría llamar a obtener_audio_whatsapp() y transcribir_audio_con_openai()
+            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
+            transcripcion = transcribir_audio_con_openai(audio_path)
+            texto = transcripcion if transcripcion else "Audio no transcribible"
         else:
             # Para otros tipos de mensaje
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
