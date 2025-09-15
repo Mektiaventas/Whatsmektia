@@ -343,16 +343,32 @@ def autorizar_manual():
             return "❌ Error: No se encuentra client_secret.json"
         
         flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', SCOPES)
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri='https://www.mektia.com/completar-autorizacion'
+        )
         
         # Generar URL de autorización
-        auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+        auth_url, _ = flow.authorization_url(
+            prompt='consent', 
+            access_type='offline',
+            include_granted_scopes='true'
+        )
         
-        return redirect(auth_url)
+        return f'''
+        <h1>✅ Autorización Google Calendar</h1>
+        <p>Por favor visita esta URL para autorizar:</p>
+        <a href="{auth_url}" target="_blank">{auth_url}</a>
+        <p>Después de autorizar, Google te dará un código. Pégalo aquí:</p>
+        <form action="/procesar-codigo" method="post">
+            <input type="text" name="codigo" placeholder="Pega el código aquí" size="50">
+            <input type="submit" value="Enviar">
+        </form>
+        '''
         
     except Exception as e:
-        return f"❌ Error: {str(e)}"    
-
+        return f"❌ Error: {str(e)}"
+    
 def crear_evento_calendar(service, cita_info, config=None):
     """Crea un evento en Google Calendar para la cita"""
     if config is None:
@@ -1485,7 +1501,41 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-         
+
+@app.route('/procesar-codigo', methods=['POST'])
+def procesar_codigo():
+    """Procesa el código de autorización manualmente"""
+    try:
+        code = request.form.get('codigo')
+        if not code:
+            return "❌ Error: No se proporcionó código"
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri='https://www.mektia.com/completar-autorizacion'
+        )
+        
+        # Intercambiar código por token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        # Guardar token
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        
+        return '''
+        <h1>✅ ¡Autorización completada!</h1>
+        <p>Google Calendar está ahora configurado correctamente.</p>
+        <p>Puedes cerrar esta ventana y probar agendar una cita.</p>
+        <a href="/">Volver al inicio</a>
+        '''
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"  
+
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas
