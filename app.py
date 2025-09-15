@@ -2776,62 +2776,27 @@ def ver_chats():
 @app.route('/chats/<numero>')
 def ver_chat(numero):
     try:
+        app.logger.info(f"🔍 Iniciando ver_chat para {numero}")
         config = obtener_configuracion_por_host()
-        app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
+        app.logger.info(f"📊 Configuración: {config.get('db_name')}")
         
         conn = get_db_connection(config)
+        app.logger.info("✅ Conexión a BD exitosa")
+        
         cursor = conn.cursor(dictionary=True)
         
-        # Consulta para los datos del chat (información del contacto)
-        cursor.execute("""
-            SELECT DISTINCT
-                conv.numero, 
-                cont.imagen_url, 
-                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-                cont.alias,
-                cont.nombre
-            FROM conversaciones conv
-            LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-            WHERE conv.numero = %s
-            LIMIT 1;
-        """, (numero,))
-        chats = cursor.fetchall()
-
-        # Consulta actualizada para mensajes, incluyendo imagen_url y es_imagen
-        cursor.execute("""
-            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp ASC;
-        """, (numero,))
-        msgs = cursor.fetchall()
-
-        # Convertir timestamps a hora de México
-        for msg in msgs:
-            if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is not None:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-                else:
-                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
-
-        cursor.close()
-        conn.close()
+        # PRIMERO: probar consulta simple
+        cursor.execute("SELECT 1 as test")
+        test_result = cursor.fetchone()
+        app.logger.info(f"🧪 Test consulta: {test_result}")
         
-        app.logger.info(f"✅ Chat cargado: {len(msgs)} mensajes para {numero}")
-        
-        return render_template('chats.html',
-            chats=chats, 
-            mensajes=msgs,
-            selected=numero, 
-            IA_ESTADOS=IA_ESTADOS,
-            tenant_config=config
-        )
+        # Resto del código...
         
     except Exception as e:
-        app.logger.error(f"🔴 ERROR en ver_chat para {numero}: {str(e)}")
+        app.logger.error(f"🔥 ERROR en ver_chat: {str(e)}")
         app.logger.error(traceback.format_exc())
-        return "Error interno del servidor", 500
-        
+        return "Error interno", 500
+           
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
