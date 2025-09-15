@@ -2391,25 +2391,30 @@ def webhook():
             if current_time - timestamp > 3600:  # 1 hora
                 del processed_messages[msg_hash]
         
-
+        image_id = None
+        imagen_base64 = None
+        public_url = None
+        transcripcion = None
         
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
             es_imagen = True
+            image_id = msg['image']['id']  # ✅ DEFINIR image_id aquí
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
             if not texto:
                 texto = "El usuario envió una imagen"
         elif 'audio' in msg:
             es_audio = True
-            audio_id = msg['audio']['id']
-            # Faltaría llamar a obtener_audio_whatsapp() y transcribir_audio_con_openai()
+            audio_id = msg['audio']['id']  # ✅ Para audio también
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
-            transcripcion = transcribir_audio_con_openai(audio_path)
-            texto = transcripcion if transcripcion else "Audio no transcribible"
+            if audio_path:
+                transcripcion = transcribir_audio_con_openai(audio_path)
+                texto = transcripcion if transcripcion else "No se pudo transcribir el audio"
+            else:
+                texto = "Error al procesar el audio"
         else:
-            # Para otros tipos de mensaje
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
             
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
