@@ -1651,7 +1651,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
-        
+
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
@@ -1688,23 +1688,31 @@ def obtener_audio_whatsapp(audio_id, config=None):
       
 def transcribir_audio_con_openai(audio_path):
     try:
-        import openai
-        openai.api_key = OPENAI_API_KEY
         app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
+        
+        # Usar el cliente OpenAI correctamente (nueva versión)
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        
         with open(audio_path, 'rb') as audio_file:
-            transcription = openai.Audio.transcriptions.create(
+            transcription = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 language="es"
             )
-            app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
-            return transcription.text
+            
+        app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
+        return transcription.text
+        
     except Exception as e:
         app.logger.error(f"🔴 Error en transcripción: {str(e)}")
         if hasattr(e, 'response'):
-            app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
+            try:
+                error_response = e.response.json()
+                app.logger.error(f"🔴 Respuesta de OpenAI: {error_response}")
+            except:
+                app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
         return None
-
+    
 # AGREGAR esta función para gestionar conexiones a BD
 def obtener_conexion_db(config):
     """Obtiene conexión a la base de datos correcta según la configuración"""
