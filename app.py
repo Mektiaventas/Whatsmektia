@@ -447,6 +447,31 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
+@app.route('/completar-autorizacion')
+def completar_autorizacion():
+    """Endpoint para completar la autorización con el código"""
+    try:
+        code = request.args.get('code')
+        if not code:
+            return "❌ Error: No se proporcionó código"
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+        
+        # Intercambiar código por token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        # Guardar token
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        
+        return "✅ Autorización completada correctamente. Ya puedes usar Google Calendar."
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
