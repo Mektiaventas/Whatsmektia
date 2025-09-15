@@ -3121,7 +3121,11 @@ def verificar_tablas_bd(config):
         return False
 
 # Llama esta función al inicio para ambas bases de datos
-@app.before_first_request
+with app.app_context():
+    # Esta función se ejecutará cuando la aplicación se inicie
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
 def verificar_todas_tablas():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
