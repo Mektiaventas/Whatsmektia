@@ -1591,7 +1591,7 @@ def enviar_alerta_intervencion_humana(info_intervencion, config=None):
         app.logger.error(f"Error enviando alerta de intervención: {e}")
 
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None):
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
@@ -1608,6 +1608,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
             if responder_con_voz and not es_imagen:
                 # Intentar enviar respuesta de voz
@@ -1650,7 +1651,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
-
+        
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
@@ -2503,7 +2504,7 @@ def webhook():
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion)
+        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
         return 'OK', 200
         
     except Exception as e:
