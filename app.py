@@ -1591,7 +1591,7 @@ def enviar_alerta_intervencion_humana(info_intervencion, config=None):
         app.logger.error(f"Error enviando alerta de intervención: {e}")
 
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config):
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
@@ -2503,8 +2503,7 @@ def webhook():
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config)
-        
+        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion)
         return 'OK', 200
         
     except Exception as e:
