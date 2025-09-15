@@ -263,7 +263,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         return detectar_solicitud_cita_keywords(mensaje)
     
 def autenticar_google_calendar(config=None):
-    """Autentica y devuelve el servicio de Google Calendar"""
+    """Autentica con OAuth usando client_secret.json"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -271,72 +271,88 @@ def autenticar_google_calendar(config=None):
     creds = None
     
     try:
-        app.logger.info("🔐 Intentando autenticar con Google Calendar...")
+        app.logger.info("🔐 Intentando autenticar con OAuth...")
         
-        # 1. Primero intentar con variable de entorno
-        creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
-        if creds_json:
+        # 1. Verificar si ya tenemos token guardado
+        if os.path.exists('token.json'):
             try:
-                app.logger.info("📁 Intentando cargar credenciales desde variable de entorno...")
-                creds_info = json.loads(creds_json)
-                creds = service_account.Credentials.from_service_account_info(
-                    creds_info, scopes=SCOPES
-                )
-                app.logger.info("✅ Credenciales de Google cargadas desde variable de entorno")
-            except json.JSONDecodeError as e:
-                app.logger.error(f"❌ Error: GOOGLE_CREDENTIALS_JSON no es un JSON válido: {e}")
-            except Exception as e:
-                app.logger.error(f"❌ Error cargando credenciales desde variable: {e}")
-        
-        # 2. Intentar con archivo de service account
-        if not creds and os.path.exists('service-account-key.json'):
-            try:
-                app.logger.info("📁 Intentando cargar credenciales desde archivo...")
-                creds = service_account.Credentials.from_service_account_file(
-                    'service-account-key.json', scopes=SCOPES
-                )
-                app.logger.info("✅ Credenciales de Google cargadas desde archivo")
-            except Exception as e:
-                app.logger.error(f"❌ Error cargando credenciales desde archivo: {e}")
-        
-        # 3. Intentar con OAuth (para desarrollo)
-        if not creds and os.path.exists('token.json'):
-            try:
-                app.logger.info("📁 Intentando cargar token OAuth...")
                 creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-                app.logger.info("✅ Token OAuth cargado")
+                if creds and creds.valid:
+                    app.logger.info("✅ Token OAuth válido encontrado")
+                    service = build('calendar', 'v3', credentials=creds)
+                    return service
+                elif creds and creds.expired and creds.refresh_token:
+                    app.logger.info("🔄 Refrescando token expirado...")
+                    creds.refresh(Request())
+                    with open('token.json', 'w') as token:
+                        token.write(creds.to_json())
+                    service = build('calendar', 'v3', credentials=creds)
+                    return service
             except Exception as e:
-                app.logger.error(f"❌ Error cargando token OAuth: {e}")
+                app.logger.error(f"❌ Error con token existente: {e}")
         
-        # 4. Si no hay credenciales, mostrar error claro
-        if not creds:
-            app.logger.error("❌ No se encontraron credenciales válidas para Google Calendar")
-            app.logger.error("ℹ️ Opciones: 1) Variable GOOGLE_CREDENTIALS_JSON, 2) service-account-key.json, 3) token.json")
+        # 2. Si no hay token válido, hacer flujo OAuth
+        if not os.path.exists('client_secret.json'):
+            app.logger.error("❌ No se encuentra client_secret.json")
             return None
         
-        # Verificar si las credenciales necesitan refresh
-        if not creds.valid:
-            if creds.expired and creds.refresh_token:
-                app.logger.info("🔄 Refrescando credenciales expiradas...")
-                creds.refresh(Request())
-            else:
-                app.logger.error("❌ Credenciales inválidas y no se pueden refrescar")
-                return None
-        
-        # Construir el servicio
         try:
-            service = build('calendar', 'v3', credentials=creds)
-            app.logger.info("✅ Servicio de Google Calendar autenticado correctamente")
-            return service
-        except HttpError as error:
-            app.logger.error(f'❌ Error al construir el servicio de Calendar: {error}')
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'client_secret.json', SCOPES)
+            
+            # Para servidor, genera una URL para autorizar manualmente
+            auth_url, _ = flow.authorization_url(prompt='consent')
+            
+            app.logger.info(f"🌐 Por favor visita esta URL para autorizar: {auth_url}")
+            app.logger.info("📋 Después de autorizar, copia el código de autorización que te da Google")
+            
+            # En entorno de servidor, necesitamos manejar el código manualmente
+            code = input("Pega el código de autorización aquí: ") if app.debug else None
+            
+            if code:
+                flow.fetch_token(code=code)
+                creds = flow.credentials
+                
+                # Guardar las credenciales
+                with open('token.json', 'w') as token:
+                    token.write(creds.to_json())
+                
+                app.logger.info("✅ Autenticación OAuth exitosa")
+                service = build('calendar', 'v3', credentials=creds)
+                return service
+            else:
+                app.logger.error("❌ No se proporcionó código de autorización")
+                return None
+                
+        except Exception as e:
+            app.logger.error(f"❌ Error en autenticación OAuth: {e}")
             return None
             
     except Exception as e:
-        app.logger.error(f'❌ Error inesperado en autenticación Google: {e}')
+        app.logger.error(f'❌ Error inesperado: {e}')
         app.logger.error(traceback.format_exc())
         return None
-       
+
+@app.route('/autorizar-manual')
+def autorizar_manual():
+    """Endpoint para autorizar manualmente con Google"""
+    try:
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        if not os.path.exists('client_secret.json'):
+            return "❌ Error: No se encuentra client_secret.json"
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', SCOPES)
+        
+        # Generar URL de autorización
+        auth_url, _ = flow.authorization_url(prompt='consent', access_type='offline')
+        
+        return redirect(auth_url)
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"    
+
 def crear_evento_calendar(service, cita_info, config=None):
     """Crea un evento en Google Calendar para la cita"""
     if config is None:
