@@ -614,8 +614,8 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
 @app.route('/kanban/data') 
+@app.route('/kanban/data') 
 def kanban_data(config = None):
-    """Endpoint que devuelve los datos del Kanban en formato JSON"""
     config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
@@ -625,7 +625,7 @@ def kanban_data(config = None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
         columnas = cursor.fetchall()
 
-        # 2) Datos de los chats
+        # 2) Datos de los chats - MODIFICADO
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -634,7 +634,9 @@ def kanban_data(config = None):
                 (SELECT mensaje FROM conversaciones 
                  WHERE numero = cm.numero 
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
+                (SELECT imagen_url FROM contactos 
+                 WHERE numero_telefono = cm.numero 
+                 ORDER BY id DESC LIMIT 1) AS avatar,
                 MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
@@ -646,6 +648,10 @@ def kanban_data(config = None):
             ORDER BY ultima_fecha DESC;
         """)
         chats = cursor.fetchall()
+
+        # Agregar logging para depuración
+        for chat in chats:
+            app.logger.info(f"Chat {chat['numero']}: avatar = {chat['avatar']}")
 
         # Convertir timestamps a hora de México
         for chat in chats:
@@ -671,7 +677,7 @@ def kanban_data(config = None):
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
-
+    
 # ——— Configuración en MySQL ———
 def load_config(config=None):
     if config is None:
@@ -742,6 +748,56 @@ def crear_tabla_citas(config=None):
     conn.commit()
     cursor.close()
     conn.close()
+
+def guardar_imagen_perfil_desde_mensaje(numero, imagen_url, config=None):
+    """Guarda una imagen de perfil desde una URL de WhatsApp"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Descargar la imagen
+        response = requests.get(imagen_url, timeout=10)
+        if response.status_code != 200:
+            return None
+        
+        # Generar nombre seguro para el archivo
+        filename = secure_filename(f"perfil_{numero}_{int(time.time())}.jpg")
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Guardar archivo
+        with open(filepath, 'wb') as f:
+            f.write(response.content)
+        
+        # Actualizar base de datos
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Verificar si el contacto existe
+        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
+        if cursor.fetchone() is None:
+            # Crear contacto si no existe
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, imagen_url) 
+                VALUES (%s, %s)
+            """, (numero, f"/uploads/{filename}"))
+        else:
+            # Actualizar contacto existente
+            cursor.execute("""
+                UPDATE contactos 
+                SET imagen_url = %s 
+                WHERE numero_telefono = %s
+            """, (f"/uploads/{filename}", numero))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"Imagen de perfil guardada para {numero}: {filename}")
+        return f"/uploads/{filename}"
+        
+    except Exception as e:
+        app.logger.error(f"Error guardando imagen de perfil: {e}")
+        return None
 
 def guardar_cita(info_cita, config=None):
     """Guarda la cita en la base de datos y agenda en Google Calendar"""
@@ -2372,6 +2428,53 @@ def enviar_informacion_completa(numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
 
+@app.route('/actualizar-imagenes-perfil', methods=['POST'])
+def actualizar_imagenes_perfil():
+    """Actualiza las imágenes de perfil de todos los contactos"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Obtener todos los contactos sin imagen
+    cursor.execute("""
+        SELECT DISTINCT c.numero_telefono 
+        FROM contactos c
+        LEFT JOIN conversaciones co ON c.numero_telefono = co.numero
+        WHERE c.imagen_url IS NULL 
+        AND co.tipo_mensaje = 'imagen'
+        ORDER BY c.numero_telefono
+        LIMIT 50
+    """)
+    
+    contactos = cursor.fetchall()
+    actualizados = 0
+    
+    for contacto in contactos:
+        numero = contacto['numero_telefono']
+        
+        # Buscar la última imagen enviada por este contacto
+        cursor.execute("""
+            SELECT contenido_extra 
+            FROM conversaciones 
+            WHERE numero = %s AND tipo_mensaje = 'imagen'
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        """, (numero,))
+        
+        resultado = cursor.fetchone()
+        if resultado and resultado['contenido_extra']:
+            imagen_url = guardar_imagen_perfil_desde_mensaje(numero, resultado['contenido_extra'])
+            if imagen_url:
+                actualizados += 1
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'mensaje': f'Se actualizaron {actualizados} imágenes de perfil',
+        'total_procesados': len(contactos)
+    })
+
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -2498,6 +2601,7 @@ def webhook():
             image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
+            guardar_imagen_perfil_desde_mensaje(numero, mensaje['imagen']['url'])
             if not texto:
                 texto = "El usuario envió una imagen"
             
@@ -2938,7 +3042,46 @@ def ver_chat(numero):
         return render_template('error.html', 
                              error_message="Error al cargar el chat", 
                              error_details=str(e)), 500
-                  
+
+
+@app.route('/debug-imagenes')
+def debug_imagenes():
+    """Endpoint para depurar problemas con imágenes"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Obtener información de contactos con imágenes
+    cursor.execute("""
+        SELECT numero_telefono, nombre, alias, imagen_url 
+        FROM contactos 
+        WHERE imagen_url IS NOT NULL 
+        LIMIT 10
+    """)
+    
+    contactos = cursor.fetchall()
+    
+    # Verificar existencia de archivos
+    for contacto in contactos:
+        if contacto['imagen_url']:
+            if contacto['imagen_url'].startswith('/uploads/'):
+                filename = contacto['imagen_url'][9:]  # Quitar '/uploads/'
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                contacto['archivo_existe'] = os.path.exists(filepath)
+                contacto['ruta_completa'] = filepath
+            else:
+                contacto['archivo_existe'] = False
+        else:
+            contacto['archivo_existe'] = False
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'contactos': contactos,
+        'upload_folder': UPLOAD_FOLDER
+    })
+
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
