@@ -31,11 +31,15 @@
       {% for chat in chats %}
       <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
         <div class="chat-avatar">
-          <img 
-            src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
-            alt="Avatar"
-            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-            width="40" height="40">
+          <!-- En tu template de chats, cambia esto: -->
+
+        <!-- Por esto: -->
+        <img 
+          src="{{ chat.avatar or url_for('static', filename='icons/default-avatar.png') }}" 
+          alt="Avatar"
+          onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
+          width="40" height="40"
+        >
         </div>
         <div class="chat-info">
           <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">

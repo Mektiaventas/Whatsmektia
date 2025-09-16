@@ -3402,6 +3402,41 @@ def inicializar_chat_meta(numero, config=None):
         cursor.close()
         conn.close()
 
+@app.route('/debug-avatar/<numero>')
+def debug_avatar(numero):
+    """Endpoint para depurar problemas con avatares"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Obtener información del contacto
+    cursor.execute("""
+        SELECT numero_telefono, nombre, alias, imagen_url 
+        FROM contactos 
+        WHERE numero_telefono = %s 
+        ORDER BY id DESC LIMIT 1
+    """, (numero,))
+    
+    contacto = cursor.fetchone()
+    
+    # Verificar si el archivo existe
+    archivo_existe = False
+    if contacto and contacto.get('imagen_url'):
+        if contacto['imagen_url'].startswith('/uploads/'):
+            nombre_archivo = contacto['imagen_url'].replace('/uploads/', '')
+            ruta_completa = os.path.join(UPLOAD_FOLDER, nombre_archivo)
+            archivo_existe = os.path.exists(ruta_completa)
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'numero': numero,
+        'contacto': contacto,
+        'archivo_existe': archivo_existe,
+        'upload_folder': UPLOAD_FOLDER
+    })
+
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
             config = obtener_configuracion_por_host()

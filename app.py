@@ -893,13 +893,13 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
+    """Sirve archivos subidos desde la carpeta uploads"""
     try:
         app.logger.info(f"Intentando servir archivo: {filename}")
         return send_from_directory(UPLOAD_FOLDER, filename)
     except Exception as e:
         app.logger.error(f"Error sirviendo archivo {filename}: {e}")
         abort(404)
-
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -2865,51 +2865,35 @@ def home():
         values=values
     )
 
+# Busca la función que carga los datos para la página de chats
+# y asegúrate de que la consulta incluya el campo avatar correctamente
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
-    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocido')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute("""
         SELECT 
-          conv.numero, 
-          COUNT(*) AS total_mensajes, 
-          cont.imagen_url, 
-          -- PRIORIDAD: alias > nombre > número
-          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-          cont.alias,
-          cont.nombre,
-          (SELECT mensaje FROM conversaciones 
-           WHERE numero = conv.numero 
-           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-          MAX(conv.timestamp) AS ultima_fecha
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
-        ORDER BY MAX(conv.timestamp) DESC
+            c.numero_telefono as numero,
+            c.nombre,
+            c.alias,
+            c.imagen_url as avatar,  <-- CAMBIO AQUÍ: usar 'avatar' en lugar de 'imagen_url'
+            MAX(co.timestamp) as ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = c.numero_telefono 
+             ORDER BY timestamp DESC LIMIT 1) as ultimo_mensaje
+        FROM contactos c
+        LEFT JOIN conversaciones co ON c.numero_telefono = co.numero
+        GROUP BY c.numero_telefono
+        ORDER BY ultima_fecha DESC
     """)
+    
     chats = cursor.fetchall()
-    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
-    for chat in chats:
-        if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
     cursor.close()
     conn.close()
     
-    return render_template('chats.html',
-        chats=chats, 
-        mensajes=None,
-        selected=None, 
-        IA_ESTADOS=IA_ESTADOS,
-        tenant_config=config
-    )
+    return render_template('chats.html', chats=chats, selected=request.args.get('selected'))
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
