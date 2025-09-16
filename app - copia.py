@@ -8,6 +8,7 @@ import time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from google.oauth2 import service_account
 import pytz
 import os
 import logging
@@ -39,6 +40,7 @@ app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
 
 # ——— Env vars ———
+
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -261,7 +263,7 @@ def detectar_solicitud_cita_ia(mensaje, numero, config=None):
         return detectar_solicitud_cita_keywords(mensaje)
     
 def autenticar_google_calendar(config=None):
-    """Autentica y devuelve el servicio de Google Calendar"""
+    """Autentica con OAuth usando client_secret.json"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -269,52 +271,103 @@ def autenticar_google_calendar(config=None):
     creds = None
     
     try:
-        # Intentar obtener credenciales desde variable de entorno
-        creds_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
-        if creds_json:
+        app.logger.info("🔐 Intentando autenticar con OAuth...")
+        
+        # 1. Verificar si ya tenemos token guardado
+        if os.path.exists('token.json'):
             try:
-                # Parsear el JSON desde la variable de entorno
-                creds_info = json.loads(creds_json)
-                creds = service_account.Credentials.from_service_account_info(
-                    creds_info, scopes=SCOPES
-                )
-                app.logger.info("✅ Credenciales de Google cargadas desde variable de entorno")
-            except json.JSONDecodeError:
-                app.logger.error("❌ Error: GOOGLE_CREDENTIALS_JSON no es un JSON válido")
-                return None
+                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+                if creds and creds.valid:
+                    app.logger.info("✅ Token OAuth válido encontrado")
+                    service = build('calendar', 'v3', credentials=creds)
+                    return service
+                elif creds and creds.expired and creds.refresh_token:
+                    app.logger.info("🔄 Refrescando token expirado...")
+                    creds.refresh(Request())
+                    with open('token.json', 'w') as token:
+                        token.write(creds.to_json())
+                    service = build('calendar', 'v3', credentials=creds)
+                    return service
+            except Exception as e:
+                app.logger.error(f"❌ Error con token existente: {e}")
         
-        # Si no hay credenciales de variable de entorno, intentar con archivo
-        if not creds and os.path.exists('token.json'):
-            creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-        
-        # Si no hay credenciales válidas, permite que el usuario inicie sesión
-        if not creds or not creds.valid:
-            if creds and creds.expired and creds.refresh_token:
-                creds.refresh(Request())
-            else:
-                # Intentar con archivo de client secret
-                client_secret_file = os.getenv('GOOGLE_CLIENT_SECRET_FILE', 'client_secret.json')
-                if os.path.exists(client_secret_file):
-                    flow = InstalledAppFlow.from_client_secrets_file(client_secret_file, SCOPES)
-                    creds = flow.run_local_server(port=0)
-                else:
-                    app.logger.warning("⚠️ No se encontraron credenciales de Google Calendar")
-                    return None
-            
-            # Guardar las credenciales para la próxima vez
-            with open('token.json', 'w') as token:
-                token.write(creds.to_json())
+        # 2. Si no hay token válido, hacer flujo OAuth
+        if not os.path.exists('client_secret.json'):
+            app.logger.error("❌ No se encuentra client_secret.json")
+            return None
         
         try:
-            service = build('calendar', 'v3', credentials=creds)
-            return service
-        except HttpError as error:
-            app.logger.error(f'Error al construir el servicio de Calendar: {error}')
+            flow = InstalledAppFlow.from_client_secrets_file(
+                'client_secret.json', SCOPES)
+            
+            # Para servidor, genera una URL para autorizar manualmente
+            auth_url, _ = flow.authorization_url(prompt='consent')
+            
+            app.logger.info(f"🌐 Por favor visita esta URL para autorizar: {auth_url}")
+            app.logger.info("📋 Después de autorizar, copia el código de autorización que te da Google")
+            
+            # En entorno de servidor, necesitamos manejar el código manualmente
+            code = input("Pega el código de autorización aquí: ") if app.debug else None
+            
+            if code:
+                flow.fetch_token(code=code)
+                creds = flow.credentials
+                
+                # Guardar las credenciales
+                with open('token.json', 'w') as token:
+                    token.write(creds.to_json())
+                
+                app.logger.info("✅ Autenticación OAuth exitosa")
+                service = build('calendar', 'v3', credentials=creds)
+                return service
+            else:
+                app.logger.error("❌ No se proporcionó código de autorización")
+                return None
+                
+        except Exception as e:
+            app.logger.error(f"❌ Error en autenticación OAuth: {e}")
             return None
             
     except Exception as e:
-        app.logger.error(f'Error inesperado en autenticación Google: {e}')
+        app.logger.error(f'❌ Error inesperado: {e}')
+        app.logger.error(traceback.format_exc())
         return None
+
+@app.route('/autorizar-manual')
+def autorizar_manual():
+    """Endpoint para autorizar manualmente con Google"""
+    try:
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        if not os.path.exists('client_secret.json'):
+            return "❌ Error: No se encuentra client_secret.json"
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri='https://www.mektia.com/completar-autorizacion'
+        )
+        
+        # Generar URL de autorización
+        auth_url, _ = flow.authorization_url(
+            prompt='consent', 
+            access_type='offline',
+            include_granted_scopes='true'
+        )
+        
+        return f'''
+        <h1>✅ Autorización Google Calendar</h1>
+        <p>Por favor visita esta URL para autorizar:</p>
+        <a href="{auth_url}" target="_blank">{auth_url}</a>
+        <p>Después de autorizar, Google te dará un código. Pégalo aquí:</p>
+        <form action="/procesar-codigo" method="post">
+            <input type="text" name="codigo" placeholder="Pega el código aquí" size="50">
+            <input type="submit" value="Enviar">
+        </form>
+        '''
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
     """Crea un evento en Google Calendar para la cita"""
@@ -325,20 +378,26 @@ def crear_evento_calendar(service, cita_info, config=None):
         # Determinar el tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # Formatear fecha y hora
-        start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
-        end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
-                                      "%Y-%m-%d %H:%M") + timedelta(hours=1)
-        end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+        # Formatear fecha y hora (solo para Mektia)
+        if not es_porfirianna:
+            start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
+            end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
+                                          "%Y-%m-%d %H:%M") + timedelta(hours=1)
+            end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+        else:
+            # Para La Porfirianna, usar la hora actual + 1 hora
+            now = datetime.now()
+            start_time = now.isoformat()
+            end_time = (now + timedelta(hours=1)).isoformat()
         
         # Crear el evento
         event = {
             'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']}",
             'description': f"""
-Servicio: {cita_info.get('servicio_solicitado', 'No especificado')}
+{'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
 Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
 Teléfono: {cita_info.get('telefono', 'No especificado')}
-Notas: Cita agendada automáticamente desde WhatsApp
+Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
             """.strip(),
             'start': {
                 'dateTime': start_time,
@@ -366,7 +425,7 @@ Notas: Cita agendada automáticamente desde WhatsApp
     except HttpError as error:
         app.logger.error(f'Error al crear evento: {error}')
         return None
-
+    
 def validar_datos_cita_completos(info_cita, config=None):
     """
     Valida que la información de la cita/pedido tenga todos los datos necesarios
@@ -403,6 +462,31 @@ def validar_datos_cita_completos(info_cita, config=None):
         return False, mensaje_error
     
     return True, None
+
+@app.route('/completar-autorizacion')
+def completar_autorizacion():
+    """Endpoint para completar la autorización con el código"""
+    try:
+        code = request.args.get('code')
+        if not code:
+            return "❌ Error: No se proporcionó código"
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+        
+        # Intercambiar código por token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        # Guardar token
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        
+        return "✅ Autorización completada correctamente. Ya puedes usar Google Calendar."
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
 
 def convertir_audio(audio_path):
     try:
@@ -1417,7 +1501,41 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
         app.logger.error(traceback.format_exc())
         return None, None
-         
+
+@app.route('/procesar-codigo', methods=['POST'])
+def procesar_codigo():
+    """Procesa el código de autorización manualmente"""
+    try:
+        code = request.form.get('codigo')
+        if not code:
+            return "❌ Error: No se proporcionó código"
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri='https://www.mektia.com/completar-autorizacion'
+        )
+        
+        # Intercambiar código por token
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        # Guardar token
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+        
+        return '''
+        <h1>✅ ¡Autorización completada!</h1>
+        <p>Google Calendar está ahora configurado correctamente.</p>
+        <p>Puedes cerrar esta ventana y probar agendar una cita.</p>
+        <a href="/">Volver al inicio</a>
+        '''
+        
+    except Exception as e:
+        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"  
+
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas

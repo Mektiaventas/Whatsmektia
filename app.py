@@ -632,13 +632,15 @@ def kanban_data(config = None):
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
+                WHERE numero = cm.numero 
+                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                (SELECT imagen_url FROM contactos 
+                WHERE numero_telefono = cm.numero 
+                ORDER BY id DESC LIMIT 1) AS avatar,
                 MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -671,6 +673,32 @@ def kanban_data(config = None):
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
+
+def guardar_imagen_perfil(numero, archivo_imagen):
+    try:
+        # Generar nombre seguro
+        filename = secure_filename(f"perfil_{numero}_{int(time.time())}.jpg")
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Guardar archivo
+        archivo_imagen.save(filepath)
+        
+        # Actualizar base de datos
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE contactos 
+            SET imagen_url = %s 
+            WHERE numero_telefono = %s
+        """, (f"/uploads/{filename}", numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return True
+    except Exception as e:
+        app.logger.error(f"Error guardando imagen: {e}")
+        return False
 
 # ——— Configuración en MySQL ———
 def load_config(config=None):
@@ -865,7 +893,12 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    try:
+        app.logger.info(f"Intentando servir archivo: {filename}")
+        return send_from_directory(UPLOAD_FOLDER, filename)
+    except Exception as e:
+        app.logger.error(f"Error sirviendo archivo {filename}: {e}")
+        abort(404)
 
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
