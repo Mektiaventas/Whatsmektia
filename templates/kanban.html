@@ -3,7 +3,11 @@
 
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
-
+<style>
+  .form-text text-muted {
+  color: white;
+}
+</style>
 <div id="kanban-board" class="kanban-board">
   {% for col in columnas %}  <!-- ¡ESTE LOOP FALTABA! -->
   <div class="kanban-column" data-col-id="{{ col.id }}">

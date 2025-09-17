@@ -213,7 +213,7 @@ body {
   color: var(--brand-blue);
 }
 .form-text text-muted {
-  color: var(--text-light);
+  color: white;
 }
 /* Mensajes */
 .messages {
