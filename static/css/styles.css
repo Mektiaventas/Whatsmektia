@@ -212,7 +212,9 @@ body {
 .chat-list a:hover {
   color: var(--brand-blue);
 }
-
+.form-text text-muted {
+  color: var(--text-light);
+}
 /* Mensajes */
 .messages {
   flex: 1;
