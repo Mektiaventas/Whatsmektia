@@ -511,7 +511,7 @@ body {
 
 /* === CONTRASTE MEJORADO PARA BURBUJAS DE MENSAJES === */
 .msg-user, .msg-bot, .msg-box {
-  color: #111 !important;
+  color: #2f9f40 !important;
   font-weight: 500;
   font-size: 1.05rem;
 }

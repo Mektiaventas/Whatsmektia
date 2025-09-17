@@ -1832,6 +1832,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
+
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
