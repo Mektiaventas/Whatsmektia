@@ -342,10 +342,18 @@ def autorizar_manual():
         if not os.path.exists('client_secret.json'):
             return "❌ Error: No se encuentra client_secret.json"
         
+        # Obtener el host actual de la solicitud
+        host = request.host
+        app.logger.info(f"🔍 Host actual en autorizar_manual: {host}")
+        
+        # Construir la URI de redirección basada en el host actual
+        redirect_uri = f'https://{host}/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección en autorizar_manual: {redirect_uri}")
+        
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
             SCOPES,
-            redirect_uri='https://www.mektia.com/completar-autorizacion'
+            redirect_uri=redirect_uri
         )
         
         # Generar URL de autorización
@@ -354,6 +362,8 @@ def autorizar_manual():
             access_type='offline',
             include_granted_scopes='true'
         )
+        
+        app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
         
         return f'''
         <h1>✅ Autorización Google Calendar</h1>
@@ -367,6 +377,7 @@ def autorizar_manual():
         '''
         
     except Exception as e:
+        app.logger.error(f"❌ Error en autorización manual: {str(e)}")
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
@@ -463,7 +474,7 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
-@app.route('/completar-autorizacion')
+@app.route('/completar_autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
     try:
@@ -491,11 +502,13 @@ def completar_autorizacion():
             app.logger.error(f"❌ No se encuentra {client_secret_path}")
             return f"❌ Error: No se encuentra el archivo de configuración de Google"
         
-        # Obtener configuración actual para determinar el dominio
-        config = obtener_configuracion_por_host()
-        dominio_actual = config.get('dominio', 'mektia.com')
+        # Obtener el host actual de la solicitud
+        host = request.host
+        app.logger.info(f"🔍 Host actual: {host}")
         
-        app.logger.info(f"🔐 Usando dominio: {dominio_actual}")
+        # Construir la URI de redirección basada en el host actual
+        redirect_uri = f'https://{host}/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección: {redirect_uri}")
         
         SCOPES = ['https://www.googleapis.com/auth/calendar']
         
@@ -504,7 +517,7 @@ def completar_autorizacion():
         flow = InstalledAppFlow.from_client_secrets_file(
             client_secret_path, 
             SCOPES,
-            redirect_uri=f'https://{dominio_actual}/completar-autorizacion'
+            redirect_uri=redirect_uri
         )
         
         # Intercambiar código por token
@@ -565,7 +578,7 @@ def completar_autorizacion():
         </body>
         </html>
         """
-       
+         
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
