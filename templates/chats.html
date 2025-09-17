@@ -5,16 +5,18 @@
 {% set es_porfirianna = tenant_config.dominio == 'laporfirianna.mektia.com' %}
 {% set negocio_nombre = 'La Porfirianna' if es_porfirianna else 'Mektia' %}
 
-<div class="main-header">
-  <h1>Conversaciones - {{ negocio_nombre }}</h1>
-  <div class="header-info">
-    <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
-      {{ negocio_nombre }}
-    </span>
-    <span class="db-info">
-      (Base de datos: {{ tenant_config.db_name }})
-    </span>
-  </div>
+<div class="chat-list-header">
+  <h2>Conversaciones - {{ negocio_nombre }}</h2>
+  <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
+    {{ negocio_nombre }}
+  </span>
+  <span style="font-size: 12px; color: #666; margin-left: 15px;">
+    (Base de datos: {{ tenant_config.db_name }})
+  </span>
+</div>
+
+<div class="chat-list-header">
+  <h2>Conversaciones</h2>
 </div>
 
 <div class="chat-layout-v2">
@@ -25,97 +27,53 @@
       <input type="text" placeholder="Buscar chats..." class="search-input">
     </div>
 
-    <!-- Columnas tipo Kanban -->
-    <div class="kanban-board">
-      <!-- Columna 1: Sin Leads -->
-      <div class="kanban-column">
-        <div class="column-header">
-          <h3>0 Leads</h3>
-          <div class="column-count">0</div>
+    <div class="chat-items">
+      {% for chat in chats %}
+      <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
+        <div class="chat-avatar">
+          <img 
+            src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
+            alt="Avatar"
+            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
+            width="40" height="40">
         </div>
-        <div class="column-content">
-          {% for chat in chats %}
-            {% if not chat.leads or chat.leads == 0 %}
-              <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
-                <div class="chat-avatar">
-                  <img 
-                    src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
-                    alt="Avatar"
-                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-                    width="40" height="40">
-                </div>
-                <div class="chat-info">
-                  <div class="chat-name">{{ chat.nombre_mostrado }}</div>
-                  <div class="chat-preview">
-                    {% if chat.ultimo_mensaje %}
-                      {% if chat.tipo_mensaje == 'imagen' %}
-                        📷 Imagen
-                      {% else %}
-                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
-                      {% endif %}
-                    {% else %}
-                      Sin mensajes
-                    {% endif %}
-                  </div>
-                </div>
-                <div class="chat-meta">
-                  {% if chat.ultima_fecha %}
-                    <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
-                  {% endif %}
-                  {% if chat.no_leidos and chat.no_leidos > 0 %}
-                    <div class="unread-badge">{{ chat.no_leidos }}</div>
-                  {% endif %}
-                </div>
-              </a>
+        <div class="chat-info">
+          <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
+            <span class="alias-view">
+              {{ chat.nombre_mostrado }}
+            </span>
+            <span class="alias-edit" style="display:none;">
+              <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+            </span>
+            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+              ✏️
+            </button>
+          </div>
+          {% if chat.alias or chat.nombre %}
+            <div class="chat-num" style="font-size:11px;color:#888;">
+              {{ chat.numero }}
+            </div>
+          {% endif %}
+          <div class="chat-preview">
+            {% if chat.ultimo_mensaje %}
+              {% if chat.tipo_mensaje == 'imagen' %}
+                📷 Imagen
+              {% else %}
+                {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+              {% endif %}
+            {% else %}
+              Sin mensajes
             {% endif %}
-          {% endfor %}
+          </div>
         </div>
-      </div>
-      
-      <!-- Columna 2: Con Leads -->
-      <div class="kanban-column">
-        <div class="column-header">
-          <h3>23 Leads</h3>
-          <div class="column-count">23</div>
+        <div class="chat-meta">
+          {% if chat.ultima_fecha %}
+            <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
+            <div class="chat-time">{{ chat.ultima_fecha.strftime("%H:%M") }}</div>
+          {% endif %}
         </div>
-        <div class="column-content">
-          {% for chat in chats %}
-            {% if chat.leads and chat.leads > 0 %}
-              <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
-                <div class="chat-avatar">
-                  <img 
-                    src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
-                    alt="Avatar"
-                    onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-                    width="40" height="40">
-                </div>
-                <div class="chat-info">
-                  <div class="chat-name">{{ chat.nombre_mostrado }}</div>
-                  <div class="chat-preview">
-                    {% if chat.ultimo_mensaje %}
-                      {% if chat.tipo_mensaje == 'imagen' %}
-                        📷 Imagen
-                      {% else %}
-                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
-                      {% endif %}
-                    {% else %}
-                      Sin mensajes
-                    {% endif %}
-                  </div>
-                </div>
-                <div class="chat-meta">
-                  {% if chat.ultima_fecha %}
-                    <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
-                  {% endif %}
-                  {% if chat.no_leidos and chat.no_leidos > 0 %}
-                    <div class="unread-badge">{{ chat.no_leidos }}</div>
-                  {% endif %}
-                </div>
-              </a>
-            {% endif %}
-          {% endfor %}
-        </div>
-      </div>
+      </a>
+      {% endfor %}
     </div>
   </aside>
 
@@ -322,345 +280,64 @@
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
 <style>
-  /* ========== VARIABLES & RESET ========= */
-  :root {
-    /* Paleta institucional */
-    --brand-blue:    #002663;  /* azul oscuro */
-    --brand-gold:    #FFC20E;  /* dorado */
-    --bg-light-1:    #28324E;  /* azul grisáceo claro */
-    --bg-light-2:    #1A1F2E;  /* azul muy oscuro */
-    --bg-dark:       #0A0E18;  /* casi negro azul */
-    --card-bg:       rgba(255,255,255,0.9);
-    --text-light:    #ECEFF4;  /* blanco suave */
-    --text-dark:     #24303C;  /* gris azulado oscuro */
-    --border-light:  #CFD8DC;
-    
-    /* Colores institucionales (del segundo bloque) */
-    --bg-page:        #1f2640;  /* fondo general */
-    --bg-config:      #2c344f;  /* fondo de secciones de config */
-    --bg-card-header: #2a2f48;  /* encabezado de tarjeta */
-    --btn-primary:    #8BC34A;  /* verde negocio */
-    --btn-secondary:  #ECECEC;  /* gris claro */
-    --btn-danger:     #E53935;  /* rojo de "borrar" */
-    
-    /* Colores para Kanban */
-    --kanban-bg-1:    #f0f4f8;
-    --kanban-bg-2:    #e8f0fe;
-    --kanban-header-1:#4285f4;
-    --kanban-header-2:#34a853;
+  .whatsapp-image {
+    max-width: 300px;
+    max-height: 300px;
+    border-radius: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    margin-bottom: 8px;
   }
 
-  *, *::before, *::after {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
+  .image-message {
+    padding: 8px;
   }
 
-  html, body {
-    height: 100%;
-  }
-
-  body {
-    font-family: 'Segoe UI', sans-serif;
-    background: linear-gradient(135deg, var(--bg-light-1) 0%, var(--bg-light-2) 85%, var(--bg-dark) 100%);
-    background-attachment: fixed;
-    background-repeat: no-repeat;
-    background-size: cover;
-    min-height: 100vh;
-    color: var(--text-brand-blue);
-  }
-
-  /* ========== LAYOUT ========= */
-  .layout {
-    display: flex;
-    min-height: 100vh;
-  }
-
-  /* Sidebar principal */
-  .sidebar {
-    position: sticky;
-    top: 0;
-    width: 240px;
-    height: 100vh; 
-    background: var(--brand-blue);
-    color: #fff;
-    padding: 24px 16px;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  /* Logo y título */
-  .sidebar-logo img {
-    max-width: 200px;
-    margin-bottom: 12px;
-  }
-  .sidebar-title {
-    font-size: 1.25em;
-    font-weight: 600;
-    color: var(--brand-gold);
-    margin-bottom: 24px;
-  }
-
-  /* Navegación sidebar */
-  .sidebar-nav {
-    list-style: none;
-    width: 100%;
-  }
-  .sidebar-nav li {
-    margin-bottom: 12px;
-  }
-  .sidebar-nav a {
-    display: block;
-    text-decoration: none;
-    color: #fff;
+  .image-caption {
     padding: 8px 12px;
-    border-radius: 4px;
-    transition: background .2s;
-  }
-  .sidebar-nav a:hover,
-  .sidebar-nav li.active > a {
-    background: var(--brand-gold);
-    color: var(--brand-blue);
-  }
-
-  /* Main content transparente para ver el degradado */
-  .main-content {
-    flex: 1;
-    padding: 32px;
-    background: transparent;
-    overflow-y: auto;
-  }
-
-  /* ========== ESTILOS PRINCIPALES ========= */
-  .main-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px;
-    margin-bottom: 20px;
-    background: rgba(37, 37, 59, 0.8);
-    border-radius: 12px;
-    backdrop-filter: blur(12px);
-    color: #fff;
-  }
-
-  .main-header h1 {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 600;
-  }
-
-  .header-info {
-    display: flex;
-    align-items: center;
-    gap: 15px;
-  }
-
-  .db-info {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .tenant-badge {
-    padding: 4px 12px;
-    border-radius: 20px;
-    font-size: 12px;
-    font-weight: bold;
-    color: white;
-  }
-
-  .mektia-badge {
-    background: linear-gradient(45deg, #3498db, #2980b9);
-  }
-
-  .porfirianna-badge {
-    background: linear-gradient(45deg, #e74c3c, #c0392b);
-  }
-
-  /* ========== KANBAN BOARD ========= */
-  .kanban-board {
-    display: flex;
-    gap: 16px;
-    overflow-x: auto;
-    padding-bottom: 10px;
-  }
-
-  .kanban-column {
-    flex: 1;
-    min-width: 280px;
-    background: var(--kanban-bg-1);
-    border-radius: 12px;
-    overflow: hidden;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  }
-
-  .kanban-column:nth-child(2) {
-    background: var(--kanban-bg-2);
-  }
-
-  .column-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 16px;
-    background: var(--kanban-header-1);
-    color: white;
-    font-weight: 600;
-  }
-
-  .kanban-column:nth-child(2) .column-header {
-    background: var(--kanban-header-2);
-  }
-
-  .column-header h3 {
-    margin: 0;
-    font-size: 16px;
-  }
-
-  .column-count {
-    background: rgba(255,255,255,0.3);
-    color: white;
-    border-radius: 50%;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 12px;
-  }
-
-  .column-content {
-    padding: 12px;
-    max-height: calc(100vh - 200px);
-    overflow-y: auto;
-  }
-
-  /* ========== CHAT ITEMS ========= */
-  .chat-item {
-    display: flex;
-    align-items: center;
-    padding: 12px;
-    background: white;
+    background-color: #f0f0f0;
     border-radius: 8px;
-    margin-bottom: 10px;
-    cursor: pointer;
-    text-decoration: none;
-    color: #333;
-    box-shadow: 0 2px 5px rgba(0,0,0,0.05);
-    transition: all 0.2s ease;
+    margin-top: 8px;
+    font-size: 14px;
   }
 
-  .chat-item:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-  }
-
-  .chat-item.selected {
-    background: #fff8e1;
-    border-left: 4px solid var(--brand-gold);
-  }
-
-  .chat-avatar img {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    margin-right: 12px;
-    object-fit: cover;
-  }
-
-  .chat-info {
-    flex: 1;
-    min-width: 0;
-  }
-
-  .chat-name {
-    font-weight: 600;
+  .message-content {
     margin-bottom: 4px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 
-  .chat-preview {
-    font-size: 13px;
+  .manual-indicator {
+    font-size: 12px;
     color: #666;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .chat-meta {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    margin-left: 8px;
-  }
-
-  .chat-date {
-    font-size: 11px;
-    color: #888;
     margin-bottom: 4px;
+    font-style: italic;
   }
 
-  .unread-badge {
-    background: #f44336;
-    color: white;
-    border-radius: 50%;
-    width: 18px;
-    height: 18px;
+  .ia-active-message {
+    padding: 15px;
+    text-align: center;
+    background-color: #f8f9fa;
+    border-top: 1px solid #dee2e6;
+  }
+
+  .ia-indicator {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: bold;
-    font-size: 10px;
+    gap: 8px;
+    margin-bottom: 10px;
   }
 
-  /* ========== CHAT PANEL ========= */
-  .chat-layout-v2 {
+  .ia-icon {
+    font-size: 20px;
+  }
+
+  .chat-controls {
     display: flex;
-    height: calc(100vh - 80px);
-    max-width: 1400px;
-    margin: 0 auto;
-    box-shadow: 0 0 15px rgba(0,0,0,0.2);
-    border-radius: 12px;
-    overflow: hidden;
-  }
-
-  .chat-list-v2 {
-    width: 35%;
-    background: rgba(30, 30, 47, 0.7);
-    border-right: 1px solid rgba(255, 255, 255, 0.15);
-    overflow-y: auto;
-    backdrop-filter: blur(12px);
-    border-radius: 12px 0 0 12px;
-    padding: 16px;
-  }
-
-  .chat-panel-v2 {
-    width: 45%;
-    display: flex;
-    flex-direction: column;
-    background: rgba(30, 30, 47, 0.7);
-    backdrop-filter: blur(12px);
-  }
-
-  .chat-panel-header {
-    padding: 16px;
-    background: rgba(37, 37, 59, 0.8);
-    color: white;
-    font-weight: 600;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    display: flex;
-    justify-content: space-between;
     align-items: center;
+    gap: 10px;
   }
 
   .chat-header-info {
-    display: flex;
-    flex-direction: column;
+    flex: 1;
   }
 
   .chat-title {
@@ -672,293 +349,89 @@
 
   .chat-number {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .chat-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .badge {
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .bg-success {
-    background-color: #4caf50;
-    color: white;
-  }
-
-  .bg-warning {
-    background-color: #ff9800;
-    color: white;
-  }
-
-  .toggle-btn {
-    padding: 6px 12px;
-    border: none;
-    border-radius: 4px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .toggle-btn.on {
-    background-color: #4caf50;
-    color: white;
-  }
-
-  .toggle-btn.off {
-    background-color: #f44336;
-    color: white;
-  }
-
-  .msgs-wrap-v2 {
-    flex: 1;
-    overflow-y: auto;
-    padding: 16px;
-    background: rgba(30, 30, 47, 0.4);
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .msg-box {
-    max-width: 80%;
-    padding: 12px 16px;
-    border-radius: 18px;
-    position: relative;
-    font-size: 15px;
-    line-height: 1.4;
-    word-wrap: break-word;
-  }
-
-  .msg-box.msg-user {
-    align-self: flex-start;
-    background: #e3f2fd;
-    border: 1px solid #bbdefb;
-    border-top-left-radius: 4px;
-  }
-
-  .msg-box.msg-ai {
-    align-self: flex-end;
-    background: #e8f5e9;
-    border: 1px solid #c8e6c9;
-    border-top-right-radius: 4px;
-  }
-
-  .msg-box.msg-manual {
-    align-self: flex-end;
-    background: #fff3e0;
-    border: 1px solid #ffe0b2;
-    border-top-right-radius: 4px;
-  }
-
-  .msg-meta {
-    font-size: 11px;
-    color: rgba(0,0,0,0.5);
-    margin-top: 4px;
-    text-align: right;
-  }
-
-  .text-message {
-    margin-bottom: 4px;
-  }
-
-  .manual-indicator {
-    font-size: 12px;
-    color: #e65100;
-    margin-bottom: 4px;
-    font-style: italic;
-  }
-
-  .ia-active-message {
-    padding: 16px;
-    text-align: center;
-    background: rgba(37, 37, 59, 0.8);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-    color: white;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .ia-indicator {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .ia-icon {
-    font-size: 20px;
-  }
-
-  .reply-form {
-    padding: 12px;
-    background: rgba(37, 37, 59, 0.8);
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
-  }
-
-  .input-group {
-    display: flex;
-    gap: 8px;
-  }
-
-  .reply-input-line {
-    flex: 1;
-    padding: 10px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    font-size: 14px;
-  }
-
-  .reply-input-line::placeholder {
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .send-btn {
-    padding: 8px 16px;
-    background: var(--brand-gold);
-    color: var(--brand-blue);
-    border: none;
-    border-radius: 20px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  /* ========== SIDEBAR DERECHO ========= */
-  .sidebar-right {
-    width: 20%;
-    background: rgba(30, 30, 47, 0.7);
-    border-left: 1px solid rgba(255, 255, 255, 0.15);
-    padding: 16px;
-    backdrop-filter: blur(12px);
-    border-radius: 0 12px 12px 0;
-    color: white;
+    color: #666;
   }
 
   .sidebar-section {
-    margin-bottom: 24px;
+    margin-bottom: 20px;
   }
 
   .sidebar-section h3 {
-    margin-bottom: 12px;
-    font-size: 16px;
-    color: white;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    padding-bottom: 8px;
-  }
-
-  .delete-btn {
-    width: 100%;
-    padding: 10px;
-    background: #f44336;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .delete-btn:hover {
-    background: #d32f2f;
+    margin-bottom: 10px;
+    font-size: 14px;
+    color: #333;
   }
 
   .chat-info-stats {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
 
   .stat-item {
     display: flex;
     justify-content: space-between;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    align-items: center;
   }
 
   .stat-label {
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.7);
+    font-size: 12px;
+    color: #666;
   }
 
   .stat-value {
-    font-size: 14px;
-    font-weight: 600;
-    color: white;
+    font-size: 12px;
+    font-weight: 500;
+    color: #333;
   }
 
-  /* ========== HERRAMIENTAS DE CHAT ========= */
-  .chat-list-tools {
+  /* Estilos para mensajes */
+  .msg-box {
     display: flex;
     flex-direction: column;
-    gap: 12px;
-    margin-bottom: 16px;
+    margin: 10px 0;
+    max-width: 70%;
   }
 
-  .add-contact-btn {
+  .msg-user {
+    align-self: flex-start; /* Izquierda para usuario */
+    background-color: #e3f2fd; /* Azul claro */
+  }
+
+  .msg-ai {
+    align-self: flex-end; /* Derecha para IA */
+    background-color: #d1e7dd; /* Verde claro */
+  }
+
+  .msg-manual {
+    align-self: flex-end; /* Derecha para mensajes manuales */
+    background-color: #f8f9fa; /* Gris claro */
+  }
+
+  .message-content {
     padding: 10px;
-    background: var(--brand-gold);
-    color: var(--brand-blue);
-    border: none;
-    border-radius: 6px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.2s;
+    border-radius: 10px;
   }
 
-  .add-contact-btn:hover {
-    background: #e6ac00;
+  .text-message {
+    word-wrap: break-word;
   }
 
-  .search-input {
-    padding: 10px 14px;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-    font-size: 14px;
+  .msg-meta {
+    font-size: 12px;
+    color: #666;
+    text-align: right;
+    margin-top: 4px;
   }
 
-  .search-input::placeholder {
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  /* ========== IMAGENES Y AUDIO ========= */
-  .whatsapp-image {
-    max-width: 250px;
-    max-height: 250px;
-    border-radius: 8px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-  }
-
-  .image-message {
-    margin-bottom: 8px;
-  }
-
-  .image-caption {
-    padding: 8px 12px;
-    background-color: rgba(255, 255, 255, 0.7);
-    border-radius: 8px;
-    margin-top: 8px;
-    font-size: 14px;
-  }
-
+  /* Estilos para audio */
   .audio-player {
-    background: rgba(255, 255, 255, 0.9);
+    background: #f8f9fa;
     border-radius: 12px;
-    padding: 12px;
-    margin: 8px 0;
-    border: 1px solid rgba(0,0,0,0.1);
-    max-width: 300px;
+    padding: 15px;
+    margin: 10px 0;
+    border: 1px solid #e9ecef;
+    max-width: 350px;
   }
 
   .whatsapp-audio {
@@ -973,12 +446,13 @@
   }
 
   .audio-play-btn {
-    background: #25D366;
+    background: none;
     border: none;
     cursor: pointer;
     font-size: 14px;
-    padding: 6px;
+    padding: 8px;
     border-radius: 50%;
+    background-color: #25D366;
     color: white;
     width: 32px;
     height: 32px;
@@ -1023,7 +497,7 @@
     border: none;
     cursor: pointer;
     font-size: 14px;
-    padding: 4px;
+    padding: 6px;
     border-radius: 4px;
     color: #666;
     transition: all 0.2s;
@@ -1031,14 +505,14 @@
 
   .audio-download-btn:hover {
     color: #25D366;
-    background-color: rgba(0,0,0,0.05);
+    background-color: #f0f0f0;
   }
 
   .audio-transcription {
-    background-color: rgba(0,0,0,0.05);
-    padding: 8px 12px;
+    background-color: #e8f5e8;
+    padding: 10px 12px;
     border-radius: 8px;
-    margin-top: 8px;
+    margin-top: 10px;
     font-size: 13px;
     line-height: 1.4;
     border-left: 3px solid #25D366;
@@ -1047,190 +521,6 @@
   .audio-transcription strong {
     color: #128C7E;
     font-size: 12px;
-  }
-
-  /* ========== RESPONSIVE DESIGN ========== */
-  @media (max-width: 1200px) {
-    .chat-layout-v2 {
-      flex-direction: column;
-      height: auto;
-    }
-    .chat-list-v2,
-    .chat-panel-v2,
-    .sidebar-right {
-      width: 100%;
-    }
-    .chat-list-v2 {
-      max-height: 300px;
-    }
-    .sidebar-right {
-      border-radius: 0;
-      border-left: none;
-      border-top: 1px solid rgba(255, 255, 255, 0.15);
-    }
-  }
-
-  @media (max-width: 768px) {
-    .layout {
-      flex-direction: column;
-    }
-    .sidebar {
-      width: 100%;
-      height: auto;
-      position: relative;
-    }
-    .main-content {
-      padding: 1rem;
-    }
-    
-    .kanban-board {
-      flex-direction: column;
-    }
-    
-    .kanban-column {
-      min-width: 100%;
-    }
-    
-    .chat-layout-v2 {
-      display: block;
-      position: relative;
-    }
-    
-    .chat-list-v2 {
-      position: fixed;
-      left: -100%;
-      top: 0;
-      width: 80%;
-      height: 100vh;
-      z-index: 1000;
-      background: rgba(30, 30, 47, 0.95);
-      transition: left 0.3s ease;
-      padding: 1rem;
-      box-shadow: 2px 0 10px rgba(0,0,0,0.3);
-      border-radius: 0;
-    }
-    
-    .chat-list-v2.mobile-visible {
-      left: 0;
-    }
-    
-    .chat-panel-v2 {
-      width: 100%;
-      min-height: 100vh;
-      border-radius: 0;
-    }
-    
-    .mobile-chat-toggle {
-      position: fixed;
-      bottom: 20px;
-      right: 20px;
-      z-index: 1001;
-      width: 50px;
-      height: 50px;
-      border-radius: 50%;
-      background: var(--brand-blue);
-      color: white;
-      border: none;
-      font-size: 1.2rem;
-      cursor: pointer;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.3);
-      display: block;
-    }
-    
-    .sidebar-right {
-      display: none;
-    }
-    
-    .chat-panel-header {
-      padding: 12px;
-      font-size: 14px;
-    }
-    
-    .msg-box {
-      max-width: 90%;
-      font-size: 14px;
-      padding: 10px 14px;
-    }
-    
-    .reply-form {
-      padding: 10px;
-    }
-    
-    .input-group {
-      gap: 8px;
-    }
-    
-    .reply-input-line {
-      padding: 8px 12px;
-      font-size: 14px;
-    }
-    
-    .send-btn {
-      padding: 8px 14px;
-      font-size: 14px;
-    }
-  }
-
-  @media (max-width: 480px) {
-    .main-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-    }
-    
-    .chat-list-v2 {
-      width: 100%;
-    }
-    
-    .chat-item {
-      padding: 10px;
-    }
-    
-    .chat-avatar img {
-      width: 35px;
-      height: 35px;
-    }
-    
-    .chat-info {
-      font-size: 14px;
-    }
-    
-    .chat-preview {
-      font-size: 12px;
-    }
-    
-    .chat-meta {
-      font-size: 11px;
-    }
-    
-    .msg-box {
-      max-width: 95%;
-      padding: 8px 12px;
-    }
-    
-    .msg-meta {
-      font-size: 10px;
-    }
-    
-    .no-chat-selected {
-      text-align: center;
-      padding: 2rem;
-      color: white;
-    }
-    
-    .ia-active-message {
-      padding: 12px;
-      font-size: 14px;
-      flex-direction: column;
-      gap: 10px;
-    }
-  }
-
-  /* Ocultar botón toggle en desktop */
-  @media (min-width: 769px) {
-    .mobile-chat-toggle {
-      display: none;
-    }
   }
 </style>
 
