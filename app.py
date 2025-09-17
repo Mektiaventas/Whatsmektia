@@ -1512,7 +1512,8 @@ def procesar_codigo():
         if not code:
             return "❌ Error: No se proporcionó código"
         
-        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        # En app.py, la función autenticar_google_calendar()
+        SCOPES = ['https://www.googleapis.com/auth/calendar']  # Este scope está correcto
         
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
