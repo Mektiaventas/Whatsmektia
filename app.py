@@ -467,52 +467,27 @@ def validar_datos_cita_completos(info_cita, config=None):
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
     try:
+        # Obtener todos los parámetros de la URL
         code = request.args.get('code')
+        state = request.args.get('state')
+        scope = request.args.get('scope')
+        
+        app.logger.info(f"🔐 Parámetros recibidos:")
+        app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
+        app.logger.info(f"  - State: {state}")
+        app.logger.info(f"  - Scope: {scope}")
+        
         if not code:
             app.logger.error("❌ No se proporcionó código de autorización")
             return "❌ Error: No se proporcionó código"
         
-        app.logger.info(f"🔐 Código recibido: {code[:10]}...")  # Log solo los primeros caracteres
-        
-        SCOPES = ['https://www.googleapis.com/auth/calendar']
-        
-        # Verificar que el archivo client_secret.json existe
-        if not os.path.exists('client_secret.json'):
-            app.logger.error("❌ No se encuentra client_secret.json")
-            return "❌ Error: No se encuentra el archivo de configuración de Google"
-        
-        # Obtener configuración actual para determinar el dominio
-        config = obtener_configuracion_por_host()
-        dominio_actual = config.get('dominio', 'mektia.com')
-        
-        app.logger.info(f"🔐 Usando dominio: {dominio_actual}")
-        
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', 
-            SCOPES,
-            redirect_uri=f'https://{dominio_actual}/completar-autorizacion'
-        )
-        
-        # Intercambiar código por token
-        app.logger.info("🔄 Intercambiando código por token...")
-        flow.fetch_token(code=code)
-        creds = flow.credentials
-        
-        # Guardar token
-        token_path = 'token.json'
-        app.logger.info(f"💾 Guardando token en: {token_path}")
-        
-        with open(token_path, 'w') as token:
-            token.write(creds.to_json())
-        
-        app.logger.info("✅ Autorización completada correctamente")
-        return "✅ Autorización completada correctamente. Ya puedes usar Google Calendar."
+        # Resto del código...
         
     except Exception as e:
         app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
-        app.logger.error(traceback.format_exc())  # Agregar traceback completo
+        app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
-
+    
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
