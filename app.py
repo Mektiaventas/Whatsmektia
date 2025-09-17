@@ -479,15 +479,93 @@ def completar_autorizacion():
         
         if not code:
             app.logger.error("❌ No se proporcionó código de autorización")
-            return "❌ Error: No se proporcionó código"
+            return "❌ Error: No se proporcionó código de autorización"
         
-        # Resto del código...
+        # Definir rutas absolutas
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
+        token_path = os.path.join(BASE_DIR, 'token.json')
+        
+        # Verificar que el archivo client_secret.json existe
+        if not os.path.exists(client_secret_path):
+            app.logger.error(f"❌ No se encuentra {client_secret_path}")
+            return f"❌ Error: No se encuentra el archivo de configuración de Google"
+        
+        # Obtener configuración actual para determinar el dominio
+        config = obtener_configuracion_por_host()
+        dominio_actual = config.get('dominio', 'mektia.com')
+        
+        app.logger.info(f"🔐 Usando dominio: {dominio_actual}")
+        
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        
+        # Crear el flujo de OAuth
+        app.logger.info("🔄 Creando flujo de OAuth...")
+        flow = InstalledAppFlow.from_client_secrets_file(
+            client_secret_path, 
+            SCOPES,
+            redirect_uri=f'https://{dominio_actual}/completar-autorizacion'
+        )
+        
+        # Intercambiar código por token
+        app.logger.info("🔄 Intercambiando código por token...")
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        
+        app.logger.info("✅ Token obtenido correctamente")
+        
+        # Guardar token
+        app.logger.info(f"💾 Guardando token en: {token_path}")
+        
+        with open(token_path, 'w') as token:
+            token.write(creds.to_json())
+        
+        app.logger.info("✅ Autorización completada correctamente")
+        return """
+        <html>
+        <head>
+            <title>Autorización Completada</title>
+            <style>
+                body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                .success { color: green; font-size: 24px; }
+                .info { margin: 20px; }
+            </style>
+        </head>
+        <body>
+            <h1 class="success">✅ Autorización completada correctamente</h1>
+            <div class="info">
+                <p>Ya puedes usar Google Calendar para agendar citas.</p>
+                <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
+            </div>
+        </body>
+        </html>
+        """
         
     except Exception as e:
         app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
         app.logger.error(traceback.format_exc())
-        return f"❌ Error: {str(e)}"
-    
+        return f"""
+        <html>
+        <head>
+            <title>Error de Autorización</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
+                .error {{ color: red; font-size: 24px; }}
+                .info {{ margin: 20px; }}
+                pre {{ background: #f5f5f5; padding: 10px; text-align: left; margin: 20px auto; max-width: 80%; }}
+            </style>
+        </head>
+        <body>
+            <h1 class="error">❌ Error en la autorización</h1>
+            <div class="info">
+                <p>Ocurrió un error al procesar la autorización de Google:</p>
+                <pre>{str(e)}</pre>
+                <p>Por favor, contacta al administrador del sistema.</p>
+            </div>
+        </body>
+        </html>
+        """
+       
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
