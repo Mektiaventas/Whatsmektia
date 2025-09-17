@@ -1,6 +1,11 @@
 {% extends 'base.html' %}
 {% block title %}Configuración – {{ active|capitalize }}{% endblock %}
 {% block content %}
+<style>
+  .form-text text-muted {
+  color: white;
+}
+</style>
   <div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
     {% if guardado %}
