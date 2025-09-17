@@ -632,13 +632,15 @@ def kanban_data(config = None):
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
+                WHERE numero = cm.numero 
+                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                (SELECT imagen_url FROM contactos 
+                WHERE numero_telefono = cm.numero 
+                ORDER BY id DESC LIMIT 1) AS avatar,
                 MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
