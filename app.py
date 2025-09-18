@@ -810,6 +810,31 @@ def load_config(config=None):
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
 
+def crear_tabla_contactos(config=None):
+    """Crea la tabla de contactos si no existe"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS contactos (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            numero_telefono VARCHAR(20) UNIQUE,
+            nombre VARCHAR(100),
+            alias VARCHAR(100),
+            imagen_url VARCHAR(255),
+            plataforma VARCHAR(50),
+            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
+            fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
     conn = get_db_connection(config)
@@ -1008,13 +1033,32 @@ def extraer_fecha_del_mensaje(mensaje):
     
     return None
 
-def extraer_nombre_del_mensaje(mensaje):
-    """Intenta extraer un nombre del mensaje"""
-    # Patrón simple para nombres (2-3 palabras)
-    patron_nombre = r'^[A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}( [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?$'
+def extraer_nombre_del_mensaje(mensaje, numero=None, config=None):
+    """Intenta extraer un nombre del mensaje y lo guarda"""
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    if re.match(patron_nombre, mensaje.strip()):
-        return mensaje.strip()
+    # Patrones comunes para identificar nombres
+    patrones_nombre = [
+        r'mi nombre es ([A-Za-zÁáÉéÍíÓóÚúÑñ\s]+)',
+        r'soy ([A-Za-zÁáÉéÍíÓóÚúÑñ\s]+)',
+        r'([A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}(?: [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?)'
+    ]
+    
+    mensaje_limpio = mensaje.lower()
+    
+    for patron in patrones_nombre:
+        coincidencia = re.search(patron, mensaje, re.IGNORECASE)
+        if coincidencia:
+            nombre = coincidencia.group(1).strip()
+            
+            # Validar que sea un nombre razonable
+            if len(nombre.split()) >= 2 and len(nombre) < 50:
+                # Guardar el contacto si tenemos el número
+                if numero:
+                    guardar_contacto(numero=numero, nombre=nombre, config=config)
+                
+                return nombre
     
     return None
 
@@ -2496,29 +2540,45 @@ def guardar_contacto(numero, nombre=None, alias=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
+    if not numero:
+        app.logger.error("❌ No se puede guardar contacto sin número")
+        return
+    
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
     try:
         # Verificar si el contacto ya existe
-        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
-        existe = cursor.fetchone()
+        cursor.execute("SELECT id, nombre, alias FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto = cursor.fetchone()
         
-        if existe:
-            # Actualizar el contacto existente
-            if nombre:
-                cursor.execute("UPDATE contactos SET nombre = %s WHERE numero_telefono = %s", (nombre, numero))
-            if alias:
-                cursor.execute("UPDATE contactos SET alias = %s WHERE numero_telefono = %s", (alias, numero))
+        if contacto:
+            # Actualizar el contacto existente solo si hay nuevos datos
+            update_fields = []
+            params = []
+            
+            if nombre and nombre != contacto[1]:  # contacto[1] es el nombre actual
+                update_fields.append("nombre = %s")
+                params.append(nombre)
+            
+            if alias and alias != contacto[2]:  # contacto[2] es el alias actual
+                update_fields.append("alias = %s")
+                params.append(alias)
+            
+            if update_fields:
+                params.append(numero)
+                query = f"UPDATE contactos SET {', '.join(update_fields)} WHERE numero_telefono = %s"
+                cursor.execute(query, params)
+                conn.commit()
+                app.logger.info(f"✅ Contacto actualizado: {numero} - {nombre or alias}")
         else:
             # Insertar nuevo contacto
             cursor.execute("""
                 INSERT INTO contactos (numero_telefono, nombre, alias)
                 VALUES (%s, %s, %s)
             """, (numero, nombre, alias))
-        
-        conn.commit()
-        app.logger.info(f"✅ Contacto guardado: {numero} - {nombre}")
+            conn.commit()
+            app.logger.info(f"✅ Nuevo contacto guardado: {numero} - {nombre or alias}")
     except Exception as e:
         app.logger.error(f"❌ Error guardando contacto: {e}")
         conn.rollback()
@@ -3631,5 +3691,6 @@ if __name__ == '__main__':
     
     # Crear tablas necesarias - usar configuración por defecto
     crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
-    
+    # Después de crear la app
+    crear_tabla_contactos()
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
