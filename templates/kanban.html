@@ -4,6 +4,38 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
+<style>
+/* Animaciones para nuevos mensajes en el Kanban */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes highlightPulse {
+  0% { background-color: rgba(255, 255, 255, 0.1); }
+  50% { background-color: rgba(255, 224, 130, 0.4); }
+  100% { background-color: rgba(255, 255, 255, 0.1); }
+}
+
+@keyframes gentleShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px); }
+  75% { transform: translateX(3px); }
+}
+
+.kanban-card.new-message {
+  animation: 
+    fadeIn 0.5s ease-out,
+    highlightPulse 2s ease-in-out,
+    gentleShake 0.5s ease-in-out;
+}
+
+/* Para evitar que la animación se repita indefinidamente */
+.kanban-card {
+  transition: all 0.3s ease;
+}
+</style>
+
 <div id="kanban-board" class="kanban-board">
   {% for col in columnas %}  <!-- ¡ESTE LOOP FALTABA! -->
   <div class="kanban-column" data-col-id="{{ col.id }}">
@@ -16,7 +48,9 @@
       {% for chat in chats if chat.columna_id == col.id %}
       <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
         <div class="card-avatar-section">
-          zzz
+          <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}" 
+               class="card-avatar" alt="Avatar"
+               onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
         </div>
         <div class="card-content">
           <div class="card-title-row">
@@ -63,6 +97,35 @@ document.addEventListener('DOMContentLoaded', function() {
     
     console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
     
+    // Función para detectar y animar nuevos mensajes
+    function animarNuevosMensajes(data) {
+      const numerosActuales = new Set(
+        Array.from(document.querySelectorAll('.kanban-card'))
+          .map(card => card.dataset.chatNum)
+      );
+      
+      // Buscar nuevos mensajes en los datos recibidos
+      data.chats.forEach(chat => {
+        if (!numerosActuales.has(chat.numero)) {
+          // Este es un mensaje nuevo que no estaba antes
+          console.log('Nuevo mensaje detectado:', chat.numero);
+          
+          // Encontrar el elemento correspondiente después de actualizar
+          setTimeout(() => {
+            const nuevoElemento = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
+            if (nuevoElemento) {
+              nuevoElemento.classList.add('new-message');
+              
+              // Remover la clase después de que termine la animación
+              setTimeout(() => {
+                nuevoElemento.classList.remove('new-message');
+              }, 2500);
+            }
+          }, 100);
+        }
+      });
+    }
+
     // Función para actualizar el Kanban
     function actualizarKanban() {
         if (!kanbanAutoRefresh) return;
@@ -88,6 +151,12 @@ document.addEventListener('DOMContentLoaded', function() {
     function actualizarInterfazCompleta(data) {
         const kanbanBoard = document.getElementById('kanban-board');
         if (!kanbanBoard) return;
+        
+        // Primero detectamos los mensajes actuales antes de actualizar
+        const numerosPrevios = new Set(
+          Array.from(document.querySelectorAll('.kanban-card'))
+            .map(card => card.dataset.chatNum)
+        );
         
         // Reconstruir todo el Kanban con los nuevos datos
         let nuevoHTML = '';
@@ -137,6 +206,14 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Reinicializar Sortable.js después de actualizar
         inicializarSortable();
+        
+        // Animar nuevos mensajes
+        setTimeout(() => {
+          animarNuevosMensajes({
+            chats: data.chats,
+            numerosPrevios: numerosPrevios
+          });
+        }, 50);
     }
     
     // Función auxiliar para banderas (simplificada)
