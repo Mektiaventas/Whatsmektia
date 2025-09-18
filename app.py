@@ -705,11 +705,9 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
 @app.route('/kanban/data') 
-def kanban_data(config=None):
+def kanban_data(config = None):
     """Endpoint que devuelve los datos del Kanban en formato JSON"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
+    config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -742,23 +740,16 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # Obtener el dominio actual
-        dominio = config.get('dominio', 'mektia.com')
-        if not dominio.startswith('http'):
-            dominio = f"https://{dominio}"
-
-        # Convertir timestamps a hora de México y construir URLs completas
+        # Convertir timestamps a hora de México
         for chat in chats:
             if chat.get('ultima_fecha'):
                 if chat['ultima_fecha'].tzinfo is not None:
                     chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 else:
                     chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                
+                # Formatear fecha para JSON
                 chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
-            
-            # Construir URL completa para el avatar si es una ruta relativa
-            if chat.get('avatar') and not chat['avatar'].startswith('http'):
-                chat['avatar'] = f"{dominio}{chat['avatar']}"
 
         cursor.close()
         conn.close()
@@ -818,31 +809,6 @@ def load_config(config=None):
         'lenguaje': row['lenguaje'],
     }
     return {'negocio': negocio, 'personalizacion': personalizacion}
-
-def crear_tabla_contactos(config=None):
-    """Crea la tabla de contactos si no existe"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS contactos (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            numero_telefono VARCHAR(20) UNIQUE,
-            nombre VARCHAR(100),
-            alias VARCHAR(100),
-            imagen_url VARCHAR(255),
-            plataforma VARCHAR(50),
-            fecha_creacion DATETIME DEFAULT CURRENT_TIMESTAMP,
-            fecha_actualizacion DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -989,37 +955,6 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 
-@app.route('/avatar/<numero>')
-def servir_avatar(numero):
-    """Sirve la imagen de perfil de un contacto"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        # Buscar la imagen en la base de datos
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("SELECT imagen_url FROM contactos WHERE numero_telefono = %s", (numero,))
-        contacto = cursor.fetchone()
-        
-        cursor.close()
-        conn.close()
-        
-        if contacto and contacto.get('imagen_url'):
-            # Si la imagen es una ruta local, servirla
-            if contacto['imagen_url'].startswith('/static/'):
-                return send_from_directory('static', contacto['imagen_url'][8:])
-            else:
-                # Si es una URL externa, redirigir
-                return redirect(contacto['imagen_url'])
-        else:
-            # Imagen por defecto
-            return send_from_directory('static', 'img/default-avatar.png')
-            
-    except Exception as e:
-        app.logger.error(f"Error sirviendo avatar: {e}")
-        # Imagen por defecto en caso de error
-        return send_from_directory('static', 'img/default-avatar.png')
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
@@ -1073,32 +1008,13 @@ def extraer_fecha_del_mensaje(mensaje):
     
     return None
 
-def extraer_nombre_del_mensaje(mensaje, numero=None, config=None):
-    """Intenta extraer un nombre del mensaje y lo guarda"""
-    if config is None:
-        config = obtener_configuracion_por_host()
+def extraer_nombre_del_mensaje(mensaje):
+    """Intenta extraer un nombre del mensaje"""
+    # Patrón simple para nombres (2-3 palabras)
+    patron_nombre = r'^[A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}( [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?$'
     
-    # Patrones comunes para identificar nombres
-    patrones_nombre = [
-        r'mi nombre es ([A-Za-zÁáÉéÍíÓóÚúÑñ\s]+)',
-        r'soy ([A-Za-zÁáÉéÍíÓóÚúÑñ\s]+)',
-        r'([A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}(?: [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?)'
-    ]
-    
-    mensaje_limpio = mensaje.lower()
-    
-    for patron in patrones_nombre:
-        coincidencia = re.search(patron, mensaje, re.IGNORECASE)
-        if coincidencia:
-            nombre = coincidencia.group(1).strip()
-            
-            # Validar que sea un nombre razonable
-            if len(nombre.split()) >= 2 and len(nombre) < 50:
-                # Guardar el contacto si tenemos el número
-                if numero:
-                    guardar_contacto(numero=numero, nombre=nombre, config=config)
-                
-                return nombre
+    if re.match(patron_nombre, mensaje.strip()):
+        return mensaje.strip()
     
     return None
 
@@ -1452,38 +1368,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-
-@app.route('/actualizar-avatares', methods=['POST'])
-def actualizar_avatares():
-    """Endpoint para actualizar todas las imágenes de perfil"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Obtener todos los números de teléfono
-        cursor.execute("SELECT DISTINCT numero_telefono FROM contactos")
-        numeros = [row[0] for row in cursor.fetchall()]
-        
-        cursor.close()
-        conn.close()
-        
-        # Actualizar cada imagen de perfil
-        actualizados = 0
-        for numero in numeros:
-            if actualizar_imagen_perfil_contacto(numero, config):
-                actualizados += 1
-        
-        return jsonify({
-            'status': 'success',
-            'message': f'Se actualizaron {actualizados} imágenes de perfil',
-            'total': len(numeros)
-        })
-        
-    except Exception as e:
-        app.logger.error(f"Error en actualizar_avatares: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
@@ -2607,63 +2491,6 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
-def guardar_contacto(numero, nombre=None, alias=None, imagen_url=None, plataforma='whatsapp', config=None):
-    """Guarda o actualiza un contacto en la base de datos - VERSIÓN CORREGIDA"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    if not numero:
-        app.logger.error("❌ No se puede guardar contacto sin número")
-        return False
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    
-    try:
-        # Verificar si el contacto ya existe
-        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
-        contacto_existente = cursor.fetchone()
-        
-        if contacto_existente:
-            # Actualizar contacto existente
-            update_fields = []
-            params = []
-            
-            if nombre:
-                update_fields.append("nombre = %s")
-                params.append(nombre)
-            
-            if alias:
-                update_fields.append("alias = %s")
-                params.append(alias)
-            
-            if imagen_url:
-                update_fields.append("imagen_url = %s")
-                params.append(imagen_url)
-            
-            if update_fields:
-                params.append(numero)
-                query = f"UPDATE contactos SET {', '.join(update_fields)}, fecha_actualizacion = CURRENT_TIMESTAMP WHERE numero_telefono = %s"
-                cursor.execute(query, params)
-        else:
-            # Insertar nuevo contacto
-            cursor.execute("""
-                INSERT INTO contactos (numero_telefono, nombre, alias, imagen_url, plataforma)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (numero, nombre, alias, imagen_url, plataforma))
-        
-        conn.commit()
-        app.logger.info(f"✅ Contacto {'actualizado' if contacto_existente else 'guardado'}: {numero}")
-        return True
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error guardando contacto {numero}: {e}")
-        conn.rollback()
-        return False
-    finally:
-        cursor.close()
-        conn.close()
-
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2952,65 +2779,45 @@ def inicio():
     return redirect(url_for('home', config=config))
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Obtiene la imagen de perfil de un contacto de WhatsApp"""
+    """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # URL de la API de Facebook Graph para obtener la imagen de perfil
-        url = f"https://graph.facebook.com/v15.0/{numero}/picture"
+        # Formatear el número correctamente (eliminar + y espacios)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}'
+        # Usar el endpoint CORRECTO para obtener imagen de contacto
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        
+        params = {
+            'fields': f'contacts({numero_formateado}){{profile}}',
+            'access_token': config['whatsapp_token']
         }
         
-        response = requests.get(url, headers=headers, timeout=10)
+        headers = {
+            'Content-Type': 'application/json',
+        }
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
         
         if response.status_code == 200:
-            # Redirige a la URL real de la imagen
-            if 'location' in response.headers:
-                imagen_url = response.headers['location']
-                return imagen_url
-            else:
-                # Si no hay redirección, la respuesta contiene la imagen directamente
-                return response.url
-        else:
-            app.logger.error(f"Error obteniendo imagen de perfil: {response.status_code}")
-            return None
+            data = response.json()
+            app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
             
-    except Exception as e:
-        app.logger.error(f"Error en obtener_imagen_perfil_whatsapp: {e}")
+            # Verificar la estructura de la respuesta
+            if 'contacts' in data and data['contacts']:
+                contacto = data['contacts'][0]
+                if 'profile' in contacto and 'picture_url' in contacto['profile']:
+                    return contacto['profile']['picture_url']
+        
+        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
         return None
-
-def descargar_y_guardar_imagen(imagen_url, numero, config=None):
-    """Descarga la imagen de perfil y la guarda localmente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Crear directorio para avatares si no existe
-        avatars_dir = os.path.join('static', 'avatars')
-        os.makedirs(avatars_dir, exist_ok=True)
-        
-        # Nombre del archivo basado en el número de teléfono
-        filename = f"{numero}.jpg"
-        filepath = os.path.join(avatars_dir, filename)
-        
-        # Descargar la imagen
-        response = requests.get(imagen_url, timeout=10)
-        response.raise_for_status()
-        
-        # Guardar la imagen
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
-        
-        # Retornar la URL relativa para acceso web
-        return f"/static/avatars/{filename}"
         
     except Exception as e:
-        app.logger.error(f"Error descargando imagen: {e}")
-        return None 
-
+        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        return None
+       
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
@@ -3703,27 +3510,6 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         cursor.close()
         conn.close()
 
-def actualizar_imagen_perfil_contacto(numero, config=None):
-    """Actualiza la imagen de perfil de un contacto - VERSIÓN CORREGIDA"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Obtener imagen de perfil
-        imagen_url = obtener_imagen_perfil_whatsapp(numero, config)
-        
-        if imagen_url:
-            # Actualizar en la base de datos
-            guardar_contacto(numero=numero, imagen_url=imagen_url, config=config)
-            app.logger.info(f"✅ Imagen de perfil actualizada para {numero}")
-            return True
-        
-        return False
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error actualizando imagen de perfil para {numero}: {e}")
-        return False
-
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
@@ -3810,6 +3596,5 @@ if __name__ == '__main__':
     
     # Crear tablas necesarias - usar configuración por defecto
     crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
-    # Después de crear la app
-    crear_tabla_contactos()
+    
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
