@@ -2491,6 +2491,41 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
+def guardar_contacto(numero, nombre=None, alias=None, config=None):
+    """Guarda o actualiza un contacto en la base de datos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    try:
+        # Verificar si el contacto ya existe
+        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
+        existe = cursor.fetchone()
+        
+        if existe:
+            # Actualizar el contacto existente
+            if nombre:
+                cursor.execute("UPDATE contactos SET nombre = %s WHERE numero_telefono = %s", (nombre, numero))
+            if alias:
+                cursor.execute("UPDATE contactos SET alias = %s WHERE numero_telefono = %s", (alias, numero))
+        else:
+            # Insertar nuevo contacto
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, nombre, alias)
+                VALUES (%s, %s, %s)
+            """, (numero, nombre, alias))
+        
+        conn.commit()
+        app.logger.info(f"✅ Contacto guardado: {numero} - {nombre}")
+    except Exception as e:
+        app.logger.error(f"❌ Error guardando contacto: {e}")
+        conn.rollback()
+    finally:
+        cursor.close()
+        conn.close()
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
