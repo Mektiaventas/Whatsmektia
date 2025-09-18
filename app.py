@@ -3379,7 +3379,7 @@ def ver_kanban(config=None):
     columnas = cursor.fetchall()
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    # En ver_kanban(), modifica la consulta para mejor manejo de nombres:
+    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
     cursor.execute("""
         SELECT 
             cm.numero,
