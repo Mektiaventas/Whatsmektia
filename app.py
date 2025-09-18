@@ -2467,6 +2467,39 @@ def enviar_informacion_completa(numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
 
+def crear_contacto_si_no_existe(numero, config=None):
+    """Crea un nuevo contacto si no existe en la base de datos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Verificar si el contacto ya existe
+        cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto_existente = cursor.fetchone()
+        
+        if not contacto_existente:
+            # Crear nuevo contacto
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, plataforma, fecha_creacion) 
+                VALUES (%s, 'whatsapp', NOW())
+            """, (numero,))
+            conn.commit()
+            app.logger.info(f"✅ Nuevo contacto creado: {numero}")
+            
+            # También inicializar metadata para kanban
+            inicializar_chat_meta(numero, config)
+            
+        cursor.close()
+        conn.close()
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error creando contacto {numero}: {e}")
+        return False
+
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -2526,6 +2559,7 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+        crear_contacto_si_no_existe(numero, config)
                 # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
@@ -3485,17 +3519,32 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-        # Asignar automáticamente a la columna "Nuevos" (id=1)
+    """Inicializa metadata para nuevo chat y asigna a columna 'Nuevos'"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        
+        # Obtener ID de la columna "Nuevos" (normalmente id=1)
+        cursor.execute("SELECT id FROM kanban_columnas WHERE nombre LIKE '%Nuevo%' OR orden = 1 LIMIT 1")
+        columna_nuevos = cursor.fetchone()
+        columna_id = columna_nuevos[0] if columna_nuevos else 1
+        
         cursor.execute("""
-            INSERT INTO chat_meta (numero, columna_id) 
-            VALUES (%s, 1)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
-        """, (numero,))
+            INSERT INTO chat_meta (numero, columna_id, fecha_creacion) 
+            VALUES (%s, %s, NOW())
+            ON DUPLICATE KEY UPDATE fecha_actualizacion = NOW()
+        """, (numero, columna_id))
+        
         conn.commit()
         cursor.close()
         conn.close()
+        app.logger.info(f"✅ Metadata inicializada para chat: {numero}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error inicializando metadata para {numero}: {e}")
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
