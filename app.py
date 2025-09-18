@@ -590,42 +590,6 @@ def convertir_audio(audio_path):
         app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
         return None
 
-def guardar_contacto(numero, nombre=None, alias=None, config=None):
-    """Guarda o actualiza un contacto en la base de datos"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    
-    try:
-        # Verificar si el contacto ya existe
-        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
-        existe = cursor.fetchone()
-        
-        if existe:
-            # Actualizar el contacto existente
-            if nombre:
-                cursor.execute("UPDATE contactos SET nombre = %s WHERE numero_telefono = %s", (nombre, numero))
-            if alias:
-                cursor.execute("UPDATE contactos SET alias = %s WHERE numero_telefono = %s", (alias, numero))
-        else:
-            # Insertar nuevo contacto
-            cursor.execute("""
-                INSERT INTO contactos (numero_telefono, nombre, alias)
-                VALUES (%s, %s, %s)
-            """, (numero, nombre, alias))
-        
-        conn.commit()
-        app.logger.info(f"✅ Contacto guardado: {numero} - {nombre}")
-    except Exception as e:
-        app.logger.error(f"❌ Error guardando contacto: {e}")
-        conn.rollback()
-    finally:
-        cursor.close()
-        conn.close()
-
-# Modificar la función extraer_info_cita_mejorado
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información"""
     if config is None:
@@ -687,15 +651,6 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
             info_cita = json.loads(json_match.group())
-            
-            # 🔑 NUEVO: Guardar el contacto si tenemos el nombre
-            if info_cita.get('nombre_cliente'):
-                guardar_contacto(
-                    numero=info_cita.get('telefono'),
-                    nombre=info_cita.get('nombre_cliente'),
-                    config=config
-                )
-            
             return info_cita
         else:
             return None
@@ -783,6 +738,7 @@ def kanban_data(config = None):
             GROUP BY cm.numero, cm.columna_id
             ORDER BY ultima_fecha DESC;
         """)
+        chats = cursor.fetchall()
 
         # Convertir timestamps a hora de México
         for chat in chats:
@@ -1052,21 +1008,16 @@ def extraer_fecha_del_mensaje(mensaje):
     
     return None
 
-def extraer_nombre_del_mensaje(mensaje, numero=None, config=None):
-    """Intenta extraer un nombre del mensaje y lo guarda"""
+def extraer_nombre_del_mensaje(mensaje):
+    """Intenta extraer un nombre del mensaje"""
     # Patrón simple para nombres (2-3 palabras)
     patron_nombre = r'^[A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20} [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20}( [A-Za-zÁáÉéÍíÓóÚúÑñ]{2,20})?$'
     
     if re.match(patron_nombre, mensaje.strip()):
-        nombre = mensaje.strip()
-        
-        # Guardar el nombre si tenemos el número
-        if numero:
-            guardar_contacto(numero=numero, nombre=nombre, config=config)
-        
-        return nombre
+        return mensaje.strip()
     
     return None
+
 def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
     """
     Solicita al usuario los datos faltantes para completar la cita/pedido
