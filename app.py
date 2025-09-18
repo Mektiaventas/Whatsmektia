@@ -705,9 +705,11 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
 @app.route('/kanban/data') 
-def kanban_data(config = None):
+def kanban_data(config=None):
     """Endpoint que devuelve los datos del Kanban en formato JSON"""
-    config = obtener_configuracion_por_host()
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -740,16 +742,23 @@ def kanban_data(config = None):
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps a hora de México
+        # Obtener el dominio actual
+        dominio = config.get('dominio', 'mektia.com')
+        if not dominio.startswith('http'):
+            dominio = f"https://{dominio}"
+
+        # Convertir timestamps a hora de México y construir URLs completas
         for chat in chats:
             if chat.get('ultima_fecha'):
                 if chat['ultima_fecha'].tzinfo is not None:
                     chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 else:
                     chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                
-                # Formatear fecha para JSON
                 chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+            
+            # Construir URL completa para el avatar si es una ruta relativa
+            if chat.get('avatar') and not chat['avatar'].startswith('http'):
+                chat['avatar'] = f"{dominio}{chat['avatar']}"
 
         cursor.close()
         conn.close()
@@ -980,6 +989,37 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 
+@app.route('/avatar/<numero>')
+def servir_avatar(numero):
+    """Sirve la imagen de perfil de un contacto"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        # Buscar la imagen en la base de datos
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT imagen_url FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        if contacto and contacto.get('imagen_url'):
+            # Si la imagen es una ruta local, servirla
+            if contacto['imagen_url'].startswith('/static/'):
+                return send_from_directory('static', contacto['imagen_url'][8:])
+            else:
+                # Si es una URL externa, redirigir
+                return redirect(contacto['imagen_url'])
+        else:
+            # Imagen por defecto
+            return send_from_directory('static', 'img/default-avatar.png')
+            
+    except Exception as e:
+        app.logger.error(f"Error sirviendo avatar: {e}")
+        # Imagen por defecto en caso de error
+        return send_from_directory('static', 'img/default-avatar.png')
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
@@ -1412,6 +1452,38 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
+
+@app.route('/actualizar-avatares', methods=['POST'])
+def actualizar_avatares():
+    """Endpoint para actualizar todas las imágenes de perfil"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Obtener todos los números de teléfono
+        cursor.execute("SELECT DISTINCT numero_telefono FROM contactos")
+        numeros = [row[0] for row in cursor.fetchall()]
+        
+        cursor.close()
+        conn.close()
+        
+        # Actualizar cada imagen de perfil
+        actualizados = 0
+        for numero in numeros:
+            if actualizar_imagen_perfil_contacto(numero, config):
+                actualizados += 1
+        
+        return jsonify({
+            'status': 'success',
+            'message': f'Se actualizaron {actualizados} imágenes de perfil',
+            'total': len(numeros)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error en actualizar_avatares: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
@@ -2906,7 +2978,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error en obtener_imagen_perfil_whatsapp: {e}")
         return None
-   
+
 def descargar_y_guardar_imagen(imagen_url, numero, config=None):
     """Descarga la imagen de perfil y la guarda localmente"""
     if config is None:
@@ -2934,8 +3006,7 @@ def descargar_y_guardar_imagen(imagen_url, numero, config=None):
         
     except Exception as e:
         app.logger.error(f"Error descargando imagen: {e}")
-        return None
-    
+        return None 
 
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
