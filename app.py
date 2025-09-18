@@ -2607,60 +2607,63 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
-def guardar_contacto(numero, nombre=None, alias=None, imagen_url=None, config=None):
-    """Guarda o actualiza un contacto en la base de datos"""
+def guardar_contacto(numero, nombre=None, alias=None, imagen_url=None, plataforma='whatsapp', config=None):
+    """Guarda o actualiza un contacto en la base de datos - VERSIÓN CORREGIDA"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     if not numero:
         app.logger.error("❌ No se puede guardar contacto sin número")
-        return
+        return False
     
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
     try:
         # Verificar si el contacto ya existe
-        cursor.execute("SELECT id, nombre, alias, imagen_url FROM contactos WHERE numero_telefono = %s", (numero,))
-        contacto = cursor.fetchone()
+        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto_existente = cursor.fetchone()
         
-        if contacto:
-            # Actualizar el contacto existente
+        if contacto_existente:
+            # Actualizar contacto existente
             update_fields = []
             params = []
             
-            if nombre and nombre != contacto[1]:
+            if nombre:
                 update_fields.append("nombre = %s")
                 params.append(nombre)
             
-            if alias and alias != contacto[2]:
+            if alias:
                 update_fields.append("alias = %s")
                 params.append(alias)
             
-            if imagen_url and imagen_url != contacto[3]:
+            if imagen_url:
                 update_fields.append("imagen_url = %s")
                 params.append(imagen_url)
             
             if update_fields:
                 params.append(numero)
-                query = f"UPDATE contactos SET {', '.join(update_fields)} WHERE numero_telefono = %s"
+                query = f"UPDATE contactos SET {', '.join(update_fields)}, fecha_actualizacion = CURRENT_TIMESTAMP WHERE numero_telefono = %s"
                 cursor.execute(query, params)
-                conn.commit()
-                app.logger.info(f"✅ Contacto actualizado: {numero}")
         else:
             # Insertar nuevo contacto
             cursor.execute("""
-                INSERT INTO contactos (numero_telefono, nombre, alias, imagen_url)
-                VALUES (%s, %s, %s, %s)
-            """, (numero, nombre, alias, imagen_url))
-            conn.commit()
-            app.logger.info(f"✅ Nuevo contacto guardado: {numero}")
+                INSERT INTO contactos (numero_telefono, nombre, alias, imagen_url, plataforma)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (numero, nombre, alias, imagen_url, plataforma))
+        
+        conn.commit()
+        app.logger.info(f"✅ Contacto {'actualizado' if contacto_existente else 'guardado'}: {numero}")
+        return True
+        
     except Exception as e:
-        app.logger.error(f"❌ Error guardando contacto: {e}")
+        app.logger.error(f"❌ Error guardando contacto {numero}: {e}")
         conn.rollback()
+        return False
     finally:
         cursor.close()
         conn.close()
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -3701,28 +3704,24 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.close()
 
 def actualizar_imagen_perfil_contacto(numero, config=None):
-    """Actualiza la imagen de perfil de un contacto"""
+    """Actualiza la imagen de perfil de un contacto - VERSIÓN CORREGIDA"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Obtener la URL de la imagen de perfil de WhatsApp
+        # Obtener imagen de perfil
         imagen_url = obtener_imagen_perfil_whatsapp(numero, config)
         
         if imagen_url:
-            # Descargar y guardar la imagen localmente
-            imagen_local = descargar_y_guardar_imagen(imagen_url, numero, config)
-            
-            if imagen_local:
-                # Actualizar el contacto con la nueva imagen
-                guardar_contacto(numero=numero, imagen_url=imagen_local, config=config)
-                app.logger.info(f"✅ Imagen de perfil actualizada para {numero}")
-                return True
+            # Actualizar en la base de datos
+            guardar_contacto(numero=numero, imagen_url=imagen_url, config=config)
+            app.logger.info(f"✅ Imagen de perfil actualizada para {numero}")
+            return True
         
         return False
         
     except Exception as e:
-        app.logger.error(f"Error actualizando imagen de perfil: {e}")
+        app.logger.error(f"❌ Error actualizando imagen de perfil para {numero}: {e}")
         return False
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
