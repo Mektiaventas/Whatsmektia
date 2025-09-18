@@ -3379,6 +3379,7 @@ def ver_kanban(config=None):
     columnas = cursor.fetchall()
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+    # En ver_kanban(), modifica la consulta para mejor manejo de nombres:
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -3389,8 +3390,12 @@ def ver_kanban(config=None):
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre > número
-            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+            -- PRIORIDAD: alias > nombre de perfil > número
+            COALESCE(
+                MAX(cont.alias), 
+                MAX(cont.nombre), 
+                cm.numero
+            ) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
@@ -3485,15 +3490,48 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-        # Asignar automáticamente a la columna "Nuevos" (id=1)
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
+    """Inicializa el chat meta y asegura que el contacto exista con su nombre"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # 1. Primero verificar/crear el contacto en la tabla contactos
+        cursor.execute("""
+            INSERT INTO contactos (numero_telefono, plataforma, fecha_creacion)
+            VALUES (%s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                fecha_actualizacion = NOW(),
+                plataforma = VALUES(plataforma)
+        """, (numero,))
+        
+        # 2. Intentar obtener el nombre del perfil de WhatsApp (si está disponible)
+        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+        if nombre_perfil:
+            cursor.execute("""
+                UPDATE contactos 
+                SET nombre = %s, fecha_actualizacion = NOW()
+                WHERE numero_telefono = %s AND (nombre IS NULL OR nombre = '')
+            """, (nombre_perfil, numero))
+        
+        # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id) 
             VALUES (%s, 1)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
+            ON DUPLICATE KEY UPDATE 
+                columna_id = VALUES(columna_id),
+                fecha_actualizacion = NOW()
         """, (numero,))
+        
         conn.commit()
+        
+    except Exception as e:
+        app.logger.error(f"Error inicializando chat meta para {numero}: {e}")
+        conn.rollback()
+    
+    finally:
         cursor.close()
         conn.close()
 
@@ -3531,6 +3569,39 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         # Si no cumple nada, mantener donde está
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
+
+def obtener_nombre_perfil_whatsapp(numero, config=None):
+    """Intenta obtener el nombre del perfil de WhatsApp"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Formatear número (eliminar + y espacios)
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        
+        params = {
+            'fields': f'contacts({numero_formateado}){{name}}',
+            'access_token': config['whatsapp_token']
+        }
+        
+        headers = {'Content-Type': 'application/json'}
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'contacts' in data and data['contacts']:
+                contacto = data['contacts'][0]
+                if 'name' in contacto and 'formatted_name' in contacto['name']:
+                    return contacto['name']['formatted_name']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"Error obteniendo nombre de perfil: {e}")
+        return None
 
 def obtener_contexto_consulta(numero, config=None):
     """Obtiene el contexto de la consulta o proyecto del cliente"""
