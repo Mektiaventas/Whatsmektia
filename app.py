@@ -2535,7 +2535,7 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
-def guardar_contacto(numero, nombre=None, alias=None, config=None):
+def guardar_contacto(numero, nombre=None, alias=None, imagen_url=None, config=None):
     """Guarda o actualiza un contacto en la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -2549,43 +2549,46 @@ def guardar_contacto(numero, nombre=None, alias=None, config=None):
     
     try:
         # Verificar si el contacto ya existe
-        cursor.execute("SELECT id, nombre, alias FROM contactos WHERE numero_telefono = %s", (numero,))
+        cursor.execute("SELECT id, nombre, alias, imagen_url FROM contactos WHERE numero_telefono = %s", (numero,))
         contacto = cursor.fetchone()
         
         if contacto:
-            # Actualizar el contacto existente solo si hay nuevos datos
+            # Actualizar el contacto existente
             update_fields = []
             params = []
             
-            if nombre and nombre != contacto[1]:  # contacto[1] es el nombre actual
+            if nombre and nombre != contacto[1]:
                 update_fields.append("nombre = %s")
                 params.append(nombre)
             
-            if alias and alias != contacto[2]:  # contacto[2] es el alias actual
+            if alias and alias != contacto[2]:
                 update_fields.append("alias = %s")
                 params.append(alias)
+            
+            if imagen_url and imagen_url != contacto[3]:
+                update_fields.append("imagen_url = %s")
+                params.append(imagen_url)
             
             if update_fields:
                 params.append(numero)
                 query = f"UPDATE contactos SET {', '.join(update_fields)} WHERE numero_telefono = %s"
                 cursor.execute(query, params)
                 conn.commit()
-                app.logger.info(f"✅ Contacto actualizado: {numero} - {nombre or alias}")
+                app.logger.info(f"✅ Contacto actualizado: {numero}")
         else:
             # Insertar nuevo contacto
             cursor.execute("""
-                INSERT INTO contactos (numero_telefono, nombre, alias)
-                VALUES (%s, %s, %s)
-            """, (numero, nombre, alias))
+                INSERT INTO contactos (numero_telefono, nombre, alias, imagen_url)
+                VALUES (%s, %s, %s, %s)
+            """, (numero, nombre, alias, imagen_url))
             conn.commit()
-            app.logger.info(f"✅ Nuevo contacto guardado: {numero} - {nombre or alias}")
+            app.logger.info(f"✅ Nuevo contacto guardado: {numero}")
     except Exception as e:
         app.logger.error(f"❌ Error guardando contacto: {e}")
         conn.rollback()
     finally:
         cursor.close()
         conn.close()
-
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2874,45 +2877,66 @@ def inicio():
     return redirect(url_for('home', config=config))
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
+    """Obtiene la imagen de perfil de un contacto de WhatsApp"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Formatear el número correctamente (eliminar + y espacios)
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Usar el endpoint CORRECTO para obtener imagen de contacto
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': f'contacts({numero_formateado}){{profile}}',
-            'access_token': config['whatsapp_token']
-        }
+        # URL de la API de Facebook Graph para obtener la imagen de perfil
+        url = f"https://graph.facebook.com/v15.0/{numero}/picture"
         
         headers = {
-            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {config["whatsapp_token"]}'
         }
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
-            data = response.json()
-            app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
+            # Redirige a la URL real de la imagen
+            if 'location' in response.headers:
+                imagen_url = response.headers['location']
+                return imagen_url
+            else:
+                # Si no hay redirección, la respuesta contiene la imagen directamente
+                return response.url
+        else:
+            app.logger.error(f"Error obteniendo imagen de perfil: {response.status_code}")
+            return None
             
-            # Verificar la estructura de la respuesta
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['picture_url']
-        
-        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
+    except Exception as e:
+        app.logger.error(f"Error en obtener_imagen_perfil_whatsapp: {e}")
         return None
+   
+def descargar_y_guardar_imagen(imagen_url, numero, config=None):
+    """Descarga la imagen de perfil y la guarda localmente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Crear directorio para avatares si no existe
+        avatars_dir = os.path.join('static', 'avatars')
+        os.makedirs(avatars_dir, exist_ok=True)
+        
+        # Nombre del archivo basado en el número de teléfono
+        filename = f"{numero}.jpg"
+        filepath = os.path.join(avatars_dir, filename)
+        
+        # Descargar la imagen
+        response = requests.get(imagen_url, timeout=10)
+        response.raise_for_status()
+        
+        # Guardar la imagen
+        with open(filepath, 'wb') as f:
+            f.write(response.content)
+        
+        # Retornar la URL relativa para acceso web
+        return f"/static/avatars/{filename}"
         
     except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
+        app.logger.error(f"Error descargando imagen: {e}")
         return None
-       
+    
+
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
@@ -3604,6 +3628,31 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.commit()
         cursor.close()
         conn.close()
+
+def actualizar_imagen_perfil_contacto(numero, config=None):
+    """Actualiza la imagen de perfil de un contacto"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Obtener la URL de la imagen de perfil de WhatsApp
+        imagen_url = obtener_imagen_perfil_whatsapp(numero, config)
+        
+        if imagen_url:
+            # Descargar y guardar la imagen localmente
+            imagen_local = descargar_y_guardar_imagen(imagen_url, numero, config)
+            
+            if imagen_local:
+                # Actualizar el contacto con la nueva imagen
+                guardar_contacto(numero=numero, imagen_url=imagen_local, config=config)
+                app.logger.info(f"✅ Imagen de perfil actualizada para {numero}")
+                return True
+        
+        return False
+        
+    except Exception as e:
+        app.logger.error(f"Error actualizando imagen de perfil: {e}")
+        return False
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
