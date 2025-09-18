@@ -2006,6 +2006,24 @@ def enviar_mensaje(numero, texto, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Exception: {e}")
         return False
+
+@app.route('/actualizar-contactos')
+def actualizar_contactos():
+    """Endpoint para actualizar información de todos los contactos"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT DISTINCT numero_telefono FROM contactos")
+    numeros = [row[0] for row in cursor.fetchall()]
+    
+    for numero in numeros:
+        actualizar_info_contacto(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Actualizados {len(numeros)} contactos"
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
@@ -2014,6 +2032,9 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         config = obtener_configuracion_por_host()
     
     try:
+        # Primero asegurar que el contacto existe con su información actualizada
+        actualizar_info_contacto(numero, config)
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
@@ -2033,7 +2054,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
-      
+    
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
@@ -2585,7 +2606,8 @@ def webhook():
         imagen_base64 = None
         public_url = None
         transcripcion = None
-        
+        # En el webhook, después de procesar el mensaje:
+        actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
@@ -2778,26 +2800,62 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+def obtener_nombre_perfil_whatsapp(numero, config=None):
+    """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Formatear número correctamente
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Endpoint CORRECTO para obtener información de contacto
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        
+        params = {
+            'fields': 'contacts',
+            'user_numbers': f'["{numero_formateado}"]',
+            'access_token': config['whatsapp_token']
+        }
+        
+        headers = {'Content-Type': 'application/json'}
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
+            
+            if 'contacts' in data and data['contacts']:
+                contacto = data['contacts'][0]
+                if 'profile' in contacto and 'name' in contacto['profile']:
+                    return contacto['profile']['name']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
+        return None
+
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Formatear el número correctamente (eliminar + y espacios)
+        # Formatear número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Usar el endpoint CORRECTO para obtener imagen de contacto
+        # Endpoint CORRECTO para obtener imagen de perfil
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': f'contacts({numero_formateado}){{profile}}',
+            'fields': 'contacts',
+            'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
         
-        headers = {
-            'Content-Type': 'application/json',
-        }
+        headers = {'Content-Type': 'application/json'}
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
         
@@ -2805,19 +2863,17 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
             data = response.json()
             app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
             
-            # Verificar la estructura de la respuesta
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
                 if 'profile' in contacto and 'picture_url' in contacto['profile']:
                     return contacto['profile']['picture_url']
         
-        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
         return None
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
-       
+    
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
@@ -3490,7 +3546,7 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-    """Inicializa el chat meta y asegura que el contacto exista con su nombre"""
+    """Inicializa el chat meta y asegura que el contacto exista con su nombre e imagen"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3498,23 +3554,23 @@ def inicializar_chat_meta(numero, config=None):
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # 1. Primero verificar/crear el contacto en la tabla contactos
+        # 1. Obtener nombre e imagen de WhatsApp
+        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        
+        app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        
+        # 2. Insertar/actualizar contacto con toda la información
         cursor.execute("""
-            INSERT INTO contactos (numero_telefono, plataforma, fecha_creacion)
-            VALUES (%s, 'WhatsApp', NOW())
+            INSERT INTO contactos 
+                (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
+            VALUES (%s, %s, %s, 'WhatsApp', NOW())
             ON DUPLICATE KEY UPDATE 
+                nombre = COALESCE(%s, nombre),
+                imagen_url = COALESCE(%s, imagen_url),
                 fecha_actualizacion = NOW(),
                 plataforma = VALUES(plataforma)
-        """, (numero,))
-        
-        # 2. Intentar obtener el nombre del perfil de WhatsApp (si está disponible)
-        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-        if nombre_perfil:
-            cursor.execute("""
-                UPDATE contactos 
-                SET nombre = %s, fecha_actualizacion = NOW()
-                WHERE numero_telefono = %s AND (nombre IS NULL OR nombre = '')
-            """, (nombre_perfil, numero))
+        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
         
         # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
@@ -3526,9 +3582,10 @@ def inicializar_chat_meta(numero, config=None):
         """, (numero,))
         
         conn.commit()
+        app.logger.info(f"✅ Contacto actualizado: {numero} - {nombre_perfil}")
         
     except Exception as e:
-        app.logger.error(f"Error inicializando chat meta para {numero}: {e}")
+        app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
         conn.rollback()
     
     finally:
@@ -3547,6 +3604,36 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.commit()
         cursor.close()
         conn.close()
+
+def actualizar_info_contacto(numero, config=None):
+    """Actualiza la información del contacto (nombre e imagen)"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        
+        if nombre_perfil or imagen_perfil:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE contactos 
+                SET nombre = COALESCE(%s, nombre),
+                    imagen_url = COALESCE(%s, imagen_url),
+                    fecha_actualizacion = NOW()
+                WHERE numero_telefono = %s
+            """, (nombre_perfil, imagen_perfil, numero))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            app.logger.info(f"🔄 Contacto actualizado: {numero}")
+            
+    except Exception as e:
+        app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
@@ -3570,38 +3657,6 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
 
-def obtener_nombre_perfil_whatsapp(numero, config=None):
-    """Intenta obtener el nombre del perfil de WhatsApp"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Formatear número (eliminar + y espacios)
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': f'contacts({numero_formateado}){{name}}',
-            'access_token': config['whatsapp_token']
-        }
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                if 'name' in contacto and 'formatted_name' in contacto['name']:
-                    return contacto['name']['formatted_name']
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"Error obteniendo nombre de perfil: {e}")
-        return None
 
 def obtener_contexto_consulta(numero, config=None):
     """Obtiene el contexto de la consulta o proyecto del cliente"""

@@ -342,10 +342,18 @@ def autorizar_manual():
         if not os.path.exists('client_secret.json'):
             return "❌ Error: No se encuentra client_secret.json"
         
+        # Obtener el host actual de la solicitud
+        host = request.host
+        app.logger.info(f"🔍 Host actual en autorizar_manual: {host}")
+        
+        # Construir la URI de redirección basada en el host actual
+        redirect_uri = f'https://{host}/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección en autorizar_manual: {redirect_uri}")
+        
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
             SCOPES,
-            redirect_uri='https://www.mektia.com/completar-autorizacion'
+            redirect_uri=redirect_uri
         )
         
         # Generar URL de autorización
@@ -354,6 +362,8 @@ def autorizar_manual():
             access_type='offline',
             include_granted_scopes='true'
         )
+        
+        app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
         
         return f'''
         <h1>✅ Autorización Google Calendar</h1>
@@ -367,6 +377,7 @@ def autorizar_manual():
         '''
         
     except Exception as e:
+        app.logger.error(f"❌ Error en autorización manual: {str(e)}")
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
@@ -463,31 +474,111 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
-@app.route('/completar-autorizacion')
+@app.route('/completar_autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
     try:
+        # Obtener todos los parámetros de la URL
         code = request.args.get('code')
+        state = request.args.get('state')
+        scope = request.args.get('scope')
+        
+        app.logger.info(f"🔐 Parámetros recibidos:")
+        app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
+        app.logger.info(f"  - State: {state}")
+        app.logger.info(f"  - Scope: {scope}")
+        
         if not code:
-            return "❌ Error: No se proporcionó código"
+            app.logger.error("❌ No se proporcionó código de autorización")
+            return "❌ Error: No se proporcionó código de autorización"
+        
+        # Definir rutas absolutas
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
+        token_path = os.path.join(BASE_DIR, 'token.json')
+        
+        # Verificar que el archivo client_secret.json existe
+        if not os.path.exists(client_secret_path):
+            app.logger.error(f"❌ No se encuentra {client_secret_path}")
+            return f"❌ Error: No se encuentra el archivo de configuración de Google"
+        
+        # Obtener el host actual de la solicitud
+        host = request.host
+        app.logger.info(f"🔍 Host actual: {host}")
+        
+        # Construir la URI de redirección basada en el host actual
+        redirect_uri = f'https://{host}/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección: {redirect_uri}")
         
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        flow = InstalledAppFlow.from_client_secrets_file('client_secret.json', SCOPES)
+        
+        # Crear el flujo de OAuth
+        app.logger.info("🔄 Creando flujo de OAuth...")
+        flow = InstalledAppFlow.from_client_secrets_file(
+            client_secret_path, 
+            SCOPES,
+            redirect_uri=redirect_uri
+        )
         
         # Intercambiar código por token
+        app.logger.info("🔄 Intercambiando código por token...")
         flow.fetch_token(code=code)
         creds = flow.credentials
         
+        app.logger.info("✅ Token obtenido correctamente")
+        
         # Guardar token
-        with open('token.json', 'w') as token:
+        app.logger.info(f"💾 Guardando token en: {token_path}")
+        
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
         
-        return "✅ Autorización completada correctamente. Ya puedes usar Google Calendar."
+        app.logger.info("✅ Autorización completada correctamente")
+        return """
+        <html>
+        <head>
+            <title>Autorización Completada</title>
+            <style>
+                body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+                .success { color: green; font-size: 24px; }
+                .info { margin: 20px; }
+            </style>
+        </head>
+        <body>
+            <h1 class="success">✅ Autorización completada correctamente</h1>
+            <div class="info">
+                <p>Ya puedes usar Google Calendar para agendar citas.</p>
+                <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
+            </div>
+        </body>
+        </html>
+        """
         
     except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-
+        app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
+        app.logger.error(traceback.format_exc())
+        return f"""
+        <html>
+        <head>
+            <title>Error de Autorización</title>
+            <style>
+                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
+                .error {{ color: red; font-size: 24px; }}
+                .info {{ margin: 20px; }}
+                pre {{ background: #f5f5f5; padding: 10px; text-align: left; margin: 20px auto; max-width: 80%; }}
+            </style>
+        </head>
+        <body>
+            <h1 class="error">❌ Error en la autorización</h1>
+            <div class="info">
+                <p>Ocurrió un error al procesar la autorización de Google:</p>
+                <pre>{str(e)}</pre>
+                <p>Por favor, contacta al administrador del sistema.</p>
+            </div>
+        </body>
+        </html>
+        """
+         
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
@@ -614,8 +705,8 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
 @app.route('/kanban/data') 
-@app.route('/kanban/data') 
 def kanban_data(config = None):
+    """Endpoint que devuelve los datos del Kanban en formato JSON"""
     config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
@@ -625,22 +716,22 @@ def kanban_data(config = None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
         columnas = cursor.fetchall()
 
-        # 2) Datos de los chats - MODIFICADO
+        # 2) Datos de los chats
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                WHERE numero = cm.numero 
+                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 (SELECT imagen_url FROM contactos 
-                 WHERE numero_telefono = cm.numero 
-                 ORDER BY id DESC LIMIT 1) AS avatar,
+                WHERE numero_telefono = cm.numero 
+                ORDER BY id DESC LIMIT 1) AS avatar,
                 MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -648,10 +739,6 @@ def kanban_data(config = None):
             ORDER BY ultima_fecha DESC;
         """)
         chats = cursor.fetchall()
-
-        # Agregar logging para depuración
-        for chat in chats:
-            app.logger.info(f"Chat {chat['numero']}: avatar = {chat['avatar']}")
 
         # Convertir timestamps a hora de México
         for chat in chats:
@@ -677,7 +764,7 @@ def kanban_data(config = None):
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
-    
+
 # ——— Configuración en MySQL ———
 def load_config(config=None):
     if config is None:
@@ -748,56 +835,6 @@ def crear_tabla_citas(config=None):
     conn.commit()
     cursor.close()
     conn.close()
-
-def guardar_imagen_perfil_desde_mensaje(numero, imagen_url, config=None):
-    """Guarda una imagen de perfil desde una URL de WhatsApp"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Descargar la imagen
-        response = requests.get(imagen_url, timeout=10)
-        if response.status_code != 200:
-            return None
-        
-        # Generar nombre seguro para el archivo
-        filename = secure_filename(f"perfil_{numero}_{int(time.time())}.jpg")
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        # Guardar archivo
-        with open(filepath, 'wb') as f:
-            f.write(response.content)
-        
-        # Actualizar base de datos
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Verificar si el contacto existe
-        cursor.execute("SELECT id FROM contactos WHERE numero_telefono = %s", (numero,))
-        if cursor.fetchone() is None:
-            # Crear contacto si no existe
-            cursor.execute("""
-                INSERT INTO contactos (numero_telefono, imagen_url) 
-                VALUES (%s, %s)
-            """, (numero, f"/uploads/{filename}"))
-        else:
-            # Actualizar contacto existente
-            cursor.execute("""
-                UPDATE contactos 
-                SET imagen_url = %s 
-                WHERE numero_telefono = %s
-            """, (f"/uploads/{filename}", numero))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"Imagen de perfil guardada para {numero}: {filename}")
-        return f"/uploads/{filename}"
-        
-    except Exception as e:
-        app.logger.error(f"Error guardando imagen de perfil: {e}")
-        return None
 
 def guardar_cita(info_cita, config=None):
     """Guarda la cita en la base de datos y agenda en Google Calendar"""
@@ -1566,7 +1603,8 @@ def procesar_codigo():
         if not code:
             return "❌ Error: No se proporcionó código"
         
-        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        # En app.py, la función autenticar_google_calendar()
+        SCOPES = ['https://www.googleapis.com/auth/calendar']  # Este scope está correcto
         
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
@@ -1794,6 +1832,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
+
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
@@ -1967,6 +2006,24 @@ def enviar_mensaje(numero, texto, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Exception: {e}")
         return False
+
+@app.route('/actualizar-contactos')
+def actualizar_contactos():
+    """Endpoint para actualizar información de todos los contactos"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT DISTINCT numero_telefono FROM contactos")
+    numeros = [row[0] for row in cursor.fetchall()]
+    
+    for numero in numeros:
+        actualizar_info_contacto(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Actualizados {len(numeros)} contactos"
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
@@ -1975,6 +2032,9 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         config = obtener_configuracion_por_host()
     
     try:
+        # Primero asegurar que el contacto existe con su información actualizada
+        actualizar_info_contacto(numero, config)
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
@@ -1994,7 +2054,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
-      
+    
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
@@ -2428,53 +2488,6 @@ def enviar_informacion_completa(numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
 
-@app.route('/actualizar-imagenes-perfil', methods=['POST'])
-def actualizar_imagenes_perfil():
-    """Actualiza las imágenes de perfil de todos los contactos"""
-    config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # Obtener todos los contactos sin imagen
-    cursor.execute("""
-        SELECT DISTINCT c.numero_telefono 
-        FROM contactos c
-        LEFT JOIN conversaciones co ON c.numero_telefono = co.numero
-        WHERE c.imagen_url IS NULL 
-        AND co.tipo_mensaje = 'imagen'
-        ORDER BY c.numero_telefono
-        LIMIT 50
-    """)
-    
-    contactos = cursor.fetchall()
-    actualizados = 0
-    
-    for contacto in contactos:
-        numero = contacto['numero_telefono']
-        
-        # Buscar la última imagen enviada por este contacto
-        cursor.execute("""
-            SELECT contenido_extra 
-            FROM conversaciones 
-            WHERE numero = %s AND tipo_mensaje = 'imagen'
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """, (numero,))
-        
-        resultado = cursor.fetchone()
-        if resultado and resultado['contenido_extra']:
-            imagen_url = guardar_imagen_perfil_desde_mensaje(numero, resultado['contenido_extra'])
-            if imagen_url:
-                actualizados += 1
-    
-    cursor.close()
-    conn.close()
-    
-    return jsonify({
-        'mensaje': f'Se actualizaron {actualizados} imágenes de perfil',
-        'total_procesados': len(contactos)
-    })
-
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -2593,7 +2606,8 @@ def webhook():
         imagen_base64 = None
         public_url = None
         transcripcion = None
-        
+        # En el webhook, después de procesar el mensaje:
+        actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
         elif 'image' in msg:
@@ -2601,7 +2615,6 @@ def webhook():
             image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip()
-            guardar_imagen_perfil_desde_mensaje(numero, mensaje['imagen']['url'])
             if not texto:
                 texto = "El usuario envió una imagen"
             
@@ -2787,26 +2800,62 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+def obtener_nombre_perfil_whatsapp(numero, config=None):
+    """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Formatear número correctamente
+        numero_formateado = numero.replace('+', '').replace(' ', '')
+        
+        # Endpoint CORRECTO para obtener información de contacto
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        
+        params = {
+            'fields': 'contacts',
+            'user_numbers': f'["{numero_formateado}"]',
+            'access_token': config['whatsapp_token']
+        }
+        
+        headers = {'Content-Type': 'application/json'}
+        
+        response = requests.get(url, params=params, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
+            
+            if 'contacts' in data and data['contacts']:
+                contacto = data['contacts'][0]
+                if 'profile' in contacto and 'name' in contacto['profile']:
+                    return contacto['profile']['name']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
+        return None
+
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Formatear el número correctamente (eliminar + y espacios)
+        # Formatear número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Usar el endpoint CORRECTO para obtener imagen de contacto
+        # Endpoint CORRECTO para obtener imagen de perfil
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': f'contacts({numero_formateado}){{profile}}',
+            'fields': 'contacts',
+            'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
         
-        headers = {
-            'Content-Type': 'application/json',
-        }
+        headers = {'Content-Type': 'application/json'}
         
         response = requests.get(url, params=params, headers=headers, timeout=10)
         
@@ -2814,19 +2863,17 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
             data = response.json()
             app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
             
-            # Verificar la estructura de la respuesta
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
                 if 'profile' in contacto and 'picture_url' in contacto['profile']:
                     return contacto['profile']['picture_url']
         
-        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
         return None
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
         return None
-       
+    
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
     try:
@@ -2939,30 +2986,48 @@ def home():
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
+    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocido')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute("""
         SELECT 
-            c.numero_telefono as numero,
-            c.nombre,
-            c.alias,
-            c.imagen_url as avatar,
-            MAX(co.timestamp) as ultima_fecha,
-            (SELECT mensaje FROM conversaciones 
-             WHERE numero = c.numero_telefono 
-             ORDER BY timestamp DESC LIMIT 1) as ultimo_mensaje
-        FROM contactos c
-        LEFT JOIN conversaciones co ON c.numero_telefono = co.numero
-        GROUP BY c.numero_telefono
-        ORDER BY ultima_fecha DESC
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          -- PRIORIDAD: alias > nombre > número
+          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+          cont.alias,
+          cont.nombre,
+          (SELECT mensaje FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+          MAX(conv.timestamp) AS ultima_fecha
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
+        ORDER BY MAX(conv.timestamp) DESC
     """)
-    
     chats = cursor.fetchall()
+    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
     cursor.close()
     conn.close()
     
-    return render_template('chats.html', chats=chats, selected=request.args.get('selected'))
+    return render_template('chats.html',
+        chats=chats, 
+        mensajes=None,
+        selected=None, 
+        IA_ESTADOS=IA_ESTADOS,
+        tenant_config=config
+    )
 
 @app.route('/chats/<numero>')
 def ver_chat(numero):
@@ -3024,46 +3089,7 @@ def ver_chat(numero):
         return render_template('error.html', 
                              error_message="Error al cargar el chat", 
                              error_details=str(e)), 500
-
-
-@app.route('/debug-imagenes')
-def debug_imagenes():
-    """Endpoint para depurar problemas con imágenes"""
-    config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # Obtener información de contactos con imágenes
-    cursor.execute("""
-        SELECT numero_telefono, nombre, alias, imagen_url 
-        FROM contactos 
-        WHERE imagen_url IS NOT NULL 
-        LIMIT 10
-    """)
-    
-    contactos = cursor.fetchall()
-    
-    # Verificar existencia de archivos
-    for contacto in contactos:
-        if contacto['imagen_url']:
-            if contacto['imagen_url'].startswith('/uploads/'):
-                filename = contacto['imagen_url'][9:]  # Quitar '/uploads/'
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
-                contacto['archivo_existe'] = os.path.exists(filepath)
-                contacto['ruta_completa'] = filepath
-            else:
-                contacto['archivo_existe'] = False
-        else:
-            contacto['archivo_existe'] = False
-    
-    cursor.close()
-    conn.close()
-    
-    return jsonify({
-        'contactos': contactos,
-        'upload_folder': UPLOAD_FOLDER
-    })
-
+                  
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
@@ -3409,6 +3435,7 @@ def ver_kanban(config=None):
     columnas = cursor.fetchall()
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -3419,8 +3446,12 @@ def ver_kanban(config=None):
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre > número
-            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+            -- PRIORIDAD: alias > nombre de perfil > número
+            COALESCE(
+                MAX(cont.alias), 
+                MAX(cont.nombre), 
+                cm.numero
+            ) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
@@ -3515,52 +3546,51 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-        # Asignar automáticamente a la columna "Nuevos" (id=1)
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO chat_meta (numero, columna_id) 
-            VALUES (%s, 1)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id);
-        """, (numero,))
-        conn.commit()
-        cursor.close()
-        conn.close()
-
-@app.route('/debug-avatar/<numero>')
-def debug_avatar(numero):
-    """Endpoint para depurar problemas con avatares"""
-    config = obtener_configuracion_por_host()
+    """Inicializa el chat meta y asegura que el contacto exista con su nombre e imagen"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # Obtener información del contacto
-    cursor.execute("""
-        SELECT numero_telefono, nombre, alias, imagen_url 
-        FROM contactos 
-        WHERE numero_telefono = %s 
-        ORDER BY id DESC LIMIT 1
-    """, (numero,))
+    try:
+        # 1. Obtener nombre e imagen de WhatsApp
+        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        
+        app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        
+        # 2. Insertar/actualizar contacto con toda la información
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
+            VALUES (%s, %s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = COALESCE(%s, nombre),
+                imagen_url = COALESCE(%s, imagen_url),
+                fecha_actualizacion = NOW(),
+                plataforma = VALUES(plataforma)
+        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
+        
+        # 3. Insertar/actualizar en chat_meta
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id) 
+            VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE 
+                columna_id = VALUES(columna_id),
+                fecha_actualizacion = NOW()
+        """, (numero,))
+        
+        conn.commit()
+        app.logger.info(f"✅ Contacto actualizado: {numero} - {nombre_perfil}")
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
+        conn.rollback()
     
-    contacto = cursor.fetchone()
-    
-    # Verificar si el archivo existe
-    archivo_existe = False
-    if contacto and contacto.get('imagen_url'):
-        if contacto['imagen_url'].startswith('/uploads/'):
-            nombre_archivo = contacto['imagen_url'].replace('/uploads/', '')
-            ruta_completa = os.path.join(UPLOAD_FOLDER, nombre_archivo)
-            archivo_existe = os.path.exists(ruta_completa)
-    
-    cursor.close()
-    conn.close()
-    
-    return jsonify({
-        'numero': numero,
-        'contacto': contacto,
-        'archivo_existe': archivo_existe,
-        'upload_folder': UPLOAD_FOLDER
-    })
+    finally:
+        cursor.close()
+        conn.close()
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
@@ -3574,6 +3604,36 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.commit()
         cursor.close()
         conn.close()
+
+def actualizar_info_contacto(numero, config=None):
+    """Actualiza la información del contacto (nombre e imagen)"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        
+        if nombre_perfil or imagen_perfil:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE contactos 
+                SET nombre = COALESCE(%s, nombre),
+                    imagen_url = COALESCE(%s, imagen_url),
+                    fecha_actualizacion = NOW()
+                WHERE numero_telefono = %s
+            """, (nombre_perfil, imagen_perfil, numero))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            app.logger.info(f"🔄 Contacto actualizado: {numero}")
+            
+    except Exception as e:
+        app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
@@ -3596,6 +3656,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         # Si no cumple nada, mantener donde está
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
+
 
 def obtener_contexto_consulta(numero, config=None):
     """Obtiene el contexto de la consulta o proyecto del cliente"""
