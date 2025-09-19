@@ -3801,3 +3801,32 @@ if __name__ == '__main__':
     crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
     
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+
+@app.route('/debug-contacto/<numero>')
+def debug_contacto(numero):
+    """Endpoint completo de diagnóstico de contacto"""
+    config = obtener_configuracion_por_host()
+    
+    # 1. Probar la función de obtener nombre
+    nombre_directo = obtener_nombre_perfil_whatsapp(numero, config)
+    
+    # 2. Verificar en base de datos
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
+    contacto_db = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    # 3. Verificar configuración usada
+    return jsonify({
+        'numero': numero,
+        'nombre_obtenido_directo': nombre_directo,
+        'en_base_datos': contacto_db,
+        'config_usada': {
+            'dominio': config.get('dominio'),
+            'phone_number_id': config.get('phone_number_id'),
+            'db_name': config.get('db_name')
+        },
+        'timestamp': datetime.now().isoformat()
+    })
