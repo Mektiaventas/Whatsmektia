@@ -3599,18 +3599,18 @@ def inicializar_chat_meta(numero, config=None):
             
             app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
         
-        # 3. Insertar/actualizar contacto
+        # 3. Insertar/actualizar contacto (CORREGIDO - sin fecha_creacion)
         cursor.execute("""
             INSERT INTO contactos 
-                (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
-            VALUES (%s, %s, %s, 'WhatsApp', NOW())
+                (numero_telefono, nombre, imagen_url, plataforma) 
+            VALUES (%s, %s, %s, 'WhatsApp')
             ON DUPLICATE KEY UPDATE 
                 nombre = COALESCE(%s, nombre),
                 imagen_url = COALESCE(%s, imagen_url),
                 fecha_actualizacion = NOW()
         """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
         
-        # 4. Insertar/actualizar en chat_meta (asegurar que existe en kanban)
+        # 4. Insertar/actualizar en chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
             VALUES (%s, 1, NOW())
