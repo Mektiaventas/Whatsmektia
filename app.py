@@ -3624,7 +3624,6 @@ def reparar_contactos():
     conn.close()
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
-
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
