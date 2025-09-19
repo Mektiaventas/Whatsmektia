@@ -1595,25 +1595,6 @@ def obtener_imagen_whatsapp(image_id, config=None):
         app.logger.error(traceback.format_exc())
         return None, None
 
-def procesar_nuevo_contacto(numero, config):
-    """Procesa un nuevo contacto y lo guarda directamente en la tabla contactos"""
-    try:
-        app.logger.info(f"📥 Procesando nuevo contacto: {numero}")
-        
-        # Actualizar directamente en la tabla contactos
-        success = actualizar_contacto_desde_whatsapp(numero, config)
-        
-        if success:
-            app.logger.info(f"✅ Contacto {numero} guardado exitosamente en tabla contactos")
-        else:
-            app.logger.warning(f"⚠️ No se pudo guardar contacto {numero} en tabla contactos")
-            
-        return success
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error procesando contacto {numero}: {e}")
-        return False
-
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
     """Procesa el código de autorización manualmente"""
@@ -2024,44 +2005,6 @@ def enviar_mensaje(numero, texto, config=None):
             
     except Exception as e:
         app.logger.error(f"🔴 Exception: {e}")
-        return False
-
-def actualizar_contacto_desde_whatsapp(numero, config=None):
-    """Actualiza la información del contacto desde WhatsApp directamente en la tabla contactos"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Obtener información de WhatsApp
-        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
-        
-        app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
-        
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Insertar o actualizar directamente en contactos
-        cursor.execute("""
-            INSERT INTO contactos 
-                (numero_telefono, nombre_generico, plataforma, imagen_url, avatar_actualizado_en, created_at, ia_activada) 
-            VALUES (%s, %s, 'whatsapp', %s, NOW(), NOW(), 1)
-            ON DUPLICATE KEY UPDATE 
-                nombre_generico = COALESCE(%s, nombre_generico),
-                imagen_url = COALESCE(%s, imagen_url),
-                avatar_actualizado_en = NOW(),
-                plataforma = 'whatsapp'
-        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"✅ Contacto actualizado en tabla contactos: {numero}")
-        return True
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error actualizando contacto {numero}: {e}")
         return False
 
 @app.route('/actualizar-contactos')
@@ -2629,9 +2572,9 @@ def webhook():
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
-       # ✅ ACTUALIZAR CONTACTO DIRECTAMENTE en tabla contactos
-        app.logger.info(f"📋 Procesando contacto: {numero}")
-        procesar_nuevo_contacto(numero, config)
+        inicializar_chat_meta(numero, config)
+        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
+         
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
@@ -3496,19 +3439,29 @@ def ver_kanban(config=None):
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
-    # En ver_kanban(), modifica la consulta para usar solo la tabla contactos:
     cursor.execute("""
         SELECT 
-            c.numero_telefono as numero,
-            COALESCE(c.nombre_generico, c.numero_telefono) AS nombre_mostrado,
-            c.imagen_url AS avatar,
-            'whatsapp' AS canal,
-            (SELECT MAX(timestamp) FROM conversaciones WHERE numero = c.numero_telefono) AS ultima_fecha,
-            (SELECT mensaje FROM conversaciones WHERE numero = c.numero_telefono ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            (SELECT COUNT(*) FROM conversaciones WHERE numero = c.numero_telefono AND respuesta IS NULL) AS sin_leer
-        FROM contactos c
-        WHERE c.numero_telefono IS NOT NULL
-        ORDER BY ultima_fecha DESC NULLS LAST;
+            cm.numero,
+            cm.columna_id,
+            MAX(c.timestamp) AS ultima_fecha,
+            (SELECT mensaje FROM conversaciones 
+             WHERE numero = cm.numero 
+             ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+            MAX(cont.imagen_url) AS avatar,
+            MAX(cont.plataforma) AS canal,
+            -- PRIORIDAD: alias > nombre de perfil > número
+            COALESCE(
+                MAX(cont.alias), 
+                MAX(cont.nombre), 
+                cm.numero
+            ) AS nombre_mostrado,
+            (SELECT COUNT(*) FROM conversaciones 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+        FROM chat_meta cm
+        LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+        LEFT JOIN conversaciones c ON c.numero = cm.numero
+        GROUP BY cm.numero, cm.columna_id
+        ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
 
@@ -3584,6 +3537,67 @@ def test_alerta():
         enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
         return "🚀 Test alerta disparada."
 
+def obtener_chat_meta(numero, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM chat_meta WHERE numero = %s;", (numero,))
+        meta = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return meta
+
+def inicializar_chat_meta(numero, config=None):
+    """Inicializa el chat meta y asegura que el contacto exista con su nombre e imagen"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    try:
+        # 1. Primero verificar si el contacto ya existe
+        cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto_existente = cursor.fetchone()
+        
+        # 2. Obtener información de WhatsApp solo si no existe o está incompleta
+        if not contacto_existente or not contacto_existente.get('nombre') or not contacto_existente.get('imagen_url'):
+            nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+            imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+            
+            app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        
+        # 3. Insertar/actualizar contacto
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
+            VALUES (%s, %s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = COALESCE(%s, nombre),
+                imagen_url = COALESCE(%s, imagen_url),
+                fecha_actualizacion = NOW()
+        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
+        
+        # 4. Insertar/actualizar en chat_meta (asegurar que existe en kanban)
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
+            VALUES (%s, 1, NOW())
+            ON DUPLICATE KEY UPDATE 
+                fecha_actualizacion = NOW()
+        """, (numero,))
+        
+        conn.commit()
+        app.logger.info(f"✅ Contacto inicializado/actualizado: {numero}")
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
+        conn.rollback()
+    
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/reparar-contactos')
 def reparar_contactos():
     """Repara todos los contactos que no están en chat_meta"""
@@ -3610,6 +3624,19 @@ def reparar_contactos():
     conn.close()
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
+
+def actualizar_columna_chat(numero, columna_id, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_meta SET columna_id = %s 
+            WHERE numero = %s;
+        """, (columna_id, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
 
 def actualizar_info_contacto(numero, config=None):
     """Actualiza la información del contacto (nombre e imagen)"""
@@ -3640,6 +3667,29 @@ def actualizar_info_contacto(numero, config=None):
             
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
+
+def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+    
+        historial = obtener_historial(numero, limite=5, config=config)
+        
+        # Si es primer mensaje, mantener en "Nuevos"
+        if len(historial) <= 1:
+            return 1  # Nuevos
+        
+        # Si hay intervención humana, mover a "Esperando Respuesta"
+        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
+            return 3  # Esperando Respuesta
+        
+        # Si tiene más de 2 mensajes, mover a "En Conversación"
+        if len(historial) >= 2:
+            return 2  # En Conversación
+        
+        # Si no cumple nada, mantener donde está
+        meta = obtener_chat_meta(numero)
+        return meta['columna_id'] if meta else 1
+
 
 def obtener_contexto_consulta(numero, config=None):
     """Obtiene el contexto de la consulta o proyecto del cliente"""
