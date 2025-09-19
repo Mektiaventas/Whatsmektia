@@ -2852,7 +2852,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         
         headers = {'Content-Type': 'application/json'}
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=20)
         
         if response.status_code == 200:
             data = response.json()
@@ -2898,7 +2898,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
                 if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['picture_url']
+                    return contacto['profile']['picture_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
         
         return None
         
@@ -3651,6 +3651,7 @@ def reparar_contactos():
     conn.close()
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
+
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
