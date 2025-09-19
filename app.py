@@ -2547,6 +2547,9 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+        # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        inicializar_chat_meta(numero, config)
+        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
                 # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
@@ -3554,13 +3557,18 @@ def inicializar_chat_meta(numero, config=None):
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # 1. Obtener nombre e imagen de WhatsApp
-        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        # 1. Primero verificar si el contacto ya existe
+        cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto_existente = cursor.fetchone()
         
-        app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        # 2. Obtener información de WhatsApp solo si no existe o está incompleta
+        if not contacto_existente or not contacto_existente.get('nombre') or not contacto_existente.get('imagen_url'):
+            nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
+            imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+            
+            app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
         
-        # 2. Insertar/actualizar contacto con toda la información
+        # 3. Insertar/actualizar contacto
         cursor.execute("""
             INSERT INTO contactos 
                 (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
@@ -3568,21 +3576,19 @@ def inicializar_chat_meta(numero, config=None):
             ON DUPLICATE KEY UPDATE 
                 nombre = COALESCE(%s, nombre),
                 imagen_url = COALESCE(%s, imagen_url),
-                fecha_actualizacion = NOW(),
-                plataforma = VALUES(plataforma)
+                fecha_actualizacion = NOW()
         """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
         
-        # 3. Insertar/actualizar en chat_meta
+        # 4. Insertar/actualizar en chat_meta (asegurar que existe en kanban)
         cursor.execute("""
-            INSERT INTO chat_meta (numero, columna_id) 
-            VALUES (%s, 1)
+            INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
+            VALUES (%s, 1, NOW())
             ON DUPLICATE KEY UPDATE 
-                columna_id = VALUES(columna_id),
                 fecha_actualizacion = NOW()
         """, (numero,))
         
         conn.commit()
-        app.logger.info(f"✅ Contacto actualizado: {numero} - {nombre_perfil}")
+        app.logger.info(f"✅ Contacto inicializado/actualizado: {numero}")
         
     except Exception as e:
         app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
@@ -3591,6 +3597,33 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/reparar-contactos')
+def reparar_contactos():
+    """Repara todos los contactos que no están en chat_meta"""
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Encontrar contactos que no están en chat_meta
+    cursor.execute("""
+        SELECT c.numero_telefono 
+        FROM contactos c 
+        LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+        WHERE cm.numero IS NULL
+    """)
+    
+    contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+    
+    for numero in contactos_sin_meta:
+        app.logger.info(f"🔧 Reparando contacto: {numero}")
+        inicializar_chat_meta(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
