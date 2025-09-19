@@ -3534,8 +3534,9 @@ def data_deletion():
 
 @app.route('/test-alerta')
 def test_alerta():
-        enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
-        return "🚀 Test alerta disparada."
+    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
+    return "🚀 Test alerta disparada."
 
 def obtener_chat_meta(numero, config=None):
         if config is None:
@@ -3689,9 +3690,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
 
-
 def obtener_contexto_consulta(numero, config=None):
-    """Obtiene el contexto de la consulta o proyecto del cliente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3718,13 +3717,10 @@ def obtener_contexto_consulta(numero, config=None):
         # Analizar el contexto de la conversación
         contexto = ""
         
-        
-        
         # Buscar menciones de servicios/proyectos
         servicios_mencionados = []
         for msg in mensajes:
-            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""
-            # En servicios_clave para La Porfirianna, agrega:
+            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
             for servicio in servicios_clave:
                 if servicio in mensaje_texto and servicio not in servicios_mencionados:
                     servicios_mencionados.append(servicio)
@@ -3733,20 +3729,20 @@ def obtener_contexto_consulta(numero, config=None):
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
         
         # Extraer información específica del último mensaje
-        ultimo_mensaje = mensajes[0]['mensaje'] or ""
-        if len(ultimo_mensaje) > 10:  # Solo si tiene contenido
+        ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
+        if len(ultimo_mensaje) > 10:
             contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
         
         # Intentar detectar urgencia o tipo de consulta
         palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
         if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
             contexto += "🚨 *Tono:* Urgente\n"
+        
         return contexto if contexto else "No se detectó contexto relevante."
         
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
