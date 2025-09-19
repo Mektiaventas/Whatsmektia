@@ -2852,7 +2852,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     
     try:
         # Formatear número correctamente
-        numero_formateado = numero.replace('').replace('')
+        numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Endpoint CORRECTO para obtener información de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
