@@ -3697,32 +3697,25 @@ def actualizar_info_contacto(numero, config=None):
         nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
         imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
         
-        app.logger.info(f"🔄 Actualizando contacto {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
-        
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Insertar o actualizar
-        cursor.execute("""
-            INSERT INTO contactos 
-                (numero_telefono, nombre, imagen_url, plataforma) 
-            VALUES (%s, %s, %s, 'WhatsApp')
-            ON DUPLICATE KEY UPDATE 
-                nombre = COALESCE(VALUES(nombre), nombre),
-                imagen_url = COALESCE(VALUES(imagen_url), imagen_url),
-                ultima_actualizacion = NOW()
-        """, (numero, nombre_perfil, imagen_perfil))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"✅ Contacto actualizado exitosamente: {numero}")
-        return True
+        if nombre_perfil or imagen_perfil:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                UPDATE contactos 
+                SET nombre = COALESCE(%s, nombre),
+                    imagen_url = COALESCE(%s, imagen_url)
+                WHERE numero_telefono = %s
+            """, (nombre_perfil, imagen_perfil, numero))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            app.logger.info(f"🔄 Contacto actualizado: {numero}")
             
     except Exception as e:
-        app.logger.error(f"❌ Error actualizando contacto {numero}: {e}")
-        return False
+        app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
