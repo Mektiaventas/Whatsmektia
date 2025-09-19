@@ -2832,6 +2832,19 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+@app.route('/test-contacto/<numero>')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
+
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
     if config is None:
@@ -2839,13 +2852,13 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     
     try:
         # Formatear número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
+        numero_formateado = numero.replace('').replace('')
         
         # Endpoint CORRECTO para obtener información de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': 'contact_profiles',
+            'fields': 'contacts',
             'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
@@ -2860,8 +2873,11 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
             
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
+                nombre = contacto.get('profile', {}).get('name')
+                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
+                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
                 if 'profile' in contacto and 'name' in contacto['profile']:
-                    return contacto['profile']['name']
+                    return contacto['profile']['nombre']
         
         return None
         
@@ -2882,14 +2898,14 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': 'contact_profiles',
+            'fields': 'contacts',
             'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
         
         headers = {'Content-Type': 'application/json'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        app.logger.info(f"🔍 Solicitando info contacto para: {numero_formateado}")
+        response = requests.get(url, params=params, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -2897,8 +2913,11 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
             
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
+                nombre = contacto.get('profile', {}).get('name')
+                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
+                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
                 if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['picture_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
+                    return contacto['profile']['imagen_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
         
         return None
         

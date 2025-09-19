@@ -2512,6 +2512,32 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
+@app.route('/reparar-kanban')
+def reparar_kanban():
+    """Repara todos los contactos que no están en chat_meta"""
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Encontrar números en conversaciones que no están en chat_meta
+    cursor.execute("""
+        SELECT DISTINCT numero 
+        FROM conversaciones 
+        WHERE numero NOT IN (SELECT numero FROM chat_meta)
+    """)
+    
+    numeros_sin_meta = [row['numero'] for row in cursor.fetchall()]
+    
+    for numero in numeros_sin_meta:
+        app.logger.info(f"🔧 Reparando contacto en Kanban: {numero}")
+        inicializar_chat_meta(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Reparados {len(numeros_sin_meta)} contactos en Kanban"
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2547,6 +2573,8 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+        # Agregar esto inmediatamente:
+        
        # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
@@ -2574,6 +2602,7 @@ def webhook():
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
         inicializar_chat_meta(numero, config)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
+        inicializar_chat_meta(numero, config)
          
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
@@ -2803,6 +2832,19 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+@app.route('/test-contacto/<numero>')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
+
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
     if config is None:
@@ -2810,7 +2852,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     
     try:
         # Formatear número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
+        numero_formateado = numero.replace('').replace('')
         
         # Endpoint CORRECTO para obtener información de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
@@ -2823,7 +2865,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         
         headers = {'Content-Type': 'application/json'}
         
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        response = requests.get(url, params=params, headers=headers, timeout=20)
         
         if response.status_code == 200:
             data = response.json()
@@ -2831,8 +2873,11 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
             
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
+                nombre = contacto.get('profile', {}).get('name')
+                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
+                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
                 if 'profile' in contacto and 'name' in contacto['profile']:
-                    return contacto['profile']['name']
+                    return contacto['profile']['nombre']
         
         return None
         
@@ -2859,8 +2904,8 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         }
         
         headers = {'Content-Type': 'application/json'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=10)
+        app.logger.info(f"🔍 Solicitando info contacto para: {numero_formateado}")
+        response = requests.get(url, params=params, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
@@ -2868,8 +2913,11 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
             
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
+                nombre = contacto.get('profile', {}).get('name')
+                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
+                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
                 if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['picture_url']
+                    return contacto['profile']['imagen_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
         
         return None
         
@@ -3534,8 +3582,9 @@ def data_deletion():
 
 @app.route('/test-alerta')
 def test_alerta():
-        enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.")
-        return "🚀 Test alerta disparada."
+    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
+    return "🚀 Test alerta disparada."
 
 def obtener_chat_meta(numero, config=None):
         if config is None:
@@ -3568,23 +3617,20 @@ def inicializar_chat_meta(numero, config=None):
             
             app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
         
-        # 3. Insertar/actualizar contacto
+        # 3. Insertar/actualizar contacto (CORREGIDO - sin fecha_creacion)
         cursor.execute("""
             INSERT INTO contactos 
-                (numero_telefono, nombre, imagen_url, plataforma, fecha_creacion) 
-            VALUES (%s, %s, %s, 'WhatsApp', NOW())
+                (numero_telefono, nombre, imagen_url, plataforma) 
+            VALUES (%s, %s, %s, 'WhatsApp')
             ON DUPLICATE KEY UPDATE 
                 nombre = COALESCE(%s, nombre),
-                imagen_url = COALESCE(%s, imagen_url),
-                fecha_actualizacion = NOW()
+                imagen_url = COALESCE(%s, imagen_url)
         """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
         
-        # 4. Insertar/actualizar en chat_meta (asegurar que existe en kanban)
+        # 4. Insertar/actualizar en chat_meta
         cursor.execute("""
-            INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
-            VALUES (%s, 1, NOW())
-            ON DUPLICATE KEY UPDATE 
-                fecha_actualizacion = NOW()
+            INSERT INTO chat_meta (numero, columna_id) 
+            VALUES (%s, 1)
         """, (numero,))
         
         conn.commit()
@@ -3654,8 +3700,7 @@ def actualizar_info_contacto(numero, config=None):
             cursor.execute("""
                 UPDATE contactos 
                 SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url),
-                    fecha_actualizacion = NOW()
+                    imagen_url = COALESCE(%s, imagen_url)
                 WHERE numero_telefono = %s
             """, (nombre_perfil, imagen_perfil, numero))
             
@@ -3690,9 +3735,7 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
 
-
 def obtener_contexto_consulta(numero, config=None):
-    """Obtiene el contexto de la consulta o proyecto del cliente"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3719,13 +3762,10 @@ def obtener_contexto_consulta(numero, config=None):
         # Analizar el contexto de la conversación
         contexto = ""
         
-        
-        
         # Buscar menciones de servicios/proyectos
         servicios_mencionados = []
         for msg in mensajes:
-            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""
-            # En servicios_clave para La Porfirianna, agrega:
+            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
             for servicio in servicios_clave:
                 if servicio in mensaje_texto and servicio not in servicios_mencionados:
                     servicios_mencionados.append(servicio)
@@ -3734,20 +3774,20 @@ def obtener_contexto_consulta(numero, config=None):
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
         
         # Extraer información específica del último mensaje
-        ultimo_mensaje = mensajes[0]['mensaje'] or ""
-        if len(ultimo_mensaje) > 10:  # Solo si tiene contenido
+        ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
+        if len(ultimo_mensaje) > 10:
             contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
         
         # Intentar detectar urgencia o tipo de consulta
         palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
         if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
             contexto += "🚨 *Tono:* Urgente\n"
+        
         return contexto if contexto else "No se detectó contexto relevante."
         
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
