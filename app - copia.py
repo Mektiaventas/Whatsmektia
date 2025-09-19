@@ -2547,10 +2547,7 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
-        # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
-        inicializar_chat_meta(numero, config)
-        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
-                # CORRECCIÓN: Manejo robusto de texto
+       # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
         es_audio = False
@@ -2574,7 +2571,10 @@ def webhook():
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
-        
+                # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        inicializar_chat_meta(numero, config)
+        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
+         
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
