@@ -5,7 +5,6 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
 import time
-import whatsapp_selenium
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -2887,31 +2886,6 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
         return None
-
-@app.route('/whatsapp/qr')
-def whatsapp_qr():
-    """Genera y muestra el código QR para WhatsApp"""
-    try:
-        client = get_whatsapp_client()
-        
-        # Generar nuevo QR si no existe o está expirado
-        if not client.qr_code or (client.qr_generated_time and 
-                                time.time() - client.qr_generated_time > 120):
-            qr_code = client.generate_qr_code()
-        else:
-            qr_code = client.qr_code
-        
-        if qr_code:
-            return jsonify({
-                'qr_code': f"data:image/png;base64,{qr_code}",
-                'status': 'qr_generated',
-                'timestamp': client.qr_generated_time
-            })
-        else:
-            return jsonify({'error': 'No se pudo generar QR'}), 500
-            
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
