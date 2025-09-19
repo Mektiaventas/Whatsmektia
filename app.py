@@ -2851,12 +2851,13 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Formatear número correctamente
+        # Formatear número correctamente (eliminar el '+' si existe)
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
         # Endpoint CORRECTO para obtener información de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
+        # Parámetros correctos según la documentación de WhatsApp
         params = {
             'fields': 'contacts',
             'user_numbers': f'["{numero_formateado}"]',
@@ -2865,23 +2866,22 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         
         headers = {'Content-Type': 'application/json'}
         
-        response = requests.get(url, params=params, headers=headers, timeout=20)
+        app.logger.info(f"🔍 Solicitando nombre para: {numero_formateado}")
+        response = requests.get(url, params=params, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
             app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
             
+            # Estructura correcta de la respuesta
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
                 nombre = contacto.get('profile', {}).get('name')
-                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
-                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                
-                # 🔥 CORRECCIÓN: Devuelve el nombre si existe
-                if nombre:
-                    return nombre
+                app.logger.info(f"✅ Nombre obtenido: {nombre}")
+                return nombre
         
-        return None  # 🔥 CORREGIDO: Sin texto adicional
+        app.logger.warning(f"⚠️ No se pudo obtener nombre para {numero}")
+        return None
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
@@ -3697,23 +3697,23 @@ def actualizar_info_contacto(numero, config=None):
         nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
         imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
         
-        if nombre_perfil or imagen_perfil:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE contactos 
-                SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url)
-                WHERE numero_telefono = %s
-            """, (nombre_perfil, imagen_perfil, numero))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            app.logger.info(f"🔄 Contacto actualizado: {numero}")
-            
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO contactos (numero_telefono, nombre, imagen_url, plataforma) 
+            VALUES (%s, %s, %s, 'WhatsApp')
+            ON DUPLICATE KEY UPDATE 
+                nombre = COALESCE(VALUES(nombre), nombre),
+                imagen_url = COALESCE(VALUES(imagen_url), imagen_url)
+        """, (numero, nombre_perfil, imagen_perfil))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"🔄 Contacto actualizado: {numero} - Nombre: {nombre_perfil}")
+        
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
