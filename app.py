@@ -3606,8 +3606,7 @@ def inicializar_chat_meta(numero, config=None):
             VALUES (%s, %s, %s, 'WhatsApp')
             ON DUPLICATE KEY UPDATE 
                 nombre = COALESCE(%s, nombre),
-                imagen_url = COALESCE(%s, imagen_url),
-                fecha_actualizacion = NOW()
+                imagen_url = COALESCE(%s, imagen_url)
         """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
         
         # 4. Insertar/actualizar en chat_meta
