@@ -2512,6 +2512,32 @@ def obtener_configuracion_por_phone_number_id(phone_number_id):
     # Fallback to default
     return NUMEROS_CONFIG['524495486142']
 
+@app.route('/reparar-kanban')
+def reparar_kanban():
+    """Repara todos los contactos que no están en chat_meta"""
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Encontrar números en conversaciones que no están en chat_meta
+    cursor.execute("""
+        SELECT DISTINCT numero 
+        FROM conversaciones 
+        WHERE numero NOT IN (SELECT numero FROM chat_meta)
+    """)
+    
+    numeros_sin_meta = [row['numero'] for row in cursor.fetchall()]
+    
+    for numero in numeros_sin_meta:
+        app.logger.info(f"🔧 Reparando contacto en Kanban: {numero}")
+        inicializar_chat_meta(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Reparados {len(numeros_sin_meta)} contactos en Kanban"
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2547,6 +2573,9 @@ def webhook():
             
         msg = mensajes[0]
         numero = msg['from']
+        # Agregar esto inmediatamente:
+        inicializar_chat_meta(numero, config)
+        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
        # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
