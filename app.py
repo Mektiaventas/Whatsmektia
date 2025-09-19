@@ -2876,10 +2876,12 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
                 nombre = contacto.get('profile', {}).get('name')
                 imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
                 app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                if 'profile' in contacto and 'name' in contacto['profile']:
-                    return contacto['profile']['nombre']
+                
+                # 🔥 CORRECCIÓN: Devuelve el nombre si existe
+                if nombre:
+                    return nombre
         
-        return None
+        return None  # 🔥 CORREGIDO: Sin texto adicional
         
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
@@ -2916,8 +2918,10 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
                 nombre = contacto.get('profile', {}).get('name')
                 imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
                 app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['imagen_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
+                
+                # 🔥 CORRECCIÓN: Devuelve la URL de la imagen si existe
+                if imagen_url:
+                    return imagen_url
         
         return None
         
@@ -3693,25 +3697,32 @@ def actualizar_info_contacto(numero, config=None):
         nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
         imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
         
-        if nombre_perfil or imagen_perfil:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE contactos 
-                SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url)
-                WHERE numero_telefono = %s
-            """, (nombre_perfil, imagen_perfil, numero))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            app.logger.info(f"🔄 Contacto actualizado: {numero}")
+        app.logger.info(f"🔄 Actualizando contacto {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Insertar o actualizar
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, imagen_url, plataforma) 
+            VALUES (%s, %s, %s, 'WhatsApp')
+            ON DUPLICATE KEY UPDATE 
+                nombre = COALESCE(VALUES(nombre), nombre),
+                imagen_url = COALESCE(VALUES(imagen_url), imagen_url),
+                ultima_actualizacion = NOW()
+        """, (numero, nombre_perfil, imagen_perfil))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Contacto actualizado exitosamente: {numero}")
+        return True
             
     except Exception as e:
-        app.logger.error(f"Error actualizando contacto {numero}: {e}")
+        app.logger.error(f"❌ Error actualizando contacto {numero}: {e}")
+        return False
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
