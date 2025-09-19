@@ -3613,8 +3613,6 @@ def inicializar_chat_meta(numero, config=None):
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
             VALUES (%s, 1, NOW())
-            ON DUPLICATE KEY UPDATE 
-                fecha_actualizacion = NOW()
         """, (numero,))
         
         conn.commit()
