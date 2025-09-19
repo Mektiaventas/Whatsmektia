@@ -2845,7 +2845,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': 'contacts',
+            'fields': 'contact_profiles',
             'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
@@ -2882,7 +2882,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
-            'fields': 'contacts',
+            'fields': 'contact_profiles',
             'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
