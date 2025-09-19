@@ -3681,8 +3681,7 @@ def actualizar_info_contacto(numero, config=None):
             cursor.execute("""
                 UPDATE contactos 
                 SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url),
-                    fecha_actualizacion = NOW()
+                    imagen_url = COALESCE(%s, imagen_url)
                 WHERE numero_telefono = %s
             """, (nombre_perfil, imagen_perfil, numero))
             
