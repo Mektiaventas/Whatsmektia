@@ -2832,8 +2832,8 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-@app.route('/test-contacto/<numero>')
-def test_contacto(numero):
+@app.route('/test-contacto')
+def test_contacto(numero = '5214493432744'):
     """Endpoint para probar la obtención de información de contacto"""
     config = obtener_configuracion_por_host()
     nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
