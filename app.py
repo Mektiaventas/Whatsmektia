@@ -3611,8 +3611,8 @@ def inicializar_chat_meta(numero, config=None):
         
         # 4. Insertar/actualizar en chat_meta
         cursor.execute("""
-            INSERT INTO chat_meta (numero, columna_id, fecha_actualizacion) 
-            VALUES (%s, 1, NOW())
+            INSERT INTO chat_meta (numero, columna_id) 
+            VALUES (%s, 1)
         """, (numero,))
         
         conn.commit()
