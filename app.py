@@ -3792,15 +3792,8 @@ def obtener_contexto_consulta(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
-    args = parser.parse_args()
-    
-    # Crear tablas necesarias - usar configuración por defecto
-    crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
-    
-    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+
+# Agrega estas rutas de diagnóstico ANTES del if __name__ == '__main__':
 
 @app.route('/debug-contacto/<numero>')
 def debug_contacto(numero):
@@ -3818,7 +3811,6 @@ def debug_contacto(numero):
     cursor.close()
     conn.close()
     
-    # 3. Verificar configuración usada
     return jsonify({
         'numero': numero,
         'nombre_obtenido_directo': nombre_directo,
@@ -3830,3 +3822,89 @@ def debug_contacto(numero):
         },
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/test-api-manual/<numero>')
+def test_api_manual(numero):
+    """Test manual de la API de WhatsApp"""
+    config = obtener_configuracion_por_host()
+    
+    numero_formateado = numero.replace('+', '').replace(' ', '')
+    url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+    
+    params = {
+        'fields': 'contacts',
+        'user_numbers': f'["{numero_formateado}"]',
+        'access_token': config['whatsapp_token']
+    }
+    
+    try:
+        response = requests.get(url, params=params, timeout=15)
+        
+        # Log detallado para debugging
+        app.logger.info(f"🔍 API Request: {response.url}")
+        app.logger.info(f"🔍 Status Code: {response.status_code}")
+        app.logger.info(f"🔍 Response: {response.text}")
+        
+        return jsonify({
+            'status_code': response.status_code,
+            'response': response.json() if response.status_code == 200 else response.text,
+            'url_solicitada': response.url,
+            'numero_formateado': numero_formateado,
+            'params': params
+        })
+    except Exception as e:
+        app.logger.error(f"❌ Error en test-api-manual: {e}")
+        return jsonify({'error': str(e)})
+
+@app.route('/forzar-actualizacion/<numero>')
+def forzar_actualizacion(numero):
+    """Forzar actualización completa del contacto"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Eliminar contacto existente si hay
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM contactos WHERE numero_telefono = %s", (numero,))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # 2. Esperar un momento
+        time.sleep(1)
+        
+        # 3. Volver a crear desde cero
+        actualizar_info_contacto(numero, config)
+        
+        # 4. Verificar resultado
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
+        resultado = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'contacto_actualizado': resultado,
+            'status': 'forzado'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+# También agrega esta ruta simple para verificar que el servidor funciona
+@app.route('/status')
+def status():
+    return jsonify({'status': 'ok', 'server': 'mektia.com', 'time': datetime.now().isoformat()})
+    
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    args = parser.parse_args()
+    
+    # Crear tablas necesarias - usar configuración por defecto
+    crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
+    
+    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+
+
