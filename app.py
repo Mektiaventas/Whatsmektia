@@ -2846,7 +2846,7 @@ def test_contacto(numero = '5214493432744'):
     })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
-    """Obtiene el nombre del perfil de WhatsApp usando el endpoint CORRECTO"""
+    """Obtiene el nombre del perfil de WhatsApp usando la versión CORRECTA de la API"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2854,13 +2854,14 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         numero_formateado = numero.replace('+', '').replace(' ', '')
         app.logger.info(f"🎯 SOLICITANDO NOMBRE para: {numero_formateado}")
         
-        # ✅ ENDPOINT CORRECTO
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}/contacts"
+        # ✅ VERSIÓN CORRECTA: v23.0
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/contacts"
         app.logger.info(f"🌐 URL: {url}")
         
         # ✅ MÉTODO CORRECTO: POST con JSON body
         payload = {
-            "user_numbers": [numero_formateado]  # ✅ Array, no string
+            "user_numbers": [numero_formateado],
+            "fields": ["profile"]  # ✅ Especificar campos que queremos
         }
         
         headers = {
@@ -2879,7 +2880,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
             data = response.json()
             app.logger.info(f"✅ JSON: {json.dumps(data, indent=2)}")
             
-            # ✅ ESTRUCTURA CORRECTA
+            # ✅ ESTRUCTURA CORRECTA para v23.0
             if 'data' in data and data['data']:
                 contacto = data['data'][0]
                 nombre = contacto.get('profile', {}).get('name')
@@ -2894,7 +2895,18 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         
     except Exception as e:
         app.logger.error(f"🔥 Exception: {str(e)}")
-        return None       
+        return None
+
+@app.route('/test-api-manual/<numero>')
+def test_api_manual(numero):
+    """Test manual de la API de WhatsApp - VERSIÓN v23.0"""
+    config = obtener_configuracion_por_host()
+    
+    numero_formateado = numero.replace('+', '').replace(' ', '')
+    
+    # ✅ VERSIÓN CORRECTA: v23.0
+    url = f"https://graph.facebook.com/v23.0/{config
+    
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
