@@ -2846,36 +2846,31 @@ def test_contacto(numero = '5214493432744'):
     })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
-    """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
+    """Obtiene el nombre del perfil de WhatsApp usando el endpoint CORRECTO"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # ✅ FORMATO CORRECTO: 5214491182201 (con el 1 después del 52)
         numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Verificar que tenga el formato correcto
-        if not numero_formateado.startswith('521'):
-            app.logger.warning(f"⚠️ Número puede tener formato incorrecto: {numero_formateado}")
-            # Intentar corregir automáticamente
-            if numero_formateado.startswith('524'):
-                numero_formateado = numero_formateado.replace('524', '521', 1)
-                app.logger.info(f"🔧 Número corregido: {numero_formateado}")
-        
         app.logger.info(f"🎯 SOLICITANDO NOMBRE para: {numero_formateado}")
         
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        # ✅ ENDPOINT CORRECTO
+        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}/contacts"
+        app.logger.info(f"🌐 URL: {url}")
         
-        params = {
-            'fields': 'contacts',
-            'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token']
+        # ✅ MÉTODO CORRECTO: POST con JSON body
+        payload = {
+            "user_numbers": [numero_formateado]  # ✅ Array, no string
         }
         
-        app.logger.info(f"🌐 URL: {url}")
-        app.logger.info(f"🔑 Token: {config['whatsapp_token'][:10]}...")
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
         
-        response = requests.get(url, params=params, timeout=15)
+        app.logger.info(f"📦 Payload: {json.dumps(payload)}")
+        
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
         
         app.logger.info(f"📡 Status: {response.status_code}")
         app.logger.info(f"📦 Response: {response.text}")
@@ -2884,17 +2879,22 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
             data = response.json()
             app.logger.info(f"✅ JSON: {json.dumps(data, indent=2)}")
             
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
+            # ✅ ESTRUCTURA CORRECTA
+            if 'data' in data and data['data']:
+                contacto = data['data'][0]
                 nombre = contacto.get('profile', {}).get('name')
                 app.logger.info(f"👤 Nombre obtenido: {nombre}")
                 return nombre
+            else:
+                app.logger.warning("❌ No hay 'data' en la respuesta")
+        else:
+            app.logger.error(f"💥 Error de API: {response.status_code}")
             
         return None
         
     except Exception as e:
-        app.logger.error(f"🔥 Error: {e}")
-        return None        
+        app.logger.error(f"🔥 Exception: {str(e)}")
+        return None       
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
