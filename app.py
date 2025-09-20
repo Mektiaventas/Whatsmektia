@@ -2851,42 +2851,47 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Formatear número correctamente (eliminar el '+' si existe)
         numero_formateado = numero.replace('+', '').replace(' ', '')
+        app.logger.info(f"🎯 INICIANDO OBTENCIÓN DE NOMBRE para: {numero_formateado}")
         
-        # Endpoint CORRECTO para obtener información de contacto
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+        app.logger.info(f"🌐 URL: {url}")
         
-        # Parámetros correctos según la documentación de WhatsApp
         params = {
             'fields': 'contacts',
             'user_numbers': f'["{numero_formateado}"]',
             'access_token': config['whatsapp_token']
         }
         
-        headers = {'Content-Type': 'application/json'}
+        app.logger.info(f"🔑 Token usado: {config['whatsapp_token'][:15]}...")
+        app.logger.info(f"📋 Parámetros: {params}")
         
-        app.logger.info(f"🔍 Solicitando nombre para: {numero_formateado}")
-        response = requests.get(url, params=params, headers=headers, timeout=15)
+        response = requests.get(url, params=params, timeout=15)
+        
+        app.logger.info(f"📡 Status Code: {response.status_code}")
+        app.logger.info(f"📦 Response Text: {response.text}")
         
         if response.status_code == 200:
             data = response.json()
-            app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
+            app.logger.info(f"✅ Respuesta JSON: {json.dumps(data, indent=2)}")
             
-            # Estructura correcta de la respuesta
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
                 nombre = contacto.get('profile', {}).get('name')
-                app.logger.info(f"✅ Nombre obtenido: {nombre}")
+                app.logger.info(f"👤 Nombre extraído: {nombre}")
                 return nombre
-        
-        app.logger.warning(f"⚠️ No se pudo obtener nombre para {numero}")
+            else:
+                app.logger.warning("❌ No hay 'contacts' en la respuesta")
+        else:
+            app.logger.error(f"💥 Error de API: {response.status_code}")
+            
         return None
         
     except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
+        app.logger.error(f"🔥 Exception: {str(e)}")
+        app.logger.error(traceback.format_exc())
         return None
-
+        
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
     if config is None:
