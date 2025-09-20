@@ -2897,15 +2897,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         app.logger.error(f"🔥 Exception: {str(e)}")
         return None
 
-@app.route('/test-api-manual/<numero>')
-def test_api_manual(numero):
-    """Test manual de la API de WhatsApp - VERSIÓN v23.0"""
-    config = obtener_configuracion_por_host()
-    
-    numero_formateado = numero.replace('+', '').replace(' ', '')
-    
-    # ✅ VERSIÓN CORRECTA: v23.0
-    url = f"https://graph.facebook.com/v23.0/{config
+
     
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
@@ -3845,11 +3837,13 @@ def debug_contacto(numero):
 
 @app.route('/test-api-manual/<numero>')
 def test_api_manual(numero):
-    """Test manual de la API de WhatsApp"""
+    """Test manual de la API de WhatsApp - VERSIÓN v23.0"""
     config = obtener_configuracion_por_host()
     
     numero_formateado = numero.replace('+', '').replace(' ', '')
-    url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
+    
+    # ✅ VERSIÓN CORRECTA: v23.0
+    url = f"https://graph.facebook.com/v23.0/{config
     
     params = {
         'fields': 'contacts',
