@@ -3836,8 +3836,8 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.commit()
         cursor.close()
         conn.close()
-@app.route('/actualizar-contact')
-def actualizar_info_contacto(numero = "5214491182201", config=None):
+
+def actualizar_info_contacto(numero, config=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
