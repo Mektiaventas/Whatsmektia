@@ -3777,9 +3777,9 @@ def obtener_contexto_consulta(numero, config=None):
         if servicios_mencionados:
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
         
-        # Extraer información específica del último mensaje
+        # Extraer información específica del último mensaje, lo que significa que es reciente, si no es reciente, no tiene sentido
         ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
-        if len(ultimo_mensaje) > 10:
+        if len(ultimo_mensaje) > 15:
             contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
         
         # Intentar detectar urgencia o tipo de consulta
