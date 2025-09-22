@@ -29,35 +29,47 @@ class WhatsAppSelenium:
         self.setup_driver()
         
     def setup_driver(self):
-        """Configura el driver de Chrome"""
+    #"""Configura el driver de Selenium para servidor headless"""
+    try:
+        from selenium import webdriver
+        from selenium.webdriver.chrome.options import Options
+        
+        chrome_options = Options()
+        
+        # Configuración para servidor sin interfaz gráfica
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--headless=new')  # Modo headless moderno
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        
+        # Configuración específica para WhatsApp Web
+        chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+        
+        # Usar ChromeDriver del sistema
+        self.driver = webdriver.Chrome(options=chrome_options)
+        
+        self.driver.set_page_load_timeout(60)
+        self.driver.implicitly_wait(10)
+        
+        logger.info("✅ Driver configurado en modo headless")
+        return True
+        
+    except Exception as e:
+        logger.error(f"❌ Error configurando driver: {e}")
+        # Fallback: intentar sin modo headless para debugging
         try:
             chrome_options = Options()
-            
-            # Para desarrollo (con interfaz)
-            # chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
-            chrome_options.add_argument('--disable-gpu')
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--user-data-dir=./whatsapp_profile')
-            
-            # Evitar problemas
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--allow-running-insecure-content')
-            chrome_options.add_argument('--disable-extensions')
-            chrome_options.add_argument('--disable-popup-blocking')
-            
-            # Mantener sesión
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option('useAutomationExtension', False)
-            
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.driver.implicitly_wait(10)
-            logger.info("✅ Driver de Chrome configurado")
-        except Exception as e:
-            logger.error(f"❌ Error configurando driver: {e}")
-            raise
+            self.driver = webdriver.Chrome(options=chrome_options)
+            logger.info("✅ Driver configurado sin headless (fallback)")
+            return True
+        except Exception as e2:
+            logger.error(f"❌ Fallback también falló: {e2}")
+            return False
 
     def generate_qr_code(self):
         """Genera el código QR para WhatsApp Web"""
