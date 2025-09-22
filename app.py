@@ -110,28 +110,28 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 def get_db_connection(config=None):
     if config is None:
         try:
-            # Solo intentar obtener configuración por host si hay contexto de solicitud
             from flask import has_request_context
             if has_request_context():
                 config = obtener_configuracion_por_host()
             else:
-                config = NUMEROS_CONFIG['524495486142']  # Default
+                config = NUMEROS_CONFIG['524495486142']
         except Exception as e:
             app.logger.error(f"Error obteniendo configuración: {e}")
-            # Fallback a configuración por defecto
             config = NUMEROS_CONFIG['524495486142']
     
-    app.logger.info(f"🗄️ Conectando a BD: {config['db_name']}")
+    app.logger.info(f"🗄️ Conectando a BD: {config['db_name']} en {config['db_host']}")
     
     try:
-        return mysql.connector.connect(
+        conn = mysql.connector.connect(
             host=config['db_host'],
             user=config['db_user'],
             password=config['db_password'],
             database=config['db_name']
         )
+        app.logger.info(f"✅ Conexión exitosa a {config['db_name']}")
+        return conn
     except Exception as e:
-        app.logger.error(f"Error conectando a BD {config['db_name']}: {e}")
+        app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
         raise
 
 # ——— Función para enviar mensajes de voz ———
@@ -2977,7 +2977,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         return None
     
 def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host de la solicitud de forma robusta"""
+    """Obtiene la configuración basada en el host de forma robusta"""
     try:
         from flask import has_request_context
         if not has_request_context():
@@ -2985,22 +2985,25 @@ def obtener_configuracion_por_host():
         
         host = request.headers.get('Host', '').lower()
         referer = request.headers.get('Referer', '').lower()
-        url = request.url.lower()
         
-        app.logger.info(f"🔍 Config detection - Host: '{host}', Referer: '{referer}', URL: '{url}'")
+        app.logger.info(f"🔍 Config detection - Host: '{host}', Referer: '{referer}'")
         
-        # Detección PRIORITARIA por subdominio explícito
-        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
+        # Detección MÁS AGRESIVA para La Porfirianna
+        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna', 'www.laporfirianna']):
             app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
             return NUMEROS_CONFIG['524812372326']
         
-        if any(dominio in referer for dominio in ['laporfirianna', 'porfirianna']):
+        if any(dominio in referer for dominio in ['laporfirianna', 'porfirianna', 'www.laporfirianna']):
             app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
             return NUMEROS_CONFIG['524812372326']
         
-        if any(dominio in url for dominio in ['laporfirianna', 'porfirianna']):
-            app.logger.info("✅ Configuración detectada: La Porfirianna (por URL)")
-            return NUMEROS_CONFIG['524812372326']
+        # Si el host contiene 'www', podría ser un problema de redirección
+        if host.startswith('www.') and 'laporfirianna' not in host:
+            # Intentar sin www
+            host_sin_www = host.replace('www.', '')
+            if 'laporfirianna' in host_sin_www:
+                app.logger.info("✅ Configuración detectada: La Porfirianna (host sin www)")
+                return NUMEROS_CONFIG['524812372326']
         
         # Default a Mektia
         app.logger.info("✅ Configuración por defecto: Mektia")
