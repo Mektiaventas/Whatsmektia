@@ -836,6 +836,8 @@ def kanban_data():
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+
 # ——— Configuración en MySQL ———
 def load_config(config=None):
     if config is None:
@@ -2616,6 +2618,30 @@ def enviar_informacion_completa(numero_cliente, config=None):
         
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
+
+@app.route('/whatsapp-login')
+def whatsapp_login():
+    """Inicia sesión en WhatsApp Web"""
+    try:
+        qr_code = init_whatsapp_session()
+        if qr_code:
+            return render_template('whatsapp_login.html', qr_code=qr_code)
+        else:
+            flash('Error al generar QR de WhatsApp', 'error')
+            return redirect(url_for('index'))
+    except Exception as e:
+        app.logger.error(f"Error en whatsapp-login: {e}")
+        flash(f'Error: {str(e)}', 'error')
+        return redirect(url_for('index'))
+
+@app.route('/whatsapp-status')
+def whatsapp_status():
+    """Verifica el estado de la sesión de WhatsApp"""
+    client = get_whatsapp_client()
+    return jsonify({
+        'logged_in': client.is_logged_in,
+        'qr_code': client.qr_code is not None
+    })
 
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
