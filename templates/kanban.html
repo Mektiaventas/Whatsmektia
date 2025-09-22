@@ -5,265 +5,377 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
 <style>
-/* Animaciones para nuevos mensajes en el Kanban */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+    /* Animaciones para nuevos mensajes en el Kanban */
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
 
-@keyframes highlightPulse {
-  0% { background-color: rgba(255, 255, 255, 0.1); }
-  50% { background-color: rgba(255, 224, 130, 0.4); }
-  100% { background-color: rgba(255, 255, 255, 0.1); }
-}
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
 
-@keyframes gentleShake {
-  0%, 100% { transform: translateX(0); }
-  25% { transform: translateX(-3px); }
-  75% { transform: translateX(3px); }
-}
+    @keyframes highlightPulse {
+        0% {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
 
-.kanban-card.new-message {
-  animation: 
-    fadeIn 0.5s ease-out,
-    highlightPulse 2s ease-in-out,
-    gentleShake 0.5s ease-in-out;
-}
+        50% {
+            background-color: rgba(255, 224, 130, 0.4);
+        }
 
-/* Para evitar que la animación se repita indefinidamente */
-.kanban-card {
-  transition: all 0.3s ease;
-}
+        100% {
+            background-color: rgba(255, 255, 255, 0.1);
+        }
+    }
+
+    @keyframes gentleShake {
+        0%, 100% {
+            transform: translateX(0);
+        }
+
+        25% {
+            transform: translateX(-3px);
+        }
+
+        75% {
+            transform: translateX(3px);
+        }
+    }
+
+    .kanban-card.new-message {
+        animation: fadeIn 0.5s ease-out, highlightPulse 2s ease-in-out, gentleShake 0.5s ease-in-out;
+    }
+
+    /* Para evitar que la animación se repita indefinidamente */
+    .kanban-card {
+        transition: all 0.3s ease;
+    }
 </style>
 
 <div id="kanban-board" class="kanban-board">
-  {% for col in columnas %}  <!-- ¡ESTE LOOP FALTABA! -->
-  <div class="kanban-column" data-col-id="{{ col.id }}">
-    <div class="column-header">
-      <img src="{{ col.icono }}" class="col-icon" alt="">
-      <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
-      <button class="add-chat-btn" title="Agregar aquí">+</button>
-    </div>
-    <div class="column-list">
-      {% for chat in chats if chat.columna_id == col.id %}
-      <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
-        <div class="card-avatar-section">
-          <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}" 
-               class="card-avatar" alt="Avatar"
-               onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+    {% for col in columnas %}  <!-- ¡ESTE LOOP FALTABA! -->
+    <div class="kanban-column" data-col-id="{{ col.id }}">
+        <div class="column-header">
+            <img src="{{ col.icono }}" class="col-icon" alt="">
+            <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
+            <button class="add-chat-btn" title="Agregar aquí">+</button>
         </div>
-        <div class="card-content">
-          <div class="card-title-row">
-            {% set bandera = chat.numero | bandera %}
-            {% if bandera %}
-              <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-            {% endif %}
-            <span class="alias-view" data-num="{{ chat.numero }}">
-              {{ chat.nombre_mostrado }}
-            </span>
-            <span class="alias-edit" style="display:none;">
-              <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
-            </span>
-            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
-              ✏️
-            </button>
-          </div>
-          <div class="card-meta-row">
-            <span class="card-num">{{ chat.numero }}</span>
-            <span class="card-time">
-              {% if chat.ultima_fecha %}
-                {{ chat.ultima_fecha.strftime('%d/%m %H:%M') }}
-              {% endif %}
-            </span>
-          </div>
-          <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+        <div class="column-list" data-col-id="{{ col.id }}">
+            {% for chat in chats if chat.columna_id == col.id %}
+            <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
+                <div class="card-avatar-section">
+                    <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}"
+                         class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                <div class="card-content">
+                    <div class="card-title-row">
+                        {% set bandera = chat.numero | bandera %}
+                        {% if bandera %}
+                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                        {% endif %}
+                        <span class="alias-view" data-num="{{ chat.numero }}">
+                            {{ chat.nombre_mostrado }}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                        </span>
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
+                            ✏️
+                        </button>
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-num">{{ chat.numero }}</span>
+                        <span class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%d/%m %H:%M') }}
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+                </div>
+                {% if chat.sin_leer > 0 %}
+                <span class="card-unread">{{ chat.sin_leer }}</span>
+                {% endif %}
+            </a>
+            {% endfor %}
         </div>
-        {% if chat.sin_leer > 0 %}
-          <span class="card-unread">{{ chat.sin_leer }}</span>
-        {% endif %}
-      </a>
-      {% endfor %}
     </div>
-  </div>
-  {% endfor %}  <!-- CIERRE DEL LOOP DE COLUMNAS -->
+    {% endfor %}  <!-- CIERRE DEL LOOP DE COLUMNAS -->
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
-// ——— AUTO-ACTUALIZACIÓN DEL KANBAN CADA 5 SEGUNDOS ———
-document.addEventListener('DOMContentLoaded', function() {
-    let kanbanAutoRefresh = true;
-    let refreshInterval = 3000; // 5 segundos
-    
-    console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
-    
-    // Función para detectar y animar nuevos mensajes
-    function animarNuevosMensajes(data) {
-      const numerosActuales = new Set(
-        Array.from(document.querySelectorAll('.kanban-card'))
-          .map(card => card.dataset.chatNum)
-      );
-      
-      // Buscar nuevos mensajes en los datos recibidos
-      data.chats.forEach(chat => {
-        if (!numerosActuales.has(chat.numero)) {
-          // Este es un mensaje nuevo que no estaba antes
-          console.log('Nuevo mensaje detectado:', chat.numero);
-          
-          // Encontrar el elemento correspondiente después de actualizar
-          setTimeout(() => {
-            const nuevoElemento = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
-            if (nuevoElemento) {
-              nuevoElemento.classList.add('new-message');
-              
-              // Remover la clase después de que termine la animación
-              setTimeout(() => {
-                nuevoElemento.classList.remove('new-message');
-              }, 2500);
-            }
-          }, 100);
-        }
-      });
-    }
+    // ——— AUTO-ACTUALIZACIÓN DEL KANBAN CADA 5 SEGUNDOS ———
+    document.addEventListener('DOMContentLoaded', function () {
+        let kanbanAutoRefresh = true;
+        let refreshInterval = 5000; // 5 segundos
 
-    // Función para actualizar el Kanban
-    function actualizarKanban() {
-        if (!kanbanAutoRefresh) return;
-        
-        fetch('/kanban/data')
-        .then(response => {
-            if (!response.ok) {
-                throw new Error('Error en la respuesta del servidor');
-            }
-            return response.json();
-        })
-        .then(data => {
-            // Actualizar toda la interfaz del Kanban
-            actualizarInterfazCompleta(data);
-            console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
-        })
-        .catch(error => {
-            console.error('❌ Error actualizando Kanban:', error);
-        });
-    }
-    
-    // Función para actualizar toda la interfaz
-    function actualizarInterfazCompleta(data) {
-        const kanbanBoard = document.getElementById('kanban-board');
-        if (!kanbanBoard) return;
-        
-        // Primero detectamos los mensajes actuales antes de actualizar
-        const numerosPrevios = new Set(
-          Array.from(document.querySelectorAll('.kanban-card'))
-            .map(card => card.dataset.chatNum)
-        );
-        
-        // Reconstruir todo el Kanban con los nuevos datos
-        let nuevoHTML = '';
-        
-        data.columnas.forEach(col => {
-            nuevoHTML += `
-            <div class="kanban-column" data-col-id="${col.id}">
-                <div class="column-header">
-                    <img src="${col.icono}" class="col-icon" alt="">
-                    <h3 contenteditable="true" data-col-id="${col.id}" class="col-name">${col.nombre}</h3>
-                    <button class="add-chat-btn" title="Agregar aquí">+</button>
-                </div>
-                <div class="column-list">`;
-            
-            data.chats.filter(chat => chat.columna_id == col.id).forEach(chat => {
-                const bandera = getCountryFlag(chat.numero);
-                nuevoHTML += `
-                <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link" data-chat-num="${chat.numero}" style="text-decoration: none; color: inherit; display: block;">
-                    <div class="card-avatar-section">
-                        <img src="${chat.avatar || '/static/icons/default-avatar.png'}" 
-                             class="card-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                    </div>
-                    <div class="card-content">
-                        <div class="card-title-row">
-                            ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                            <span class="alias-view" data-num="${chat.numero}">
-                                ${chat.nombre_mostrado}
-                            </span>
-                        </div>
-                        <div class="card-meta-row">
-                            <span class="card-num">${chat.numero}</span>
-                            <span class="card-time">
-                                ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleString() : ''}
-                            </span>
-                        </div>
-                        <div class="card-msg">${chat.ultimo_mensaje || '&nbsp;'}</div>
-                    </div>
-                    ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
-                </a>`;
-            });
-            
-            nuevoHTML += `</div></div>`;
-        });
-        
-        kanbanBoard.innerHTML = nuevoHTML;
-        
-        // Reinicializar Sortable.js después de actualizar
-        inicializarSortable();
-        
-        // Animar nuevos mensajes
-        setTimeout(() => {
-          animarNuevosMensajes({
-            chats: data.chats,
-            numerosPrevios: numerosPrevios
-          });
-        }, 50);
-    }
-    
-    // Función auxiliar para banderas (simplificada)
-    function getCountryFlag(numero) {
-        if (!numero) return null;
-        const prefijos = {
-            '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
-            '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec'
-        };
-        
-        const numStr = numero.toString().replace('+', '');
-        for (let i = 3; i > 0; i--) {
-            const prefijo = numStr.substring(0, i);
-            if (prefijos[prefijo]) {
-                return `https://flagcdn.com/24x18/${prefijos[prefijo]}.png`;
-            }
+        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+
+        // Función para actualizar el Kanban de forma incremental
+        function actualizarKanban() {
+            if (!kanbanAutoRefresh) return;
+
+            // Guardar posición del scroll antes de actualizar
+            const scrollPosition = window.scrollY;
+
+            fetch('/kanban/data')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error en la respuesta del servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // Actualizar de forma incremental sin resetear el scroll
+                    actualizarIncremental(data);
+                    console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
+
+                    // Restaurar posición del scroll después de actualizar
+                    setTimeout(() => {
+                        window.scrollTo(0, scrollPosition);
+                    }, 10);
+                })
+                .catch(error => {
+                    console.error('❌ Error actualizando Kanban:', error);
+                });
         }
-        return null;
-    }
-    
-    // Inicializar Sortable.js
-    function inicializarSortable() {
-        document.querySelectorAll('.column-list').forEach(list => {
-            new Sortable(list, {
-                group: 'kanban',
-                animation: 150,
-                ghostClass: 'sortable-ghost',
-                onEnd: evt => {
-                    const numero = evt.item.dataset.chatNum;
-                    const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
-                    fetch('/kanban/mover', {
-                        method: 'POST',
-                        headers: { 'Content-Type':'application/json' },
-                        body: JSON.stringify({ numero, columna_id: nuevaCol })
-                    });
+
+        // Función para actualizar de forma incremental
+        function actualizarIncremental(data) {
+            // Actualizar nombres de columnas si cambiaron
+            data.columnas.forEach(col => {
+                const colHeader = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
+                if (colHeader && colHeader.textContent !== col.nombre) {
+                    colHeader.textContent = col.nombre;
                 }
             });
+
+            // Crear un mapa de los chats actuales para comparación rápida
+            const chatsActuales = new Map();
+            document.querySelectorAll('.kanban-card').forEach(card => {
+                chatsActuales.set(card.dataset.chatNum, {
+                    element: card,
+                    columnaId: card.closest('.kanban-column').dataset.colId
+                });
+            });
+
+            // Procesar cada chat de los datos recibidos
+            data.chats.forEach(chat => {
+                const chatExistente = chatsActuales.get(chat.numero);
+
+                if (chatExistente) {
+                    // El chat ya existe, actualizar si es necesario
+                    actualizarChatExistente(chatExistente.element, chat);
+
+                    // Mover a otra columna si es necesario
+                    if (chatExistente.columnaId !== chat.columna_id.toString()) {
+                        moverChatAColumna(chat.numero, chat.columna_id);
+                    }
+
+                    // Eliminar del mapa para marcar como procesado
+                    chatsActuales.delete(chat.numero);
+                } else {
+                    // Chat nuevo, agregarlo
+                    agregarNuevoChat(chat);
+                }
+            });
+
+            // Eliminar chats que ya no existen
+            chatsActuales.forEach((info, numero) => {
+                eliminarChat(numero);
+            });
+        }
+
+        // Función para actualizar un chat existente
+        function actualizarChatExistente(elemento, chat) {
+            // Actualizar avatar si cambió
+            const avatar = elemento.querySelector('.card-avatar');
+            const nuevoAvatar = chat.avatar || '/static/icons/default-avatar.png';
+            if (avatar.src !== nuevoAvatar) {
+                avatar.src = nuevoAvatar;
+            }
+
+            // Actualizar nombre mostrado
+            const aliasView = elemento.querySelector('.alias-view');
+            if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
+                aliasView.textContent = chat.nombre_mostrado;
+            }
+
+            // Actualizar tiempo
+            const timeElement = elemento.querySelector('.card-time');
+            if (timeElement && chat.ultima_fecha) {
+                const nuevoTiempo = new Date(chat.ultima_fecha).toLocaleString();
+                if (timeElement.textContent !== nuevoTiempo) {
+                    timeElement.textContent = nuevoTiempo;
+                }
+            }
+
+            // Actualizar último mensaje
+            const msgElement = elemento.querySelector('.card-msg');
+            const nuevoMensaje = chat.ultimo_mensaje || '&nbsp;';
+            if (msgElement.textContent !== nuevoMensaje) {
+                msgElement.textContent = nuevoMensaje;
+
+                // Animar si hay nuevo mensaje
+                if (chat.ultimo_mensaje) {
+                    elemento.classList.add('new-message');
+                    setTimeout(() => {
+                        elemento.classList.remove('new-message');
+                    }, 2500);
+                }
+            }
+
+            // Actualizar contador de no leídos
+            const unreadElement = elemento.querySelector('.card-unread');
+            if (chat.sin_leer > 0) {
+                if (unreadElement) {
+                    unreadElement.textContent = chat.sin_leer;
+                } else {
+                    const newUnread = document.createElement('span');
+                    newUnread.className = 'card-unread';
+                    newUnread.textContent = chat.sin_leer;
+                    elemento.appendChild(newUnread);
+                }
+            } else if (unreadElement) {
+                unreadElement.remove();
+            }
+
+            // Actualizar bandera
+            const flagElement = elemento.querySelector('.card-flag');
+            const nuevaBandera = getCountryFlag(chat.numero);
+            if (nuevaBandera) {
+                if (flagElement) {
+                    flagElement.src = nuevaBandera;
+                } else {
+                    const banderaImg = document.createElement('img');
+                    banderaImg.src = nuevaBandera;
+                    banderaImg.className = 'card-flag';
+                    banderaImg.alt = 'País';
+                    banderaImg.title = 'País';
+                    elemento.querySelector('.card-title-row').prepend(banderaImg);
+                }
+            } else if (flagElement) {
+                flagElement.remove();
+            }
+        }
+
+        // Función para agregar un nuevo chat
+        function agregarNuevoChat(chat) {
+            const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
+            if (!columna) return;
+
+            const bandera = getCountryFlag(chat.numero);
+            const nuevoChatHTML = `
+            <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration: none; color: inherit; display: block;">
+                <div class="card-avatar-section">
+                    <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
+                         class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                <div class="card-content">
+                    <div class="card-title-row">
+                        ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
+                        <span class="alias-view" data-num="${chat.numero}">
+                            ${chat.nombre_mostrado}
+                        </span>
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-num">${chat.numero}</span>
+                        <span class="card-time">
+                            ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleString() : ''}
+                        </span>
+                    </div>
+                    <div class="card-msg">${chat.ultimo_mensaje || '&nbsp;'}</div>
+                </div>
+                ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
+            </a>`;
+
+            columna.insertAdjacentHTML('beforeend', nuevoChatHTML);
+
+            // Remover la clase de animación después de un tiempo
+            setTimeout(() => {
+                const nuevoElemento = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
+                if (nuevoElemento) {
+                    nuevoElemento.classList.remove('new-message');
+                }
+            }, 2500);
+        }
+
+        // Función para mover un chat a otra columna
+        function moverChatAColumna(numero, nuevaColumnaId) {
+            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+            const nuevaColumna = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
+
+            if (chatElement && nuevaColumna) {
+                nuevaColumna.appendChild(chatElement);
+            }
+        }
+
+        // Función para eliminar un chat
+        function eliminarChat(numero) {
+            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+            if (chatElement) {
+                chatElement.remove();
+            }
+        }
+
+        // Función auxiliar para banderas (simplificada)
+        function getCountryFlag(numero) {
+            if (!numero) return null;
+            const prefijos = {
+                '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
+                '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec'
+            };
+
+            const numStr = numero.toString().replace('+', '');
+            for (let i = 3; i > 0; i--) {
+                const prefijo = numStr.substring(0, i);
+                if (prefijos[prefijo]) {
+                    return `https://flagcdn.com/24x18/${prefijos[prefijo]}.png`;
+                }
+            }
+            return null;
+        }
+
+        // Inicializar Sortable.js
+        function inicializarSortable() {
+            document.querySelectorAll('.column-list').forEach(list => {
+                new Sortable(list, {
+                    group: 'kanban',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: evt => {
+                        const numero = evt.item.dataset.chatNum;
+                        const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
+                        fetch('/kanban/mover', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ numero, columna_id: nuevaCol })
+                        });
+                    }
+                });
+            });
+        }
+
+        // Inicializar Sortable al cargar
+        inicializarSortable();
+
+        // Iniciar el intervalo
+        setInterval(actualizarKanban, refreshInterval);
+
+        // Controlar actualización cuando la pestaña no está visible
+        document.addEventListener('visibilitychange', function () {
+            kanbanAutoRefresh = !document.hidden;
         });
-    }
-    
-    // Iniciar el intervalo
-    setInterval(actualizarKanban, refreshInterval);
-    
-    // Controlar actualización cuando la pestaña no está visible
-    document.addEventListener('visibilitychange', function() {
-        kanbanAutoRefresh = !document.hidden;
+
+        // Forzar primera actualización
+        setTimeout(actualizarKanban, 1000);
     });
-    
-    // Forzar primera actualización
-    setTimeout(actualizarKanban, 1000);
-});
 </script>
 {% endblock %}
