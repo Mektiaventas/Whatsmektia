@@ -2860,7 +2860,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
         params = {
             'fields': 'contacts',
             'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token']
+            'access_token': config['whatsapp_token'] 
         }
         
         headers = {'Content-Type': 'application/json'}
