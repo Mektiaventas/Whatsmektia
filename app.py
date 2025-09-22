@@ -2628,7 +2628,6 @@ def whatsapp_login():
         app.logger.error(f"Error en whatsapp-login: {e}")
         flash('❌ Funcionalidad temporalmente deshabilitada por mantenimiento', 'warning')
         return redirect(url_for('inicio'))
-    })
 
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
