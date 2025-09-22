@@ -2621,7 +2621,7 @@ def enviar_informacion_completa(numero_cliente, config=None):
 
 @app.route('/whatsapp-login')
 def whatsapp_login():
-    """Página de login de WhatsApp - Versión simplificada"""
+    #"""Página de login de WhatsApp - Versión simplificada"""
     try:
         return render_template('whatsapp_login_simple.html')
     except Exception as e:
