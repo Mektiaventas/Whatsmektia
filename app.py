@@ -706,8 +706,9 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
 @app.route('/kanban/data')
-def kanban_data():
-    config = obtener_configuracion_por_host()
+def kanban_data(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
