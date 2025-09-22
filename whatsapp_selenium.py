@@ -29,37 +29,37 @@ class WhatsAppSelenium:
         self.setup_driver()
         
     def setup_driver(self):
-    #"""Configura el driver de Selenium para servidor headless"""
-    try:
-        from selenium import webdriver
-        from selenium.webdriver.chrome.options import Options
+        #"""Configura el driver de Selenium para servidor headless"""
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.options import Options
         
-        chrome_options = Options()
+            chrome_options = Options()
         
-        # Configuración para servidor sin interfaz gráfica
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--headless=new')  # Modo headless moderno
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--window-size=1920,1080')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-software-rasterizer')
+            # Configuración para servidor sin interfaz gráfica
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--headless=new')  # Modo headless moderno
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-software-rasterizer')
         
-        # Configuración específica para WhatsApp Web
-        chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
+            # Configuración específica para WhatsApp Web
+            chrome_options.add_argument('--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36')
         
-        # Usar ChromeDriver del sistema
-        self.driver = webdriver.Chrome(options=chrome_options)
+            # Usar ChromeDriver del sistema
+            self.driver = webdriver.Chrome(options=chrome_options)
         
-        self.driver.set_page_load_timeout(60)
-        self.driver.implicitly_wait(10)
+            self.driver.set_page_load_timeout(60)
+            self.driver.implicitly_wait(10)
         
-        logger.info("✅ Driver configurado en modo headless")
-        return True
+            logger.info("✅ Driver configurado en modo headless")
+            return True
         
-    except Exception as e:
-        logger.error(f"❌ Error configurando driver: {e}")
-        # Fallback: intentar sin modo headless para debugging
+        except Exception as e:
+            logger.error(f"❌ Error configurando driver: {e}")
+            # Fallback: intentar sin modo headless para debugging
         try:
             chrome_options = Options()
             chrome_options.add_argument('--no-sandbox')
