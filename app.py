@@ -2769,7 +2769,7 @@ def webhook():
                         )
                         thread.daemon = True
                         thread.start()
-                    except Exception as e:
+                except Exception as e:
                         app.logger.error(f"Error iniciando hilo para imagen: {e}")
         
                 # Continuar con el procesamiento normal del mensaje
