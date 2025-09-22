@@ -45,6 +45,35 @@ body {
   color: var(--text-brand-blue);
 }
 
+/* Estilos para la sección de restricciones */
+.form-group {
+    margin-bottom: 15px;
+}
+
+    .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+
+    .form-group input[type="number"] {
+        width: 100px;
+        padding: 5px;
+        border: 1px solid #ddd;
+        border-radius: 3px;
+    }
+
+.form-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+    .form-row .form-group {
+        flex: 1;
+        min-width: 200px;
+    }
+
 /* ========== LAYOUT ========= */
 .layout {
   display: flex;

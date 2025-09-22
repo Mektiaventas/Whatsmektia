@@ -703,7 +703,7 @@ def get_country_flag(numero):
     return None
 
 # ——— Subpestañas válidas ———
-SUBTABS = ['negocio', 'personalizacion', 'precios']
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones']
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
@@ -778,7 +778,11 @@ def load_config(config=None):
             correo VARCHAR(100),
             que_hace TEXT,
             tono VARCHAR(50),
-            lenguaje VARCHAR(50)
+            lenguaje VARCHAR(50),
+            restricciones TEXT,                    -- ← NUEVO CAMPO
+            palabras_prohibidas TEXT,             -- ← NUEVO CAMPO
+            max_mensajes INT DEFAULT 10,          -- ← NUEVO CAMPO
+            tiempo_max_respuesta INT DEFAULT 30   -- ← NUEVO CAMPO
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -787,7 +791,7 @@ def load_config(config=None):
     conn.close()
 
     if not row:
-        return {'negocio': {}, 'personalizacion': {}}
+        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}}
 
     negocio = {
         'ia_nombre': row['ia_nombre'],
@@ -803,8 +807,13 @@ def load_config(config=None):
         'tono': row['tono'],
         'lenguaje': row['lenguaje'],
     }
-    return {'negocio': negocio, 'personalizacion': personalizacion}
-
+    restricciones = {  # ← NUEVA SECCIÓN
+        'restricciones': row.get('restricciones', ''),
+        'palabras_prohibidas': row.get('palabras_prohibidas', ''),
+        'max_mensajes': row.get('max_mensajes', 10),
+        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
+    }
+    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones}
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
     conn = get_db_connection(config)
@@ -1106,15 +1115,16 @@ def save_config(cfg_all, config=None):
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
+    res = cfg_all.get('restricciones', {})  # ← NUEVA SECCIÓN
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute('''
         INSERT INTO configuracion
             (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-             telefono, correo, que_hace, tono, lenguaje)
+             telefono, correo, que_hace, tono, lenguaje, restricciones, palabras_prohibidas, max_mensajes, tiempo_max_respuesta)
         VALUES
-            (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             ia_nombre = VALUES(ia_nombre),
             negocio_nombre = VALUES(negocio_nombre),
@@ -1125,7 +1135,11 @@ def save_config(cfg_all, config=None):
             correo = VALUES(correo),
             que_hace = VALUES(que_hace),
             tono = VALUES(tono),
-            lenguaje = VALUES(lenguaje);
+            lenguaje = VALUES(lenguaje),
+            restricciones = VALUES(restricciones),
+            palabras_prohibidas = VALUES(palabras_prohibidas),
+            max_mensajes = VALUES(max_mensajes),
+            tiempo_max_respuesta = VALUES(tiempo_max_respuesta);
     ''', (
         neg.get('ia_nombre'),
         neg.get('negocio_nombre'),
@@ -1137,6 +1151,10 @@ def save_config(cfg_all, config=None):
         neg.get('que_hace'),
         per.get('tono'),
         per.get('lenguaje'),
+        res.get('restricciones'),           # ← NUEVO
+        res.get('palabras_prohibidas'),     # ← NUEVO
+        res.get('max_mensajes', 10),        # ← NUEVO
+        res.get('tiempo_max_respuesta', 30) # ← NUEVO
     ))
     conn.commit()
     cursor.close()
@@ -1333,7 +1351,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             response.raise_for_status()
             
             data = response.json()
-            return data['choices'][0]['message']['content'].strip()
+            respuesta = data['choices'][0]['message']['content'].strip()
+            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
+            respuesta = aplicar_restricciones(respuesta, numero, config)
+            return respuesta
         
         else:
             # Usar DeepSeek para texto (o audio transcrito)
@@ -1353,7 +1374,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             response.raise_for_status()
             
             data = response.json()
-            return data['choices'][0]['message']['content'].strip()
+            respuesta = data['choices'][0]['message']['content'].strip()
+            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
+            respuesta = aplicar_restricciones(respuesta, numero, config)
+            return respuesta
     
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 API error: {e}")
@@ -3389,38 +3413,44 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     return None
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
-        config = obtener_configuracion_por_host()
-        if tab not in ['negocio','personalizacion']:
-            abort(404)
+    config = obtener_configuracion_por_host()
+    if tab not in ['negocio','personalizacion','restricciones']:  # ← Agrega 'restricciones'
+        abort(404)
 
-        cfg = load_config(config)
-        guardado = False
-        if request.method == 'POST':
-            if tab == 'negocio':
-                cfg['negocio'] = {
-                    'ia_nombre':      request.form['ia_nombre'],
-                    'negocio_nombre': request.form['negocio_nombre'],
-                    'descripcion':    request.form['descripcion'],
-                    'url':            request.form['url'],
-                    'direccion':      request.form['direccion'],
-                    'telefono':       request.form['telefono'],
-                    'correo':         request.form['correo'],
-                    'que_hace':       request.form['que_hace']
-                }
-            else:
-                cfg['personalizacion'] = {
-                    'tono':     request.form['tono'],
-                    'lenguaje': request.form['lenguaje']
-                }
-            save_config(cfg)
-            guardado = True
+    cfg = load_config(config)
+    guardado = False
+    if request.method == 'POST':
+        if tab == 'negocio':
+            cfg['negocio'] = {
+                'ia_nombre':      request.form['ia_nombre'],
+                'negocio_nombre': request.form['negocio_nombre'],
+                'descripcion':    request.form['descripcion'],
+                'url':            request.form['url'],
+                'direccion':      request.form['direccion'],
+                'telefono':       request.form['telefono'],
+                'correo':         request.form['correo'],
+                'que_hace':       request.form['que_hace']
+            }
+        elif tab == 'personalizacion':
+            cfg['personalizacion'] = {
+                'tono':     request.form['tono'],
+                'lenguaje': request.form['lenguaje']
+            }
+        elif tab == 'restricciones':  # ← NUEVA SECCIÓN
+            cfg['restricciones'] = {
+                'restricciones': request.form['restricciones'],
+                'palabras_prohibidas': request.form['palabras_prohibidas'],
+                'max_mensajes': int(request.form.get('max_mensajes', 10)),
+                'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
+            }
+        save_config(cfg, config)
+        guardado = True
 
-        datos = cfg.get(tab, {})
-        return render_template('configuracion.html',
-            tabs=SUBTABS, active=tab,
-            datos=datos, guardado=guardado
-        )
-
+    datos = cfg.get(tab, {})
+    return render_template('configuracion.html',
+        tabs=SUBTABS, active=tab,
+        datos=datos, guardado=guardado
+    )
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
         config = obtener_configuracion_por_host()
@@ -3488,6 +3518,49 @@ def configuracion_precio_borrar(pid):
         conn.close()
         return redirect(url_for('configuracion_precios'))
 
+
+def aplicar_restricciones(respuesta_ia, numero, config=None):
+    """Aplica las restricciones configuradas a las respuestas de la IA"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        cfg = load_config(config)
+        restricciones = cfg.get('restricciones', {})
+        
+        # Verificar palabras prohibidas
+        palabras_prohibidas = restricciones.get('palabras_prohibidas', '').lower().split('\n')
+        palabras_prohibidas = [p.strip() for p in palabras_prohibidas if p.strip()]
+        
+        for palabra in palabras_prohibidas:
+            if palabra and palabra in respuesta_ia.lower():
+                respuesta_ia = respuesta_ia.replace(palabra, '[REDACTADO]')
+                app.logger.info(f"🚫 Palabra prohibida detectada y redactada: {palabra}")
+        
+        # Verificar restricciones específicas
+        lista_restricciones = restricciones.get('restricciones', '').split('\n')
+        lista_restricciones = [r.strip() for r in lista_restricciones if r.strip()]
+        
+        # Ejemplo: Si hay restricción sobre agendar citas sin confirmación
+        if any('no agendar citas sin confirmación' in r.lower() for r in lista_restricciones):
+            if any(palabra in respuesta_ia.lower() for palabra in ['agendo', 'agendado', 'cita confirmada']):
+                if 'confirmación' not in respuesta_ia.lower() and 'verific' not in respuesta_ia.lower():
+                    respuesta_ia = "Necesito confirmar algunos detalles antes de agendar la cita. ¿Podrías proporcionarme más información?"
+                    app.logger.info(f"🔒 Restricción de cita aplicada para {numero}")
+        
+        # Verificar límite de mensajes
+        max_mensajes = restricciones.get('max_mensajes', 10)
+        historial = obtener_historial(numero, limite=max_mensajes + 5, config=config)
+        
+        if len(historial) >= max_mensajes:
+            respuesta_ia = "Hemos alcanzado el límite de esta conversación. Por favor, contacta con un agente humano para continuar."
+            app.logger.info(f"📊 Límite de mensajes alcanzado para {numero}")
+        
+        return respuesta_ia
+        
+    except Exception as e:
+        app.logger.error(f"Error aplicando restricciones: {e}")
+        return respuesta_ia
     # ——— Kanban ———
 
 def verificar_tablas_bd(config):
