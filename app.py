@@ -107,80 +107,6 @@ PREFIJOS_PAIS = {
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
-def get_contact_image(self, phone_number):
-    """Obtiene la imagen de perfil de un contacto (solo imagen, no nombre)"""
-    if not self.is_logged_in:
-        logger.error("❌ No hay sesión activa de WhatsApp")
-        return None
-    
-    try:
-        # Formatear número
-        clean_number = ''.join(filter(str.isdigit, phone_number))
-        
-        # Buscar el contacto
-        search_box = WebDriverWait(self.driver, 15).until(
-            EC.element_to_be_clickable((By.XPATH, '//div[@contenteditable="true"][@data-tab="3"]'))
-        )
-        
-        search_box.clear()
-        search_box.send_keys(clean_number)
-        time.sleep(3)  # Esperar resultados de búsqueda
-        
-        # Buscar contacto en la lista
-        contact_xpath = f'//span[contains(@title, "{clean_number}")]'
-        contacts = self.driver.find_elements(By.XPATH, contact_xpath)
-        
-        if not contacts:
-            logger.warning(f"⚠️ No se encontró contacto para {clean_number}")
-            search_box.clear()
-            search_box.send_keys(Keys.ESCAPE)
-            return None
-        
-        # Hacer click en el primer resultado
-        contacts[0].click()
-        time.sleep(3)
-        
-        # Obtener SOLO la imagen de perfil
-        profile_image = None
-        try:
-            img_element = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, '//header//img[@src]'))
-            )
-            profile_image = img_element.get_attribute('src')
-            
-            # Si es una imagen base64, guardarla como URL accesible
-            if profile_image and profile_image.startswith('data:image'):
-                # Extraer base64 y crear archivo
-                image_data = profile_image.split(',')[1]
-                image_bytes = base64.b64decode(image_data)
-                
-                # Guardar imagen localmente
-                images_dir = os.path.join(os.path.dirname(__file__), 'static', 'images', 'profiles')
-                os.makedirs(images_dir, exist_ok=True)
-                
-                filename = f"profile_{clean_number}.jpg"
-                filepath = os.path.join(images_dir, filename)
-                
-                with open(filepath, 'wb') as f:
-                    f.write(image_bytes)
-                
-                profile_image = f"/static/images/profiles/{filename}"
-                
-        except Exception as e:
-            logger.warning(f"⚠️ No se pudo obtener imagen: {e}")
-        
-        # Limpiar búsqueda
-        search_box.clear()
-        search_box.send_keys(Keys.ESCAPE)
-        time.sleep(1)
-        
-        logger.info(f"✅ Imagen obtenida para {clean_number}: {profile_image}")
-        return profile_image
-        
-    except Exception as e:
-        logger.error(f"❌ Error obteniendo imagen de {phone_number}: {e}")
-        return None
-
 def get_db_connection(config=None):
     if config is None:
         try:
@@ -790,7 +716,7 @@ def kanban_data():
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Obtener chats con nombres e imágenes de contactos
+        # Obtener chats con nombres de contactos
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -800,9 +726,6 @@ def kanban_data():
                 WHERE numero = cm.numero 
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
-                (SELECT imagen_url FROM contactos 
-                WHERE numero_telefono = cm.numero 
-                ORDER BY fecha_actualizacion DESC LIMIT 1) AS imagen_url,
                 (SELECT COUNT(*) FROM conversaciones 
                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
             FROM chat_meta cm
@@ -835,8 +758,6 @@ def kanban_data():
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
-
-
 
 # ——— Configuración en MySQL ———
 def load_config(config=None):
@@ -1148,24 +1069,6 @@ def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
         else:
             enviar_mensaje(numero, "¡Gracias! He agendado tu cita y nos pondremos en contacto contigo pronto.", config)
 
-@app.route('/actualizar-imagen-contacto/<phone_number>')
-def actualizar_imagen_contacto_endpoint(phone_number):
-    """Endpoint para actualizar la imagen de un contacto específico"""
-    try:
-        config = obtener_configuracion_por_host()
-        exito = actualizar_imagen_contacto(phone_number, config)
-        
-        if exito:
-            flash('✅ Imagen actualizada correctamente', 'success')
-        else:
-            flash('❌ No se pudo actualizar la imagen', 'error')
-            
-    except Exception as e:
-        app.logger.error(f"Error en endpoint de imagen: {e}")
-        flash(f'Error: {str(e)}', 'error')
-    
-    return redirect(url_for('index'))
-
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
@@ -1459,46 +1362,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-
-def actualizar_imagen_contacto(numero, config=None):
-    """Actualiza solo la imagen de un contacto usando Selenium"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        client = get_whatsapp_client()
-        
-        if not client.is_logged_in:
-            app.logger.warning("No hay sesión activa de WhatsApp para obtener imagen")
-            return False
-        
-        # Obtener imagen con Selenium
-        imagen_url = client.get_contact_image(numero)
-        
-        if imagen_url:
-            # Actualizar en la base de datos
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE contactos 
-                SET imagen_url = %s, fecha_actualizacion = CURRENT_TIMESTAMP
-                WHERE numero_telefono = %s
-            """, (imagen_url, numero))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            app.logger.info(f"✅ Imagen actualizada para {numero}: {imagen_url}")
-            return True
-        else:
-            app.logger.warning(f"No se pudo obtener imagen para {numero}")
-            return False
-            
-    except Exception as e:
-        app.logger.error(f"Error actualizando imagen de {numero}: {e}")
-        return False
 
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
@@ -2619,29 +2482,6 @@ def enviar_informacion_completa(numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
 
-@app.route('/whatsapp-login')
-def whatsapp_login():
-    #"""Inicia sesión en WhatsApp Web"""
-    try:
-        qr_code = init_whatsapp_session()
-        if qr_code:
-            return render_template('whatsapp_login.html', qr_code=qr_code)
-        else:
-            flash('Error al generar QR de WhatsApp', 'error')
-            return redirect(url_for('index'))
-    except Exception as e:
-        app.logger.error(f"Error en whatsapp-login: {e}")
-        flash(f'Error: {str(e)}', 'error')
-        return redirect(url_for('index'))
-
-@app.route('/whatsapp-status')
-def whatsapp_status():
-    """Verifica el estado de la sesión de WhatsApp"""
-    client = get_whatsapp_client()
-    return jsonify({
-        'logged_in': client.is_logged_in,
-        'qr_code': client.qr_code is not None
-    })
 # ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
@@ -2785,26 +2625,16 @@ def webhook():
                 conn.close()
             
                 app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
-                try:
-                        # Iniciar un hilo para obtener la imagen sin bloquear el webhook
-                        import threading
-                        thread = threading.Thread(
-                            target=actualizar_imagen_contacto, 
-                            args=(wa_id, config)
-                        )
-                        thread.daemon = True
-                        thread.start()
-                except Exception as e:
-                        app.logger.error(f"Error iniciando hilo para imagen: {e}")
         
-                # Continuar con el procesamiento normal del mensaje
-                # ... tu código existente para procesar mensajes ...
+            # Continuar con el procesamiento normal del mensaje
+            # ... tu código existente para procesar mensajes ...
         
         except Exception as e:
-                app.logger.error(f"Error procesando webhook: {str(e)}")
-                return jsonify({"status": "error"}), 500
-    
-        return jsonify({"status": "ok"}), 200
+            app.logger.error(f"Error procesando webhook: {str(e)}")
+            return jsonify({"status": "error"}), 500
+        if not mensajes:
+            app.logger.info("⚠️ No hay mensajes en el payload")
+            return 'OK', 200    
 
         msg = mensajes[0]
         numero = msg['from']
