@@ -21,6 +21,8 @@
     </li>
     {% endfor %}
 </ul>
+
+<!-- Contenido de la subpestaña -->
 {% if active == 'negocio' %}
 <div class="form-group">
     <label>Integración con Google Calendar</label>
@@ -33,8 +35,7 @@
         </small>
     </div>
 </div>
-{% endif %}
-{% if active == 'negocio' %}
+
 <div style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
     <h3>🔗 WhatsApp Web Integration</h3>
     <p>Conecta con WhatsApp Web para obtener nombres y fotos de perfil actualizados</p>
@@ -42,9 +43,7 @@
     <a href="/whatsapp-status" class="btn btn-secondary">Ver Estado</a>
     <a href="/whatsapp-refresh-contactos" class="btn btn-info">Actualizar Contactos</a>
 </div>
-{% endif %}
-<!-- Contenido de la subpestaña -->
-  {% if active == 'negocio' %}
+
 <form class="config-form" method="POST">
     <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
@@ -85,7 +84,7 @@
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
 
-  {% elif active == 'personalizacion' %}
+{% elif active == 'personalizacion' %}
 <form class="config-form" method="POST">
     <div class="form-card">
         <label>Tono de la IA</label>
@@ -97,47 +96,52 @@
     </div>
     <button type="submit" class="btn-primary">Guardar Personalización</button>
 </form>
-{% endblock %}
-  {% elif active == 'restricciones' %}
-    <form class="config-form" method="POST">
-        <div class="form-card">
-            <label>Restricciones del Bot (Una por línea)</label>
-            <textarea name="restricciones" rows="8" placeholder="Ejemplo:
-    - No agendar citas sin confirmación previa
-    - No proporcionar precios exactos
-    - No prometer fechas de entrega específicas
-    - No aceptar pedidos fuera del horario laboral
-    - No compartir información confidencial">{{ datos.restricciones or '' }}</textarea>
-            <small class="form-text text-muted">
-                Lista de cosas que el bot NO debe hacer. Cada restricción en una línea nueva.
-            </small>
-        </div>
 
-        <div class="form-card">
-            <label>Palabras clave prohibidas</label>
-            <textarea name="palabras_prohibidas" rows="4" placeholder="Ejemplo:
-    gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or '' }}</textarea>
-            <small class="form-text text-muted">
-                Palabras que el bot debe evitar usar en sus respuestas.
-            </small>
-        </div>
+{% elif active == 'precios' %}
+<!-- El contenido de precios se maneja en otra ruta -->
+<p>La configuración de precios se maneja en una página separada.</p>
+<a href="{{ url_for('configuracion_precios') }}" class="btn btn-primary">Gestionar Precios</a>
 
-        <div class="form-card">
-            <label>Límites de la IA</label>
-            <div class="form-row">
-                <div class="form-group">
-                    <label>Máximo de mensajes por conversación:</label>
-                    <input type="number" name="max_mensajes" value="{{ datos.max_mensajes or '10' }}" min="1" max="50">
-                </div>
-                <div class="form-group">
-                    <label>Tiempo máximo de respuesta (segundos):</label>
-                    <input type="number" name="tiempo_max_respuesta" value="{{ datos.tiempo_max_respuesta or '30' }}" min="5" max="120">
-                </div>
+{% elif active == 'restricciones' %}
+<form class="config-form" method="POST">
+    <div class="form-card">
+        <label>Restricciones del Bot (Una por línea)</label>
+        <textarea name="restricciones" rows="8" placeholder="Ejemplo:
+- No agendar citas sin confirmación previa
+- No proporcionar precios exactos
+- No prometer fechas de entrega específicas
+- No aceptar pedidos fuera del horario laboral
+- No compartir información confidencial">{{ datos.restricciones or '' }}</textarea>
+        <small class="form-text text-muted">
+            Lista de cosas que el bot NO debe hacer. Cada restricción en una línea nueva.
+        </small>
+    </div>
+
+    <div class="form-card">
+        <label>Palabras clave prohibidas</label>
+        <textarea name="palabras_prohibidas" rows="4" placeholder="Ejemplo:
+gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or '' }}</textarea>
+        <small class="form-text text-muted">
+            Palabras que el bot debe evitar usar en sus respuestas.
+        </small>
+    </div>
+
+    <div class="form-card">
+        <label>Límites de la IA</label>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Máximo de mensajes por conversación:</label>
+                <input type="number" name="max_mensajes" value="{{ datos.max_mensajes or '10' }}" min="1" max="50">
+            </div>
+            <div class="form-group">
+                <label>Tiempo máximo de respuesta (segundos):</label>
+                <input type="number" name="tiempo_max_respuesta" value="{{ datos.tiempo_max_respuesta or '30' }}" min="5" max="120">
             </div>
         </div>
+    </div>
 
-        <button type="submit" class="btn-primary">Guardar Restricciones</button>
-    </form>
-    {% endif %}
+    <button type="submit" class="btn-primary">Guardar Restricciones</button>
+</form>
+{% endif %}
 
 {% endblock %}
