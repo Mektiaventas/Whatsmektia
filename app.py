@@ -760,7 +760,6 @@ def kanban_data(config=None):
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
 
-# ——— Configuración en MySQL ———
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -779,10 +778,10 @@ def load_config(config=None):
             que_hace TEXT,
             tono VARCHAR(50),
             lenguaje VARCHAR(50),
-            restricciones TEXT,                    -- ← NUEVO CAMPO
-            palabras_prohibidas TEXT,             -- ← NUEVO CAMPO
-            max_mensajes INT DEFAULT 10,          -- ← NUEVO CAMPO
-            tiempo_max_respuesta INT DEFAULT 30   -- ← NUEVO CAMPO
+            restricciones TEXT,
+            palabras_prohibidas TEXT,
+            max_mensajes INT DEFAULT 10,
+            tiempo_max_respuesta INT DEFAULT 30
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -807,13 +806,14 @@ def load_config(config=None):
         'tono': row['tono'],
         'lenguaje': row['lenguaje'],
     }
-    restricciones = {  # ← NUEVA SECCIÓN
+    restricciones = {
         'restricciones': row.get('restricciones', ''),
         'palabras_prohibidas': row.get('palabras_prohibidas', ''),
         'max_mensajes': row.get('max_mensajes', 10),
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
     return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones}
+
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
     conn = get_db_connection(config)
@@ -1115,51 +1115,89 @@ def save_config(cfg_all, config=None):
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
-    res = cfg_all.get('restricciones', {})  # ← NUEVA SECCIÓN
+    res = cfg_all.get('restricciones', {})  # Nueva sección
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    cursor.execute('''
-        INSERT INTO configuracion
-            (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-             telefono, correo, que_hace, tono, lenguaje, restricciones, palabras_prohibidas, max_mensajes, tiempo_max_respuesta)
-        VALUES
-            (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ON DUPLICATE KEY UPDATE
-            ia_nombre = VALUES(ia_nombre),
-            negocio_nombre = VALUES(negocio_nombre),
-            descripcion = VALUES(descripcion),
-            url = VALUES(url),
-            direccion = VALUES(direccion),
-            telefono = VALUES(telefono),
-            correo = VALUES(correo),
-            que_hace = VALUES(que_hace),
-            tono = VALUES(tono),
-            lenguaje = VALUES(lenguaje),
-            restricciones = VALUES(restricciones),
-            palabras_prohibidas = VALUES(palabras_prohibidas),
-            max_mensajes = VALUES(max_mensajes),
-            tiempo_max_respuesta = VALUES(tiempo_max_respuesta);
-    ''', (
-        neg.get('ia_nombre'),
-        neg.get('negocio_nombre'),
-        neg.get('descripcion'),
-        neg.get('url'),
-        neg.get('direccion'),
-        neg.get('telefono'),
-        neg.get('correo'),
-        neg.get('que_hace'),
-        per.get('tono'),
-        per.get('lenguaje'),
-        res.get('restricciones'),           # ← NUEVO
-        res.get('palabras_prohibidas'),     # ← NUEVO
-        res.get('max_mensajes', 10),        # ← NUEVO
-        res.get('tiempo_max_respuesta', 30) # ← NUEVO
-    ))
+    
+    # Verificar si la tabla tiene las nuevas columnas
+    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'restricciones'")
+    tiene_restricciones = cursor.fetchone() is not None
+    
+    if tiene_restricciones:
+        # Si tiene las nuevas columnas, usar la consulta actualizada
+        cursor.execute('''
+            INSERT INTO configuracion
+                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
+                 telefono, correo, que_hace, tono, lenguaje, restricciones, palabras_prohibidas, max_mensajes, tiempo_max_respuesta)
+            VALUES
+                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                ia_nombre = VALUES(ia_nombre),
+                negocio_nombre = VALUES(negocio_nombre),
+                descripcion = VALUES(descripcion),
+                url = VALUES(url),
+                direccion = VALUES(direccion),
+                telefono = VALUES(telefono),
+                correo = VALUES(correo),
+                que_hace = VALUES(que_hace),
+                tono = VALUES(tono),
+                lenguaje = VALUES(lenguaje),
+                restricciones = VALUES(restricciones),
+                palabras_prohibidas = VALUES(palabras_prohibidas),
+                max_mensajes = VALUES(max_mensajes),
+                tiempo_max_respuesta = VALUES(tiempo_max_respuesta);
+        ''', (
+            neg.get('ia_nombre'),
+            neg.get('negocio_nombre'),
+            neg.get('descripcion'),
+            neg.get('url'),
+            neg.get('direccion'),
+            neg.get('telefono'),
+            neg.get('correo'),
+            neg.get('que_hace'),
+            per.get('tono'),
+            per.get('lenguaje'),
+            res.get('restricciones'),
+            res.get('palabras_prohibidas'),
+            res.get('max_mensajes', 10),
+            res.get('tiempo_max_respuesta', 30)
+        ))
+    else:
+        # Si no tiene las nuevas columnas, usar la consulta original
+        cursor.execute('''
+            INSERT INTO configuracion
+                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
+                 telefono, correo, que_hace, tono, lenguaje)
+            VALUES
+                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                ia_nombre = VALUES(ia_nombre),
+                negocio_nombre = VALUES(negocio_nombre),
+                descripcion = VALUES(descripcion),
+                url = VALUES(url),
+                direccion = VALUES(direccion),
+                telefono = VALUES(telefono),
+                correo = VALUES(correo),
+                que_hace = VALUES(que_hace),
+                tono = VALUES(tono),
+                lenguaje = VALUES(lenguaje);
+        ''', (
+            neg.get('ia_nombre'),
+            neg.get('negocio_nombre'),
+            neg.get('descripcion'),
+            neg.get('url'),
+            neg.get('direccion'),
+            neg.get('telefono'),
+            neg.get('correo'),
+            neg.get('que_hace'),
+            per.get('tono'),
+            per.get('lenguaje')
+        ))
+    
     conn.commit()
     cursor.close()
     conn.close()
-
 # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config=None):
     if config is None:
@@ -3013,22 +3051,18 @@ def obtener_configuracion_por_host():
         
         app.logger.info(f"🔍 Config detection - Host: '{host}', Referer: '{referer}'")
         
-        # Detección MÁS AGRESIVA para La Porfirianna
-        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna', 'www.laporfirianna']):
+        # 🔥 CORRECCIÓN: Remover 'www.' para una detección consistente
+        host_clean = host.replace('www.', '')
+        referer_clean = referer.replace('www.', '') if referer else ''
+        
+        # Detección MÁS AGRESIVA para La Porfirianna (sin www)
+        if any(dominio in host_clean for dominio in ['laporfirianna', 'porfirianna']):
             app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
             return NUMEROS_CONFIG['524812372326']
         
-        if any(dominio in referer for dominio in ['laporfirianna', 'porfirianna', 'www.laporfirianna']):
+        if any(dominio in referer_clean for dominio in ['laporfirianna', 'porfirianna']):
             app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
             return NUMEROS_CONFIG['524812372326']
-        
-        # Si el host contiene 'www', podría ser un problema de redirección
-        if host.startswith('www.') and 'laporfirianna' not in host:
-            # Intentar sin www
-            host_sin_www = host.replace('www.', '')
-            if 'laporfirianna' in host_sin_www:
-                app.logger.info("✅ Configuración detectada: La Porfirianna (host sin www)")
-                return NUMEROS_CONFIG['524812372326']
         
         # Default a Mektia
         app.logger.info("✅ Configuración por defecto: Mektia")
@@ -3414,7 +3448,7 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
-    if tab not in ['negocio','personalizacion','restricciones']:  # ← Agrega 'restricciones'
+    if tab not in SUBTABS:  # Asegúrate de que 'restricciones' esté en SUBTABS
         abort(404)
 
     cfg = load_config(config)
@@ -3436,10 +3470,10 @@ def configuracion_tab(tab):
                 'tono':     request.form['tono'],
                 'lenguaje': request.form['lenguaje']
             }
-        elif tab == 'restricciones':  # ← NUEVA SECCIÓN
+        elif tab == 'restricciones':
             cfg['restricciones'] = {
-                'restricciones': request.form['restricciones'],
-                'palabras_prohibidas': request.form['palabras_prohibidas'],
+                'restricciones': request.form.get('restricciones', ''),
+                'palabras_prohibidas': request.form.get('palabras_prohibidas', ''),
                 'max_mensajes': int(request.form.get('max_mensajes', 10)),
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
             }
@@ -3451,6 +3485,7 @@ def configuracion_tab(tab):
         tabs=SUBTABS, active=tab,
         datos=datos, guardado=guardado
     )
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
         config = obtener_configuracion_por_host()
