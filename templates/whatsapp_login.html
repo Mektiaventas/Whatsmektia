@@ -1,0 +1,80 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Login WhatsApp</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            text-align: center;
+        }
+
+        .qr-container {
+            margin: 20px 0;
+        }
+
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔗 Conectar WhatsApp Web</h1>
+
+    <div class="info status">
+        <p>Escanea el código QR con WhatsApp en tu teléfono</p>
+        <p><strong>Ir a WhatsApp → Menú de tres puntos → Dispositivos vinculados → Vincular dispositivo</strong></p>
+    </div>
+
+    <div class="qr-container">
+        {% if qr_code %}
+        <img src="data:image/png;base64,{{ qr_code }}" alt="QR Code WhatsApp" style="max-width: 300px;">
+        {% else %}
+        <p>Error generando QR</p>
+        {% endif %}
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div>
+        <button onclick="checkStatus()">Verificar Estado</button>
+        <button onclick="window.location.href='/configuracion/negocio'">Volver a Configuración</button>
+    </div>
+
+    <script>function checkStatus() {
+            fetch('/whatsapp-status')
+                .then(response => response.json())
+                .then(data => {
+                    const statusDiv = document.getElementById('status');
+                    if (data.logged_in) {
+                        statusDiv.innerHTML = '<p class="success">✅ Conectado a WhatsApp</p>';
+                        statusDiv.innerHTML += '<p><a href="/whatsapp-refresh-contactos">Actualizar información de contactos</a></p>';
+                    } else {
+                        statusDiv.innerHTML = '<p class="error">❌ Esperando escaneo de QR...</p>';
+                    }
+                });
+        }
+
+        // Verificar estado automáticamente cada 10 segundos
+        setInterval(checkStatus, 10000);
+        checkStatus(); // Verificar al cargar</script>
+</body>
+</html>

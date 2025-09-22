@@ -2,25 +2,25 @@
 {% block title %}Configuración – {{ active|capitalize }}{% endblock %}
 {% block content %}
 <style>
-  .form-text text-muted {
-  color: white;
-}
+    .form-text text-muted {
+        color: white;
+    }
 </style>
-  <div class="config-header">
+<div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
     {% if guardado %}
-      <div class="alert success">¡Guardado correctamente!</div>
+    <div class="alert success">¡Guardado correctamente!</div>
     {% endif %}
-  </div>
+</div>
 
-  <!-- Pestañas -->
-  <ul class="tabs">
+<!-- Pestañas -->
+<ul class="tabs">
     {% for tab in tabs %}
-      <li class="tab-{{ tab }} {{ 'active' if tab == active else '' }}">
+    <li class="tab-{{ tab }} {{ 'active' if tab == active else '' }}">
         <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
-      </li>
+    </li>
     {% endfor %}
-  </ul>
+</ul>
   {% if active == 'negocio' %}
 <div class="form-group">
     <label>Integración con Google Calendar</label>
@@ -34,59 +34,68 @@
     </div>
 </div>
 {% endif %}
-  <!-- Contenido de la subpestaña -->
+{% if active == 'negocio' %}
+<div style="margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px;">
+    <h3>🔗 WhatsApp Web Integration</h3>
+    <p>Conecta con WhatsApp Web para obtener nombres y fotos de perfil actualizados</p>
+    <a href="/whatsapp-login" class="btn btn-primary">Conectar WhatsApp Web</a>
+    <a href="/whatsapp-status" class="btn btn-secondary">Ver Estado</a>
+    <a href="/whatsapp-refresh-contactos" class="btn btn-info">Actualizar Contactos</a>
+</div>
+{% endif %}
+<!-- Contenido de la subpestaña -->
   {% if active == 'negocio' %}
-    <form class="config-form" method="POST">
-      <div class="form-card">
+<form class="config-form" method="POST">
+    <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
-      </div>
-      <div class="form-card">
+    </div>
+    <div class="form-card">
         <label>Nombre de tu Negocio</label>
         <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
-      </div>
-      <div class="form-card">
+    </div>
+    <div class="form-card">
         <label>Descripción del Negocio</label>
         <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
-      </div>
-      <div class="form-row">
+    </div>
+    <div class="form-row">
         <div class="form-card">
-          <label>URL del Negocio</label>
-          <input type="url" name="url" value="{{ datos.url or '' }}">
+            <label>URL del Negocio</label>
+            <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
         <div class="form-card">
-          <label>Dirección</label>
-          <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
+            <label>Dirección</label>
+            <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
-      </div>
-      <div class="form-row">
+    </div>
+    <div class="form-row">
         <div class="form-card">
-          <label>Teléfono</label>
-          <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
+            <label>Teléfono</label>
+            <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
         <div class="form-card">
-          <label>Correo de contacto</label>
-          <input type="email" name="correo" value="{{ datos.correo or '' }}">
+            <label>Correo de contacto</label>
+            <input type="email" name="correo" value="{{ datos.correo or '' }}">
         </div>
-      </div>
-      <div class="form-card">
+    </div>
+    <div class="form-card">
         <label>¿Qué quieres que haga tu IA?</label>
         <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
-      </div>
-      <button type="submit" class="btn-primary">Guardar Negocio</button>
-    </form>
+    </div>
+    <button type="submit" class="btn-primary">Guardar Negocio</button>
+</form>
 
   {% elif active == 'personalizacion' %}
-    <form class="config-form" method="POST">
-      <div class="form-card">
+<form class="config-form" method="POST">
+    <div class="form-card">
         <label>Tono de la IA</label>
         <input type="text" name="tono" value="{{ datos.tono or '' }}" required>
-      </div>
-      <div class="form-card">
+    </div>
+    <div class="form-card">
         <label>Lenguaje preferido</label>
         <input type="text" name="lenguaje" value="{{ datos.lenguaje or '' }}" required>
-      </div>
-      <button type="submit" class="btn-primary">Guardar Personalización</button>
-    </form>
+    </div>
+    <button type="submit" class="btn-primary">Guardar Personalización</button>
+</form>
   {% endif %}
 {% endblock %}

@@ -9,6 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
+from whatsapp_selenium import get_whatsapp_client, init_whatsapp_session
 import pytz
 import os
 import logging
@@ -473,6 +474,111 @@ def validar_datos_cita_completos(info_cita, config=None):
         return False, mensaje_error
     
     return True, None
+
+@app.route('/whatsapp-login')
+def whatsapp_login():
+    """Inicia sesión en WhatsApp Web"""
+    try:
+        qr_code = init_whatsapp_session()
+        if qr_code:
+            return render_template('whatsapp_login.html', qr_code=qr_code)
+        else:
+            flash('Error al generar QR de WhatsApp', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+    except Exception as e:
+        app.logger.error(f"Error en whatsapp-login: {e}")
+        flash(f'Error: {str(e)}', 'error')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+@app.route('/whatsapp-status')
+def whatsapp_status():
+    """Verifica el estado de la sesión de WhatsApp"""
+    client = get_whatsapp_client()
+    return jsonify({
+        'logged_in': client.is_logged_in,
+        'qr_code': client.qr_code is not None
+    })
+
+@app.route('/whatsapp-get-contact/<phone_number>')
+def whatsapp_get_contact(phone_number):
+    """Obtiene información de contacto usando WhatsApp Web"""
+    try:
+        client = get_whatsapp_client()
+        
+        if not client.is_logged_in:
+            return jsonify({'error': 'No hay sesión activa de WhatsApp'}), 400
+        
+        nombre, imagen = client.get_contact_info(phone_number)
+        
+        if nombre or imagen:
+            # Actualizar en la base de datos
+            config = obtener_configuracion_por_host()
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, nombre, imagen_url, plataforma) 
+                VALUES (%s, %s, %s, 'WhatsApp')
+                ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(%s, nombre),
+                    imagen_url = COALESCE(%s, imagen_url)
+            """, (phone_number, nombre, imagen, nombre, imagen))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            return jsonify({
+                'success': True,
+                'nombre': nombre,
+                'imagen': imagen,
+                'numero': phone_number
+            })
+        else:
+            return jsonify({'error': 'No se pudo obtener información del contacto'}), 404
+            
+    except Exception as e:
+        app.logger.error(f"Error obteniendo contacto: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/whatsapp-refresh-contactos')
+def whatsapp_refresh_contactos():
+    """Actualiza información de todos los contactos usando WhatsApp"""
+    try:
+        config = obtener_configuracion_por_host()
+        client = get_whatsapp_client()
+        
+        if not client.is_logged_in:
+            return jsonify({'error': 'No hay sesión activa de WhatsApp'}), 400
+        
+        # Obtener todos los números de la base de datos
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT DISTINCT numero_telefono FROM contactos")
+        numeros = [row['numero_telefono'] for row in cursor.fetchall()]
+        cursor.close()
+        conn.close()
+        
+        resultados = []
+        for numero in numeros[:10]:  # Limitar a 10 para no sobrecargar
+            nombre, imagen = client.get_contact_info(numero)
+            if nombre or imagen:
+                resultados.append({
+                    'numero': numero,
+                    'nombre': nombre,
+                    'imagen': imagen
+                })
+            time.sleep(2)  # Esperar entre consultas
+        
+        return jsonify({
+            'success': True,
+            'actualizados': len(resultados),
+            'resultados': resultados
+        })
+        
+    except Exception as e:
+        app.logger.error(f"Error refrescando contactos: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/completar_autorizacion')
 def completar_autorizacion():
@@ -3689,11 +3795,37 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.close()
 
 def actualizar_info_contacto(numero, config=None):
-    """Actualiza la información del contacto (nombre e imagen)"""
+    """Actualiza la información del contacto, intentando primero con WhatsApp Web"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
+        # Intentar con WhatsApp Web primero
+        try:
+            client = get_whatsapp_client()
+            if client and client.is_logged_in:
+                nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
+                if nombre_whatsapp or imagen_whatsapp:
+                    app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
+                    
+                    conn = get_db_connection(config)
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("""
+                        UPDATE contactos 
+                        SET nombre = COALESCE(%s, nombre),
+                            imagen_url = COALESCE(%s, imagen_url)
+                        WHERE numero_telefono = %s
+                    """, (nombre_whatsapp, imagen_whatsapp, numero))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ WhatsApp Web no disponible, usando API normal: {e}")
+        
+        # Fallback a la API normal de WhatsApp
         nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
         imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
         
@@ -3779,7 +3911,7 @@ def obtener_contexto_consulta(numero, config=None):
         
         # Extraer información específica del último mensaje, lo que significa que es reciente, si no es reciente, no tiene sentido
         ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
-        if len(ultimo_mensaje) > 15:
+        if len(ultimo_mensaje) > 15: 
             contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
         
         # Intentar detectar urgencia o tipo de consulta
