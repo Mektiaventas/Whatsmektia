@@ -9,6 +9,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
+from whatsapp_selenium import get_whatsapp_client, init_whatsapp_session
 import pytz
 import os
 import logging
@@ -704,19 +705,18 @@ def get_country_flag(numero):
 # ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
-@app.route('/kanban/data') 
-def kanban_data(config = None):
-    """Endpoint que devuelve los datos del Kanban en formato JSON"""
+@app.route('/kanban/data')
+def kanban_data():
     config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # 1) Cargar las columnas Kanban
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        # Obtener columnas
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # 2) Datos de los chats
+        # Obtener chats con nombres de contactos
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -725,10 +725,6 @@ def kanban_data(config = None):
                 (SELECT mensaje FROM conversaciones 
                 WHERE numero = cm.numero 
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                (SELECT imagen_url FROM contactos 
-                WHERE numero_telefono = cm.numero 
-                ORDER BY id DESC LIMIT 1) AS avatar,
-                MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
@@ -736,19 +732,17 @@ def kanban_data(config = None):
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
             GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC;
+            ORDER BY ultima_fecha DESC
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps a hora de México
+        # Convertir timestamps
         for chat in chats:
             if chat.get('ultima_fecha'):
                 if chat['ultima_fecha'].tzinfo is not None:
                     chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 else:
                     chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                
-                # Formatear fecha para JSON
                 chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
 
         cursor.close()
@@ -2538,6 +2532,45 @@ def reparar_kanban():
     
     return f"✅ Reparados {len(numeros_sin_meta)} contactos en Kanban"
 
+def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None):
+    """
+    Actualiza la información del contacto usando los datos del webhook de WhatsApp
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Si tenemos nombre del contacto, actualizamos la base de datos
+        if nombre_contacto:
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+                VALUES (%s, %s, 'WhatsApp', NOW())
+                ON DUPLICATE KEY UPDATE 
+                    nombre = VALUES(nombre),
+                    fecha_actualizacion = NOW()
+            """, (numero, nombre_contacto))
+            
+            app.logger.info(f"✅ Contacto actualizado desde webhook: {numero} -> {nombre_contacto}")
+        else:
+            # Si no hay nombre, al menos asegurarnos de que el contacto existe
+            cursor.execute("""
+                INSERT IGNORE INTO contactos 
+                    (numero_telefono, plataforma, fecha_actualizacion) 
+                VALUES (%s, 'WhatsApp', NOW())
+            """, (numero,))
+            app.logger.info(f"✅ Contacto registrado (sin nombre): {numero}")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2566,11 +2599,43 @@ def webhook():
             
         change = entry['changes'][0]['value']
         mensajes = change.get('messages', [])
+        data = request.get_json()
+        try:
+            # Extraer información del contacto del payload
+            if 'contacts' in data['entry'][0]['changes'][0]['value']:
+                contact_info = data['entry'][0]['changes'][0]['value']['contacts'][0]
+                wa_id = contact_info['wa_id']
+                name = contact_info['profile']['name']
+            
+                # Guardar en la base de datos
+                config = obtener_configuracion_por_host()
+                conn = get_db_connection(config)
+                cursor = conn.cursor()
+            
+                cursor.execute("""
+                    INSERT INTO contactos (numero_telefono, nombre, plataforma) 
+                    VALUES (%s, %s, 'WhatsApp')
+                    ON DUPLICATE KEY UPDATE 
+                        nombre = COALESCE(%s, nombre),
+                        fecha_actualizacion = CURRENT_TIMESTAMP
+                """, (wa_id, name, name))
+            
+                conn.commit()
+                cursor.close()
+                conn.close()
+            
+                app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
         
+            # Continuar con el procesamiento normal del mensaje
+            # ... tu código existente para procesar mensajes ...
+        
+        except Exception as e:
+            app.logger.error(f"Error procesando webhook: {str(e)}")
+            return jsonify({"status": "error"}), 500
         if not mensajes:
             app.logger.info("⚠️ No hay mensajes en el payload")
-            return 'OK', 200
-            
+            return 'OK', 200    
+
         msg = mensajes[0]
         numero = msg['from']
         # Agregar esto inmediatamente:
@@ -2582,7 +2647,7 @@ def webhook():
         es_video = False
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
-        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
@@ -2832,7 +2897,7 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-@app.route('/test-contacto/<numero>')
+@app.route('/test-contacto')
 def test_contacto(numero = '5214493432744'):
     """Endpoint para probar la obtención de información de contacto"""
     config = obtener_configuracion_por_host()
@@ -2846,44 +2911,28 @@ def test_contacto(numero = '5214493432744'):
     })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
-    """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
+    """Obtiene el nombre del contacto desde la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
-    try:
-        # Formatear número correctamente
-        numero_formateado = numero.replace('').replace('')
-        
-        # Endpoint CORRECTO para obtener información de contacto
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': 'contacts',
-            'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token']
-        }
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=20)
-        
-        if response.status_code == 200:
-            data = response.json()
-            app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
-            
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                nombre = contacto.get('profile', {}).get('name')
-                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
-                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                if 'profile' in contacto and 'name' in contacto['profile']:
-                    return contacto['profile']['nombre']
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
-        return None
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute("""
+        SELECT nombre, alias 
+        FROM contactos 
+        WHERE numero_telefono = %s
+        ORDER BY fecha_actualizacion DESC 
+        LIMIT 1
+    """, (numero,))
+    
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if result:
+        return result['alias'] or result['nombre']
+    return None
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
@@ -2916,8 +2965,10 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
                 nombre = contacto.get('profile', {}).get('name')
                 imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
                 app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                if 'profile' in contacto and 'picture_url' in contacto['profile']:
-                    return contacto['profile']['imagen_url']#devuelve la url de la imagen y la guarda en la base de datos usa la funcion actualizar_info_contacto
+                
+                # 🔥 CORRECCIÓN: Devuelve la URL de la imagen si existe
+                if imagen_url:
+                    return imagen_url
         
         return None
         
@@ -3598,7 +3649,7 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-    """Inicializa el chat meta y asegura que el contacto exista con su nombre e imagen"""
+    """Inicializa el chat meta usando información existente del contacto"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3606,35 +3657,28 @@ def inicializar_chat_meta(numero, config=None):
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # 1. Primero verificar si el contacto ya existe
+        # 1. Verificar si el contacto ya existe (con datos del webhook)
         cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
         contacto_existente = cursor.fetchone()
         
-        # 2. Obtener información de WhatsApp solo si no existe o está incompleta
-        if not contacto_existente or not contacto_existente.get('nombre') or not contacto_existente.get('imagen_url'):
-            nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-            imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
-            
-            app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        # 2. Si no existe, crear el contacto básico
+        if not contacto_existente:
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, plataforma, fecha_creacion) 
+                VALUES (%s, 'WhatsApp', NOW())
+            """, (numero,))
+            app.logger.info(f"✅ Contacto básico creado: {numero}")
         
-        # 3. Insertar/actualizar contacto (CORREGIDO - sin fecha_creacion)
-        cursor.execute("""
-            INSERT INTO contactos 
-                (numero_telefono, nombre, imagen_url, plataforma) 
-            VALUES (%s, %s, %s, 'WhatsApp')
-            ON DUPLICATE KEY UPDATE 
-                nombre = COALESCE(%s, nombre),
-                imagen_url = COALESCE(%s, imagen_url)
-        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
-        
-        # 4. Insertar/actualizar en chat_meta
+        # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id) 
             VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id)
         """, (numero,))
         
         conn.commit()
-        app.logger.info(f"✅ Contacto inicializado/actualizado: {numero}")
+        app.logger.info(f"✅ Chat meta inicializado: {numero}")
         
     except Exception as e:
         app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
@@ -3643,7 +3687,6 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
-
 @app.route('/reparar-contactos')
 def reparar_contactos():
     """Repara todos los contactos que no están en chat_meta"""
@@ -3685,30 +3728,65 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.close()
 
 def actualizar_info_contacto(numero, config=None):
-    """Actualiza la información del contacto (nombre e imagen)"""
+    """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
+        # Primero verificar si ya tenemos información reciente del webhook
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
         
-        if nombre_perfil or imagen_perfil:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
+        cursor.execute("""
+            SELECT nombre, imagen_url, fecha_actualizacion 
+            FROM contactos 
+            WHERE numero_telefono = %s
+        """, (numero,))
+        
+        contacto = cursor.fetchone()
+        
+        # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
+        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion'):
+            fecha_actualizacion = contacto['fecha_actualizacion']
+            if isinstance(fecha_actualizacion, str):
+                fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
             
-            cursor.execute("""
-                UPDATE contactos 
-                SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url)
-                WHERE numero_telefono = %s
-            """, (nombre_perfil, imagen_perfil, numero))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            app.logger.info(f"🔄 Contacto actualizado: {numero}")
+            if (datetime.now() - fecha_actualizacion).total_seconds() < 86400:  # 24 horas
+                app.logger.info(f"✅ Información de contacto {numero} ya está actualizada")
+                cursor.close()
+                conn.close()
+                return
+        
+        cursor.close()
+        conn.close()
+        
+        # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
+        try:
+            client = get_whatsapp_client()
+            if client and client.is_logged_in:
+                nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
+                if nombre_whatsapp or imagen_whatsapp:
+                    app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
+                    
+                    conn = get_db_connection(config)
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("""
+                        UPDATE contactos 
+                        SET nombre = COALESCE(%s, nombre),
+                            imagen_url = COALESCE(%s, imagen_url),
+                            fecha_actualizacion = NOW()
+                        WHERE numero_telefono = %s
+                    """, (nombre_whatsapp, imagen_whatsapp, numero))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
+        
+        app.logger.info(f"ℹ️  Usando información del webhook para {numero}")
             
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
@@ -3773,9 +3851,9 @@ def obtener_contexto_consulta(numero, config=None):
         if servicios_mencionados:
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
         
-        # Extraer información específica del último mensaje
+        # Extraer información específica del último mensaje, lo que significa que es reciente, si no es reciente, no tiene sentido
         ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
-        if len(ultimo_mensaje) > 10:
+        if len(ultimo_mensaje) > 15: 
             contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
         
         # Intentar detectar urgencia o tipo de consulta
