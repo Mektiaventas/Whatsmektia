@@ -810,19 +810,18 @@ def get_country_flag(numero):
 # ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios']
 
-@app.route('/kanban/data') 
-def kanban_data(config = None):
-    """Endpoint que devuelve los datos del Kanban en formato JSON"""
+@app.route('/kanban/data')
+def kanban_data():
     config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # 1) Cargar las columnas Kanban
-        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+        # Obtener columnas
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # 2) Datos de los chats
+        # Obtener chats con nombres de contactos
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -831,10 +830,6 @@ def kanban_data(config = None):
                 (SELECT mensaje FROM conversaciones 
                 WHERE numero = cm.numero 
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                (SELECT imagen_url FROM contactos 
-                WHERE numero_telefono = cm.numero 
-                ORDER BY id DESC LIMIT 1) AS avatar,
-                MAX(cont.plataforma) AS canal,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
@@ -842,19 +837,17 @@ def kanban_data(config = None):
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
             GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC;
+            ORDER BY ultima_fecha DESC
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps a hora de México
+        # Convertir timestamps
         for chat in chats:
             if chat.get('ultima_fecha'):
                 if chat['ultima_fecha'].tzinfo is not None:
                     chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 else:
                     chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                
-                # Formatear fecha para JSON
                 chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
 
         cursor.close()
@@ -2711,7 +2704,33 @@ def webhook():
             
         change = entry['changes'][0]['value']
         mensajes = change.get('messages', [])
-        contacts = change.get('contacts', [])
+        data = request.get_json()
+        try:
+            contact = data['entry'][0]['changes'][0]['value']['contacts'][0]
+            wa_id = contact['wa_id']
+            name = contact['profile']['name']
+
+                    # Guardar en la base de datos
+            config = obtener_configuracion_por_host()
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+        
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, nombre, plataforma) 
+                VALUES (%s, %s, 'WhatsApp')
+                ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(%s, nombre),
+                    fecha_actualizacion = CURRENT_TIMESTAMP
+            """, (wa_id, name, name))
+        
+            conn.commit()
+            cursor.close()
+            conn.close()
+        
+            app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
+        
+        except (KeyError, IndexError) as e:
+            app.logger.error(f"Error extrayendo contacto del webhook: {e}")
         
         if not mensajes:
             app.logger.info("⚠️ No hay mensajes en el payload")
@@ -2728,18 +2747,7 @@ def webhook():
         es_video = False
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
-        nombre_contacto = None
-        if contacts:
-            # Buscar el contacto que coincide con el número
-            for contacto in contacts:
-                if contacto.get('wa_id') == numero:
-                    nombre_contacto = contacto.get('profile', {}).get('name')
-                    app.logger.info(f"👤 Nombre obtenido del webhook: {nombre_contacto} para {numero}")
-                    break
-        
-        # 🔥 ACTUALIZAR LA INFORMACIÓN DEL CONTACTO CON EL NOMBRE OBTENIDO
-        actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
-        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
@@ -3003,46 +3011,28 @@ def test_contacto(numero = '5214493432744'):
     })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
-    """Obtiene el nombre del perfil de WhatsApp usando el endpoint correcto"""
+    """Obtiene el nombre del contacto desde la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
-    try:
-        # Formatear número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Endpoint CORRECTO para obtener información de contacto
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': 'contacts',
-            'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token'] 
-        }
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        response = requests.get(url, params=params, headers=headers, timeout=20)
-        
-        if response.status_code == 200:
-            data = response.json()
-            app.logger.info(f"📝 Respuesta nombre perfil: {json.dumps(data, indent=2)}")
-            
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                nombre = contacto.get('profile', {}).get('name')
-                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
-                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                
-                # 🔥 CORRECCIÓN: Devuelve el nombre si existe
-                if nombre:
-                    return nombre
-        
-        return None  # 🔥 CORREGIDO: Sin texto adicional
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo nombre de perfil: {e}")
-        return None
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute("""
+        SELECT nombre, alias 
+        FROM contactos 
+        WHERE numero_telefono = %s
+        ORDER BY fecha_actualizacion DESC 
+        LIMIT 1
+    """, (numero,))
+    
+    result = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    
+    if result:
+        return result['alias'] or result['nombre']
+    return None
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
     """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
