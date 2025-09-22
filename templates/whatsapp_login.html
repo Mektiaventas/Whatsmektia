@@ -61,7 +61,7 @@
 
     <script>function checkStatus() {
             fetch('/whatsapp-status')
-                .then(response => response.json())
+                .then(response => response.json()) 
                 .then(data => {
                     const statusDiv = document.getElementById('status');
                     if (data.logged_in) {
