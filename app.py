@@ -2644,6 +2644,45 @@ def reparar_kanban():
     
     return f"✅ Reparados {len(numeros_sin_meta)} contactos en Kanban"
 
+def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None):
+    """
+    Actualiza la información del contacto usando los datos del webhook de WhatsApp
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Si tenemos nombre del contacto, actualizamos la base de datos
+        if nombre_contacto:
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+                VALUES (%s, %s, 'WhatsApp', NOW())
+                ON DUPLICATE KEY UPDATE 
+                    nombre = VALUES(nombre),
+                    fecha_actualizacion = NOW()
+            """, (numero, nombre_contacto))
+            
+            app.logger.info(f"✅ Contacto actualizado desde webhook: {numero} -> {nombre_contacto}")
+        else:
+            # Si no hay nombre, al menos asegurarnos de que el contacto existe
+            cursor.execute("""
+                INSERT IGNORE INTO contactos 
+                    (numero_telefono, plataforma, fecha_actualizacion) 
+                VALUES (%s, 'WhatsApp', NOW())
+            """, (numero,))
+            app.logger.info(f"✅ Contacto registrado (sin nombre): {numero}")
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
+
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -2672,11 +2711,12 @@ def webhook():
             
         change = entry['changes'][0]['value']
         mensajes = change.get('messages', [])
+        contacts = change.get('contacts', [])
         
         if not mensajes:
             app.logger.info("⚠️ No hay mensajes en el payload")
-            return 'OK', 200
-            
+            return 'OK', 200    
+
         msg = mensajes[0]
         numero = msg['from']
         # Agregar esto inmediatamente:
@@ -2688,6 +2728,17 @@ def webhook():
         es_video = False
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
+        nombre_contacto = None
+        if contacts:
+            # Buscar el contacto que coincide con el número
+            for contacto in contacts:
+                if contacto.get('wa_id') == numero:
+                    nombre_contacto = contacto.get('profile', {}).get('name')
+                    app.logger.info(f"👤 Nombre obtenido del webhook: {nombre_contacto} para {numero}")
+                    break
+        
+        # 🔥 ACTUALIZAR LA INFORMACIÓN DEL CONTACTO CON EL NOMBRE OBTENIDO
+        actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
@@ -3708,7 +3759,7 @@ def obtener_chat_meta(numero, config=None):
         return meta
 
 def inicializar_chat_meta(numero, config=None):
-    """Inicializa el chat meta y asegura que el contacto exista con su nombre e imagen"""
+    """Inicializa el chat meta usando información existente del contacto"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3716,35 +3767,28 @@ def inicializar_chat_meta(numero, config=None):
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # 1. Primero verificar si el contacto ya existe
+        # 1. Verificar si el contacto ya existe (con datos del webhook)
         cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
         contacto_existente = cursor.fetchone()
         
-        # 2. Obtener información de WhatsApp solo si no existe o está incompleta
-        if not contacto_existente or not contacto_existente.get('nombre') or not contacto_existente.get('imagen_url'):
-            nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-            imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
-            
-            app.logger.info(f"📋 Obteniendo perfil para {numero}: nombre={nombre_perfil}, imagen={imagen_perfil}")
+        # 2. Si no existe, crear el contacto básico
+        if not contacto_existente:
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, plataforma, fecha_creacion) 
+                VALUES (%s, 'WhatsApp', NOW())
+            """, (numero,))
+            app.logger.info(f"✅ Contacto básico creado: {numero}")
         
-        # 3. Insertar/actualizar contacto (CORREGIDO - sin fecha_creacion)
-        cursor.execute("""
-            INSERT INTO contactos 
-                (numero_telefono, nombre, imagen_url, plataforma) 
-            VALUES (%s, %s, %s, 'WhatsApp')
-            ON DUPLICATE KEY UPDATE 
-                nombre = COALESCE(%s, nombre),
-                imagen_url = COALESCE(%s, imagen_url)
-        """, (numero, nombre_perfil, imagen_perfil, nombre_perfil, imagen_perfil))
-        
-        # 4. Insertar/actualizar en chat_meta
+        # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id) 
             VALUES (%s, 1)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id)
         """, (numero,))
         
         conn.commit()
-        app.logger.info(f"✅ Contacto inicializado/actualizado: {numero}")
+        app.logger.info(f"✅ Chat meta inicializado: {numero}")
         
     except Exception as e:
         app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
@@ -3753,7 +3797,6 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
-
 @app.route('/reparar-contactos')
 def reparar_contactos():
     """Repara todos los contactos que no están en chat_meta"""
@@ -3795,12 +3838,39 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         conn.close()
 
 def actualizar_info_contacto(numero, config=None):
-    """Actualiza la información del contacto, intentando primero con WhatsApp Web"""
+    """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Intentar con WhatsApp Web primero
+        # Primero verificar si ya tenemos información reciente del webhook
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT nombre, imagen_url, fecha_actualizacion 
+            FROM contactos 
+            WHERE numero_telefono = %s
+        """, (numero,))
+        
+        contacto = cursor.fetchone()
+        
+        # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
+        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion'):
+            fecha_actualizacion = contacto['fecha_actualizacion']
+            if isinstance(fecha_actualizacion, str):
+                fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
+            
+            if (datetime.now() - fecha_actualizacion).total_seconds() < 86400:  # 24 horas
+                app.logger.info(f"✅ Información de contacto {numero} ya está actualizada")
+                cursor.close()
+                conn.close()
+                return
+        
+        cursor.close()
+        conn.close()
+        
+        # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
         try:
             client = get_whatsapp_client()
             if client and client.is_logged_in:
@@ -3814,7 +3884,8 @@ def actualizar_info_contacto(numero, config=None):
                     cursor.execute("""
                         UPDATE contactos 
                         SET nombre = COALESCE(%s, nombre),
-                            imagen_url = COALESCE(%s, imagen_url)
+                            imagen_url = COALESCE(%s, imagen_url),
+                            fecha_actualizacion = NOW()
                         WHERE numero_telefono = %s
                     """, (nombre_whatsapp, imagen_whatsapp, numero))
                     
@@ -3823,28 +3894,9 @@ def actualizar_info_contacto(numero, config=None):
                     conn.close()
                     return
         except Exception as e:
-            app.logger.warning(f"⚠️ WhatsApp Web no disponible, usando API normal: {e}")
+            app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
         
-        # Fallback a la API normal de WhatsApp
-        nombre_perfil = obtener_nombre_perfil_whatsapp(numero, config)
-        imagen_perfil = obtener_imagen_perfil_whatsapp(numero, config)
-        
-        if nombre_perfil or imagen_perfil:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            cursor.execute("""
-                UPDATE contactos 
-                SET nombre = COALESCE(%s, nombre),
-                    imagen_url = COALESCE(%s, imagen_url)
-                WHERE numero_telefono = %s
-            """, (nombre_perfil, imagen_perfil, numero))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            app.logger.info(f"🔄 Contacto actualizado: {numero}")
+        app.logger.info(f"ℹ️  Usando información del webhook para {numero}")
             
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
