@@ -2873,7 +2873,7 @@ def webhook():
                         # Enviar alerta al administrador
                         #enviar_alerta_cita_administrador(info_cita, cita_id, config)
                         
-                        respuesta = f"✅ ¡{'Pedido' if 'porfirianna' in config.get('dominio', '') else 'Cita'} confirmado! Te hemos enviado los detalles por mensaje. ID: #{cita_id}"
+                        #respuesta = f"✅ ¡{'Pedido' if 'porfirianna' in config.get('dominio', '') else 'Cita'} confirmado! Te hemos enviado los detalles por mensaje. ID: #{cita_id}"
                     else:
                         respuesta = "❌ Lo siento, hubo un error al guardar tu solicitud. Por favor, intenta de nuevo."
                 else:
