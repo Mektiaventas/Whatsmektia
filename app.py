@@ -1054,34 +1054,6 @@ def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
         datos_faltantes.append("tu nombre")
     
-    # Construir mensaje personalizado según lo que falte
-    if datos_faltantes:
-        if es_porfirianna:
-            mensaje = f"¡Perfecto! Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_faltantes)}."
-        else:
-            mensaje = f"¡Excelente! Para agendar tu cita, necesito que me proporciones: {', '.join(datos_faltantes)}."
-        
-        # Agregar ejemplos según lo que falte
-        if "qué platillo deseas ordenar" in datos_faltantes or "qué servicio necesitas" in datos_faltantes:
-            if es_porfirianna:
-                mensaje += "\n\nPor ejemplo: 'Quiero ordenar 4 gorditas de chicharrón y 2 tacos'"
-            else:
-                mensaje += "\n\nPor ejemplo: 'Necesito una página web para mi negocio'"
-        
-        if "fecha preferida" in datos_faltantes:
-            mensaje += "\n\nPor ejemplo: 'El próximo lunes' o 'Para el 15 de octubre'"
-        
-        if "tu nombre" in datos_faltantes:
-            mensaje += "\n\nPor ejemplo: 'Mi nombre es Juan Pérez'"
-        
-        enviar_mensaje(numero, mensaje, config)
-        app.logger.info(f"📋 Solicitando datos faltantes a {numero}: {', '.join(datos_faltantes)}")
-    else:
-        # Todos los datos están completos (no debería llegar aquí)
-        if es_porfirianna:
-            enviar_mensaje(numero, "¡Gracias! He registrado tu pedido y nos pondremos en contacto contigo pronto.", config)
-        else:
-            enviar_mensaje(numero, "¡Gracias! He agendado tu cita y nos pondremos en contacto contigo pronto.", config)
 
 @app.route('/autorizar-google')
 def autorizar_google():
