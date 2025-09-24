@@ -3051,7 +3051,6 @@ def webhook():
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
-    
             return 'OK', 200
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
@@ -3077,6 +3076,7 @@ def webhook():
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
+            actualizar_kanban(numero, columna_id=1, config=config)
             
             return 'OK', 200
         
@@ -4156,6 +4156,20 @@ def reparar_contactos():
     conn.close()
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
+
+def actualizar_kanban(numero, columna_id=1, config=None):
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO chat_meta (numero, columna_id)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
+                                fecha_actualizacion = CURRENT_TIMESTAMP
+    """, (numero, columna_id))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
