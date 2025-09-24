@@ -4056,10 +4056,9 @@ def obtener_contexto_consulta(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
-    args = parser.parse_args()
+
+# ——— Inicialización al arrancar la aplicación ———
+with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
     
@@ -4067,7 +4066,10 @@ if __name__ == '__main__':
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
-    # Crear tablas necesarias - usar configuración por defecto
-    crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    args = parser.parse_args()
     
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
