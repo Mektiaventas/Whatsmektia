@@ -189,6 +189,7 @@ def crear_tablas_kanban(config=None):
     except Exception as e:
         app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
 
+app.route('/inicializar-kanban', methods=['POST'])
 def inicializar_kanban_multitenant():
     """Inicializa el sistema Kanban en todas las bases de datos configuradas"""
     app.logger.info("🔧 Inicializando Kanban para todos los tenants...")
@@ -4297,7 +4298,7 @@ def obtener_contexto_consulta(numero, config=None):
             mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
             for servicio in servicios_clave:
                 if servicio in mensaje_texto and servicio not in servicios_mencionados:
-                    servicios_mencionados.append(servicio)
+                    servicios_mencionados.append(servicio) 
         
         if servicios_mencionados:
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
