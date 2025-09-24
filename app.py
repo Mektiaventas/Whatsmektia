@@ -4060,7 +4060,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
     args = parser.parse_args()
+    # Crear tablas Kanban para todos los tenants
+    inicializar_kanban_multitenant()
     
+    # Verificar tablas en todas las bases de datos
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
     # Crear tablas necesarias - usar configuración por defecto
     crear_tabla_citas(config=NUMEROS_CONFIG['524495486142'])
     
