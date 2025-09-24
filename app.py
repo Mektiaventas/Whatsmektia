@@ -31,14 +31,18 @@ tz_mx = pytz.timezone('America/Mexico_City')
 # Configuración multi-tenant
 # ------------------------------
 NUMEROS_CONFIG = {
-    '524495486142': {  # Mektia
+    '524495486142': {  # Número de Mektia
+        'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'mektia.com'
     },
-    '524812372326': {  # La Porfirianna
+    '524812372326': {  # Número de La Porfirianna
+        'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
@@ -46,6 +50,7 @@ NUMEROS_CONFIG = {
         'dominio': 'laporfirianna.mektia.com'
     }
 }
+
 
 import requests
 from gtts import gTTS
@@ -247,53 +252,51 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 # ------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    # 1. Detectar tenant
     config = obtener_configuracion_por_host()
-
-    # 2. Recibir datos del mensaje
     data = request.get_json()
-    numero = data.get("numero")
-    mensaje = data.get("mensaje")
-    es_imagen = data.get("es_imagen", False)
-    es_audio = data.get("es_audio", False)
-    imagen_base64 = data.get("imagen_base64")
-    transcripcion_audio = data.get("transcripcion_audio")
+
+    numero = None
+    mensaje = None
+
+    try:
+        entry = data['entry'][0]
+        change = entry['changes'][0]['value']
+        messages = change.get('messages')
+        if messages:
+            msg = messages[0]
+            numero = msg.get("from")  # número del usuario
+            if "text" in msg:
+                mensaje = msg["text"]["body"]
+            elif "image" in msg:
+                mensaje = "📷 Imagen recibida"
+            elif "audio" in msg:
+                mensaje = "🎵 Audio recibido"
+    except Exception as e:
+        app.logger.error(f"❌ Error parseando mensaje: {e}")
 
     app.logger.info(f"📥 Mensaje recibido de {numero}: {mensaje}")
 
-    # 3. Obtener respuesta de la IA
-    respuesta = responder_con_ia(
-        mensaje,
-        numero,
-        es_imagen=es_imagen,
-        imagen_base64=imagen_base64,
-        es_audio=es_audio,
-        transcripcion_audio=transcripcion_audio,
-        config=config
-    )
+    if not numero or not mensaje:
+        return jsonify({"status": "ignored"})
 
-    # 4. Guardar conversación en BD
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-            VALUES (%s, %s, %s, %s)
-        """, (numero, mensaje, respuesta, datetime.now(tz_mx)))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info(f"💾 Conversación guardada para {numero}")
-    except Exception as e:
-        app.logger.error(f"❌ Error guardando conversación: {e}")
+    # Aquí llamas a la IA
+    respuesta = responder_con_ia(mensaje, numero, config=config)
 
-    # 5. Enviar respuesta de texto a WhatsApp
+    # Guardar en DB
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+        VALUES (%s, %s, %s, %s)
+    """, (numero, mensaje, respuesta, datetime.now(tz_mx)))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+    # Enviar de vuelta al usuario
     enviar_mensaje(numero, respuesta, config)
 
-    # 6. (Opcional) Enviar también la respuesta como audio
-    # enviar_mensaje_voz(numero, respuesta, config)
-
-    return jsonify({"status": "ok", "respuesta": respuesta})
+    return jsonify({"status": "ok"})
 
 
 # ------------------------------
