@@ -1167,8 +1167,8 @@ def save_config(cfg_all, config=None):
             res.get('palabras_prohibidas'),
             res.get('max_mensajes', 10),
             res.get('tiempo_max_respuesta', 30),
-            neg.get('logo_url', ''),  -- NUEVO
-            neg.get('nombre_empresa', 'SmartWhats')  -- NUEVO
+            neg.get('logo_url', ''), 
+            neg.get('nombre_empresa', 'SmartWhats')  
         ))
     else:
         # Si no tiene las nuevas columnas, usar la consulta original
