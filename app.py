@@ -418,4 +418,7 @@ def webhook():
 
 # ------------------------------
 if __name__ == "__main__":
-    app.run(port=5000, debug=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    args = parser.parse_args()
+    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
