@@ -25,7 +25,6 @@ import re
 import io
 from flask import current_app as app
 from werkzeug.utils import secure_filename
-from pydub import AudioSegment
 from PIL import Image
 from openai import OpenAI
 processed_messages = {}
