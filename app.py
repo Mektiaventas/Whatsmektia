@@ -252,51 +252,96 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 # ------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    config = obtener_configuracion_por_host()
     data = request.get_json()
+    app.logger.info(f"📥 Payload recibido: {json.dumps(data, indent=2)}")
 
-    numero = None
+    numero_cliente = None
     mensaje = None
+    es_imagen = False
+    es_audio = False
+    imagen_base64 = None
+    transcripcion_audio = None
+    config = None
 
     try:
         entry = data['entry'][0]
         change = entry['changes'][0]['value']
+
+        # 1. Identificar desde qué phone_number_id llegó el mensaje
+        business_number_id = change.get("metadata", {}).get("phone_number_id")
+        if business_number_id:
+            # Buscar el tenant correcto por phone_number_id
+            for cfg in NUMEROS_CONFIG.values():
+                if cfg['phone_number_id'] == business_number_id:
+                    config = cfg
+                    break
+        if not config:
+            app.logger.error("❌ No se encontró config para este phone_number_id")
+            return jsonify({"status": "error", "msg": "config no encontrada"})
+
+        # 2. Extraer mensaje del usuario
         messages = change.get('messages')
         if messages:
             msg = messages[0]
-            numero = msg.get("from")  # número del usuario
+            numero_cliente = msg.get("from")
+
+            # Texto
             if "text" in msg:
                 mensaje = msg["text"]["body"]
+
+            # Imagen
             elif "image" in msg:
                 mensaje = "📷 Imagen recibida"
+                es_imagen = True
+                # Nota: aquí podrías descargar la imagen si quieres analizarla
+                # image_id = msg["image"]["id"]
+
+            # Audio
             elif "audio" in msg:
                 mensaje = "🎵 Audio recibido"
+                es_audio = True
+                # Para transcripción deberías descargar el audio con la API de Meta
+                # y luego pasarlo a Whisper o a OpenAI
+                # Por ahora lo dejamos simulado:
+                transcripcion_audio = "Transcripción de audio no implementada"
     except Exception as e:
         app.logger.error(f"❌ Error parseando mensaje: {e}")
 
-    app.logger.info(f"📥 Mensaje recibido de {numero}: {mensaje}")
+    app.logger.info(f"📥 Mensaje recibido de {numero_cliente}: {mensaje}")
 
-    if not numero or not mensaje:
+    if not numero_cliente or not mensaje:
         return jsonify({"status": "ignored"})
 
-    # Aquí llamas a la IA
-    respuesta = responder_con_ia(mensaje, numero, config=config)
+    # 3. Obtener respuesta de la IA
+    respuesta = responder_con_ia(
+        mensaje,
+        numero_cliente,
+        es_imagen=es_imagen,
+        imagen_base64=imagen_base64,
+        es_audio=es_audio,
+        transcripcion_audio=transcripcion_audio,
+        config=config
+    )
 
-    # Guardar en DB
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-        VALUES (%s, %s, %s, %s)
-    """, (numero, mensaje, respuesta, datetime.now(tz_mx)))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    # 4. Guardar conversación en DB
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+            VALUES (%s, %s, %s, %s)
+        """, (numero_cliente, mensaje, respuesta, datetime.now(tz_mx)))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info(f"💾 Conversación guardada para {numero_cliente}")
+    except Exception as e:
+        app.logger.error(f"❌ Error guardando conversación: {e}")
 
-    # Enviar de vuelta al usuario
-    enviar_mensaje(numero, respuesta, config)
+    # 5. Responder al cliente desde el MISMO número de negocio
+    enviar_mensaje(numero_cliente, respuesta, config)
 
-    return jsonify({"status": "ok"})
+    return jsonify({"status": "ok", "respuesta": respuesta})
 
 
 # ------------------------------
