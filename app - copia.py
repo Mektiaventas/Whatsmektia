@@ -189,6 +189,7 @@ def crear_tablas_kanban(config=None):
     except Exception as e:
         app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
 
+app.route('/inicializar-kanban', methods=['POST'])
 def inicializar_kanban_multitenant():
     """Inicializa el sistema Kanban en todas las bases de datos configuradas"""
     app.logger.info("🔧 Inicializando Kanban para todos los tenants...")
@@ -1436,25 +1437,17 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     # En la función responder_con_ia, modifica el system_prompt:
     system_prompt = f"""
-    Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
-    Descripción del negocio:
-    {descripcion}
+Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+Descripción del negocio: {descripcion}
 
-    Tus responsabilidades:  
-    {que_hace} 
+Servicios y precios:
+{lista_precios}
 
-    Servicios y tarifas actuales:
-    {lista_precios}
+Habla de manera natural y libre, siempre basándote en la información de arriba.
+Si el usuario pregunta por algo que no está en la lista de precios o descripción,
+responde amablemente que no tienes esa información.
+"""
 
-    INSTRUCCIONES IMPORTANTES:
-    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios, si no los tienes no insistas solo manda un mensaje para recordar y ya no le digas de nuevo
-    2. Los datos obligatorios para un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'cita'} son:
-    - Servicio solicitado (siempre requerido)
-    {'- Fecha sugerida (requerido)' if not 'laporfirianna' in config.get('dominio', '') else ''}
-    - Nombre del cliente (siempre requerido)
-    3. Si el usuario quiere hacer un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'agendar una cita'} pero faltan datos, pídelos amablemente
-    4. Mantén siempre un tono profesional y conciso
-    """.strip()
 
     historial = obtener_historial(numero, config=config)
     
@@ -2969,7 +2962,6 @@ def webhook():
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
-        inicializar_chat_meta(numero, config)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
          
@@ -3059,7 +3051,6 @@ def webhook():
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
-    
             return 'OK', 200
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
@@ -3085,6 +3076,7 @@ def webhook():
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
+            actualizar_kanban(numero, columna_id=1, config=config)
             
             return 'OK', 200
         
@@ -4165,6 +4157,20 @@ def reparar_contactos():
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
+def actualizar_kanban(numero, columna_id=1, config=None):
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO chat_meta (numero, columna_id)
+        VALUES (%s, %s)
+        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
+                                fecha_actualizacion = CURRENT_TIMESTAMP
+    """, (numero, columna_id))
+    conn.commit()
+    cursor.close()
+    conn.close()
+
+
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
@@ -4297,7 +4303,7 @@ def obtener_contexto_consulta(numero, config=None):
             mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
             for servicio in servicios_clave:
                 if servicio in mensaje_texto and servicio not in servicios_mencionados:
-                    servicios_mencionados.append(servicio)
+                    servicios_mencionados.append(servicio) 
         
         if servicios_mencionados:
             contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
