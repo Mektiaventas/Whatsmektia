@@ -55,6 +55,61 @@ NUMEROS_CONFIG = {
 import requests
 from gtts import gTTS
 
+@app.route('/kanban/data')
+def kanban_data(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Obtener columnas
+        cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
+        columnas = cursor.fetchall()
+
+        # Obtener chats con nombres de contactos
+        cursor.execute("""
+            SELECT 
+                cm.numero,
+                cm.columna_id,
+                MAX(c.timestamp) AS ultima_fecha,
+                (SELECT mensaje FROM conversaciones 
+                WHERE numero = cm.numero 
+                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                (SELECT COUNT(*) FROM conversaciones 
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+            FROM chat_meta cm
+            LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
+            LEFT JOIN conversaciones c ON c.numero = cm.numero
+            GROUP BY cm.numero, cm.columna_id
+            ORDER BY ultima_fecha DESC
+        """)
+        chats = cursor.fetchall()
+
+        # Convertir timestamps
+        for chat in chats:
+            if chat.get('ultima_fecha'):
+                if chat['ultima_fecha'].tzinfo is not None:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                else:
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'columnas': columnas,
+            'chats': chats,
+            'timestamp': datetime.now().isoformat(),
+            'total_chats': len(chats)
+        })
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en kanban_data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # ------------------------------
 # Enviar texto a WhatsApp
 # ------------------------------
