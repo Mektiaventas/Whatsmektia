@@ -2057,6 +2057,36 @@ def enviar_alerta_intervencion_humana(info_intervencion, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de intervención: {e}")
 
+
+def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
+    """
+    Actualiza la información del contacto usando el nombre proporcionado desde el webhook
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+            VALUES (%s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = VALUES(nombre),
+                fecha_actualizacion = NOW()
+        """, (numero, nombre))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Contacto actualizado con nombre desde webhook: {numero} -> {nombre}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
+
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
@@ -2962,9 +2992,14 @@ def webhook():
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
-         
+         # 🔥 ACTUALIZAR CONTACTO CON NOMBRE DEL WEBHOOK (SI EXISTE)
+        if nombre_desde_webhook:
+            actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
+        else:
+            actualizar_info_contacto(numero, config)  # Fallback al método normal
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
@@ -3089,6 +3124,34 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
     
+def extraer_nombre_desde_webhook(payload):
+    """
+    Extrae el nombre del contacto directamente desde el webhook de WhatsApp
+    """
+    try:
+        # Verificar si existe la estructura de contacts en el payload
+        if ('entry' in payload and 
+            payload['entry'] and 
+            'changes' in payload['entry'][0] and 
+            payload['entry'][0]['changes'] and 
+            'contacts' in payload['entry'][0]['changes'][0]['value']):
+            
+            contacts = payload['entry'][0]['changes'][0]['value']['contacts']
+            if contacts and len(contacts) > 0:
+                profile = contacts[0].get('profile', {})
+                nombre = profile.get('name')
+                
+                if nombre:
+                    app.logger.info(f"✅ Nombre extraído desde webhook: {nombre}")
+                    return nombre
+        
+        app.logger.info("ℹ️ No se encontró nombre en el webhook")
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
+        return None
+
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
