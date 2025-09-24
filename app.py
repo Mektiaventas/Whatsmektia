@@ -7,6 +7,8 @@ import logging
 import requests
 import mysql.connector
 import pytz
+import requests
+from gtts import gTTS
 from flask import Flask, request, jsonify
 from dotenv import load_dotenv
 from datetime import datetime
@@ -44,6 +46,66 @@ NUMEROS_CONFIG = {
         'dominio': 'laporfirianna.mektia.com'
     }
 }
+
+import requests
+from gtts import gTTS
+
+# ------------------------------
+# Enviar texto a WhatsApp
+# ------------------------------
+def enviar_mensaje(numero, texto, config):
+    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+    headers = {
+        "Authorization": f"Bearer {config['whatsapp_token']}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "text",
+        "text": {"body": texto}
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        r.raise_for_status()
+        app.logger.info(f"✅ Mensaje enviado a {numero}")
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando mensaje: {e}")
+
+# ------------------------------
+# Texto a voz y envío como audio
+# ------------------------------
+def enviar_mensaje_voz(numero, texto, config):
+    try:
+        # Convertir texto a mp3
+        tts = gTTS(text=texto, lang="es", slow=False)
+        filename = f"respuesta_{numero}.mp3"
+        filepath = os.path.join("uploads", filename)
+        os.makedirs("uploads", exist_ok=True)
+        tts.save(filepath)
+
+        # Subir archivo a tu dominio (ej: https://mektia.com/uploads/...)
+        MI_DOMINIO = os.getenv("MI_DOMINIO", "https://mektia.com")
+        audio_url = f"{MI_DOMINIO}/uploads/{filename}"
+
+        # Enviar por WhatsApp
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            "Authorization": f"Bearer {config['whatsapp_token']}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "audio",
+            "audio": {"link": audio_url}
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        r.raise_for_status()
+        app.logger.info(f"🎵 Audio enviado a {numero}")
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando voz: {e}")
+
 
 def obtener_configuracion_por_host():
     host = request.host if request else None
@@ -185,7 +247,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 # ------------------------------
 @app.route("/webhook", methods=["POST"])
 def webhook():
+    # 1. Detectar tenant
     config = obtener_configuracion_por_host()
+
+    # 2. Recibir datos del mensaje
     data = request.get_json()
     numero = data.get("numero")
     mensaje = data.get("mensaje")
@@ -194,10 +259,12 @@ def webhook():
     imagen_base64 = data.get("imagen_base64")
     transcripcion_audio = data.get("transcripcion_audio")
 
-    app.logger.info(f"📥 Mensaje de {numero}: {mensaje}")
+    app.logger.info(f"📥 Mensaje recibido de {numero}: {mensaje}")
 
+    # 3. Obtener respuesta de la IA
     respuesta = responder_con_ia(
-        mensaje, numero,
+        mensaje,
+        numero,
         es_imagen=es_imagen,
         imagen_base64=imagen_base64,
         es_audio=es_audio,
@@ -205,18 +272,29 @@ def webhook():
         config=config
     )
 
-    # Guardar conversación
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-        VALUES (%s, %s, %s, %s)
-    """, (numero, mensaje, respuesta, datetime.now(tz_mx)))
-    conn.commit()
-    cursor.close()
-    conn.close()
+    # 4. Guardar conversación en BD
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+            VALUES (%s, %s, %s, %s)
+        """, (numero, mensaje, respuesta, datetime.now(tz_mx)))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info(f"💾 Conversación guardada para {numero}")
+    except Exception as e:
+        app.logger.error(f"❌ Error guardando conversación: {e}")
 
-    return jsonify({"respuesta": respuesta})
+    # 5. Enviar respuesta de texto a WhatsApp
+    enviar_mensaje(numero, respuesta, config)
+
+    # 6. (Opcional) Enviar también la respuesta como audio
+    # enviar_mensaje_voz(numero, respuesta, config)
+
+    return jsonify({"status": "ok", "respuesta": respuesta})
+
 
 # ------------------------------
 if __name__ == "__main__":
