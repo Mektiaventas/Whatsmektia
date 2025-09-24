@@ -782,8 +782,8 @@ def load_config(config=None):
             palabras_prohibidas TEXT,
             max_mensajes INT DEFAULT 10,
             tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),  -- NUEVO: URL del logo
-            nombre_empresa VARCHAR(100)  -- NUEVO: Nombre de la empresa para la UI
+            logo_url VARCHAR(255),  
+            nombre_empresa VARCHAR(100)  
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
