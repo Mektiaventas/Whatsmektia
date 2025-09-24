@@ -1437,25 +1437,17 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     # En la función responder_con_ia, modifica el system_prompt:
     system_prompt = f"""
-    Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
-    Descripción del negocio:
-    {descripcion}
+Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+Descripción del negocio: {descripcion}
 
-    Tus responsabilidades:  
-    {que_hace} 
+Servicios y precios:
+{lista_precios}
 
-    Servicios y tarifas actuales:
-    {lista_precios}
+Habla de manera natural y libre, siempre basándote en la información de arriba.
+Si el usuario pregunta por algo que no está en la lista de precios o descripción,
+responde amablemente que no tienes esa información.
+"""
 
-    INSTRUCCIONES IMPORTANTES:
-    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios, si no los tienes no insistas solo manda un mensaje para recordar y ya no le digas de nuevo
-    2. Los datos obligatorios para un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'cita'} son:
-    - Servicio solicitado (siempre requerido)
-    {'- Fecha sugerida (requerido)' if not 'laporfirianna' in config.get('dominio', '') else ''}
-    - Nombre del cliente (siempre requerido)
-    3. Si el usuario quiere hacer un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'agendar una cita'} pero faltan datos, pídelos amablemente
-    4. Mantén siempre un tono profesional y conciso
-    """.strip()
 
     historial = obtener_historial(numero, config=config)
     
