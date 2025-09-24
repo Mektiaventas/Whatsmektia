@@ -1415,148 +1415,115 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-# ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
+    
     cfg = load_config(config)
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
-    estado_actual = obtener_estado_conversacion(numero, config)
-    if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
-        return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    precios = obtener_todos_los_precios(config)
-    lista_precios = "\n".join(
-        f"- {p['servicio']}: {p['precio']} {p['moneda']}"
-        for p in precios
-    )
+    tono = neg.get('tono', 'amistoso')
 
-    # En la función responder_con_ia, modifica el system_prompt:
+    # ✅ PROMPT SIMPLIFICADO Y MÁS AUTÓNOMO (como en app.py)
     system_prompt = f"""
-    Eres **{ia_nombre}**, asistente virtual de **{negocio_nombre}**.
-    Descripción del negocio:
-    {descripcion}
-
-    Tus responsabilidades:  
-    {que_hace} 
-
-    Servicios y tarifas actuales:
-    {lista_precios}
-
-    INSTRUCCIONES IMPORTANTES:
-    1. No permitas que los usuarios agenden {'pedidos' if 'laporfirianna' in config.get('dominio', '') else 'citas'} sin haber obtenido todos los datos necesarios, si no los tienes no insistas solo manda un mensaje para recordar y ya no le digas de nuevo
-    2. Los datos obligatorios para un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'cita'} son:
-    - Servicio solicitado (siempre requerido)
-    {'- Fecha sugerida (requerido)' if not 'laporfirianna' in config.get('dominio', '') else ''}
-    - Nombre del cliente (siempre requerido)
-    3. Si el usuario quiere hacer un {'pedido' if 'laporfirianna' in config.get('dominio', '') else 'agendar una cita'} pero faltan datos, pídelos amablemente
-    4. Mantén siempre un tono profesional y conciso
-    """.strip()
-
-    historial = obtener_historial(numero, config=config)
+    Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+    Descripción: {descripcion}
+    Tu rol: {que_hace}
+    Tono: {tono}.
     
-    # 🔥 CORRECCIÓN: Definir messages_chain correctamente
+    **INSTRUCCIONES IMPORTANTES:**
+    - Responde con naturalidad y fluidez, sin pasos rígidos
+    - Sé proactivo y autónomo en las respuestas
+    - No forces secuencias de preguntas innecesarias
+    - Si el usuario quiere agendar algo, ayúdale directamente sin muchos requisitos
+    - Mantén conversaciones fluidas y naturales
+    """
+
+    # Obtener historial reciente (más limitado para mayor autonomía)
+    historial = obtener_historial(numero, limite=3, config=config)
+    
     messages_chain = [{'role': 'system', 'content': system_prompt}]
-    
-    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
+
+    # 🔥 FILTRAR MENSAJES VÁLIDOS del historial
     for entry in historial:
-        # Solo agregar mensajes de usuario con contenido válido
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        
-        # Solo agregar respuestas de IA con contenido válido
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-    
-    # Agregar el mensaje actual (si es válido)
+
+    # Agregar mensaje actual
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
-            # ✅ Asegúrate de que imagen_base64 ya incluye el prefijo
             messages_chain.append({
                 'role': 'user',
                 'content': [
                     {"type": "text", "text": mensaje_usuario},
-                    {
-                        "type": "image_url", 
-                        "image_url": {
-                            "url": imagen_base64,  # Ya debería incluir "data:image/jpeg;base64,"
-                            "detail": "auto"
-                        }
-                    }
+                    {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Para audio: incluir la transcripción
             messages_chain.append({
                 'role': 'user',
-                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
+                'content': f"[Audio transcrito] {transcripcion_audio}\n\n{mensaje_usuario or ''}"
             })
         else:
-            # Para texto normal
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
-        if len(messages_chain) <= 1:
-            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        # ✅ USAR DEEPSEEK PARA TODO (más rápido y autónomo)
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
         
-        if es_imagen:
-            # Usar OpenAI para imágenes
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
-                "temperature": 0.7,
-                "max_tokens": 1000,
-            }
-            
-            app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
-            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages_chain,
+            "temperature": 0.7,  # Un poco más creativo
+            "max_tokens": 1000,  # Respuestas más concisas
+            "stream": False
+        }
         
-        else:
-            # Usar DeepSeek para texto (o audio transcrito)
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=25)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta = data['choices'][0]['message']['content'].strip()
+        
+        # 🔒 APLICAR RESTRICCIONES MÍNIMAS
+        respuesta = aplicar_restricciones_minimas(respuesta, numero, config)
+        return respuesta
     
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 API error: {e}")
-        if hasattr(e, 'response') and e.response:
-            app.logger.error(f"🔴 Response: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA.'
-    except Exception as e: 
-        app.logger.error(f"🔴 Error inesperado: {e}")
-        return 'Lo siento, hubo un error con la IA.'
+    except Exception as e:
+        app.logger.error(f"🔴 Error IA: {e}")
+        return "¡Hola! Estoy aquí para ayudarte. ¿En qué puedo asistirte hoy?"
+
+def aplicar_restricciones(respuesta, numero, config=None):
+    """Aplica solo restricciones esenciales para no limitar la autonomía"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        cfg = load_config(config)
+        restricciones = cfg.get('restricciones', {})
+        
+        # Solo verificar palabras realmente prohibidas
+        palabras_prohibidas = restricciones.get('palabras_prohibidas', '').lower().split('\n')
+        palabras_prohibidas = [p.strip() for p in palabras_prohibidas if p.strip() and len(p.strip()) > 3]
+        
+        for palabra in palabras_prohibidas:
+            if palabra and palabra in respuesta.lower():
+                respuesta = respuesta.replace(palabra, '[CONTENIDO NO PERMITIDO]')
+                app.logger.info(f"🚫 Palabra prohibida detectada: {palabra}")
+        
+        return respuesta
+        
+    except Exception as e:
+        app.logger.error(f"Error aplicando restricciones mínimas: {e}")
+        return respuesta
 
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
@@ -3853,50 +3820,7 @@ def configuracion_precio_borrar(pid):
         conn.close()
         return redirect(url_for('configuracion_precios'))
 
-
-def aplicar_restricciones(respuesta_ia, numero, config=None):
-    """Aplica las restricciones configuradas a las respuestas de la IA"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        cfg = load_config(config)
-        restricciones = cfg.get('restricciones', {})
-        
-        # Verificar palabras prohibidas
-        palabras_prohibidas = restricciones.get('palabras_prohibidas', '').lower().split('\n')
-        palabras_prohibidas = [p.strip() for p in palabras_prohibidas if p.strip()]
-        
-        for palabra in palabras_prohibidas:
-            if palabra and palabra in respuesta_ia.lower():
-                respuesta_ia = respuesta_ia.replace(palabra, '[REDACTADO]')
-                app.logger.info(f"🚫 Palabra prohibida detectada y redactada: {palabra}")
-        
-        # Verificar restricciones específicas
-        lista_restricciones = restricciones.get('restricciones', '').split('\n')
-        lista_restricciones = [r.strip() for r in lista_restricciones if r.strip()]
-        
-        # Ejemplo: Si hay restricción sobre agendar citas sin confirmación
-        if any('no agendar citas sin confirmación' in r.lower() for r in lista_restricciones):
-            if any(palabra in respuesta_ia.lower() for palabra in ['agendo', 'agendado', 'cita confirmada']):
-                if 'confirmación' not in respuesta_ia.lower() and 'verific' not in respuesta_ia.lower():
-                    respuesta_ia = "Necesito confirmar algunos detalles antes de agendar la cita. ¿Podrías proporcionarme más información?"
-                    app.logger.info(f"🔒 Restricción de cita aplicada para {numero}")
-        
-        # Verificar límite de mensajes
-        max_mensajes = restricciones.get('max_mensajes', 10)
-        historial = obtener_historial(numero, limite=max_mensajes + 5, config=config)
-        
-        if len(historial) >= max_mensajes:
-            respuesta_ia = "Hemos alcanzado el límite de esta conversación. Por favor, contacta con un agente humano para continuar."
-            app.logger.info(f"📊 Límite de mensajes alcanzado para {numero}")
-        
-        return respuesta_ia
-        
-    except Exception as e:
-        app.logger.error(f"Error aplicando restricciones: {e}")
-        return respuesta_ia
-    # ——— Kanban ———
+   # ——— Kanban ———
 
 def verificar_tablas_bd(config):
     """Verifica que todas las tablas necesarias existan en la base de datos"""
