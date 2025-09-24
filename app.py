@@ -2940,10 +2940,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     if es_porfirianna:
         # Palabras clave para La Porfirianna (pedidos de comida)
         palabras_clave = [
-            'pedir', 'ordenar', 'quiero', 'deseo', 'me gustaría', 'para llevar',
-            'manden', 'envíen', 'comprar', 'quiero comprar', 'deseo comprar',
-            'chilaquil', 'taco', 'gordita', 'quesadilla', 'sope', 'torta', 'comida',
-            'menú', 'platillo', 'orden', 'pedido'
+            'pedir', 'ordenar', 'para llevar',
+            'orden', 'pedido'
         ]
         
         # Palabras de confirmación
