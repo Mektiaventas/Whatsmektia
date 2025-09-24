@@ -142,22 +142,39 @@ def load_config(config=None):
         config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
+    
+    # Cargar configuración básica
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
-    row = cursor.fetchone()
+    config_row = cursor.fetchone()
+    
+    # Cargar menú REAL desde la tabla PRECIOS
+    cursor.execute("SELECT servicio, descripcion, precio FROM precios WHERE precio IS NOT NULL ORDER BY id;")
+    menu_items = cursor.fetchall()
+    
     cursor.close()
     conn.close()
 
-    if not row:
+    if not config_row:
         return {}
-    return {
-        'ia_nombre': row['ia_nombre'],
-        'negocio_nombre': row['negocio_nombre'],
-        'descripcion': row['descripcion'],
-        'que_hace': row['que_hace'],
-        'tono': row['tono'],
-        'lenguaje': row['lenguaje']
-    }
+    
+    # Formatear menú exacto como está en la base de datos
+    menu_texto = "MENÚ DISPONIBLE (PRECIOS ACTUALES):\n"
+    for item in menu_items:
+        precio = f"${item['precio']}" if item['precio'] else "Consultar precio"
+        menu_texto += f"• {item['servicio']} - {precio}: {item['descripcion']}\n"
+    
+    if not menu_items:
+        menu_texto = "Menú en preparación, por favor pregunta por nuestros platillos disponibles."
 
+    return {
+        'ia_nombre': config_row['ia_nombre'],
+        'negocio_nombre': config_row['negocio_nombre'],
+        'descripcion': config_row['descripcion'],
+        'que_hace': config_row['que_hace'],
+        'tono': config_row['tono'],
+        'lenguaje': config_row['lenguaje'],
+        'menu_real': menu_texto  # ← Esto contendrá tu menú exacto
+    }
 # ------------------------------
 # Historial de conversación
 # ------------------------------
