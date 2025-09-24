@@ -2962,7 +2962,6 @@ def webhook():
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
-        inicializar_chat_meta(numero, config)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
          
