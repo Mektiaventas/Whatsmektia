@@ -2866,7 +2866,7 @@ def webhook():
                     # Guardar la cita/pedido
                     cita_id = guardar_cita(info_cita, config)
                     
-                    if cita_id:
+                    #if cita_id:
                         # Enviar confirmación al cliente
                         #enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                         
@@ -2874,8 +2874,8 @@ def webhook():
                         #enviar_alerta_cita_administrador(info_cita, cita_id, config)
                         
                         #respuesta = f"✅ ¡{'Pedido' if 'porfirianna' in config.get('dominio', '') else 'Cita'} confirmado! Te hemos enviado los detalles por mensaje. ID: #{cita_id}"
-                    else:
-                        respuesta = "❌ Lo siento, hubo un error al guardar tu solicitud. Por favor, intenta de nuevo."
+                    #else:
+                    #    respuesta = "❌ Lo siento, hubo un error al guardar tu solicitud. Por favor, intenta de nuevo."
                 else:
                     # Faltan datos, solicitarlos
                     respuesta = mensaje_error
