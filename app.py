@@ -2870,226 +2870,60 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
 
 # REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     try:
-        # ✅ VERIFICACIÓN CRÍTICA - asegurar que tenemos JSON
-        if not request.is_json:
-            app.logger.error("🔴 Error: No se recibió JSON en el webhook")
-            return 'Invalid content type', 400
-            
-        payload = request.get_json()
-        if not payload:
-            app.logger.error("🔴 Error: JSON vacío o inválido")
-            return 'Invalid JSON', 400
-            
-        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)[:500]}...")
-        
-        # ✅ VERIFICAR ESTRUCTURA BÁSICA DEL PAYLOAD
-        if 'entry' not in payload or not payload['entry']:
-            app.logger.error("🔴 Error: Payload sin 'entry'")
-            return 'Invalid payload structure', 400
-            
-        entry = payload['entry'][0]
-        if 'changes' not in entry or not entry['changes']:
-            app.logger.error("🔴 Error: Entry sin 'changes'")
-            return 'Invalid entry structure', 400
-            
-        change = entry['changes'][0]['value']
-        mensajes = change.get('messages', [])
         data = request.get_json()
-        try:
-            # Extraer información del contacto del payload
-            if 'contacts' in data['entry'][0]['changes'][0]['value']:
-                contact_info = data['entry'][0]['changes'][0]['value']['contacts'][0]
-                wa_id = contact_info['wa_id']
-                name = contact_info['profile']['name']
-            
-                # Guardar en la base de datos
-                config = obtener_configuracion_por_host()
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
-            
-                cursor.execute("""
-                    INSERT INTO contactos (numero_telefono, nombre, plataforma) 
-                    VALUES (%s, %s, 'WhatsApp')
-                    ON DUPLICATE KEY UPDATE 
-                        nombre = COALESCE(%s, nombre),
-                        fecha_actualizacion = CURRENT_TIMESTAMP
-                """, (wa_id, name, name))
-            
-                conn.commit()
-                cursor.close()
-                conn.close()
-            
-                app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
-        
-            # Continuar con el procesamiento normal del mensaje
-            # ... tu código existente para procesar mensajes ...
-        
-        except Exception as e:
-            app.logger.error(f"Error procesando webhook: {str(e)}")
-            return jsonify({"status": "error"}), 500
-        if not mensajes:
-            app.logger.info("⚠️ No hay mensajes en el payload")
-            return 'OK', 200    
+        print("Webhook recibido:", json.dumps(data, indent=2, ensure_ascii=False))
 
-        msg = mensajes[0]
-        numero = msg['from']
-        # Agregar esto inmediatamente:
-        
-       # CORRECCIÓN: Manejo robusto de texto
-        texto = ''
-        es_imagen = False
-        es_audio = False
-        es_video = False
-        es_documento = False
-        es_mi_numero = False  # ← Add this initialization
-         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
-        phone_number_id = change.get('metadata', {}).get('phone_number_id')
-        app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
-        
-       
-        # 🔥 OBTENER CONFIGURACIÓN CORRECTA
-        config = None
-        for numero_config, config_data in NUMEROS_CONFIG.items():
-            if str(config_data['phone_number_id']) == str(phone_number_id):
-                config = config_data
-                app.logger.info(f"✅ Configuración encontrada por phone_number_id: {config['dominio']}")
-                break
-                
-        if config is None:
-            app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()  # Fallback a detección por host
-            app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
-                # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
-        inicializar_chat_meta(numero, config)
-        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
-        inicializar_chat_meta(numero, config)
-         
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        message_id = msg.get('id')
-        if not message_id:
-            app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
-            return 'OK', 200
-            
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        message_id = msg.get('id')
-        if not message_id:
-            # Si no hay ID, crear uno basado en timestamp y contenido
-            timestamp = msg.get('timestamp', '')
-            message_id = f"{numero}_{timestamp}_{texto[:50]}"
-            
-        # Crear un hash único del mensaje para evitar duplicados
-        message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
+        if "entry" not in data:
+            return "ok", 200
 
-        # Verificar si ya procesamos este mensaje (solo si no es un audio/imagen para evitar falsos positivos)
-        if not es_audio and not es_imagen and message_hash in processed_messages:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
-            return 'OK', 200
-            
-        # Agregar a mensajes procesados (con timestamp para limpieza posterior)
-        processed_messages[message_hash] = time.time()
+        for entry in data["entry"]:
+            if "changes" not in entry:
+                continue
+            for change in entry["changes"]:
+                if "value" not in change or "messages" not in change["value"]:
+                    continue
 
-        # Limpiar mensajes antiguos (más de 1 hora)
-        current_time = time.time()
-        for msg_hash, timestamp in list(processed_messages.items()):
-            if current_time - timestamp > 3600:  # 1 hora
-                del processed_messages[msg_hash]
-        
-        image_id = None
-        imagen_base64 = None
-        public_url = None
-        transcripcion = None
-        # En el webhook, después de procesar el mensaje:
-        actualizar_info_contacto(numero, config)
-        if 'text' in msg and 'body' in msg['text']:
-            texto = msg['text']['body'].strip()
-        elif 'image' in msg:
-            es_imagen = True
-            image_id = msg['image']['id']
-            imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
-            texto = msg['image'].get('caption', '').strip()
-            if not texto:
-                texto = "El usuario envió una imagen"
-            
-            # Guardar solo el mensaje del usuario (sin respuesta aún)
-            guardar_conversacion(numero, texto, None, config, public_url, True)
-        elif 'audio' in msg:
-            es_audio = True
-            audio_id = msg['audio']['id']  # ✅ Para audio también
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
-            if audio_path:
-                transcripcion = transcribir_audio_con_openai(audio_path)
-                texto = transcripcion if transcripcion else "No se pudo transcribir el audio"
-            else:
-                texto = "Error al procesar el audio"
-        else:
-            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-            
-        app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
-        
-        # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
-        if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
-            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
-            return 'OK', 200
-        
-        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
-        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
-        
-        if es_mi_numero:
-            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
-        
-        # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
-        
-        analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
+                mensajes = change["value"]["messages"]
+                contactos = change["value"].get("contacts", [])
 
-        if analisis_pedido and analisis_pedido.get('es_pedido'):
-            app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
-    
-            # Manejar el pedido automáticamente
-            respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-    
-            # Enviar respuesta y guardar conversación
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-    
-            return 'OK', 200
-        # 2. DETECTAR INTERVENCIÓN HUMANA
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            
-            # Obtener historial para contexto
-            historial = obtener_historial(numero, limite=5, config=config)
-            
-            # Extraer información con contexto
-            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            
-            if info_intervencion:
-                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                
-                # Enviar alerta al administrador
-                enviar_alerta_intervencion_humana(info_intervencion, config)
-                
-                # Responder al cliente
-                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
-            else:
-                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            
-            # Enviar respuesta y guardar conversación
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-            
-            return 'OK', 200
-        
-        # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
-        return 'OK', 200
-        
+                for mensaje in mensajes:
+                    numero = mensaje.get("from")
+                    texto = None
+                    if "text" in mensaje:
+                        texto = mensaje["text"].get("body")
+
+                    # nombre del contacto desde el payload de WhatsApp
+                    nombre = None
+                    if contactos:
+                        nombre = contactos[0].get("profile", {}).get("name")
+
+                    # obtener config del host para BD correcta
+                    config = obtener_configuracion_por_host()
+
+                    # 1. Guardar contacto (si no hay nombre, usa el número)
+                    guardar_contacto(numero, nombre or numero, config)
+
+                    # 2. Generar respuesta con IA
+                    respuesta = responder_con_ia(numero, texto, config)
+
+                    # 3. Guardar conversación
+                    guardar_conversacion(numero, texto, respuesta, config)
+
+                    # 4. Asegurar que aparezca en el Kanban (columna 1 = Nuevos)
+                    actualizar_kanban(numero, columna_id=1, config=config)
+
+                    # 5. Enviar respuesta por WhatsApp
+                    enviar_mensaje_whatsapp(numero, respuesta, config)
+
+        return "ok", 200
+
     except Exception as e:
-        app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return 'Error interno del servidor', 500
-    
+        print(f"Error en webhook: {e}")
+        return "error", 500
+   
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
