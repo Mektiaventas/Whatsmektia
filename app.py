@@ -10,10 +10,12 @@ import mysql.connector
 import pytz
 import requests
 from gtts import gTTS
-from flask import Flask, request, jsonify
+from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
 from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAI
+import requests
+from gtts import gTTS
 
 # --- Inicialización ---
 load_dotenv()
@@ -52,9 +54,6 @@ NUMEROS_CONFIG = {
     }
 }
 
-
-import requests
-from gtts import gTTS
 
 @app.route('/kanban')
 def ver_kanban(config=None):
