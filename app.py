@@ -1,6 +1,6 @@
 # Agrega esto con los otros imports al inicio
 import traceback
-# Agrega estos imports al inicio del archivo
+# Agrega estos imports al inicio del archivoqr
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -9,7 +9,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
-from whatsapp_selenium import get_whatsapp_client, init_whatsapp_session
 import pytz
 import os
 import logging
@@ -4400,7 +4399,7 @@ with app.app_context():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
