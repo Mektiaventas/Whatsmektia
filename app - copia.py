@@ -1599,7 +1599,7 @@ def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=
     conn.close()
 
 def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
-    """Maneja la secuencia de solicitud de cita paso a paso"""
+    """Maneja la secuencia de solicitud de cita/pedido paso a paso"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1609,39 +1609,69 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
     # Determinar tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    if paso_actual == 0:  # Primer paso: servicio
-        # Extraer servicio del mensaje
+    app.logger.info(f"🔄 Procesando paso {paso_actual} para {numero}: '{mensaje}'")
+    
+    if paso_actual == 0:  # Inicio - Detectar si es solicitud de cita/pedido
+        if detectar_solicitud_cita_keywords(mensaje, config):
+            datos_guardados['paso'] = 1
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_servicio", datos_guardados, config)
+            
+            if es_porfirianna:
+                return "¡Hola! 👋 Veo que quieres hacer un pedido. ¿Qué platillos te gustaría ordenar?"
+            else:
+                return "¡Hola! 👋 Veo que quieres agendar una cita. ¿Qué servicio necesitas?"
+        else:
+            # No es una solicitud de cita, dejar que la IA normal responda
+            return None
+    
+    elif paso_actual == 1:  # Paso 1: Servicio/Platillo
         servicio = extraer_servicio_del_mensaje(mensaje, config)
         if servicio:
             datos_guardados['servicio'] = servicio
-            datos_guardados['paso'] = 1
+            datos_guardados['paso'] = 2
             actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_fecha", datos_guardados, config)
             
             if es_porfirianna:
-                return "¡Perfecto! ¿Para cuándo quieres tu pedido? (puedes decir 'hoy', 'mañana' o una fecha específica)"
+                return f"¡Perfecto! ¿Para cuándo quieres tu pedido de {servicio}? (puedes decir 'hoy', 'mañana' o una fecha específica)"
             else:
-                return "¡Excelente! ¿Qué fecha te viene bien para la cita? (puedes decir 'mañana', 'próximo lunes', etc.)"
+                return f"¡Excelente! ¿Qué fecha te viene bien para la cita de {servicio}? (puedes decir 'mañana', 'próximo lunes', etc.)"
         else:
             if es_porfirianna:
-                return "No entendí qué platillo quieres ordenar. ¿Podrías ser más específico? Por ejemplo: 'Quiero 4 gorditas de chicharrón'"
+                return "No entendí qué platillo quieres ordenar. ¿Podrías ser más específico? Por ejemplo: 'Quiero 2 gorditas de chicharrón'"
             else:
                 return "No entendí qué servicio necesitas. ¿Podrías ser más específico? Por ejemplo: 'Necesito una página web'"
     
-    elif paso_actual == 1:  # Segundo paso: fecha
+    elif paso_actual == 2:  # Paso 2: Fecha
         fecha = extraer_fecha_del_mensaje(mensaje)
         if fecha:
             datos_guardados['fecha'] = fecha
-            datos_guardados['paso'] = 2
+            datos_guardados['paso'] = 3
             actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_nombre", datos_guardados, config)
-            return "¡Genial! ¿Cuál es tu nombre completo?"
+            
+            if es_porfirianna:
+                return f"¡Genial! ¿A qué hora prefieres recibir tu pedido el {fecha}? (por ejemplo: 'a las 2pm', 'en la tarde')"
+            else:
+                return f"¡Bien! ¿A qué hora prefieres la cita el {fecha}? (por ejemplo: 'a las 10am', 'por la tarde')"
         else:
             return "No entendí la fecha. ¿Podrías intentarlo de nuevo? Por ejemplo: 'mañana a las 3pm' o 'el viernes 15'"
     
-    elif paso_actual == 2:  # Tercer paso: nombre
+    elif paso_actual == 3:  # Paso 3: Hora
+        # Extraer hora del mensaje (función simple)
+        hora = extraer_hora_del_mensaje(mensaje)
+        if hora:
+            datos_guardados['hora'] = hora
+            datos_guardados['paso'] = 4
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_nombre", datos_guardados, config)
+            
+            return "¡Perfecto! ¿Cuál es tu nombre completo?"
+        else:
+            return "No entendí la hora. ¿Podrías intentarlo de nuevo? Por ejemplo: 'a las 3 de la tarde' o 'a las 10am'"
+    
+    elif paso_actual == 4:  # Paso 4: Nombre
         nombre = extraer_nombre_del_mensaje(mensaje)
         if nombre:
             datos_guardados['nombre'] = nombre
-            datos_guardados['paso'] = 3
+            datos_guardados['paso'] = 5
             actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "confirmar_datos", datos_guardados, config)
             
             # Confirmar todos los datos
@@ -1649,25 +1679,28 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
                 confirmacion = f"📋 *Resumen de tu pedido:*\n\n"
                 confirmacion += f"🍽️ *Platillo:* {datos_guardados['servicio']}\n"
                 confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
+                confirmacion += f"⏰ *Hora:* {datos_guardados.get('hora', 'Por confirmar')}\n"
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
                 confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
             else:
                 confirmacion = f"📋 *Resumen de tu cita:*\n\n"
                 confirmacion += f"🛠️ *Servicio:* {datos_guardados['servicio']}\n"
                 confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
+                confirmacion += f"⏰ *Hora:* {datos_guardados.get('hora', 'Por confirmar')}\n"
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
                 confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
             
             return confirmacion
         else:
-            return "No entendí tu nombre. ¿Podrías escribirlo de nuevo?"
+            return "No entendí tu nombre. ¿Podrías escribirlo de nuevo? Por ejemplo: 'Juan Pérez'"
     
-    elif paso_actual == 3:  # Confirmación final
-        if mensaje.lower() in ['sí', 'si', 'sip', 'correcto', 'ok']:
-            # Guardar cita completa
+    elif paso_actual == 5:  # Confirmación final
+        if mensaje.lower() in ['sí', 'si', 'sip', 'correcto', 'ok', 'confirmar']:
+            # Guardar cita/pedido completo
             info_cita = {
                 'servicio_solicitado': datos_guardados['servicio'],
                 'fecha_sugerida': datos_guardados['fecha'],
+                'hora_sugerida': datos_guardados.get('hora', '12:00'),
                 'nombre_cliente': datos_guardados['nombre'],
                 'telefono': numero,
                 'estado': 'pendiente'
@@ -1677,17 +1710,89 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             actualizar_estado_conversacion(numero, "CITA_CONFIRMADA", "cita_agendada", {"cita_id": cita_id}, config)
             
             if es_porfirianna:
-                return f"✅ *Pedido confirmado* - ID: #{cita_id}\n\nHemos registrado tu pedido. Nos pondremos en contacto contigo pronto. ¡Gracias!"
+                return f"✅ *Pedido confirmado* - ID: #{cita_id}\n\nHemos registrado tu pedido. Nos pondremos en contacto contigo pronto para confirmar. ¡Gracias! 🎉"
             else:
-                return f"✅ *Cita confirmada* - ID: #{cita_id}\n\nHemos agendado tu cita. Nos pondremos en contacto contigo pronto. ¡Gracias!"
+                return f"✅ *Cita confirmada* - ID: #{cita_id}\n\nHemos agendado tu cita. Nos pondremos en contacto contigo pronto para confirmar. ¡Gracias! 🎉"
         
         elif mensaje.lower() in ['no', 'cancelar', 'modificar']:
-            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "reiniciar", {}, config)
-            return "De acuerdo, empecemos de nuevo. ¿Qué servicio necesitas?"
+            # Preguntar qué dato modificar
+            datos_guardados['paso'] = 6  # Paso de modificación
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "modificar_datos", datos_guardados, config)
+            
+            return "¿Qué dato quieres modificar?\n- 'servicio' para cambiar el servicio/platillo\n- 'fecha' para cambiar la fecha\n- 'hora' para cambiar la hora\n- 'nombre' para cambiar tu nombre\n- 'todo' para empezar de nuevo"
         
         else:
             return "Por favor responde 'sí' para confirmar o 'no' para modificar."
+    
+    elif paso_actual == 6:  # Modificación de datos específicos
+        if 'servicio' in mensaje.lower():
+            datos_guardados['paso'] = 1
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "modificar_servicio", datos_guardados, config)
+            return "De acuerdo. ¿Qué servicio/platillo deseas entonces?"
+        
+        elif 'fecha' in mensaje.lower():
+            datos_guardados['paso'] = 2
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "modificar_fecha", datos_guardados, config)
+            return "De acuerdo. ¿Qué fecha prefieres?"
+        
+        elif 'hora' in mensaje.lower():
+            datos_guardados['paso'] = 3
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "modificar_hora", datos_guardados, config)
+            return "De acuerdo. ¿A qué hora prefieres?"
+        
+        elif 'nombre' in mensaje.lower():
+            datos_guardados['paso'] = 4
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "modificar_nombre", datos_guardados, config)
+            return "De acuerdo. ¿Cuál es tu nombre?"
+        
+        elif 'todo' in mensaje.lower():
+            actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "reiniciar", {}, config)
+            if es_porfirianna:
+                return "De acuerdo, empecemos de nuevo. ¿Qué platillos deseas ordenar?"
+            else:
+                return "De acuerdo, empecemos de nuevo. ¿Qué servicio necesitas?"
+        
+        else:
+            return "No entendí qué quieres modificar. Por favor elige: servicio, fecha, hora, nombre o todo."
+    
+    # Si llegamos aquí, hay un error en el estado
+    app.logger.error(f"❌ Estado inválido en secuencia de cita: paso {paso_actual}")
+    actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "reiniciar", {}, config)
+    return "Hubo un error en el proceso. Vamos a empezar de nuevo. ¿En qué puedo ayudarte?"
 
+def extraer_hora_del_mensaje(mensaje):
+    """Extrae la hora del mensaje de forma simple"""
+    mensaje_lower = mensaje.lower()
+    
+    # Patrones simples para horas
+    patrones_hora = [
+        (r'(\d{1,2})\s*(?:am|a\.m\.)', lambda x: f"{int(x):02d}:00"),
+        (r'(\d{1,2})\s*(?:pm|p\.m\.)', lambda x: f"{int(x) + 12 if int(x) < 12 else int(x):02d}:00"),
+        (r'a las (\d{1,2})', lambda x: f"{int(x):02d}:00"),
+        (r'(\d{1,2}):(\d{2})', lambda x, y: f"{int(x):02d}:{y}"),
+    ]
+    
+    for patron, conversion in patrones_hora:
+        match = re.search(patron, mensaje_lower)
+        if match:
+            try:
+                grupos = match.groups()
+                if len(grupos) == 1:
+                    return conversion(grupos[0])
+                elif len(grupos) == 2:
+                    return conversion(grupos[0], grupos[1])
+            except:
+                continue
+    
+    # Horas relativas
+    if 'mañana' in mensaje_lower:
+        return "09:00"
+    elif 'tarde' in mensaje_lower:
+        return "15:00"
+    elif 'noche' in mensaje_lower:
+        return "19:00"
+    
+    return None
 def obtener_estado_conversacion(numero, config=None):
     """Obtiene el estado actual de la conversación"""
     if config is None:
@@ -2578,25 +2683,29 @@ def es_respuesta_a_pregunta(mensaje):
     """
     mensaje_lower = mensaje.lower()
     
-    # Patrones que indican que es una respuesta, no una nueva solicitud
-    patrones_respuesta = [
-        'sí', 'si', 'no', 'claro', 'ok', 'vale', 'correcto',
-        'está bien', 'de acuerdo', 'perfecto', 'sip', 'nop',
+    # Palabras que indican que es una respuesta, no una nueva solicitud
+    palabras_respuesta = [
+        'sí', 'si', 'no', 'claro', 'ok', 'vale', 'correcto', 'afirmativo',
+        'está bien', 'de acuerdo', 'perfecto', 'exacto', 'así es', 'sip', 'nop',
         'mañana', 'hoy', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes',
-        'sábado', 'domingo', 'la semana', 'el próximo', 'a las'
+        'sábado', 'domingo', 'la semana', 'el próximo', 'a las', 'por la',
+        'juan', 'maría', 'carlos', 'ana', 'luis'  # Nombres comunes
     ]
     
     # Si el mensaje contiene alguna de estas palabras, probablemente es una respuesta
-    for patron in patrones_respuesta:
-        if patron in mensaje_lower:
+    for palabra in palabras_respuesta:
+        if palabra in mensaje_lower:
             return True
     
-    # Si es muy corto, probablemente es una respuesta
+    # Si es muy corto (1-3 palabras), probablemente es una respuesta
     if len(mensaje_lower.split()) <= 3:
         return True
     
+    # Si comienza con artículo o preposición, probablemente es respuesta
+    if mensaje_lower.startswith(('el ', 'la ', 'los ', 'las ', 'un ', 'una ', 'a las ', 'para ')):
+        return True
+    
     return False
-
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -2999,36 +3108,23 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     mensaje_lower = mensaje.lower().strip()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    # Palabras clave ESPECÍFICAS para cada negocio
+    # Evitar detectar respuestas a preguntas como nuevas solicitudes
+    if es_respuesta_a_pregunta(mensaje):
+        return False
+    
     if es_porfirianna:
-        # Palabras clave para La Porfirianna (pedidos de comida)
+        # Palabras clave específicas para pedidos de comida
         palabras_clave = [
-            'pedir', 'ordenar', 'orden', 'pedido'
-        ]
-        
-        # Palabras de confirmación
-        palabras_confirmacion = [
-            'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
-            'perfecto', 'exacto', 'así es', 'está bien', 'de acuerdo'
+            'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
+            'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
         ]
     else:
-        # Palabras clave para Mektia (servicios digitales)
+        # Palabras clave para servicios digitales
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
             'necesito', 'requiero', 'me interesa', 'información', 'solicitar'
         ]
-        
-        palabras_confirmacion = [
-            'sí', 'si', 'claro', 'correcto', 'afirmativo', 'ok', 'vale',
-            'perfecto', 'exacto', 'así es', 'está bien', 'de acuerdo'
-        ]
-    
-    # Verificar si es una respuesta de confirmación corta
-    es_respuesta_corta = (
-        any(palabra in mensaje_lower for palabra in palabras_confirmacion) and 
-        len(mensaje_lower.split()) <= 3
-    )
     
     # Verificar si contiene palabras clave principales
     contiene_palabras_clave = any(
@@ -3045,8 +3141,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         patron in mensaje_lower for patron in patrones_solicitud
     )
     
-    # Es una solicitud si contiene palabras clave O patrones específicos O es respuesta corta de confirmación
-    es_solicitud = contiene_palabras_clave or contiene_patron or es_respuesta_corta
+    # Es una solicitud si contiene palabras clave O patrones específicos
+    es_solicitud = contiene_palabras_clave or contiene_patron
     
     if es_solicitud:
         tipo = "pedido" if es_porfirianna else "cita"
