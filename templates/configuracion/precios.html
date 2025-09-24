@@ -2,129 +2,244 @@
 {% block title %}Configuración – Precios{% endblock %}
 
 {% block content %}
-  <div class="config-header">
+<div class="config-header">
     <h2>Configuración: Precios</h2>
     {% if guardado %}
-      <div class="alert success">¡Guardado correctamente!</div>
+    <div class="alert success">¡Guardado correctamente!</div>
     {% endif %}
-  </div>
+</div>
 
-  <!-- Navegación de subpestañas -->
-  <ul class="tabs">
+<!-- Navegación de subpestañas -->
+<ul class="tabs">
     {% for tab in tabs %}
-      <li class="{% if tab == active %}active{% endif %}">
+    <li class="{% if tab == active %}active{% endif %}">
         {% if tab == 'precios' %}
-          <a href="{{ url_for('configuracion_precios') }}">{{ tab|capitalize }}</a>
+        <a href="{{ url_for('configuracion_precios') }}">{{ tab|capitalize }}</a>
         {% else %}
-          <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
+        <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
         {% endif %}
-      </li>
+    </li>
     {% endfor %}
-  </ul>
+</ul>
 
-  <!-- Contenido principal: dos columnas -->
-  <div class="config-content grid grid-cols-2 gap-6">
+<!-- Sección de subida de PDF -->
+<div class="card mb-6">
+    <div class="card-header bg-success text-white">
+        <h3>📄 Importar Servicios desde PDF</h3>
+    </div>
+    <div class="card-body">
+        <div class="grid grid-cols-2 gap-6">
+            <div>
+                <form action="{{ url_for('subir_pdf_servicios') }}" method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="pdf_file" class="block text-sm font-medium mb-2">Subir catálogo en PDF:</label>
+                        <input type="file" name="pdf_file" id="pdf_file"
+                               accept=".pdf,.txt" required
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <small class="text-muted">Formatos aceptados: PDF, TXT. Máx. 10MB</small>
+                    </div>
+                    <button type="submit" class="btn btn-success mt-3">
+                        🚀 Procesar PDF Automáticamente
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-blue-50 p-4 rounded-lg">
+                <h4 class="font-semibold mb-2">💡 ¿Cómo funciona?</h4>
+                <ul class="text-sm space-y-1">
+                    <li>• Sube tu catálogo de servicios en PDF</li>
+                    <li>• La IA analizará y extraerá automáticamente</li>
+                    <li>• Los servicios se guardarán en la base de datos</li>
+                    <li>• La IA los usará para responder consultas</li>
+                </ul>
+
+                <h4 class="font-semibold mt-3 mb-2">📋 Para mejores resultados:</h4>
+                <ul class="text-sm space-y-1">
+                    <li>• PDF con texto editable (no escaneado)</li>
+                    <li>• Estructura clara de servicios y precios</li>
+                    <li>• Nombres específicos de servicios/platillos</li>
+                    <li>• Precios claramente identificados</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Contenido principal: dos columnas -->
+<div class="config-content grid grid-cols-2 gap-6">
 
     <!-- Tarjeta: Lista de precios -->
     <div class="card">
-      <div class="card-header">
-        <h3>Servicios y Tarifas</h3>
-      </div>
-      <div class="card-body">
-        <div class="table-responsive">
-          <table class="table">
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Servicio</th>
-                <th>Descripción</th>
-                <th>Precio</th>
-                <th>Moneda</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for precio in precios %}
-                <tr>
-                  <td>{{ precio.id }}</td>
-                  <td>{{ precio.servicio }}</td>
-                  <td>{{ precio.descripcion or '-' }}</td>
-                  <td>{{ "{:,.2f}".format(precio.precio) }}</td>
-                  <td>{{ precio.moneda }}</td>
-                  <td>
-                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                       class="btn small">Editar</a>
-                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
-                          method="post" class="inline-form">
-                      <button type="submit"
-                              class="btn small danger"
-                              onclick="return confirm('¿Eliminar servicio {{ precio.servicio }}?');">
-                        Borrar
-                      </button>
-                    </form>
-                  </td>
-                </tr>
-              {% else %}
-                <tr>
-                  <td colspan="6">No hay servicios registrados.</td>
-                </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div class="card-header">
+            <h3>Servicios y Tarifas ({{ precios|length }} registros)</h3>
         </div>
-      </div>
+        <div class="card-body">
+            {% if precios %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Servicio</th>
+                            <th>Descripción</th>
+                            <th>Precio</th>
+                            <th>Moneda</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for precio in precios %}
+                        <tr>
+                            <td>{{ precio.id }}</td>
+                            <td class="font-medium">{{ precio.servicio }}</td>
+                            <td>{{ precio.descripcion or '-' }}</td>
+                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) }}</td>
+                            <td>{{ precio.moneda }}</td>
+                            <td>
+                                <div class="flex space-x-2">
+                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                       class="btn small primary">Editar</a>
+                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
+                                          method="post" class="inline-form">
+                                        <button type="submit"
+                                                class="btn small danger"
+                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
+                                            Borrar
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <div class="text-gray-500 text-lg mb-2">📝 No hay servicios registrados</div>
+                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar servicios manualmente o sube un PDF arriba.</p>
+            </div>
+            {% endif %}
+        </div>
     </div>
 
     <!-- Tarjeta: Formulario alta/edición -->
     <div class="card">
-      <div class="card-header">
-        <h3>{{ precio_edit and 'Editar Servicio' or 'Agregar Servicio' }}</h3>
-      </div>
-      <div class="card-body">
-        <form action="{{ url_for('configuracion_precio_guardar') }}" method="post">
-          {% if precio_edit %}
-            <input type="hidden" name="id" value="{{ precio_edit.id }}">
-          {% endif %}
+        <div class="card-header">
+            <h3>{{ precio_edit and '✏️ Editar Servicio' or '➕ Agregar Servicio' }}</h3>
+        </div>
+        <div class="card-body">
+            <form action="{{ url_for('configuracion_precio_guardar') }}" method="post">
+                {% if precio_edit %}
+                <input type="hidden" name="id" value="{{ precio_edit.id }}">
+                {% endif %}
 
-          <div class="form-group">
-            <label for="servicio">Servicio *</label>
-            <input type="text" id="servicio" name="servicio" class="input" required
-                   value="{{ precio_edit.servicio if precio_edit else '' }}">
-          </div>
+                <div class="form-group">
+                    <label for="servicio">Servicio *</label>
+                    <input type="text" id="servicio" name="servicio" class="input" required
+                           value="{{ precio_edit.servicio if precio_edit else '' }}"
+                           placeholder="Ej: Página Web Corporativa">
+                </div>
 
-          <div class="form-group">
-            <label for="descripcion">Descripción</label>
-            <textarea id="descripcion" name="descripcion" class="textarea" rows="2">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
-          </div>
+                <div class="form-group">
+                    <label for="descripcion">Descripción</label>
+                    <textarea id="descripcion" name="descripcion" class="textarea" rows="2"
+                              placeholder="Ej: Diseño responsive, 5 secciones, SEO básico">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
+                </div>
 
-          <div class="form-group">
-            <label for="precio">Precio *</label>
-            <input type="number" step="0.01" min="0" id="precio" name="precio" class="input" required
-                   value="{{ precio_edit.precio if precio_edit else '' }}">
-          </div>
+                <div class="form-group">
+                    <label for="precio">Precio *</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                        <input type="number" step="0.01" min="0" id="precio" name="precio" class="input pl-8" required
+                               value="{{ precio_edit.precio if precio_edit else '' }}"
+                               placeholder="0.00">
+                    </div>
+                </div>
 
-          <div class="form-group">
-            <label for="moneda">Moneda *</label>
-            <select id="moneda" name="moneda" class="select" required>
-              {% for m in ['MXN','USD','EUR'] %}
-                <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
-                  {{ m }}
-                </option>
-              {% endfor %}
-            </select>
-          </div>
+                <div class="form-group">
+                    <label for="moneda">Moneda *</label>
+                    <select id="moneda" name="moneda" class="select" required>
+                        {% for m in ['MXN','USD','EUR'] %}
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
+                            {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
 
-          <div class="form-actions flex justify-end gap-2">
-            <button type="submit" class="btn primary">
-              {{ precio_edit and 'Actualizar' or 'Guardar' }}
-            </button>
-            <a href="{{ url_for('configuracion_precios') }}" class="btn secondary">
-              Cancelar
-            </a>
-          </div>
-        </form>
-      </div>
+                <div class="form-actions flex justify-end gap-2">
+                    <button type="submit" class="btn primary">
+                        {{ precio_edit and '💾 Actualizar' or '💾 Guardar' }}
+                    </button>
+                    <a href="{{ url_for('configuracion_precios') }}" class="btn secondary">
+                        ↩️ Cancelar
+                    </a>
+                </div>
+            </form>
+        </div>
     </div>
 
-  </div>
+</div>
+
+<!-- Mensajes Flash -->
+<div class="mt-4">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+    {% for category, message in messages %}
+    <div class="alert {{ 'success' if category == 'success' else 'error' if category == 'error' else 'warning' }}">
+        {{ message }}
+    </div>
+    {% endfor %}
+    {% endif %}
+    {% endwith %}
+</div>
 {% endblock %}
+
+<style>
+    .alert {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 10px 0;
+        font-weight: 500;
+    }
+
+        .alert.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+    .btn-success {
+        background: #28a745;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+    }
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+    .bg-success {
+        background: #28a745 !important;
+    }
+
+    .bg-blue-50 {
+        background: #eff6ff;
+    }
+</style>

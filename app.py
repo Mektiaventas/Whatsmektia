@@ -27,6 +27,10 @@ from flask import current_app as app
 from werkzeug.utils import secure_filename
 from PIL import Image
 from openai import OpenAI
+# Agrega estos imports al inicio de app.py (después de los otros imports)
+import PyPDF2
+import fitz  # PyMuPDF - alternativa para mejor extracción
+from werkzeug.utils import secure_filename
 processed_messages = {}
 
 # Configurar Gemini
@@ -105,6 +109,284 @@ PREFIJOS_PAIS = {
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
+PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
+os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def extraer_texto_pdf(file_path):
+    """Extrae texto de un archivo PDF"""
+    try:
+        texto = ""
+        
+        # Intentar con PyMuPDF primero (más robusto)
+        try:
+            doc = fitz.open(file_path)
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                texto += page.get_text()
+            doc.close()
+            app.logger.info(f"✅ Texto extraído con PyMuPDF: {len(texto)} caracteres")
+            return texto.strip()
+        except Exception as e:
+            app.logger.warning(f"⚠️ PyMuPDF falló, intentando con PyPDF2: {e}")
+        
+        # Fallback a PyPDF2
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page_num in range(len(pdf_reader.pages)):
+                page = pdf_reader.pages[page_num]
+                texto += page.extract_text()
+        
+        app.logger.info(f"✅ Texto extraído con PyPDF2: {len(texto)} caracteres")
+        return texto.strip()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
+        return None
+
+def analizar_pdf_servicios(texto_pdf, config=None):
+    """Usa IA para analizar el PDF y extraer servicios y precios"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar el tipo de negocio para el prompt
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        
+        if es_porfirianna:
+            prompt = f"""
+            Eres un asistente especializado en analizar menús de restaurantes. 
+            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
+            
+            TEXTO DEL MENÚ:
+            {texto_pdf[:6000]}
+            
+            Devuelve SOLO un JSON con esta estructura:
+            {{
+                "servicios": [
+                    {{
+                        "servicio": "Nombre del platillo/producto",
+                        "descripcion": "Descripción o ingredientes",
+                        "precio": "100.00",
+                        "moneda": "MXN",
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                    }}
+                ]
+            }}
+            
+            Reglas para restaurantes:
+            1. Extrae todos los platillos, bebidas y productos
+            2. Incluye descripciones de ingredientes si están disponibles
+            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
+            4. Si no hay precio, usa "0.00"
+            5. Moneda MXN por defecto
+            """
+        else:
+            prompt = f"""
+            Eres un asistente especializado en extraer servicios y precios de catálogos.
+            Analiza el siguiente texto y extrae TODOS los servicios:
+            
+            TEXTO DEL DOCUMENTO:
+            {texto_pdf[:6000]}
+            
+            Devuelve SOLO un JSON con esta estructura:
+            {{
+                "servicios": [
+                    {{
+                        "servicio": "Nombre del servicio",
+                        "descripcion": "Descripción breve",
+                        "precio": "100.00",
+                        "moneda": "MXN",
+                        "categoria": "Categoría del servicio"
+                    }}
+                ]
+            }}
+            
+            Reglas importantes:
+            1. Extrae TODOS los servicios que encuentres
+            2. Si no hay precio específico, usa "0.00"
+            3. La moneda por defecto es MXN
+            4. Agrupa servicios similares
+            5. Sé específico con los nombres
+            """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 3000
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            servicios_extraidos = json.loads(json_match.group())
+            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
+            return servicios_extraidos
+        else:
+            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
+        return None
+
+def guardar_servicios_desde_pdf(servicios, config=None):
+    """Guarda los servicios extraídos del PDF en la base de datos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        servicios_guardados = 0
+        for servicio in servicios.get('servicios', []):
+            try:
+                # Limpiar y validar datos
+                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
+                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
+                    continue
+                    
+                descripcion = servicio.get('descripcion', '').strip()
+                precio = servicio.get('precio', '0.00')
+                moneda = servicio.get('moneda', 'MXN')
+                
+                # Convertir precio a decimal
+                try:
+                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_decimal = Decimal('0.00')
+                
+                cursor.execute("""
+                    INSERT INTO precios (servicio, descripcion, precio, moneda)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        descripcion = VALUES(descripcion),
+                        precio = VALUES(precio),
+                        moneda = VALUES(moneda)
+                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                
+                servicios_guardados += 1
+                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
+                
+            except Exception as e:
+                app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
+                continue
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ {servicios_guardados} servicios guardados en la base de datos")
+        return servicios_guardados
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
+        return 0
+
+# Ruta para subir PDF
+@app.route('/configuracion/precios/subir-pdf', methods=['POST'])
+def subir_pdf_servicios():
+    """Endpoint para subir PDF y extraer servicios automáticamente"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        if 'pdf_file' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        file = request.files['pdf_file']
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        if file and allowed_file(file.filename):
+            # Guardar archivo
+            filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            app.logger.info(f"📄 PDF guardado: {filepath}")
+            
+            # Extraer texto del PDF
+            texto_pdf = extraer_texto_pdf(filepath)
+            if not texto_pdf:
+                flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
+                # Limpiar archivo
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            if len(texto_pdf) < 50:  # Muy poco texto extraído
+                flash('❌ Se extrajo muy poco texto del PDF. ¿Está escaneado como imagen?', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            # Analizar con IA
+            servicios = analizar_pdf_servicios(texto_pdf, config)
+            if not servicios or not servicios.get('servicios'):
+                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            # Guardar en base de datos
+            servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
+            
+            # Limpiar archivo
+            try:
+                os.remove(filepath)
+            except:
+                pass
+            
+            if servicios_guardados > 0:
+                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
+                # Log detallado
+                app.logger.info(f"📊 Resumen de servicios extraídos:")
+                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                if len(servicios.get('servicios', [])) > 10:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+            else:
+                flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
+                
+        else:
+            flash('❌ Tipo de archivo no permitido. Solo se aceptan PDF y TXT', 'error')
+        
+        return redirect(url_for('configuracion_precios'))
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando PDF: {e}")
+        flash('❌ Error interno procesando el archivo', 'error')
+        # Limpiar archivo en caso de error
+        try:
+            if 'filepath' in locals():
+                os.remove(filepath)
+        except:
+            pass
+        return redirect(url_for('configuracion_precios'))
 
 
 def get_db_connection(config=None):
