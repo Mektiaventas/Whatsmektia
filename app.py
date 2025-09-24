@@ -107,6 +107,8 @@ PREFIJOS_PAIS = {
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
+
+
 def get_db_connection(config=None):
     if config is None:
         try:
@@ -133,6 +135,70 @@ def get_db_connection(config=None):
     except Exception as e:
         app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
         raise
+
+def crear_tablas_kanban(config=None):
+    """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Crear tabla kanban_columnas si no existe
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS kanban_columnas (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                nombre VARCHAR(100) NOT NULL,
+                orden INT NOT NULL DEFAULT 0,
+                color VARCHAR(20) DEFAULT '#007bff'
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        
+        # Crear tabla chat_meta si no existe
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS chat_meta (
+                numero VARCHAR(20) PRIMARY KEY,
+                columna_id INT DEFAULT 1,
+                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                FOREIGN KEY (columna_id) REFERENCES kanban_columnas(id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        
+        # Insertar columnas por defecto si no existen
+        cursor.execute("SELECT COUNT(*) FROM kanban_columnas")
+        if cursor.fetchone()[0] == 0:
+            columnas_default = [
+                (1, 'Nuevos', 1, '#28a745'),
+                (2, 'En Conversación', 2, '#17a2b8'),
+                (3, 'Esperando Respuesta', 3, '#ffc107'),
+                (4, 'Resueltos', 4, '#6c757d')
+            ]
+            
+            cursor.executemany(
+                "INSERT INTO kanban_columnas (id, nombre, orden, color) VALUES (%s, %s, %s, %s)",
+                columnas_default
+            )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Tablas Kanban creadas/verificadas en {config['db_name']}")
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
+
+def inicializar_kanban_multitenant():
+    """Inicializa el sistema Kanban en todas las bases de datos configuradas"""
+    app.logger.info("🔧 Inicializando Kanban para todos los tenants...")
+    
+    for nombre_tenant, config in NUMEROS_CONFIG.items():
+        try:
+            crear_tablas_kanban(config)
+            app.logger.info(f"✅ Kanban inicializado para {config['dominio']}")
+        except Exception as e:
+            app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
@@ -465,13 +531,6 @@ def validar_datos_cita_completos(info_cita, config=None):
     # Validar nombre del cliente (siempre requerido)
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
         datos_requeridos.append("tu nombre")
-    
-    if datos_requeridos:
-        if es_porfirianna:
-            mensaje_error = f"Para tomar tu pedido, necesito que me proporciones: {', '.join(datos_requeridos)}."
-        else:
-            mensaje_error = f"Para agendar tu cita, necesito que me proporciones: {', '.join(datos_requeridos)}."
-        return False, mensaje_error
     
     return True, None
 
@@ -3740,16 +3799,20 @@ def obtener_chat_meta(numero, config=None):
         conn.close()
         return meta
 
+# ——— Modificar la función inicializar_chat_meta para ser más robusta ———
 def inicializar_chat_meta(numero, config=None):
     """Inicializa el chat meta usando información existente del contacto"""
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # Asegurar que las tablas Kanban existen
+    crear_tablas_kanban(config)
+    
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     try:
-        # 1. Verificar si el contacto ya existe (con datos del webhook)
+        # 1. Verificar si el contacto ya existe
         cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
         contacto_existente = cursor.fetchone()
         
@@ -3779,6 +3842,41 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
+
+# ——— Agregar ruta para reparar Kanban específico ———
+@app.route('/reparar-kanban-porfirianna')
+def reparar_kanban_porfirianna():
+    """Repara específicamente el Kanban de La Porfirianna"""
+    config = NUMEROS_CONFIG['524812372326']  # Config de La Porfirianna
+    
+    try:
+        # 1. Crear tablas Kanban
+        crear_tablas_kanban(config)
+        
+        # 2. Reparar contactos
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT c.numero_telefono 
+            FROM contactos c 
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+            WHERE cm.numero IS NULL
+        """)
+        
+        contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+        
+        for numero in contactos_sin_meta:
+            inicializar_chat_meta(numero, config)
+        
+        cursor.close()
+        conn.close()
+        
+        return f"✅ Kanban de La Porfirianna reparado: {len(contactos_sin_meta)} contactos actualizados"
+        
+    except Exception as e:
+        return f"❌ Error reparando Kanban: {str(e)}"
+
 @app.route('/reparar-contactos')
 def reparar_contactos():
     """Repara todos los contactos que no están en chat_meta"""
