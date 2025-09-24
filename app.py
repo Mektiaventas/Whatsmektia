@@ -15,6 +15,7 @@ from dotenv import load_dotenv
 from datetime import datetime
 from openai import OpenAI
 
+
 # --- Inicialización ---
 load_dotenv()
 app = Flask(__name__)
