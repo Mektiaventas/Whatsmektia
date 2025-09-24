@@ -163,7 +163,7 @@
                         {% for m in ['MXN','USD','EUR'] %}
                         <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
-                        </option>
+                        </option> 
                         {% endfor %}
                     </select>
                 </div>
