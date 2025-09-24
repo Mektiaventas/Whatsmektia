@@ -3185,7 +3185,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     return None
 
 def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Obtiene la URL de la imagen de perfil de WhatsApp correctamente"""
+    """Versión corregida de tu función actual"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -3193,7 +3193,7 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         # Formatear número correctamente
         numero_formateado = numero.replace('+', '').replace(' ', '')
         
-        # Endpoint CORRECTO para obtener imagen de perfil
+        # Usar el endpoint CORRECTO
         url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
         
         params = {
@@ -3203,23 +3203,24 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         }
         
         headers = {'Content-Type': 'application/json'}
-        app.logger.info(f"🔍 Solicitando info contacto para: {numero_formateado}")
+        
+        app.logger.info(f"🔍 Solicitando imagen para: {numero_formateado}")
         response = requests.get(url, params=params, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
-            app.logger.info(f"📸 Respuesta imagen perfil: {json.dumps(data, indent=2)}")
             
             if 'contacts' in data and data['contacts']:
                 contacto = data['contacts'][0]
-                nombre = contacto.get('profile', {}).get('name')
-                imagen_url = contacto.get('profile', {}).get('picture', {}).get('url')
+                profile = contacto.get('profile', {})
+                imagen_url = profile.get('picture', {}).get('url')
+                nombre = profile.get('name')
+                
                 app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
                 
-                # 🔥 CORRECCIÓN: Devuelve la URL de la imagen si existe
-                if imagen_url:
-                    return imagen_url
+                return imagen_url
         
+        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
         return None
         
     except Exception as e:
