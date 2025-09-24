@@ -2868,7 +2868,7 @@ def webhook():
                     
                     if cita_id:
                         # Enviar confirmación al cliente
-                        enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                        #enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                         
                         # Enviar alerta al administrador
                         #enviar_alerta_cita_administrador(info_cita, cita_id, config)
