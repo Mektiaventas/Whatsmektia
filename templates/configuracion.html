@@ -142,6 +142,38 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
 
     <button type="submit" class="btn-primary">Guardar Restricciones</button>
 </form>
+<form class="config-form" method="POST">
+    <!-- ... campos existentes ... -->
+
+    <div class="form-card">
+        <label>Nombre de la Empresa (para mostrar en la interfaz)</label>
+        <input type="text" name="nombre_empresa" value="{{ datos.nombre_empresa or 'SmartWhats' }}" required>
+        <small class="form-text text-muted">
+            Este nombre se mostrará en el sidebar y título de la página
+        </small>
+    </div>
+
+    <div class="form-card">
+        <label>URL del Logo</label>
+        <input type="url" name="logo_url" value="{{ datos.logo_url or '' }}" placeholder="https://ejemplo.com/logo.png">
+        <small class="form-text text-muted">
+            URL de la imagen del logo (recomendado: 200x50px, formato PNG o SVG)
+        </small>
+    </div>
+
+    <div class="form-card">
+        <label>Vista previa del logo actual:</label>
+        <div style="margin: 10px 0; padding: 10px; background: white; border-radius: 5px; display: inline-block;">
+            {% if datos.logo_url %}
+            <img src="{{ datos.logo_url }}" alt="Logo actual" style="max-height: 50px; max-width: 200px;">
+            {% else %}
+            <p>Logo por defecto (SmartWhats)</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <button type="submit" class="btn-primary">Guardar Negocio</button>
+</form>
 {% endif %}
 
 {% endblock %}

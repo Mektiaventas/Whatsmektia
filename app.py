@@ -781,7 +781,9 @@ def load_config(config=None):
             restricciones TEXT,
             palabras_prohibidas TEXT,
             max_mensajes INT DEFAULT 10,
-            tiempo_max_respuesta INT DEFAULT 30
+            tiempo_max_respuesta INT DEFAULT 30,
+            logo_url VARCHAR(255),  -- NUEVO: URL del logo
+            nombre_empresa VARCHAR(100)  -- NUEVO: Nombre de la empresa para la UI
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -801,6 +803,8 @@ def load_config(config=None):
         'telefono': row['telefono'],
         'correo': row['correo'],
         'que_hace': row['que_hace'],
+        'logo_url': row.get('logo_url', ''),  
+        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats') 
     }
     personalizacion = {
         'tono': row['tono'],
@@ -1115,23 +1119,22 @@ def save_config(cfg_all, config=None):
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
-    res = cfg_all.get('restricciones', {})  # Nueva sección
+    res = cfg_all.get('restricciones', {}) 
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
-    # Verificar si la tabla tiene las nuevas columnas
-    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'restricciones'")
-    tiene_restricciones = cursor.fetchone() is not None
+    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'logo_url'")
+    tiene_logo = cursor.fetchone() is not None
     
-    if tiene_restricciones:
-        # Si tiene las nuevas columnas, usar la consulta actualizada
+    if tiene_logo:
         cursor.execute('''
             INSERT INTO configuracion
                 (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                 telefono, correo, que_hace, tono, lenguaje, restricciones, palabras_prohibidas, max_mensajes, tiempo_max_respuesta)
+                 telefono, correo, que_hace, tono, lenguaje, restricciones, 
+                 palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa)
             VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 ia_nombre = VALUES(ia_nombre),
                 negocio_nombre = VALUES(negocio_nombre),
@@ -1146,7 +1149,9 @@ def save_config(cfg_all, config=None):
                 restricciones = VALUES(restricciones),
                 palabras_prohibidas = VALUES(palabras_prohibidas),
                 max_mensajes = VALUES(max_mensajes),
-                tiempo_max_respuesta = VALUES(tiempo_max_respuesta);
+                tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
+                logo_url = VALUES(logo_url),
+                nombre_empresa = VALUES(nombre_empresa);
         ''', (
             neg.get('ia_nombre'),
             neg.get('negocio_nombre'),
@@ -1161,7 +1166,9 @@ def save_config(cfg_all, config=None):
             res.get('restricciones'),
             res.get('palabras_prohibidas'),
             res.get('max_mensajes', 10),
-            res.get('tiempo_max_respuesta', 30)
+            res.get('tiempo_max_respuesta', 30),
+            neg.get('logo_url', ''),  -- NUEVO
+            neg.get('nombre_empresa', 'SmartWhats')  -- NUEVO
         ))
     else:
         # Si no tiene las nuevas columnas, usar la consulta original
@@ -1198,7 +1205,8 @@ def save_config(cfg_all, config=None):
     conn.commit()
     cursor.close()
     conn.close()
-# ——— CRUD y helpers para 'precios' ———
+    
+    # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
