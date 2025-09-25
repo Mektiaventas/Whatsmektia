@@ -1948,8 +1948,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         f"- {p['servicio']}: {p['precio']} {p['moneda']}"
         for p in precios
     )
-
-    # En la función responder_con_ia, modifica el system_prompt:
+# En la función responder_con_ia, modifica el system_prompt:
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
@@ -1957,6 +1956,8 @@ Descripción del negocio: {descripcion}
 Servicios y precios:
 {lista_precios}
 
+Cada uno de los servicios tiene su propia descripcion, en el caso de la comida vienen los guisados que contienen, etc... :
+{descripcion}
 Habla de manera natural y libre, siempre basándote en la información de arriba.
 Si el usuario pregunta por algo que no está en la lista de precios o descripción,
 responde amablemente que no tienes esa información.
