@@ -382,17 +382,18 @@ def extraer_texto_pdf(file_path):
         return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios con todas las columnas detectadas"""
+    """Usa IA para analizar el PDF y extraer servicios y precios"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
+        # Determinar el tipo de negocio para el prompt
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
         if es_porfirianna:
             prompt = f"""
             Eres un asistente especializado en analizar menús de restaurantes. 
-            Extrae TODA la información posible del siguiente texto:
+            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
             
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
@@ -405,27 +406,22 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
-                        "ingredientes": "lista de ingredientes",
-                        "tiempo_preparacion": "15 min",
-                        "disponibilidad": "siempre/estacional",
-                        "calorias": "250 kcal",
-                        "alergenos": "contiene gluten, lactosa",
-                        // ... cualquier otra columna que detectes
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
                     }}
                 ]
             }}
             
-            Reglas:
-            1. Extrae TODA la información disponible
-            2. Si hay columnas adicionales como ingredientes, tiempo, etc., inclúyelas
-            3. Mantén los nombres de campos en español y en minúsculas
-            4. Si no hay información para algún campo, omítelo (no uses null)
+            Reglas para restaurantes:
+            1. Extrae todos los platillos, bebidas y productos
+            2. Incluye descripciones de ingredientes si están disponibles
+            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
+            4. Si no hay precio, usa "0.00"
+            5. Moneda MXN por defecto
             """
         else:
             prompt = f"""
-            Eres un asistente especializado en extraer servicios de catálogos.
-            Analiza el siguiente texto y extrae TODA la información disponible:
+            Eres un asistente especializado en extraer servicios y precios de catálogos.
+            Analiza el siguiente texto y extrae TODOS los servicios:
             
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
@@ -438,21 +434,17 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio",
-                        "duracion": "2 semanas",
-                        "garantia": "6 meses",
-                        "caracteristicas": "lista de características",
-                        "requisitos": "requisitos del cliente",
-                        // ... cualquier otra columna que detectes
+                        "categoria": "Categoría del servicio"
                     }}
                 ]
             }}
             
             Reglas importantes:
-            1. Extrae TODA la información disponible
-            2. Incluye todas las columnas que encuentres en el documento
-            3. Los nombres de campos deben ser descriptivos y en español
-            4. Omite campos que no tengan información
+            1. Extrae TODOS los servicios que encuentres
+            2. Si no hay precio específico, usa "0.00"
+            3. La moneda por defecto es MXN
+            4. Agrupa servicios similares
+            5. Sé específico con los nombres
             """
         
         headers = {
@@ -478,13 +470,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         if json_match:
             servicios_extraidos = json.loads(json_match.group())
             app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
-            
-            # Log de las columnas detectadas
-            if servicios_extraidos.get('servicios'):
-                primer_servicio = servicios_extraidos['servicios'][0]
-                columnas_detectadas = list(primer_servicio.keys())
-                app.logger.info(f"📊 Columnas detectadas: {columnas_detectadas}")
-            
             return servicios_extraidos
         else:
             app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
@@ -495,7 +480,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos, adaptando la estructura si es necesario"""
+    """Guarda los servicios extraídos del PDF en la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -503,65 +488,35 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # Verificar si necesitamos adaptar la estructura de la tabla
-        necesita_adaptacion = False
-        columnas_detectadas = set()
-        
-        # Analizar las columnas detectadas por la IA
-        for servicio in servicios.get('servicios', []):
-            for clave in servicio.keys():
-                if clave not in ['servicio', 'descripcion', 'precio', 'moneda', 'categoria']:
-                    columnas_detectadas.add(clave)
-                    necesita_adaptacion = True
-        
-        # Adaptar la tabla si es necesario
-        if necesita_adaptacion:
-            app.logger.info(f"🔄 Adaptando estructura de la tabla para columnas: {columnas_detectadas}")
-            adaptar_tabla_precios(columnas_detectadas, cursor, conn)
-        
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
             try:
-                # Construir la consulta dinámicamente
-                columnas = []
-                valores = []
-                placeholders = []
+                # Limpiar y validar datos
+                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
+                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
+                    continue
+                    
+                descripcion = servicio.get('descripcion', '').strip()
+                precio = servicio.get('precio', '0.00')
+                moneda = servicio.get('moneda', 'MXN')
                 
-                for clave, valor in servicio.items():
-                    if clave in ['servicio', 'descripcion', 'precio', 'moneda', 'categoria']:
-                        columnas.append(clave)
-                        valores.append(valor)
-                        placeholders.append('%s')
-                    elif clave in columnas_detectadas:  # Columnas adicionales detectadas
-                        columnas.append(clave)
-                        valores.append(valor)
-                        placeholders.append('%s')
+                # Convertir precio a decimal
+                try:
+                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_decimal = Decimal('0.00')
                 
-                # Convertir precio a decimal si existe
-                if 'precio' in servicio:
-                    try:
-                        precio_index = columnas.index('precio')
-                        valores[precio_index] = Decimal(str(servicio['precio']).replace('$', '').replace(',', '').strip())
-                    except:
-                        valores[precio_index] = Decimal('0.00')
+                cursor.execute("""
+                    INSERT INTO precios (servicio, descripcion, precio, moneda)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        descripcion = VALUES(descripcion),
+                        precio = VALUES(precio),
+                        moneda = VALUES(moneda)
+                """, (nombre_servicio, descripcion, precio_decimal, moneda))
                 
-                # Construir consulta INSERT dinámica
-                columnas_str = ', '.join(columnas)
-                placeholders_str = ', '.join(placeholders)
-                
-                # Para UPDATE, construir SET dinámicamente
-                update_parts = [f"{col} = VALUES({col})" for col in columnas if col != 'servicio']
-                update_str = ', '.join(update_parts)
-                
-                query = f"""
-                    INSERT INTO precios ({columnas_str})
-                    VALUES ({placeholders_str})
-                    ON DUPLICATE KEY UPDATE {update_str}
-                """
-                
-                cursor.execute(query, valores)
                 servicios_guardados += 1
-                app.logger.info(f"✅ Servicio guardado: {servicio.get('servicio')}")
+                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
                 
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
@@ -578,137 +533,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-def adaptar_tabla_precios(columnas_nuevas, cursor, conn):
-    """Adapta la tabla precios agregando columnas nuevas detectadas por la IA"""
-    try:
-        # Obtener columnas actuales de la tabla
-        cursor.execute("DESCRIBE precios")
-        columnas_actuales = [col[0] for col in cursor.fetchall()]
-        
-        # Agregar columnas nuevas
-        for columna in columnas_nuevas:
-            # Convertir a nombre de columna válido (sin espacios, minúsculas, etc.)
-            columna_valida = re.sub(r'[^a-zA-Z0-9_]', '_', columna.lower())
-            
-            if columna_valida not in columnas_actuales:
-                # Determinar el tipo de dato basado en el nombre de la columna
-                tipo_dato = "VARCHAR(255)"
-                if any(keyword in columna_valida for keyword in ['precio', 'costo', 'valor', 'monto']):
-                    tipo_dato = "DECIMAL(10,2)"
-                elif any(keyword in columna_valida for keyword in ['cantidad', 'stock', 'unidades']):
-                    tipo_dato = "INT"
-                elif any(keyword in columna_valida for keyword in ['fecha', 'date']):
-                    tipo_dato = "DATE"
-                
-                cursor.execute(f"ALTER TABLE precios ADD COLUMN {columna_valida} {tipo_dato}")
-                app.logger.info(f"✅ Columna agregada: {columna_valida} ({tipo_dato})")
-        
-        conn.commit()
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error adaptando tabla precios: {e}")
-        conn.rollback()
-
-@app.route('/configuracion/precios/subir-archivo', methods=['POST'])
-def subir_archivo_servicios():
-    """Endpoint para subir PDF/Excel y extraer servicios automáticamente"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        if 'archivo' not in request.files:
-            flash('❌ No se seleccionó ningún archivo', 'error')
-            return redirect(url_for('configuracion_precios'))
-        
-        file = request.files['archivo']
-        if file.filename == '':
-            flash('❌ No se seleccionó ningún archivo', 'error')
-            return redirect(url_for('configuracion_precios'))
-        
-        if file and allowed_file(file.filename):
-            extension = file.filename.split('.')[-1].lower()
-            
-            # Guardar archivo
-            filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
-            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
-            file.save(filepath)
-            
-            app.logger.info(f"📄 Archivo guardado: {filepath} (extensión: {extension})")
-            
-            # Procesar según la extensión
-            if extension == 'pdf':
-                texto_archivo = extraer_texto_pdf(filepath)
-                if not texto_archivo:
-                    flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
-                    try:
-                        os.remove(filepath)
-                    except:
-                        pass
-                    return redirect(url_for('configuracion_precios'))
-                
-                if len(texto_archivo) < 50:
-                    flash('❌ Se extrajo muy poco texto del PDF. ¿Está escaneado como imagen?', 'error')
-                    try:
-                        os.remove(filepath)
-                    except:
-                        pass
-                    return redirect(url_for('configuracion_precios'))
-                
-                servicios = analizar_pdf_servicios(texto_archivo, config)
-                
-            elif extension in ['xlsx', 'xls']:
-                servicios = analizar_excel_servicios(filepath, config)
-            else:
-                flash('❌ Formato no soportado', 'error')
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-                return redirect(url_for('configuracion_precios'))
-            
-            if not servicios or not servicios.get('servicios'):
-                flash('❌ No se pudieron identificar servicios en el archivo. Revisa el formato.', 'error')
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-                return redirect(url_for('configuracion_precios'))
-            
-            # Guardar en base de datos
-            servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
-            
-            # Limpiar archivo
-            try:
-                os.remove(filepath)
-            except:
-                pass
-            
-            if servicios_guardados > 0:
-                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
-                # Log detallado
-                app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
-                if len(servicios.get('servicios', [])) > 10:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
-            else:
-                flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
-                
-        else:
-            flash('❌ Tipo de archivo no permitido. Solo se aceptan PDF, Excel y TXT', 'error')
-        
-        return redirect(url_for('configuracion_precios'))
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error procesando archivo: {e}")
-        flash('❌ Error interno procesando el archivo', 'error')
-        # Limpiar archivo en caso de error
-        try:
-            if 'filepath' in locals():
-                os.remove(filepath)
-        except:
-            pass
-        return redirect(url_for('configuracion_precios'))
-
 # Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
@@ -716,11 +540,11 @@ def subir_pdf_servicios():
     config = obtener_configuracion_por_host()
     
     try:
-        if 'archivo' not in request.files:
+        if 'pdf_file' not in request.files:
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
         
-        file = request.files['archivo']
+        file = request.files['pdf_file']
         if file.filename == '':
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
@@ -731,7 +555,7 @@ def subir_pdf_servicios():
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
             
-            app.logger.info(f"📄 archivo guardado: {filepath}")
+            app.logger.info(f"📄 PDF guardado: {filepath}")
             
             # Extraer texto del PDF
             texto_pdf = extraer_texto_pdf(filepath)
@@ -2020,56 +1844,6 @@ def save_config(cfg_all, config=None):
     conn.commit()
     cursor.close()
     conn.close()
-
-def obtener_estructura_tabla_precios(config=None):
-    """Obtiene la estructura actual de la tabla precios"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("DESCRIBE precios")
-        estructura = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return estructura
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo estructura de tabla: {e}")
-        return []
-
-def analizar_excel_servicios(filepath, config=None):
-    """Analiza archivos Excel y extrae servicios con estructura dinámica"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Leer el archivo Excel
-        df = pd.read_excel(filepath)
-        
-        # Convertir a texto para la IA
-        texto_excel = df.to_string()
-        
-        # Usar la misma lógica que para PDFs
-        return analizar_pdf_servicios(texto_excel, config)
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error analizando Excel: {e}")
-        return None
-
-@app.route('/configuracion/precios/estructura')
-def ver_estructura_tabla():
-    """Endpoint para ver la estructura actual de la tabla"""
-    config = obtener_configuracion_por_host()
-    estructura = obtener_estructura_tabla_precios(config)
-    
-    return jsonify({
-        'estructura': estructura,
-        'total_columnas': len(estructura)
-    })
     
     # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config=None):
@@ -2174,19 +1948,18 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         f"- {p['servicio']}: {p['precio']} {p['moneda']}"
         for p in precios
     )
-    guisados = "\n".join(
-        f"- {p['servicio']}: {p['descripcion']}"
-        for p in precios
-    )
-# En la función responder_con_ia, modifica el system_prompt:
+
+    # En la función responder_con_ia, modifica el system_prompt:
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
 
+Servicios y precios:
 {lista_precios}
+
 Habla de manera natural y libre, siempre basándote en la información de arriba.
 Si el usuario pregunta por algo que no está en la lista de precios o descripción,
-responde amablemente que no tienes esa información, recierda que los guisados de cada producto estan en {guisados}
+responde amablemente que no tienes esa información.
 """
 
 
@@ -2828,32 +2601,10 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
+# REEMPLAZA la llamada a procesar_mensaje en el webhook con:
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
-    """Procesa mensajes normales incluyendo detección inteligente de notificaciones"""
+    """Procesa mensajes normales (no citas/intervenciones)"""
     try:
-        # 🧠 DETECCIÓN INTELIGENTE DE NOTIFICACIONES (antes del procesamiento normal)
-        if not es_archivo and texto.strip():
-            # Evaluar si necesita notificación usando IA
-            evaluacion = evaluar_necesidad_notificacion_administrador(texto, numero, config=config)
-            
-            if evaluacion.get('necesita_notificacion', False):
-                app.logger.info(f"🧠 IA determinó que se necesita notificación para {numero}")
-                enviar_notificacion_inteligente_administrador(numero, texto, evaluacion, config)
-                
-                # Si es de alta urgencia, responder de manera especial
-                if evaluacion.get('nivel_urgencia') == 'alta':
-                    respuesta_urgencia = f"""⚠️ *He detectado que necesitas atención prioritaria*
-
-{evaluacion.get('razon', 'Un agente se contactará contigo inmediatamente.')}
-
-📞 Un administrador se pondrá en contacto contigo en los próximos minutos.
-
-Mientras tanto, ¿hay algo más en lo que pueda ayudarte?"""
-                    
-                    enviar_mensaje(numero, respuesta_urgencia, config)
-                    guardar_conversacion(numero, texto, respuesta_urgencia, config)
-                    return  # Salir early para urgencias altas
-
         # IA normal
         IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
@@ -2868,8 +2619,7 @@ Mientras tanto, ¿hay algo más en lo que pueda ayudarte?"""
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-        
-        # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
             app.logger.info(f"📎 Procesando archivo enviado por {numero}")
             
@@ -2913,37 +2663,37 @@ Mientras tanto, ¿hay algo más en lo que pueda ayudarte?"""
             guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
             return
         
-        # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
         if responder_con_voz and not es_imagen:
-            # Intentar enviar respuesta de voz
-            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-            
-            if audio_url_local:
-                # URL pública del audio (ajusta según tu configuración)
-                audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+                # Intentar enviar respuesta de voz
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
                 
-                if enviar_mensaje_voz(numero, audio_url_publica, config):
-                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                    guardar_conversacion(numero, texto, respuesta, config=config)
+                if audio_url_local:
+                    # URL pública del audio (ajusta según tu configuración)
+                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+                    
+                    if enviar_mensaje_voz(numero, audio_url_publica, config):
+                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        guardar_conversacion(numero, texto, respuesta, config=config)
+                    else:
+                        # Fallback a texto
+                        enviar_mensaje(numero, respuesta, config)
+                        guardar_conversacion(numero, texto, respuesta, config=config)
                 else:
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
                     guardar_conversacion(numero, texto, respuesta, config=config)
-            else:
-                # Fallback a texto
+        else:
+                # Respuesta normal de texto
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
-        else:
-            # Respuesta normal de texto
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config=config)
-        
-        # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+            
+            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-            resumen = resumen_rafa(numero, config)
-            enviar_alerta_humana(numero, texto, resumen, config)
+                app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+                resumen = resumen_rafa(numero, config)
+                enviar_alerta_humana(numero, texto, resumen, config)
         
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
@@ -2956,94 +2706,6 @@ Mientras tanto, ¿hay algo más en lo que pueda ayudarte?"""
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
-# Agregar función para análisis de efectividad de las notificaciones
-@app.route('/analytics/notificaciones')
-def analytics_notificaciones(config=None):
-    """Endpoint para analizar la efectividad de las notificaciones IA"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Estadísticas generales
-        cursor.execute('''
-            SELECT 
-                COUNT(*) as total_notificaciones,
-                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'alta')) * 100 as porcentaje_alta_urgencia,
-                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'media')) * 100 as porcentaje_media_urgencia,
-                DATE(timestamp) as fecha,
-                COUNT(DISTINCT numero) as clientes_unicos
-            FROM notificaciones_ia 
-            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-            GROUP BY DATE(timestamp)
-            ORDER BY fecha DESC
-        ''')
-        
-        stats = cursor.fetchall()
-        
-        # Tipos de consulta más comunes
-        cursor.execute('''
-            SELECT 
-                JSON_EXTRACT(evaluacion_ia, '$.tipo_consulta') as tipo_consulta,
-                COUNT(*) as cantidad
-            FROM notificaciones_ia 
-            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            GROUP BY JSON_EXTRACT(evaluacion_ia, '$.tipo_consulta')
-            ORDER BY cantidad DESC
-            LIMIT 10
-        ''')
-        
-        tipos_consulta = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return render_template('analytics_notificaciones.html',
-                            stats=stats,
-                            tipos_consulta=tipos_consulta,
-                            config=config)
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en analytics: {e}")
-        return jsonify({'error': str(e)}), 500
-
-# Función para ajustar automáticamente los criterios de notificación
-def ajustar_umbral_notificaciones(config=None):
-    """
-    Ajusta automáticamente los umbrales de notificación basándose en datos históricos
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Analizar efectividad de notificaciones pasadas
-        cursor.execute('''
-            SELECT 
-                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'alta')) as tasa_alta_urgencia,
-                COUNT(*) as total
-            FROM notificaciones_ia 
-            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
-        ''')
-        
-        stats = cursor.fetchone()
-        
-        # Si hay muchas notificaciones de alta urgencia, ajustar criterios
-        if stats and stats['total'] > 10:
-            tasa_alta = stats['tasa_alta_urgencia'] or 0
-            if tasa_alta > 0.7:  # 70% de notificaciones son alta urgencia
-                app.logger.info("🔧 Ajustando criterios: Demasiadas notificaciones de alta urgencia")
-                # En futuras versiones, podríamos ajustar el prompt automáticamente
-            
-        cursor.close()
-        conn.close()
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error ajustando umbrales: {e}")
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -4623,109 +4285,6 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     # Si no se detecta información relevante, pedir clarificación
     return "No entendí bien esa información. ¿Podrías ser más específico sobre tu pedido?"
 
-def evaluar_necesidad_notificacion_administrador(mensaje, numero, historial=None, config=None):
-    """
-    Evalúa inteligentemente si es necesario notificar al administrador
-    basándose en el contexto y la intención del usuario
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    if historial is None:
-        historial = obtener_historial(numero, limite=5, config=config)
-    
-    # Construir contexto del historial
-    contexto_historial = ""
-    for i, msg in enumerate(historial[-3:]):  # Últimos 3 mensajes
-        if msg['mensaje']:
-            contexto_historial += f"Usuario: {msg['mensaje']}\n"
-        if msg['respuesta']:
-            contexto_historial += f"Asistente: {msg['respuesta']}\n"
-    
-    try:
-        prompt_evaluacion = f"""
-        Eres un asistente inteligente que evalúa cuándo es necesario notificar a un administrador humano.
-        
-        CONTEXTO DE LA CONVERSACIÓN:
-        {contexto_historial}
-        
-        MENSAJE ACTUAL DEL USUARIO:
-        "{mensaje}"
-        
-        Analiza si este mensaje requiere intervención humana basándote en estos criterios:
-        
-        1. **Solicitud explícita de humano**: ¿El usuario pide específicamente hablar con una persona?
-        2. **Complejidad técnica**: ¿La consulta es demasiado compleja para un bot?
-        3. **Urgencia**: ¿Hay indicios de urgencia o frustración?
-        4. **Tipo de servicio**: ¿Es un servicio que requiere coordinación humana?
-        5. **Intención de compra/contratación**: ¿El usuario muestra intención real de adquirir servicios?
-        
-        Responde SOLO con un JSON en este formato:
-        {{
-            "necesita_notificacion": true/false,
-            "nivel_urgencia": "baja/media/alta",
-            "razon": "explicación breve de por qué se necesita o no la notificación",
-            "tipo_consulta": "cita/consulta_tecnica/urgencia/etc",
-            "resumen_para_administrador": "resumen conciso para el admin"
-        }}
-        
-        Ejemplos donde SÍ notificar:
-        - Usuario dice: "Quiero agendar una cita para mañana a las 3pm"
-        - Usuario muestra frustración: "No entiendo, necesito hablar con alguien"
-        - Consulta compleja: "Necesito un sistema completo con estas especificaciones..."
-        - Intención clara de compra: "¿Cuánto cuesta y cómo contrato el servicio?"
-        
-        Ejemplos donde NO notificar:
-        - Saludos simples: "Hola, ¿cómo están?"
-        - Consultas básicas: "¿Qué servicios ofrecen?"
-        - Preguntas generales: "¿Tienen página web?"
-        """
-        
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt_evaluacion}],
-            "temperature": 0.3,
-            "max_tokens": 500
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        
-        data = response.json()
-        respuesta_ia = data['choices'][0]['message']['content'].strip()
-        
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
-        if json_match:
-            evaluacion = json.loads(json_match.group())
-            app.logger.info(f"🧠 Evaluación IA para notificación: {json.dumps(evaluacion, indent=2)}")
-            return evaluacion
-        else:
-            # Fallback conservador - no notificar si no puede determinar
-            return {
-                "necesita_notificacion": False,
-                "nivel_urgencia": "baja",
-                "razon": "No se pudo analizar la intención",
-                "tipo_consulta": "indeterminado",
-                "resumen_para_administrador": ""
-            }
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Error en evaluación IA de notificación: {e}")
-        # En caso de error, no notificar para evitar spam
-        return {
-            "necesita_notificacion": False,
-            "nivel_urgencia": "baja",
-            "razon": "Error en el análisis",
-            "tipo_consulta": "error",
-            "resumen_para_administrador": ""
-        }
-
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios"""
     datos_requeridos = ['platillos', 'direccion']
@@ -4742,73 +4301,6 @@ def verificar_pedido_completo(datos_obtenidos):
         return False
     
     return True
-
-def enviar_notificacion_inteligente_administrador(numero, mensaje, evaluacion_ia, config=None):
-    """
-    Envía una notificación inteligente al administrador basada en la evaluación de la IA
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Obtener información del contacto para enriquecer la notificación
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT nombre, alias FROM contactos WHERE numero_telefono = %s",
-            (numero,)
-        )
-        contacto = cursor.fetchone()
-        cursor.close()
-        conn.close()
-        
-        nombre_contacto = contacto.get('alias') or contacto.get('nombre') or numero
-        
-        # Determinar emoji según urgencia
-        emoji_urgencia = {
-            "alta": "🚨",
-            "media": "⚠️",
-            "baja": "ℹ️"
-        }.get(evaluacion_ia.get('nivel_urgencia', 'baja'), 'ℹ️')
-        
-        # Construir mensaje de notificación inteligente
-        mensaje_notificacion = f"""
-{emoji_urgencia} *NOTIFICACIÓN INTELIGENTE - {evaluacion_ia['tipo_consulta'].upper()}*
-
-👤 *Cliente:* {nombre_contacto}
-📞 *Número:* {numero}
-🎯 *Tipo:* {evaluacion_ia['tipo_consulta']}
-⚡ *Urgencia:* {evaluacion_ia['nivel_urgencia']}
-
-💬 *Mensaje del cliente:*
-"{mensaje}"
-
-📋 *Análisis de la IA:*
-{evaluacion_ia['razon']}
-
-🔍 *Resumen para acción:*
-{evaluacion_ia['resumen_para_administrador']}
-
-🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
-
-#️⃣ *Contexto adicional:*
-- Historial reciente: {len(obtener_historial(numero, limite=3, config=config))} mensajes
-- Cliente conocido: {'Sí' if contacto.get('nombre') else 'No'}
-- Requiere seguimiento: {'Sí' if evaluacion_ia['nivel_urgencia'] in ['alta', 'media'] else 'Quizás'}
-        """.strip()
-        
-        # Enviar a ambos números de administración
-        enviar_mensaje(ALERT_NUMBER, mensaje_notificacion, config)
-        enviar_mensaje('5214493432744', mensaje_notificacion, config)
-        
-        app.logger.info(f"✅ Notificación inteligente enviada para {numero} - Tipo: {evaluacion_ia['tipo_consulta']}")
-        
-        # Guardar registro de la notificación
-        guardar_registro_notificacion(numero, mensaje, evaluacion_ia, config)
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error enviando notificación inteligente: {e}")
-
 
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes"""
@@ -5156,44 +4648,6 @@ def guardar_alias_contacto(numero, config=None):
         return '', 204
 
     # ——— Páginas legales —
-
-def guardar_registro_notificacion(numero, mensaje, evaluacion_ia, config=None):
-    """
-    Guarda un registro de las notificaciones enviadas para análisis futuro
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS notificaciones_ia (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                numero VARCHAR(20),
-                mensaje TEXT,
-                evaluacion_ia JSON,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-                INDEX idx_numero (numero),
-                INDEX idx_timestamp (timestamp)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        ''')
-        
-        cursor.execute('''
-            INSERT INTO notificaciones_ia (numero, mensaje, evaluacion_ia)
-            VALUES (%s, %s, %s)
-        ''', (numero, mensaje, json.dumps(evaluacion_ia)))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"📊 Registro de notificación guardado para {numero}")
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error guardando registro de notificación: {e}")
-
 
 @app.route('/proxy-audio/<path:audio_url>')
 def proxy_audio(audio_url):
