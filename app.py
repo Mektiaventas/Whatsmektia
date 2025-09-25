@@ -3919,11 +3919,11 @@ def home():
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-    # Detectar configuración basada en el host
-    period = request.args.get('period', 'week')
-    now = datetime.now()
-    conn = get_db_connection(config)  # ✅ Usar config
-    cursor = conn.cursor()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)  # Cambiar a dictionary=True para mejor manejo
+    
+    # Estadísticas existentes
     cursor.execute(
         "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
         (start,)
@@ -3931,22 +3931,39 @@ def home():
     chat_counts = cursor.fetchone()[0]
 
     cursor.execute(
-        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
+        "SELECT numero, COUNT(*) as count FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
         (start,)
     )
     messages_per_chat = cursor.fetchall()
 
     cursor.execute(
-        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+        "SELECT COUNT(*) as count FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
         (start,)
     )
-    total_responded = cursor.fetchone()[0]
+    total_responded = cursor.fetchone()['count']
+
+    # 🆕 CONVERSACIONES RECIENTES - Agregar esta consulta
+    cursor.execute("""
+        SELECT 
+            c.numero,
+            COALESCE(cont.alias, cont.nombre, c.numero) as nombre_mostrado,
+            c.mensaje,
+            c.respuesta,
+            c.timestamp,
+            c.imagen_url,
+            c.es_imagen
+        FROM conversaciones c
+        LEFT JOIN contactos cont ON c.numero = cont.numero_telefono
+        ORDER BY c.timestamp DESC
+        LIMIT 20
+    """)
+    conversaciones_recientes = cursor.fetchall()
 
     cursor.close()
     conn.close()
 
-    labels = [num for num,_ in messages_per_chat]
-    values = [cnt for _,cnt in messages_per_chat]
+    labels = [row['numero'] for row in messages_per_chat]
+    values = [row['count'] for row in messages_per_chat]
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -3954,7 +3971,8 @@ def home():
         total_responded=total_responded,
         period=period,
         labels=labels,
-        values=values
+        values=values,
+        conversaciones_recientes=conversaciones_recientes  # 🆕 Pasar las conversaciones a la template
     )
 
 @app.route('/chats')
