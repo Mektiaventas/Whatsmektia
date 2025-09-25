@@ -3931,13 +3931,6 @@ def home():
     result = cursor.fetchone()
     chat_counts = result['count'] if result and result['count'] is not None else 0
 
-    # Mensajes por chat
-    cursor.execute(
-        "SELECT numero, COUNT(*) as count FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
-        (start,)
-    )
-    messages_per_chat = cursor.fetchall()
-
     # Total respondidas - CON MANEJO DE None
     cursor.execute(
         "SELECT COUNT(*) as count FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
@@ -3945,6 +3938,17 @@ def home():
     )
     result = cursor.fetchone()
     total_responded = result['count'] if result and result['count'] is not None else 0
+
+    # 🟡 **CORRECCIÓN: Consulta para el GRÁFICO (TOP 10 números más activos)**
+    cursor.execute("""
+        SELECT numero, COUNT(*) as count 
+        FROM conversaciones 
+        WHERE timestamp>= %s 
+        GROUP BY numero 
+        ORDER BY count DESC 
+        LIMIT 10
+    """, (start,))
+    top_chats = cursor.fetchall()
 
     # CONVERSACIONES RECIENTES
     cursor.execute("""
@@ -3966,19 +3970,19 @@ def home():
     cursor.close()
     conn.close()
 
-    # Manejo seguro de las listas para el gráfico
-    labels = [row['numero'] for row in messages_per_chat] if messages_per_chat else []
-    values = [row['count'] for row in messages_per_chat] if messages_per_chat else []
+    # 🟡 **CORRECCIÓN: Datos para el gráfico (solo top 10)**
+    labels = [row['numero'] for row in top_chats] if top_chats else []
+    values = [row['count'] for row in top_chats] if top_chats else []
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
-        messages_per_chat=messages_per_chat,
         total_responded=total_responded,
         period=period,
-        labels=labels,
-        values=values,
+        labels=labels,           # 🟡 Estos van al gráfico
+        values=values,           # 🟡 Estos van al gráfico
         conversaciones_recientes=conversaciones_recientes
     )
+
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
