@@ -382,18 +382,17 @@ def extraer_texto_pdf(file_path):
         return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios"""
+    """Usa IA para analizar el PDF y extraer servicios con todas las columnas detectadas"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Determinar el tipo de negocio para el prompt
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
         if es_porfirianna:
             prompt = f"""
             Eres un asistente especializado en analizar menús de restaurantes. 
-            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
+            Extrae TODA la información posible del siguiente texto:
             
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
@@ -406,22 +405,27 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
+                        "ingredientes": "lista de ingredientes",
+                        "tiempo_preparacion": "15 min",
+                        "disponibilidad": "siempre/estacional",
+                        "calorias": "250 kcal",
+                        "alergenos": "contiene gluten, lactosa",
+                        // ... cualquier otra columna que detectes
                     }}
                 ]
             }}
             
-            Reglas para restaurantes:
-            1. Extrae todos los platillos, bebidas y productos
-            2. Incluye descripciones de ingredientes si están disponibles
-            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
-            4. Si no hay precio, usa "0.00"
-            5. Moneda MXN por defecto
+            Reglas:
+            1. Extrae TODA la información disponible
+            2. Si hay columnas adicionales como ingredientes, tiempo, etc., inclúyelas
+            3. Mantén los nombres de campos en español y en minúsculas
+            4. Si no hay información para algún campo, omítelo (no uses null)
             """
         else:
             prompt = f"""
-            Eres un asistente especializado en extraer servicios y precios de catálogos.
-            Analiza el siguiente texto y extrae TODOS los servicios:
+            Eres un asistente especializado en extraer servicios de catálogos.
+            Analiza el siguiente texto y extrae TODA la información disponible:
             
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
@@ -434,17 +438,21 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
+                        "categoria": "Categoría del servicio",
+                        "duracion": "2 semanas",
+                        "garantia": "6 meses",
+                        "caracteristicas": "lista de características",
+                        "requisitos": "requisitos del cliente",
+                        // ... cualquier otra columna que detectes
                     }}
                 ]
             }}
             
             Reglas importantes:
-            1. Extrae TODOS los servicios que encuentres
-            2. Si no hay precio específico, usa "0.00"
-            3. La moneda por defecto es MXN
-            4. Agrupa servicios similares
-            5. Sé específico con los nombres
+            1. Extrae TODA la información disponible
+            2. Incluye todas las columnas que encuentres en el documento
+            3. Los nombres de campos deben ser descriptivos y en español
+            4. Omite campos que no tengan información
             """
         
         headers = {
@@ -470,6 +478,13 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         if json_match:
             servicios_extraidos = json.loads(json_match.group())
             app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
+            
+            # Log de las columnas detectadas
+            if servicios_extraidos.get('servicios'):
+                primer_servicio = servicios_extraidos['servicios'][0]
+                columnas_detectadas = list(primer_servicio.keys())
+                app.logger.info(f"📊 Columnas detectadas: {columnas_detectadas}")
+            
             return servicios_extraidos
         else:
             app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
@@ -480,7 +495,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos"""
+    """Guarda los servicios extraídos del PDF en la base de datos, adaptando la estructura si es necesario"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -488,35 +503,65 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
+        # Verificar si necesitamos adaptar la estructura de la tabla
+        necesita_adaptacion = False
+        columnas_detectadas = set()
+        
+        # Analizar las columnas detectadas por la IA
+        for servicio in servicios.get('servicios', []):
+            for clave in servicio.keys():
+                if clave not in ['servicio', 'descripcion', 'precio', 'moneda', 'categoria']:
+                    columnas_detectadas.add(clave)
+                    necesita_adaptacion = True
+        
+        # Adaptar la tabla si es necesario
+        if necesita_adaptacion:
+            app.logger.info(f"🔄 Adaptando estructura de la tabla para columnas: {columnas_detectadas}")
+            adaptar_tabla_precios(columnas_detectadas, cursor, conn)
+        
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
             try:
-                # Limpiar y validar datos
-                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
-                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
-                    continue
-                    
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
+                # Construir la consulta dinámicamente
+                columnas = []
+                valores = []
+                placeholders = []
                 
-                # Convertir precio a decimal
-                try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
+                for clave, valor in servicio.items():
+                    if clave in ['servicio', 'descripcion', 'precio', 'moneda', 'categoria']:
+                        columnas.append(clave)
+                        valores.append(valor)
+                        placeholders.append('%s')
+                    elif clave in columnas_detectadas:  # Columnas adicionales detectadas
+                        columnas.append(clave)
+                        valores.append(valor)
+                        placeholders.append('%s')
                 
-                cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        descripcion = VALUES(descripcion),
-                        precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                # Convertir precio a decimal si existe
+                if 'precio' in servicio:
+                    try:
+                        precio_index = columnas.index('precio')
+                        valores[precio_index] = Decimal(str(servicio['precio']).replace('$', '').replace(',', '').strip())
+                    except:
+                        valores[precio_index] = Decimal('0.00')
                 
+                # Construir consulta INSERT dinámica
+                columnas_str = ', '.join(columnas)
+                placeholders_str = ', '.join(placeholders)
+                
+                # Para UPDATE, construir SET dinámicamente
+                update_parts = [f"{col} = VALUES({col})" for col in columnas if col != 'servicio']
+                update_str = ', '.join(update_parts)
+                
+                query = f"""
+                    INSERT INTO precios ({columnas_str})
+                    VALUES ({placeholders_str})
+                    ON DUPLICATE KEY UPDATE {update_str}
+                """
+                
+                cursor.execute(query, valores)
                 servicios_guardados += 1
-                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
+                app.logger.info(f"✅ Servicio guardado: {servicio.get('servicio')}")
                 
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
@@ -533,6 +578,137 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
+def adaptar_tabla_precios(columnas_nuevas, cursor, conn):
+    """Adapta la tabla precios agregando columnas nuevas detectadas por la IA"""
+    try:
+        # Obtener columnas actuales de la tabla
+        cursor.execute("DESCRIBE precios")
+        columnas_actuales = [col[0] for col in cursor.fetchall()]
+        
+        # Agregar columnas nuevas
+        for columna in columnas_nuevas:
+            # Convertir a nombre de columna válido (sin espacios, minúsculas, etc.)
+            columna_valida = re.sub(r'[^a-zA-Z0-9_]', '_', columna.lower())
+            
+            if columna_valida not in columnas_actuales:
+                # Determinar el tipo de dato basado en el nombre de la columna
+                tipo_dato = "VARCHAR(255)"
+                if any(keyword in columna_valida for keyword in ['precio', 'costo', 'valor', 'monto']):
+                    tipo_dato = "DECIMAL(10,2)"
+                elif any(keyword in columna_valida for keyword in ['cantidad', 'stock', 'unidades']):
+                    tipo_dato = "INT"
+                elif any(keyword in columna_valida for keyword in ['fecha', 'date']):
+                    tipo_dato = "DATE"
+                
+                cursor.execute(f"ALTER TABLE precios ADD COLUMN {columna_valida} {tipo_dato}")
+                app.logger.info(f"✅ Columna agregada: {columna_valida} ({tipo_dato})")
+        
+        conn.commit()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error adaptando tabla precios: {e}")
+        conn.rollback()
+
+@app.route('/configuracion/precios/subir-archivo', methods=['POST'])
+def subir_archivo_servicios():
+    """Endpoint para subir PDF/Excel y extraer servicios automáticamente"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        if 'archivo' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        file = request.files['archivo']
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        if file and allowed_file(file.filename):
+            extension = file.filename.split('.')[-1].lower()
+            
+            # Guardar archivo
+            filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            app.logger.info(f"📄 Archivo guardado: {filepath} (extensión: {extension})")
+            
+            # Procesar según la extensión
+            if extension == 'pdf':
+                texto_archivo = extraer_texto_pdf(filepath)
+                if not texto_archivo:
+                    flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
+                    try:
+                        os.remove(filepath)
+                    except:
+                        pass
+                    return redirect(url_for('configuracion_precios'))
+                
+                if len(texto_archivo) < 50:
+                    flash('❌ Se extrajo muy poco texto del PDF. ¿Está escaneado como imagen?', 'error')
+                    try:
+                        os.remove(filepath)
+                    except:
+                        pass
+                    return redirect(url_for('configuracion_precios'))
+                
+                servicios = analizar_pdf_servicios(texto_archivo, config)
+                
+            elif extension in ['xlsx', 'xls']:
+                servicios = analizar_excel_servicios(filepath, config)
+            else:
+                flash('❌ Formato no soportado', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            if not servicios or not servicios.get('servicios'):
+                flash('❌ No se pudieron identificar servicios en el archivo. Revisa el formato.', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            # Guardar en base de datos
+            servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
+            
+            # Limpiar archivo
+            try:
+                os.remove(filepath)
+            except:
+                pass
+            
+            if servicios_guardados > 0:
+                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
+                # Log detallado
+                app.logger.info(f"📊 Resumen de servicios extraídos:")
+                for servicio in servicios.get('servicios', [])[:10]:
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                if len(servicios.get('servicios', [])) > 10:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+            else:
+                flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
+                
+        else:
+            flash('❌ Tipo de archivo no permitido. Solo se aceptan PDF, Excel y TXT', 'error')
+        
+        return redirect(url_for('configuracion_precios'))
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando archivo: {e}")
+        flash('❌ Error interno procesando el archivo', 'error')
+        # Limpiar archivo en caso de error
+        try:
+            if 'filepath' in locals():
+                os.remove(filepath)
+        except:
+            pass
+        return redirect(url_for('configuracion_precios'))
+
 # Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
@@ -540,11 +716,11 @@ def subir_pdf_servicios():
     config = obtener_configuracion_por_host()
     
     try:
-        if 'pdf_file' not in request.files:
+        if 'archivo' not in request.files:
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
         
-        file = request.files['pdf_file']
+        file = request.files['archivo']
         if file.filename == '':
             flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_precios'))
@@ -555,7 +731,7 @@ def subir_pdf_servicios():
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
             
-            app.logger.info(f"📄 PDF guardado: {filepath}")
+            app.logger.info(f"📄 archivo guardado: {filepath}")
             
             # Extraer texto del PDF
             texto_pdf = extraer_texto_pdf(filepath)
@@ -1844,6 +2020,56 @@ def save_config(cfg_all, config=None):
     conn.commit()
     cursor.close()
     conn.close()
+
+def obtener_estructura_tabla_precios(config=None):
+    """Obtiene la estructura actual de la tabla precios"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("DESCRIBE precios")
+        estructura = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return estructura
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo estructura de tabla: {e}")
+        return []
+
+def analizar_excel_servicios(filepath, config=None):
+    """Analiza archivos Excel y extrae servicios con estructura dinámica"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Leer el archivo Excel
+        df = pd.read_excel(filepath)
+        
+        # Convertir a texto para la IA
+        texto_excel = df.to_string()
+        
+        # Usar la misma lógica que para PDFs
+        return analizar_pdf_servicios(texto_excel, config)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error analizando Excel: {e}")
+        return None
+
+@app.route('/configuracion/precios/estructura')
+def ver_estructura_tabla():
+    """Endpoint para ver la estructura actual de la tabla"""
+    config = obtener_configuracion_por_host()
+    estructura = obtener_estructura_tabla_precios(config)
+    
+    return jsonify({
+        'estructura': estructura,
+        'total_columnas': len(estructura)
+    })
     
     # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config=None):

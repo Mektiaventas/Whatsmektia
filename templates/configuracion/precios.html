@@ -65,6 +65,36 @@
     </div>
 </div>
 
+<!-- Sección de estructura dinámica -->
+<div class="card mt-6">
+    <div class="card-header bg-info text-white">
+        <h3>🏗️ Estructura de la Tabla de Precios</h3>
+    </div>
+    <div class="card-body">
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <h4 class="font-semibold mb-2">Columnas Base (Fijas):</h4>
+                <ul class="text-sm space-y-1">
+                    <li>• id (Primary Key)</li>
+                    <li>• servicio (Unique)</li>
+                    <li>• descripcion</li>
+                    <li>• precio</li>
+                    <li>• moneda</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-semibold mb-2">Columnas Dinámicas:</h4>
+                <div id="columnas-dinamicas">
+                    <p class="text-sm text-gray-600">Se agregarán automáticamente cuando subas archivos con información adicional.</p>
+                </div>
+                <button type="button" onclick="cargarEstructura()" class="btn small primary mt-2">
+                    🔄 Actualizar Estructura
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Contenido principal: dos columnas -->
 <div class="config-content grid grid-cols-2 gap-6">
 
@@ -161,9 +191,9 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
-                        </option> 
+                        </option>
                         {% endfor %}
                     </select>
                 </div>
@@ -242,4 +272,35 @@
     .bg-blue-50 {
         background: #eff6ff;
     }
+
+    .bg-info {
+        background: #17a2b8 !important;
+    }
 </style>
+
+<script>
+    function cargarEstructura() {
+        fetch('/configuracion/precios/estructura')
+            .then(response => response.json())
+            .then(data => {
+                const contenedor = document.getElementById('columnas-dinamicas');
+                const columnasDinamicas = data.estructura.filter(col =>
+                    !['id', 'servicio', 'descripcion', 'precio', 'moneda'].includes(col.Field)
+                );
+
+                if (columnasDinamicas.length > 0) {
+                    let html = '<ul class="text-sm space-y-1">';
+                    columnasDinamicas.forEach(col => {
+                        html += `<li>• ${col.Field} (${col.Type})</li>`;
+                    });
+                    html += '</ul>';
+                    contenedor.innerHTML = html;
+                } else {
+                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas aún.</p>';
+                }
+            });
+    }
+
+    // Cargar estructura al abrir la página
+    document.addEventListener('DOMContentLoaded', cargarEstructura);
+</script>
