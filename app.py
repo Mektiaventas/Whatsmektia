@@ -2602,7 +2602,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     """Procesa mensajes normales incluyendo detección inteligente de notificaciones"""
     try:
         # 🧠 DETECCIÓN INTELIGENTE DE NOTIFICACIONES (antes del procesamiento normal)
-        if not es_mi_numero and not es_archivo and texto.strip():
+        if not es_archivo and texto.strip():
             # Evaluar si necesita notificación usando IA
             evaluacion = evaluar_necesidad_notificacion_administrador(texto, numero, config=config)
             
