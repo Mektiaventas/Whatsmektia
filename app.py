@@ -1,6 +1,4 @@
-# Agrega esto con los otros imports al inicio
 import traceback
-# Agrega estos imports al inicio del archivoqr
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -19,6 +17,9 @@ import mysql.connector
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
 import requests
 from dotenv import load_dotenv
+import pandas as pd
+import openpyxl
+from docx import Document
 from datetime import datetime, timedelta
 from decimal import Decimal
 import re
@@ -27,13 +28,10 @@ from flask import current_app as app
 from werkzeug.utils import secure_filename
 from PIL import Image
 from openai import OpenAI
-# Agrega estos imports al inicio de app.py (después de los otros imports)
 import PyPDF2
-import fitz  # PyMuPDF - alternativa para mejor extracción
+import fitz 
 from werkzeug.utils import secure_filename
 processed_messages = {}
-
-# Configurar Gemini
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
@@ -111,10 +109,246 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'xlsx'}
+ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt'})
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def obtener_archivo_whatsapp(media_id, config=None):
+    """Obtiene archivos de WhatsApp y los guarda localmente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Obtener metadata del archivo
+        url_metadata = f"https://graph.facebook.com/v18.0/{media_id}"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        
+        app.logger.info(f"📎 Obteniendo metadata de archivo: {url_metadata}")
+        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
+        response_metadata.raise_for_status()
+        
+        metadata = response_metadata.json()
+        download_url = metadata.get('url')
+        mime_type = metadata.get('mime_type', 'application/octet-stream')
+        filename = metadata.get('filename', f'archivo_{media_id}')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga: {metadata}")
+            return None, None, None
+            
+        app.logger.info(f"📎 Descargando archivo: {filename} ({mime_type})")
+        
+        # 2. Descargar el archivo
+        file_response = requests.get(download_url, headers=headers, timeout=60)
+        if file_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando archivo: {file_response.status_code}")
+            return None, None, None
+        
+        # 3. Determinar extensión y guardar
+        extension = determinar_extension(mime_type, filename)
+        safe_filename = secure_filename(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
+        filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
+        
+        with open(filepath, 'wb') as f:
+            f.write(file_response.content)
+        
+        app.logger.info(f"✅ Archivo guardado: {filepath}")
+        return filepath, safe_filename, extension
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
+        return None, None, None
+
+def determinar_extension(mime_type, filename):
+    """Determina la extensión del archivo basado en MIME type y nombre"""
+    mime_to_extension = {
+        'application/pdf': 'pdf',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+        'application/vnd.ms-excel': 'xls',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+        'text/csv': 'csv',
+        'text/plain': 'txt'
+    }
+    
+    # Primero intentar por MIME type
+    extension = mime_to_extension.get(mime_type)
+    
+    # Si no se encuentra, intentar por extensión del nombre de archivo
+    if not extension and '.' in filename:
+        extension = filename.split('.')[-1].lower()
+    
+    return extension or 'bin'
+
+def extraer_texto_archivo(filepath, extension):
+    """Extrae texto de diferentes tipos de archivos"""
+    try:
+        if extension == 'pdf':
+            return extraer_texto_pdf(filepath)
+        
+        elif extension in ['xlsx', 'xls']:
+            return extraer_texto_excel(filepath)
+        
+        elif extension == 'csv':
+            return extraer_texto_csv(filepath)
+        
+        elif extension == 'docx':
+            return extraer_texto_docx(filepath)
+        
+        elif extension == 'txt':
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return f.read()
+        
+        else:
+            app.logger.warning(f"⚠️ Formato no soportado: {extension}")
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo texto de {extension}: {e}")
+        return None
+
+def extraer_texto_excel(filepath):
+    """Extrae texto de archivos Excel"""
+    try:
+        texto = ""
+        
+        # Leer todas las hojas
+        if filepath.endswith('.xlsx'):
+            workbook = openpyxl.load_workbook(filepath)
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                texto += f"\n--- Hoja: {sheet_name} ---\n"
+                
+                for row in sheet.iter_rows(values_only=True):
+                    fila_texto = " | ".join(str(cell) for cell in row if cell is not None)
+                    if fila_texto.strip():
+                        texto += fila_texto + "\n"
+        
+        # Alternativa con pandas para mejor compatibilidad
+        try:
+            excel_file = pd.ExcelFile(filepath)
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(filepath, sheet_name=sheet_name)
+                texto += f"\n--- Hoja: {sheet_name} (Pandas) ---\n"
+                texto += df.to_string() + "\n"
+        except Exception as e:
+            app.logger.warning(f"⚠️ Pandas falló: {e}")
+        
+        return texto.strip() if texto.strip() else None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando Excel: {e}")
+        return None
+
+def extraer_texto_csv(filepath):
+    """Extrae texto de archivos CSV"""
+    try:
+        df = pd.read_csv(filepath)
+        return df.to_string()
+    except Exception as e:
+        app.logger.error(f"🔴 Error leyendo CSV: {e}")
+        # Intentar lectura simple
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return f.read()
+        except:
+            return None
+
+def extraer_texto_docx(filepath):
+    """Extrae texto de archivos Word"""
+    try:
+        doc = Document(filepath)
+        texto = ""
+        for paragraph in doc.paragraphs:
+            texto += paragraph.text + "\n"
+        return texto.strip() if texto.strip() else None
+    except Exception as e:
+        app.logger.error(f"🔴 Error leyendo DOCX: {e}")
+        return None
+
+def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
+    """Analiza el contenido del archivo usando IA"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        if tipo_negocio == 'laporfirianna':
+            prompt = f"""
+            Eres un asistente especializado en analizar documentos para restaurantes.
+            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+            
+            CONTENIDO DEL ARCHIVO:
+            {texto_archivo[:8000]}  # Limitar tamaño para evitar tokens excesivos
+            
+            Proporciona un análisis en este formato:
+            
+            📊 **ANÁLISIS DEL DOCUMENTO**
+            
+            **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
+            
+            **Información clave encontrada:**
+            - Platillos/productos principales
+            - Precios (si están disponibles)
+            - Cantidades o inventarios
+            - Fechas o periodos relevantes
+            
+            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+            
+            **Recomendaciones:** [Cómo podría usar esta información]
+            """
+        else:
+            prompt = f"""
+            Eres un asistente especializado en analizar documentos para servicios digitales.
+            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+            
+            CONTENIDO DEL ARCHIVO:
+            {texto_archivo[:8000]}
+            
+            Proporciona un análisis en este formato:
+            
+            📊 **ANÁLISIS DEL DOCUMENTO**
+            
+            **Tipo de contenido detectado:** [Cotización, Requerimientos, Proyecto, etc.]
+            
+            **Información clave encontrada:**
+            - Servicios solicitados
+            - Presupuestos o costos
+            - Especificaciones técnicas
+            - Plazos o fechas importantes
+            
+            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+            
+            **Recomendaciones:** [Siguientes pasos sugeridos]
+            """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 1500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        data = response.json()
+        analisis = data['choices'][0]['message']['content'].strip()
+        
+        app.logger.info("✅ Archivo analizado con IA exitosamente")
+        return analisis
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error analizando archivo con IA: {e}")
+        return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
+
 
 def extraer_texto_pdf(file_path):
     """Extrae texto de un archivo PDF"""
@@ -2368,7 +2602,7 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False):
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
@@ -2385,9 +2619,52 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+        if es_archivo and 'document' in msg:
+            app.logger.info(f"📎 Procesando archivo enviado por {numero}")
             
+            # Obtener el archivo de WhatsApp
+            media_id = msg['document']['id']
+            filepath, filename, extension = obtener_archivo_whatsapp(media_id, config)
+            
+            if filepath and extension:
+                # Extraer texto del archivo
+                texto_archivo = extraer_texto_archivo(filepath, extension)
+                
+                if texto_archivo:
+                    # Determinar tipo de negocio
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    tipo_negocio = 'laporfirianna' if es_porfirianna else 'mektia'
+                    
+                    # Analizar con IA
+                    analisis = analizar_archivo_con_ia(texto_archivo, tipo_negocio, config)
+                    
+                    # Construir respuesta
+                    respuesta = f"""📎 **He analizado tu archivo** ({filename})
+
+{analisis}
+
+¿Te gustaría que haga algo específico con esta información?"""
+                    
+                else:
+                    respuesta = f"❌ No pude extraer texto del archivo {filename}. ¿Podrías describirme qué contiene?"
+                
+                # Limpiar archivo temporal
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                
+            else:
+                respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
+            
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
+            return
+        
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-            if responder_con_voz and not es_imagen:
+        if responder_con_voz and not es_imagen:
                 # Intentar enviar respuesta de voz
                 audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 audio_url_local = texto_a_voz(respuesta, audio_filename, config)
@@ -2407,13 +2684,13 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
                     guardar_conversacion(numero, texto, respuesta, config=config)
-            else:
+        else:
                 # Respuesta normal de texto
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
             
             # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-            if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
+        if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
                 app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
                 resumen = resumen_rafa(numero, config)
                 enviar_alerta_humana(numero, texto, resumen, config)
@@ -3252,6 +3529,7 @@ def webhook():
         es_imagen = False
         es_audio = False
         es_video = False
+        es_archivo = Fals
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
          # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
@@ -3328,6 +3606,15 @@ def webhook():
             
             # Guardar solo el mensaje del usuario (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+        elif 'document' in msg:
+                es_archivo = True
+                texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
+                app.logger.info(f"📎 Archivo detectado: {texto}")
+        
+                 # MODIFICAR LA LLAMADA A procesar_mensaje_normal
+                procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
+                                   imagen_base64, transcripcion, es_mi_numero, es_archivo)     
+                return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
             audio_id = msg['audio']['id']  # ✅ Para audio también
