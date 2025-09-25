@@ -3921,28 +3921,32 @@ def home():
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
     
     conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)  # Cambiar a dictionary=True para mejor manejo
-    
-    # Estadísticas existentes
+    cursor = conn.cursor(dictionary=True)
+
+    # Estadísticas existentes - CON MANEJO DE None
     cursor.execute(
-        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
+        "SELECT COUNT(DISTINCT numero) as count FROM conversaciones WHERE timestamp>= %s;",
         (start,)
     )
-    chat_counts = cursor.fetchone()[0]
+    result = cursor.fetchone()
+    chat_counts = result['count'] if result and result['count'] is not None else 0
 
+    # Mensajes por chat
     cursor.execute(
         "SELECT numero, COUNT(*) as count FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
         (start,)
     )
     messages_per_chat = cursor.fetchall()
 
+    # Total respondidas - CON MANEJO DE None
     cursor.execute(
         "SELECT COUNT(*) as count FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
         (start,)
     )
-    total_responded = cursor.fetchone()['count']
+    result = cursor.fetchone()
+    total_responded = result['count'] if result and result['count'] is not None else 0
 
-    # 🆕 CONVERSACIONES RECIENTES - Agregar esta consulta
+    # CONVERSACIONES RECIENTES
     cursor.execute("""
         SELECT 
             c.numero,
@@ -3962,8 +3966,9 @@ def home():
     cursor.close()
     conn.close()
 
-    labels = [row['numero'] for row in messages_per_chat]
-    values = [row['count'] for row in messages_per_chat]
+    # Manejo seguro de las listas para el gráfico
+    labels = [row['numero'] for row in messages_per_chat] if messages_per_chat else []
+    values = [row['count'] for row in messages_per_chat] if messages_per_chat else []
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -3972,9 +3977,8 @@ def home():
         period=period,
         labels=labels,
         values=values,
-        conversaciones_recientes=conversaciones_recientes  # 🆕 Pasar las conversaciones a la template
+        conversaciones_recientes=conversaciones_recientes
     )
-
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
