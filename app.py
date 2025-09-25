@@ -84,7 +84,7 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-# Configuración por defecto (para backward compatibility)
+
 # Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
@@ -533,7 +533,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
@@ -3777,18 +3776,7 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-@app.route('/test-contacto')
-def test_contacto(numero = '5214493432744'):
-    """Endpoint para probar la obtención de información de contacto"""
-    config = obtener_configuracion_por_host()
-    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
-    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
-    return jsonify({
-        'numero': numero,
-        'nombre': nombre,
-        'imagen': imagen,
-        'config': config.get('dominio')
-    })
+
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
