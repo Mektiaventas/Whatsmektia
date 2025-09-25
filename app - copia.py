@@ -1,6 +1,4 @@
-# Agrega esto con los otros imports al inicio
 import traceback
-# Agrega estos imports al inicio del archivo
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -9,7 +7,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
-from whatsapp_selenium import get_whatsapp_client, init_whatsapp_session
 import pytz
 import os
 import logging
@@ -20,18 +17,21 @@ import mysql.connector
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
 import requests
 from dotenv import load_dotenv
+import pandas as pd
+import openpyxl
+from docx import Document
 from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
 from flask import current_app as app
 from werkzeug.utils import secure_filename
-from pydub import AudioSegment
 from PIL import Image
 from openai import OpenAI
+import PyPDF2
+import fitz 
+from werkzeug.utils import secure_filename
 processed_messages = {}
-
-# Configurar Gemini
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
@@ -107,6 +107,520 @@ PREFIJOS_PAIS = {
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
+PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
+os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt'})
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def obtener_archivo_whatsapp(media_id, config=None):
+    """Obtiene archivos de WhatsApp y los guarda localmente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Obtener metadata del archivo
+        url_metadata = f"https://graph.facebook.com/v18.0/{media_id}"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        
+        app.logger.info(f"📎 Obteniendo metadata de archivo: {url_metadata}")
+        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
+        response_metadata.raise_for_status()
+        
+        metadata = response_metadata.json()
+        download_url = metadata.get('url')
+        mime_type = metadata.get('mime_type', 'application/octet-stream')
+        filename = metadata.get('filename', f'archivo_{media_id}')
+        
+        if not download_url:
+            app.logger.error(f"🔴 No se encontró URL de descarga: {metadata}")
+            return None, None, None
+            
+        app.logger.info(f"📎 Descargando archivo: {filename} ({mime_type})")
+        
+        # 2. Descargar el archivo
+        file_response = requests.get(download_url, headers=headers, timeout=60)
+        if file_response.status_code != 200:
+            app.logger.error(f"🔴 Error descargando archivo: {file_response.status_code}")
+            return None, None, None
+        
+        # 3. Determinar extensión y guardar
+        extension = determinar_extension(mime_type, filename)
+        safe_filename = secure_filename(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
+        filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
+        
+        with open(filepath, 'wb') as f:
+            f.write(file_response.content)
+        
+        app.logger.info(f"✅ Archivo guardado: {filepath}")
+        return filepath, safe_filename, extension
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
+        return None, None, None
+
+def determinar_extension(mime_type, filename):
+    """Determina la extensión del archivo basado en MIME type y nombre"""
+    mime_to_extension = {
+        'application/pdf': 'pdf',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+        'application/vnd.ms-excel': 'xls',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+        'text/csv': 'csv',
+        'text/plain': 'txt'
+    }
+    
+    # Primero intentar por MIME type
+    extension = mime_to_extension.get(mime_type)
+    
+    # Si no se encuentra, intentar por extensión del nombre de archivo
+    if not extension and '.' in filename:
+        extension = filename.split('.')[-1].lower()
+    
+    return extension or 'bin'
+
+def extraer_texto_archivo(filepath, extension):
+    """Extrae texto de diferentes tipos de archivos"""
+    try:
+        if extension == 'pdf':
+            return extraer_texto_pdf(filepath)
+        
+        elif extension in ['xlsx', 'xls']:
+            return extraer_texto_excel(filepath)
+        
+        elif extension == 'csv':
+            return extraer_texto_csv(filepath)
+        
+        elif extension == 'docx':
+            return extraer_texto_docx(filepath)
+        
+        elif extension == 'txt':
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return f.read()
+        
+        else:
+            app.logger.warning(f"⚠️ Formato no soportado: {extension}")
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo texto de {extension}: {e}")
+        return None
+
+def extraer_texto_excel(filepath):
+    """Extrae texto de archivos Excel"""
+    try:
+        texto = ""
+        
+        # Leer todas las hojas
+        if filepath.endswith('.xlsx'):
+            workbook = openpyxl.load_workbook(filepath)
+            for sheet_name in workbook.sheetnames:
+                sheet = workbook[sheet_name]
+                texto += f"\n--- Hoja: {sheet_name} ---\n"
+                
+                for row in sheet.iter_rows(values_only=True):
+                    fila_texto = " | ".join(str(cell) for cell in row if cell is not None)
+                    if fila_texto.strip():
+                        texto += fila_texto + "\n"
+        
+        # Alternativa con pandas para mejor compatibilidad
+        try:
+            excel_file = pd.ExcelFile(filepath)
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(filepath, sheet_name=sheet_name)
+                texto += f"\n--- Hoja: {sheet_name} (Pandas) ---\n"
+                texto += df.to_string() + "\n"
+        except Exception as e:
+            app.logger.warning(f"⚠️ Pandas falló: {e}")
+        
+        return texto.strip() if texto.strip() else None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando Excel: {e}")
+        return None
+
+def extraer_texto_csv(filepath):
+    """Extrae texto de archivos CSV"""
+    try:
+        df = pd.read_csv(filepath)
+        return df.to_string()
+    except Exception as e:
+        app.logger.error(f"🔴 Error leyendo CSV: {e}")
+        # Intentar lectura simple
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return f.read()
+        except:
+            return None
+
+def extraer_texto_docx(filepath):
+    """Extrae texto de archivos Word"""
+    try:
+        doc = Document(filepath)
+        texto = ""
+        for paragraph in doc.paragraphs:
+            texto += paragraph.text + "\n"
+        return texto.strip() if texto.strip() else None
+    except Exception as e:
+        app.logger.error(f"🔴 Error leyendo DOCX: {e}")
+        return None
+
+def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
+    """Analiza el contenido del archivo usando IA"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        if tipo_negocio == 'laporfirianna':
+            prompt = f"""
+            Eres un asistente especializado en analizar documentos para restaurantes.
+            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+            
+            CONTENIDO DEL ARCHIVO:
+            {texto_archivo[:8000]}  # Limitar tamaño para evitar tokens excesivos
+            
+            Proporciona un análisis en este formato:
+            
+            📊 **ANÁLISIS DEL DOCUMENTO**
+            
+            **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
+            
+            **Información clave encontrada:**
+            - Platillos/productos principales
+            - Precios (si están disponibles)
+            - Cantidades o inventarios
+            - Fechas o periodos relevantes
+            
+            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+            
+            **Recomendaciones:** [Cómo podría usar esta información]
+            """
+        else:
+            prompt = f"""
+            Eres un asistente especializado en analizar documentos para servicios digitales.
+            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+            
+            CONTENIDO DEL ARCHIVO:
+            {texto_archivo[:8000]}
+            
+            Proporciona un análisis en este formato:
+            
+            📊 **ANÁLISIS DEL DOCUMENTO**
+            
+            **Tipo de contenido detectado:** [Cotización, Requerimientos, Proyecto, etc.]
+            
+            **Información clave encontrada:**
+            - Servicios solicitados
+            - Presupuestos o costos
+            - Especificaciones técnicas
+            - Plazos o fechas importantes
+            
+            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+            
+            **Recomendaciones:** [Siguientes pasos sugeridos]
+            """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 1500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        data = response.json()
+        analisis = data['choices'][0]['message']['content'].strip()
+        
+        app.logger.info("✅ Archivo analizado con IA exitosamente")
+        return analisis
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error analizando archivo con IA: {e}")
+        return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
+
+
+def extraer_texto_pdf(file_path):
+    """Extrae texto de un archivo PDF"""
+    try:
+        texto = ""
+        
+        # Intentar con PyMuPDF primero (más robusto)
+        try:
+            doc = fitz.open(file_path)
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                texto += page.get_text()
+            doc.close()
+            app.logger.info(f"✅ Texto extraído con PyMuPDF: {len(texto)} caracteres")
+            return texto.strip()
+        except Exception as e:
+            app.logger.warning(f"⚠️ PyMuPDF falló, intentando con PyPDF2: {e}")
+        
+        # Fallback a PyPDF2
+        with open(file_path, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            for page_num in range(len(pdf_reader.pages)):
+                page = pdf_reader.pages[page_num]
+                texto += page.extract_text()
+        
+        app.logger.info(f"✅ Texto extraído con PyPDF2: {len(texto)} caracteres")
+        return texto.strip()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
+        return None
+
+def analizar_pdf_servicios(texto_pdf, config=None):
+    """Usa IA para analizar el PDF y extraer servicios y precios"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar el tipo de negocio para el prompt
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        
+        if es_porfirianna:
+            prompt = f"""
+            Eres un asistente especializado en analizar menús de restaurantes. 
+            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
+            
+            TEXTO DEL MENÚ:
+            {texto_pdf[:6000]}
+            
+            Devuelve SOLO un JSON con esta estructura:
+            {{
+                "servicios": [
+                    {{
+                        "servicio": "Nombre del platillo/producto",
+                        "descripcion": "Descripción o ingredientes",
+                        "precio": "100.00",
+                        "moneda": "MXN",
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                    }}
+                ]
+            }}
+            
+            Reglas para restaurantes:
+            1. Extrae todos los platillos, bebidas y productos
+            2. Incluye descripciones de ingredientes si están disponibles
+            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
+            4. Si no hay precio, usa "0.00"
+            5. Moneda MXN por defecto
+            """
+        else:
+            prompt = f"""
+            Eres un asistente especializado en extraer servicios y precios de catálogos.
+            Analiza el siguiente texto y extrae TODOS los servicios:
+            
+            TEXTO DEL DOCUMENTO:
+            {texto_pdf[:6000]}
+            
+            Devuelve SOLO un JSON con esta estructura:
+            {{
+                "servicios": [
+                    {{
+                        "servicio": "Nombre del servicio",
+                        "descripcion": "Descripción breve",
+                        "precio": "100.00",
+                        "moneda": "MXN",
+                        "categoria": "Categoría del servicio"
+                    }}
+                ]
+            }}
+            
+            Reglas importantes:
+            1. Extrae TODOS los servicios que encuentres
+            2. Si no hay precio específico, usa "0.00"
+            3. La moneda por defecto es MXN
+            4. Agrupa servicios similares
+            5. Sé específico con los nombres
+            """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "max_tokens": 3000
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            servicios_extraidos = json.loads(json_match.group())
+            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
+            return servicios_extraidos
+        else:
+            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
+            return None
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
+        return None
+
+def guardar_servicios_desde_pdf(servicios, config=None):
+    """Guarda los servicios extraídos del PDF en la base de datos"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        servicios_guardados = 0
+        for servicio in servicios.get('servicios', []):
+            try:
+                # Limpiar y validar datos
+                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
+                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
+                    continue
+                    
+                descripcion = servicio.get('descripcion', '').strip()
+                precio = servicio.get('precio', '0.00')
+                moneda = servicio.get('moneda', 'MXN')
+                
+                # Convertir precio a decimal
+                try:
+                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_decimal = Decimal('0.00')
+                
+                cursor.execute("""
+                    INSERT INTO precios (servicio, descripcion, precio, moneda)
+                    VALUES (%s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE 
+                        descripcion = VALUES(descripcion),
+                        precio = VALUES(precio),
+                        moneda = VALUES(moneda)
+                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                
+                servicios_guardados += 1
+                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
+                
+            except Exception as e:
+                app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
+                continue
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ {servicios_guardados} servicios guardados en la base de datos")
+        return servicios_guardados
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
+        return 0
+
+# Ruta para subir PDF
+@app.route('/configuracion/precios/subir-pdf', methods=['POST'])
+def subir_pdf_servicios():
+    """Endpoint para subir PDF y extraer servicios automáticamente"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        if 'pdf_file' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        file = request.files['pdf_file']
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        if file and allowed_file(file.filename):
+            # Guardar archivo
+            filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            app.logger.info(f"📄 PDF guardado: {filepath}")
+            
+            # Extraer texto del PDF
+            texto_pdf = extraer_texto_pdf(filepath)
+            if not texto_pdf:
+                flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
+                # Limpiar archivo
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            if len(texto_pdf) < 50:  # Muy poco texto extraído
+                flash('❌ Se extrajo muy poco texto del PDF. ¿Está escaneado como imagen?', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            # Analizar con IA
+            servicios = analizar_pdf_servicios(texto_pdf, config)
+            if not servicios or not servicios.get('servicios'):
+                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                return redirect(url_for('configuracion_precios'))
+            
+            # Guardar en base de datos
+            servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
+            
+            # Limpiar archivo
+            try:
+                os.remove(filepath)
+            except:
+                pass
+            
+            if servicios_guardados > 0:
+                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
+                # Log detallado
+                app.logger.info(f"📊 Resumen de servicios extraídos:")
+                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                if len(servicios.get('servicios', [])) > 10:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+            else:
+                flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
+                
+        else:
+            flash('❌ Tipo de archivo no permitido. Solo se aceptan PDF y TXT', 'error')
+        
+        return redirect(url_for('configuracion_precios'))
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error procesando PDF: {e}")
+        flash('❌ Error interno procesando el archivo', 'error')
+        # Limpiar archivo en caso de error
+        try:
+            if 'filepath' in locals():
+                os.remove(filepath)
+        except:
+            pass
+        return redirect(url_for('configuracion_precios'))
 
 
 def get_db_connection(config=None):
@@ -2057,8 +2571,38 @@ def enviar_alerta_intervencion_humana(info_intervencion, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de intervención: {e}")
 
+
+def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
+    """
+    Actualiza la información del contacto usando el nombre proporcionado desde el webhook
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+            VALUES (%s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = VALUES(nombre),
+                fecha_actualizacion = NOW()
+        """, (numero, nombre))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Contacto actualizado con nombre desde webhook: {numero} -> {nombre}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
+
 # REEMPLAZA la llamada a procesar_mensaje en el webhook con:
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False):
+def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
@@ -2075,9 +2619,52 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+        if es_archivo and 'document' in msg:
+            app.logger.info(f"📎 Procesando archivo enviado por {numero}")
             
+            # Obtener el archivo de WhatsApp
+            media_id = msg['document']['id']
+            filepath, filename, extension = obtener_archivo_whatsapp(media_id, config)
+            
+            if filepath and extension:
+                # Extraer texto del archivo
+                texto_archivo = extraer_texto_archivo(filepath, extension)
+                
+                if texto_archivo:
+                    # Determinar tipo de negocio
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    tipo_negocio = 'laporfirianna' if es_porfirianna else 'mektia'
+                    
+                    # Analizar con IA
+                    analisis = analizar_archivo_con_ia(texto_archivo, tipo_negocio, config)
+                    
+                    # Construir respuesta
+                    respuesta = f"""📎 **He analizado tu archivo** ({filename})
+
+{analisis}
+
+¿Te gustaría que haga algo específico con esta información?"""
+                    
+                else:
+                    respuesta = f"❌ No pude extraer texto del archivo {filename}. ¿Podrías describirme qué contiene?"
+                
+                # Limpiar archivo temporal
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
+                
+            else:
+                respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
+            
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
+            return
+        
             # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-            if responder_con_voz and not es_imagen:
+        if responder_con_voz and not es_imagen:
                 # Intentar enviar respuesta de voz
                 audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 audio_url_local = texto_a_voz(respuesta, audio_filename, config)
@@ -2097,13 +2684,13 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
                     guardar_conversacion(numero, texto, respuesta, config=config)
-            else:
+        else:
                 # Respuesta normal de texto
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
             
             # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-            if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
+        if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
                 app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
                 resumen = resumen_rafa(numero, config)
                 enviar_alerta_humana(numero, texto, resumen, config)
@@ -2942,6 +3529,7 @@ def webhook():
         es_imagen = False
         es_audio = False
         es_video = False
+        es_archivo = False
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
          # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
@@ -2962,9 +3550,14 @@ def webhook():
             config = obtener_configuracion_por_host()  # Fallback a detección por host
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
                 # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
-         
+         # 🔥 ACTUALIZAR CONTACTO CON NOMBRE DEL WEBHOOK (SI EXISTE)
+        if nombre_desde_webhook:
+            actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
+        else:
+            actualizar_info_contacto(numero, config)  # Fallback al método normal
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
@@ -3013,6 +3606,15 @@ def webhook():
             
             # Guardar solo el mensaje del usuario (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+        elif 'document' in msg:
+                es_archivo = True
+                texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
+                app.logger.info(f"📎 Archivo detectado: {texto}")
+        
+                 # MODIFICAR LA LLAMADA A procesar_mensaje_normal
+                procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
+                                   imagen_base64, transcripcion, es_mi_numero, es_archivo)     
+                return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
             audio_id = msg['audio']['id']  # ✅ Para audio también
@@ -3089,6 +3691,34 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
     
+def extraer_nombre_desde_webhook(payload):
+    """
+    Extrae el nombre del contacto directamente desde el webhook de WhatsApp
+    """
+    try:
+        # Verificar si existe la estructura de contacts en el payload
+        if ('entry' in payload and 
+            payload['entry'] and 
+            'changes' in payload['entry'][0] and 
+            payload['entry'][0]['changes'] and 
+            'contacts' in payload['entry'][0]['changes'][0]['value']):
+            
+            contacts = payload['entry'][0]['changes'][0]['value']['contacts']
+            if contacts and len(contacts) > 0:
+                profile = contacts[0].get('profile', {})
+                nombre = profile.get('name')
+                
+                if nombre:
+                    app.logger.info(f"✅ Nombre extraído desde webhook: {nombre}")
+                    return nombre
+        
+        app.logger.info("ℹ️ No se encontró nombre en el webhook")
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
+        return None
+
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
@@ -3228,31 +3858,35 @@ def obtener_imagen_perfil_whatsapp(numero, config=None):
         return None
     
 def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host de forma robusta"""
+    """Obtiene la configuración basada en el host"""
     try:
         from flask import has_request_context
         if not has_request_context():
             return NUMEROS_CONFIG['524495486142']  # Default
         
         host = request.headers.get('Host', '').lower()
-        referer = request.headers.get('Referer', '').lower()
         
-        app.logger.info(f"🔍 Config detection - Host: '{host}', Referer: '{referer}'")
+        # 🆕 DETECCIÓN UNILOVA - más específica
+        if 'unilova' in host:
+            app.logger.info("✅ Configuración detectada: Unilova")
+            # Verificar si es una ruta de WhatsApp
+            path = request.path.lower()
+            rutas_whatsapp = ['/webhook', '/chats', '/kanban', '/configuracion', '/static', '/home', '/']
+            
+            if any(path.startswith(ruta) for ruta in rutas_whatsapp):
+                app.logger.info(f"🎯 Ruta de WhatsApp detectada: {path}")
+                return NUMEROS_CONFIG['524495486142']  # Usar configuración de WhatsApp
+            else:
+                app.logger.info(f"🔧 Ruta no manejada por WhatsApp: {path}")
+                # Para rutas no manejadas, igual usar WhatsApp como default
+                return NUMEROS_CONFIG['524495486142']
         
-        # 🔥 CORRECCIÓN: Remover 'www.' para una detección consistente
-        host_clean = host.replace('www.', '')
-        referer_clean = referer.replace('www.', '') if referer else ''
-        
-        # Detección MÁS AGRESIVA para La Porfirianna (sin www)
-        if any(dominio in host_clean for dominio in ['laporfirianna', 'porfirianna']):
-            app.logger.info("✅ Configuración detectada: La Porfirianna (por host)")
+        # DETECCIÓN PORFIRIANNA
+        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
+            app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
         
-        if any(dominio in referer_clean for dominio in ['laporfirianna', 'porfirianna']):
-            app.logger.info("✅ Configuración detectada: La Porfirianna (por referer)")
-            return NUMEROS_CONFIG['524812372326']
-        
-        # Default a Mektia
+        # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
         return NUMEROS_CONFIG['524495486142']
             
@@ -4337,7 +4971,7 @@ with app.app_context():
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')
+    parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     
     app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción

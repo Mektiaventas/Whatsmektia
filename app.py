@@ -2601,10 +2601,32 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
-# REEMPLAZA la llamada a procesar_mensaje en el webhook con:
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
-    """Procesa mensajes normales (no citas/intervenciones)"""
+    """Procesa mensajes normales incluyendo detección inteligente de notificaciones"""
     try:
+        # 🧠 DETECCIÓN INTELIGENTE DE NOTIFICACIONES (antes del procesamiento normal)
+        if not es_mi_numero and not es_archivo and texto.strip():
+            # Evaluar si necesita notificación usando IA
+            evaluacion = evaluar_necesidad_notificacion_administrador(texto, numero, config=config)
+            
+            if evaluacion.get('necesita_notificacion', False):
+                app.logger.info(f"🧠 IA determinó que se necesita notificación para {numero}")
+                enviar_notificacion_inteligente_administrador(numero, texto, evaluacion, config)
+                
+                # Si es de alta urgencia, responder de manera especial
+                if evaluacion.get('nivel_urgencia') == 'alta':
+                    respuesta_urgencia = f"""⚠️ *He detectado que necesitas atención prioritaria*
+
+{evaluacion.get('razon', 'Un agente se contactará contigo inmediatamente.')}
+
+📞 Un administrador se pondrá en contacto contigo en los próximos minutos.
+
+Mientras tanto, ¿hay algo más en lo que pueda ayudarte?"""
+                    
+                    enviar_mensaje(numero, respuesta_urgencia, config)
+                    guardar_conversacion(numero, texto, respuesta_urgencia, config)
+                    return  # Salir early para urgencias altas
+
         # IA normal
         IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
         respuesta = ""
@@ -2619,7 +2641,8 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+        
+        # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
             app.logger.info(f"📎 Procesando archivo enviado por {numero}")
             
@@ -2663,37 +2686,37 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
             return
         
-            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+        # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
         if responder_con_voz and not es_imagen:
-                # Intentar enviar respuesta de voz
-                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+            # Intentar enviar respuesta de voz
+            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+            
+            if audio_url_local:
+                # URL pública del audio (ajusta según tu configuración)
+                audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
                 
-                if audio_url_local:
-                    # URL pública del audio (ajusta según tu configuración)
-                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
-                    
-                    if enviar_mensaje_voz(numero, audio_url_publica, config):
-                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, config=config)
-                    else:
-                        # Fallback a texto
-                        enviar_mensaje(numero, respuesta, config)
-                        guardar_conversacion(numero, texto, respuesta, config=config)
+                if enviar_mensaje_voz(numero, audio_url_publica, config):
+                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                    guardar_conversacion(numero, texto, respuesta, config=config)
                 else:
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
                     guardar_conversacion(numero, texto, respuesta, config=config)
-        else:
-                # Respuesta normal de texto
+            else:
+                # Fallback a texto
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
-            
-            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+        else:
+            # Respuesta normal de texto
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config=config)
+        
+        # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
-                app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-                resumen = resumen_rafa(numero, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
+            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+            resumen = resumen_rafa(numero, config)
+            enviar_alerta_humana(numero, texto, resumen, config)
         
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
@@ -2706,6 +2729,94 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
+# Agregar función para análisis de efectividad de las notificaciones
+@app.route('/analytics/notificaciones')
+def analytics_notificaciones(config=None):
+    """Endpoint para analizar la efectividad de las notificaciones IA"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Estadísticas generales
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_notificaciones,
+                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'alta')) * 100 as porcentaje_alta_urgencia,
+                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'media')) * 100 as porcentaje_media_urgencia,
+                DATE(timestamp) as fecha,
+                COUNT(DISTINCT numero) as clientes_unicos
+            FROM notificaciones_ia 
+            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+            GROUP BY DATE(timestamp)
+            ORDER BY fecha DESC
+        ''')
+        
+        stats = cursor.fetchall()
+        
+        # Tipos de consulta más comunes
+        cursor.execute('''
+            SELECT 
+                JSON_EXTRACT(evaluacion_ia, '$.tipo_consulta') as tipo_consulta,
+                COUNT(*) as cantidad
+            FROM notificaciones_ia 
+            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            GROUP BY JSON_EXTRACT(evaluacion_ia, '$.tipo_consulta')
+            ORDER BY cantidad DESC
+            LIMIT 10
+        ''')
+        
+        tipos_consulta = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return render_template('analytics_notificaciones.html',
+                            stats=stats,
+                            tipos_consulta=tipos_consulta,
+                            config=config)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en analytics: {e}")
+        return jsonify({'error': str(e)}), 500
+
+# Función para ajustar automáticamente los criterios de notificación
+def ajustar_umbral_notificaciones(config=None):
+    """
+    Ajusta automáticamente los umbrales de notificación basándose en datos históricos
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Analizar efectividad de notificaciones pasadas
+        cursor.execute('''
+            SELECT 
+                AVG(JSON_EXTRACT(evaluacion_ia, '$.nivel_urgencia' = 'alta')) as tasa_alta_urgencia,
+                COUNT(*) as total
+            FROM notificaciones_ia 
+            WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+        ''')
+        
+        stats = cursor.fetchone()
+        
+        # Si hay muchas notificaciones de alta urgencia, ajustar criterios
+        if stats and stats['total'] > 10:
+            tasa_alta = stats['tasa_alta_urgencia'] or 0
+            if tasa_alta > 0.7:  # 70% de notificaciones son alta urgencia
+                app.logger.info("🔧 Ajustando criterios: Demasiadas notificaciones de alta urgencia")
+                # En futuras versiones, podríamos ajustar el prompt automáticamente
+            
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error ajustando umbrales: {e}")
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -4285,6 +4396,109 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     # Si no se detecta información relevante, pedir clarificación
     return "No entendí bien esa información. ¿Podrías ser más específico sobre tu pedido?"
 
+def evaluar_necesidad_notificacion_administrador(mensaje, numero, historial=None, config=None):
+    """
+    Evalúa inteligentemente si es necesario notificar al administrador
+    basándose en el contexto y la intención del usuario
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    if historial is None:
+        historial = obtener_historial(numero, limite=5, config=config)
+    
+    # Construir contexto del historial
+    contexto_historial = ""
+    for i, msg in enumerate(historial[-3:]):  # Últimos 3 mensajes
+        if msg['mensaje']:
+            contexto_historial += f"Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            contexto_historial += f"Asistente: {msg['respuesta']}\n"
+    
+    try:
+        prompt_evaluacion = f"""
+        Eres un asistente inteligente que evalúa cuándo es necesario notificar a un administrador humano.
+        
+        CONTEXTO DE LA CONVERSACIÓN:
+        {contexto_historial}
+        
+        MENSAJE ACTUAL DEL USUARIO:
+        "{mensaje}"
+        
+        Analiza si este mensaje requiere intervención humana basándote en estos criterios:
+        
+        1. **Solicitud explícita de humano**: ¿El usuario pide específicamente hablar con una persona?
+        2. **Complejidad técnica**: ¿La consulta es demasiado compleja para un bot?
+        3. **Urgencia**: ¿Hay indicios de urgencia o frustración?
+        4. **Tipo de servicio**: ¿Es un servicio que requiere coordinación humana?
+        5. **Intención de compra/contratación**: ¿El usuario muestra intención real de adquirir servicios?
+        
+        Responde SOLO con un JSON en este formato:
+        {{
+            "necesita_notificacion": true/false,
+            "nivel_urgencia": "baja/media/alta",
+            "razon": "explicación breve de por qué se necesita o no la notificación",
+            "tipo_consulta": "cita/consulta_tecnica/urgencia/etc",
+            "resumen_para_administrador": "resumen conciso para el admin"
+        }}
+        
+        Ejemplos donde SÍ notificar:
+        - Usuario dice: "Quiero agendar una cita para mañana a las 3pm"
+        - Usuario muestra frustración: "No entiendo, necesito hablar con alguien"
+        - Consulta compleja: "Necesito un sistema completo con estas especificaciones..."
+        - Intención clara de compra: "¿Cuánto cuesta y cómo contrato el servicio?"
+        
+        Ejemplos donde NO notificar:
+        - Saludos simples: "Hola, ¿cómo están?"
+        - Consultas básicas: "¿Qué servicios ofrecen?"
+        - Preguntas generales: "¿Tienen página web?"
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt_evaluacion}],
+            "temperature": 0.3,
+            "max_tokens": 500
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            evaluacion = json.loads(json_match.group())
+            app.logger.info(f"🧠 Evaluación IA para notificación: {json.dumps(evaluacion, indent=2)}")
+            return evaluacion
+        else:
+            # Fallback conservador - no notificar si no puede determinar
+            return {
+                "necesita_notificacion": False,
+                "nivel_urgencia": "baja",
+                "razon": "No se pudo analizar la intención",
+                "tipo_consulta": "indeterminado",
+                "resumen_para_administrador": ""
+            }
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error en evaluación IA de notificación: {e}")
+        # En caso de error, no notificar para evitar spam
+        return {
+            "necesita_notificacion": False,
+            "nivel_urgencia": "baja",
+            "razon": "Error en el análisis",
+            "tipo_consulta": "error",
+            "resumen_para_administrador": ""
+        }
+
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios"""
     datos_requeridos = ['platillos', 'direccion']
@@ -4301,6 +4515,73 @@ def verificar_pedido_completo(datos_obtenidos):
         return False
     
     return True
+
+def enviar_notificacion_inteligente_administrador(numero, mensaje, evaluacion_ia, config=None):
+    """
+    Envía una notificación inteligente al administrador basada en la evaluación de la IA
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Obtener información del contacto para enriquecer la notificación
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT nombre, alias FROM contactos WHERE numero_telefono = %s",
+            (numero,)
+        )
+        contacto = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        nombre_contacto = contacto.get('alias') or contacto.get('nombre') or numero
+        
+        # Determinar emoji según urgencia
+        emoji_urgencia = {
+            "alta": "🚨",
+            "media": "⚠️",
+            "baja": "ℹ️"
+        }.get(evaluacion_ia.get('nivel_urgencia', 'baja'), 'ℹ️')
+        
+        # Construir mensaje de notificación inteligente
+        mensaje_notificacion = f"""
+{emoji_urgencia} *NOTIFICACIÓN INTELIGENTE - {evaluacion_ia['tipo_consulta'].upper()}*
+
+👤 *Cliente:* {nombre_contacto}
+📞 *Número:* {numero}
+🎯 *Tipo:* {evaluacion_ia['tipo_consulta']}
+⚡ *Urgencia:* {evaluacion_ia['nivel_urgencia']}
+
+💬 *Mensaje del cliente:*
+"{mensaje}"
+
+📋 *Análisis de la IA:*
+{evaluacion_ia['razon']}
+
+🔍 *Resumen para acción:*
+{evaluacion_ia['resumen_para_administrador']}
+
+🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+#️⃣ *Contexto adicional:*
+- Historial reciente: {len(obtener_historial(numero, limite=3, config=config))} mensajes
+- Cliente conocido: {'Sí' if contacto.get('nombre') else 'No'}
+- Requiere seguimiento: {'Sí' if evaluacion_ia['nivel_urgencia'] in ['alta', 'media'] else 'Quizás'}
+        """.strip()
+        
+        # Enviar a ambos números de administración
+        enviar_mensaje(ALERT_NUMBER, mensaje_notificacion, config)
+        enviar_mensaje('5214493432744', mensaje_notificacion, config)
+        
+        app.logger.info(f"✅ Notificación inteligente enviada para {numero} - Tipo: {evaluacion_ia['tipo_consulta']}")
+        
+        # Guardar registro de la notificación
+        guardar_registro_notificacion(numero, mensaje, evaluacion_ia, config)
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando notificación inteligente: {e}")
+
 
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes"""
@@ -4648,6 +4929,44 @@ def guardar_alias_contacto(numero, config=None):
         return '', 204
 
     # ——— Páginas legales —
+
+def guardar_registro_notificacion(numero, mensaje, evaluacion_ia, config=None):
+    """
+    Guarda un registro de las notificaciones enviadas para análisis futuro
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificaciones_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20),
+                mensaje TEXT,
+                evaluacion_ia JSON,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_numero (numero),
+                INDEX idx_timestamp (timestamp)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        
+        cursor.execute('''
+            INSERT INTO notificaciones_ia (numero, mensaje, evaluacion_ia)
+            VALUES (%s, %s, %s)
+        ''', (numero, mensaje, json.dumps(evaluacion_ia)))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"📊 Registro de notificación guardado para {numero}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando registro de notificación: {e}")
+
 
 @app.route('/proxy-audio/<path:audio_url>')
 def proxy_audio(audio_url):
