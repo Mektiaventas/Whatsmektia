@@ -1,0 +1,48 @@
+﻿<!-- templates/analytics_notificaciones.html -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Analytics - Notificaciones IA</title>
+    <style>
+        .urgencia-alta {
+            background-color: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+
+        .urgencia-media {
+            background-color: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+
+        .urgencia-baja {
+            background-color: #e8f5e8;
+            border-left: 4px solid #4caf50;
+        }
+    </style>
+</head>
+<body>
+    <h1>📊 Analytics de Notificaciones IA</h1>
+
+    <div class="stats">
+        <h2>Estadísticas últimos 7 días</h2>
+        <table border="1">
+            <tr>
+                <th>Fecha</th>
+                <th>Total Notificaciones</th>
+                <th>Alta Urgencia</th>
+                <th>Media Urgencia</th>
+                <th>Clientes Únicos</th>
+            </tr>
+            {% for stat in stats %}
+            <tr>
+                <td>{{ stat.fecha }}</td>
+                <td>{{ stat.total_notificaciones }}</td>
+                <td>{{ "%.1f"|format(stat.porcentaje_alta_urgencia) }}%</td>
+                <td>{{ "%.1f"|format(stat.porcentaje_media_urgencia) }}%</td>
+                <td>{{ stat.clientes_unicos }}</td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
+</body>
+</html>
