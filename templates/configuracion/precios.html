@@ -169,11 +169,11 @@
                         <label for="linea">Línea</label>
                         <select id="linea" name="linea" class="select">
                             <option value="">Seleccionar...</option>
-                            <option value="DIRECTIVA" {% if producto_edit and producto_edit.linea= ='DIRECTIVA' %}selected{% endif %}>DIRECTIVA</option>
-                            <option value="VISITA" {% if producto_edit and producto_edit.linea= ='VISITA' %}selected{% endif %}>VISITA</option>
-                            <option value="EJECUTIVA" {% if producto_edit and producto_edit.linea= ='EJECUTIVA' %}selected{% endif %}>EJECUTIVA</option>
-                            <option value="OPERATIVA" {% if producto_edit and producto_edit.linea= ='OPERATIVA' %}selected{% endif %}>OPERATIVA</option>
-                            <option value="PUPITRE" {% if producto_edit and producto_edit.linea= ='PUPITRE' %}selected{% endif %}>PUPITRE</option>
+                            <option value="DIRECTIVA" {% if producto_edit and producto_edit.linea =='DIRECTIVA' %}selected{% endif %}>DIRECTIVA</option>
+                            <option value="VISITA" {% if producto_edit and producto_edit.linea=='VISITA' %}selected{% endif %}>VISITA</option>
+                            <option value="EJECUTIVA" {% if producto_edit and producto_edit.linea=='EJECUTIVA' %}selected{% endif %}>EJECUTIVA</option>
+                            <option value="OPERATIVA" {% if producto_edit and producto_edit.linea=='OPERATIVA' %}selected{% endif %}>OPERATIVA</option>
+                            <option value="PUPITRE" {% if producto_edit and producto_edit.linea=='PUPITRE' %}selected{% endif %}>PUPITRE</option>
                         </select>
                     </div>
                 </div>
@@ -234,8 +234,8 @@
                         <label for="status_ws">Status WS</label>
                         <select id="status_ws" name="status_ws" class="select">
                             <option value="">Seleccionar...</option>
-                            <option value="Arriba" {% if producto_edit and producto_edit.status_ws= ='Arriba' %}selected{% endif %}>Arriba</option>
-                            <option value="descontinuada" {% if producto_edit and producto_edit.status_ws= ='descontinuada' %}selected{% endif %}>Descontinuada</option>
+                            <option value="Arriba" {% if producto_edit and producto_edit.status_ws=='Arriba' %}selected{% endif %}>Arriba</option>
+                            <option value="descontinuada" {% if producto_edit and producto_edit.status_ws=='descontinuada' %}selected{% endif %}>Descontinuada</option>
                         </select>
                     </div>
 
