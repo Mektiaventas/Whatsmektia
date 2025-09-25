@@ -3919,68 +3919,42 @@ def home():
     period = request.args.get('period', 'week')
     now    = datetime.now()
     start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-
-    # Estadísticas existentes - CON MANEJO DE None
+    # Detectar configuración basada en el host
+    period = request.args.get('period', 'week')
+    now = datetime.now()
+    conn = get_db_connection(config)  # ✅ Usar config
+    cursor = conn.cursor()
     cursor.execute(
-        "SELECT COUNT(DISTINCT numero) as count FROM conversaciones WHERE timestamp>= %s;",
+        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
         (start,)
     )
-    result = cursor.fetchone()
-    chat_counts = result['count'] if result and result['count'] is not None else 0
+    chat_counts = cursor.fetchone()[0]
 
-    # Total respondidas - CON MANEJO DE None
     cursor.execute(
-        "SELECT COUNT(*) as count FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
         (start,)
     )
-    result = cursor.fetchone()
-    total_responded = result['count'] if result and result['count'] is not None else 0
+    messages_per_chat = cursor.fetchall()
 
-    # 🟡 **CORRECCIÓN: Consulta para el GRÁFICO (TOP 10 números más activos)**
-    cursor.execute("""
-        SELECT numero, COUNT(*) as count 
-        FROM conversaciones 
-        WHERE timestamp>= %s 
-        GROUP BY numero 
-        ORDER BY count DESC 
-        LIMIT 10
-    """, (start,))
-    top_chats = cursor.fetchall()
-
-    # CONVERSACIONES RECIENTES
-    cursor.execute("""
-        SELECT 
-            c.numero,
-            COALESCE(cont.alias, cont.nombre, c.numero) as nombre_mostrado,
-            c.mensaje,
-            c.respuesta,
-            c.timestamp,
-            c.imagen_url,
-            c.es_imagen
-        FROM conversaciones c
-        LEFT JOIN contactos cont ON c.numero = cont.numero_telefono
-        ORDER BY c.timestamp DESC
-        LIMIT 20
-    """)
-    conversaciones_recientes = cursor.fetchall()
+    cursor.execute(
+        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+        (start,)
+    )
+    total_responded = cursor.fetchone()[0]
 
     cursor.close()
     conn.close()
 
-    # 🟡 **CORRECCIÓN: Datos para el gráfico (solo top 10)**
-    labels = [row['numero'] for row in top_chats] if top_chats else []
-    values = [row['count'] for row in top_chats] if top_chats else []
+    labels = [num for num,_ in messages_per_chat]
+    values = [cnt for _,cnt in messages_per_chat]
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
+        messages_per_chat=messages_per_chat,
         total_responded=total_responded,
         period=period,
-        labels=labels,           # 🟡 Estos van al gráfico
-        values=values,           # 🟡 Estos van al gráfico
-        conversaciones_recientes=conversaciones_recientes
+        labels=labels,
+        values=values
     )
 
 @app.route('/chats')
