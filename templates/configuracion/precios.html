@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}Configuración – Productos{% endblock %}
+{% block title %}Configuración – Precios{% endblock %}
 
 {% block content %}
 <div class="config-header">
-    <h2>Configuración: Catálogo de Productos</h2>
+    <h2>Configuración: Precios</h2>
     {% if guardado %}
     <div class="alert success">¡Guardado correctamente!</div>
     {% endif %}
@@ -22,41 +22,74 @@
     {% endfor %}
 </ul>
 
-<!-- Sección de subida de Excel -->
+<!-- Sección de subida de PDF -->
 <div class="card mb-6">
     <div class="card-header bg-success text-white">
-        <h3>📊 Importar Productos desde Excel</h3>
+        <h3>📄 Importar Servicios desde PDF</h3>
     </div>
     <div class="card-body">
         <div class="grid grid-cols-2 gap-6">
             <div>
-                <form action="{{ url_for('subir_excel_productos') }}" method="POST" enctype="multipart/form-data">
+                <form action="{{ url_for('subir_pdf_servicios') }}" method="POST" enctype="multipart/form-data">
                     <div class="form-group">
-                        <label for="excel_file" class="block text-sm font-medium mb-2">Subir catálogo en Excel:</label>
-                        <input type="file" name="excel_file" id="excel_file"
-                               accept=".xlsx,.xls,.csv" required
+                        <label for="pdf_file" class="block text-sm font-medium mb-2">Subir catálogo en PDF:</label>
+                        <input type="file" name="pdf_file" id="pdf_file"
+                               accept=".pdf,.txt, .xlsx" required
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                        <small class="text-muted">Formatos aceptados: XLSX, XLS, CSV. Máx. 10MB</small>
+                        <small class="text-muted">Formatos aceptados: PDF, TXT. Máx. 10MB</small>
                     </div>
                     <button type="submit" class="btn btn-success mt-3">
-                        🚀 Procesar Excel Automáticamente
+                        🚀 Procesar PDF Automáticamente
                     </button>
                 </form>
             </div>
 
             <div class="bg-blue-50 p-4 rounded-lg">
-                <h4 class="font-semibold mb-2">💡 Estructura esperada:</h4>
+                <h4 class="font-semibold mb-2">💡 ¿Cómo funciona?</h4>
                 <ul class="text-sm space-y-1">
-                    <li>• SKU (Código único)</li>
-                    <li>• CATEGORIA (Línea de Sillas, Mesas, etc.)</li>
-                    <li>• SUBCATEGORIA (OFFIHO, ECONOSILLAS)</li>
-                    <li>• LINEA (DIRECTIVA, VISITA, EJECUTIVA)</li>
-                    <li>• MODELO (Nombre del modelo)</li>
-                    <li>• DESCRIPCION (Detalles del producto)</li>
-                    <li>• MEDIDAS (Dimensiones)</li>
-                    <li>• COSTO (Precio base)</li>
-                    <li>• PRECIO MAYOREO/MENUDEO</li>
+                    <li>• Sube tu catálogo de servicios en PDF</li>
+                    <li>• La IA analizará y extraerá automáticamente</li>
+                    <li>• Los servicios se guardarán en la base de datos</li>
+                    <li>• La IA los usará para responder consultas</li>
                 </ul>
+
+                <h4 class="font-semibold mt-3 mb-2">📋 Para mejores resultados:</h4>
+                <ul class="text-sm space-y-1">
+                    <li>• PDF con texto editable (no escaneado)</li>
+                    <li>• Estructura clara de servicios y precios</li>
+                    <li>• Nombres específicos de servicios/platillos</li>
+                    <li>• Precios claramente identificados</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Sección de estructura dinámica -->
+<div class="card mt-6">
+    <div class="card-header bg-info text-white">
+        <h3>🏗️ Estructura de la Tabla de Precios</h3>
+    </div>
+    <div class="card-body">
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <h4 class="font-semibold mb-2">Columnas Base (Fijas):</h4>
+                <ul class="text-sm space-y-1">
+                    <li>• id (Primary Key)</li>
+                    <li>• servicio (Unique)</li>
+                    <li>• descripcion</li>
+                    <li>• precio</li>
+                    <li>• moneda</li>
+                </ul>
+            </div>
+            <div>
+                <h4 class="font-semibold mb-2">Columnas Dinámicas:</h4>
+                <div id="columnas-dinamicas">
+                    <p class="text-sm text-gray-600">Se agregarán automáticamente cuando subas archivos con información adicional.</p>
+                </div>
+                <button type="button" onclick="cargarEstructura()" class="btn small primary mt-2">
+                    🔄 Actualizar Estructura
+                </button>
             </div>
         </div>
     </div>
@@ -65,52 +98,42 @@
 <!-- Contenido principal: dos columnas -->
 <div class="config-content grid grid-cols-2 gap-6">
 
-    <!-- Tarjeta: Lista de productos -->
+    <!-- Tarjeta: Lista de precios -->
     <div class="card">
         <div class="card-header">
-            <h3>Productos ({{ productos|length }} registros)</h3>
+            <h3>Servicios y Tarifas ({{ precios|length }} registros)</h3>
         </div>
         <div class="card-body">
-            {% if productos %}
-            <div class="table-responsive" style="max-height: 600px; overflow-y: auto;">
+            {% if precios %}
+            <div class="table-responsive">
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>SKU</th>
-                            <th>Categoría</th>
-                            <th>Línea</th>
-                            <th>Modelo</th>
-                            <th>Costo</th>
-                            <th>Mayoreo</th>
-                            <th>Menudeo</th>
-                            <th>Status</th>
+                            <th>ID</th>
+                            <th>Servicio</th>
+                            <th>Descripción</th>
+                            <th>Precio</th>
+                            <th>Moneda</th>
                             <th>Acciones</th>
                         </tr>
                     </thead>
                     <tbody>
-                        {% for producto in productos %}
+                        {% for precio in precios %}
                         <tr>
-                            <td class="font-mono text-sm">{{ producto.sku }}</td>
-                            <td>{{ producto.categoria }}</td>
-                            <td>{{ producto.linea }}</td>
-                            <td class="font-medium">{{ producto.modelo }}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(producto.costo) }}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(producto.precio_mayoreo) }}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(producto.precio_menudeo) }}</td>
-                            <td>
-                                <span class="badge {% if producto.status_ws == 'Arriba' %}success{% else %}warning{% endif %}">
-                                    {{ producto.status_ws or '-' }}
-                                </span>
-                            </td>
+                            <td>{{ precio.id }}</td>
+                            <td class="font-medium">{{ precio.servicio }}</td>
+                            <td>{{ precio.descripcion or '-' }}</td>
+                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) }}</td>
+                            <td>{{ precio.moneda }}</td>
                             <td>
                                 <div class="flex space-x-2">
-                                    <a href="{{ url_for('configuracion_producto_editar', pid=producto.id) }}"
+                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
                                        class="btn small primary">Editar</a>
-                                    <form action="{{ url_for('configuracion_producto_borrar', pid=producto.id) }}"
+                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
                                           method="post" class="inline-form">
                                         <button type="submit"
                                                 class="btn small danger"
-                                                onclick="return confirm('¿Eliminar {{ producto.modelo }}?');">
+                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
                                             Borrar
                                         </button>
                                     </form>
@@ -123,8 +146,8 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
-                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar productos manualmente o sube un Excel arriba.</p>
+                <div class="text-gray-500 text-lg mb-2">📝 No hay servicios registrados</div>
+                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar servicios manualmente o sube un PDF arriba.</p>
             </div>
             {% endif %}
         </div>
@@ -133,123 +156,51 @@
     <!-- Tarjeta: Formulario alta/edición -->
     <div class="card">
         <div class="card-header">
-            <h3>{{ producto_edit and '✏️ Editar Producto' or '➕ Agregar Producto' }}</h3>
+            <h3>{{ precio_edit and '✏️ Editar Servicio' or '➕ Agregar Servicio' }}</h3>
         </div>
         <div class="card-body">
-            <form action="{{ url_for('configuracion_producto_guardar') }}" method="post">
-                {% if producto_edit %}
-                <input type="hidden" name="id" value="{{ producto_edit.id }}">
+            <form action="{{ url_for('configuracion_precio_guardar') }}" method="post">
+                {% if precio_edit %}
+                <input type="hidden" name="id" value="{{ precio_edit.id }}">
                 {% endif %}
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="form-group">
-                        <label for="sku">SKU *</label>
-                        <input type="text" id="sku" name="sku" class="input" required
-                               value="{{ producto_edit.sku if producto_edit else '' }}"
-                               placeholder="Ej: OFH-D1000">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="categoria">Categoría *</label>
-                        <input type="text" id="categoria" name="categoria" class="input" required
-                               value="{{ producto_edit.categoria if producto_edit else '' }}"
-                               placeholder="Ej: LINEA DE SILLAS">
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="form-group">
-                        <label for="subcategoria">Subcategoría</label>
-                        <input type="text" id="subcategoria" name="subcategoria" class="input"
-                               value="{{ producto_edit.subcategoria if producto_edit else '' }}"
-                               placeholder="Ej: OFFIHO">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="linea">Línea</label>
-                        <select id="linea" name="linea" class="select">
-                            <option value="">Seleccionar...</option>
-                            <option value="DIRECTIVA" {% if producto_edit and producto_edit.linea == 'DIRECTIVA' %}selected{% endif %}>DIRECTIVA</option>
-                            <option value="VISITA" {% if producto_edit and producto_edit.linea == 'VISITA' %}selected{% endif %}>VISITA</option>
-                            <option value="EJECUTIVA" {% if producto_edit and producto_edit.linea == 'EJECUTIVA' %}selected{% endif %}>EJECUTIVA</option>
-                            <option value="OPERATIVA" {% if producto_edit and producto_edit.linea == 'OPERATIVA' %}selected{% endif %}>OPERATIVA</option>
-                            <option value="PUPITRE" {% if producto_edit and producto_edit.linea == 'PUPITRE' %}selected{% endif %}>PUPITRE</option>
-                        </select>
-                    </div>
-                </div>
-
                 <div class="form-group">
-                    <label for="modelo">Modelo *</label>
-                    <input type="text" id="modelo" name="modelo" class="input" required
-                           value="{{ producto_edit.modelo if producto_edit else '' }}"
-                           placeholder="Ej: PAOLI 505">
+                    <label for="servicio">Servicio *</label>
+                    <input type="text" id="servicio" name="servicio" class="input" required
+                           value="{{ precio_edit.servicio if precio_edit else '' }}"
+                           placeholder="Ej: Página Web Corporativa">
                 </div>
 
                 <div class="form-group">
                     <label for="descripcion">Descripción</label>
-                    <textarea id="descripcion" name="descripcion" class="textarea" rows="3"
-                              placeholder="Descripción detallada del producto">{{ producto_edit.descripcion if producto_edit else '' }}</textarea>
+                    <textarea id="descripcion" name="descripcion" class="textarea" rows="2"
+                              placeholder="Ej: Diseño responsive, 5 secciones, SEO básico">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
                 </div>
 
                 <div class="form-group">
-                    <label for="medidas">Medidas</label>
-                    <textarea id="medidas" name="medidas" class="textarea" rows="2"
-                              placeholder="Dimensiones del producto">{{ producto_edit.medidas if producto_edit else '' }}</textarea>
-                </div>
-
-                <div class="grid grid-cols-3 gap-4">
-                    <div class="form-group">
-                        <label for="costo">Costo *</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
-                            <input type="number" step="0.01" min="0" id="costo" name="costo" class="input pl-8" required
-                                   value="{{ producto_edit.costo if producto_edit else '' }}"
-                                   placeholder="0.00">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="precio_mayoreo">Precio Mayoreo</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
-                            <input type="number" step="0.01" min="0" id="precio_mayoreo" name="precio_mayoreo" class="input pl-8"
-                                   value="{{ producto_edit.precio_mayoreo if producto_edit else '' }}"
-                                   placeholder="0.00">
-                        </div>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="precio_menudeo">Precio Menudeo</label>
-                        <div class="relative">
-                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
-                            <input type="number" step="0.01" min="0" id="precio_menudeo" name="precio_menudeo" class="input pl-8"
-                                   value="{{ producto_edit.precio_menudeo if producto_edit else '' }}"
-                                   placeholder="0.00">
-                        </div>
+                    <label for="precio">Precio *</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                        <input type="number" step="0.01" min="0" id="precio" name="precio" class="input pl-8" required
+                               value="{{ precio_edit.precio if precio_edit else '' }}"
+                               placeholder="0.00">
                     </div>
                 </div>
 
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="form-group">
-                        <label for="status_ws">Status WS</label>
-                        <select id="status_ws" name="status_ws" class="select">
-                            <option value="">Seleccionar...</option>
-                            <option value="Arriba" {% if producto_edit and producto_edit.status_ws == 'Arriba' %}selected{% endif %}>Arriba</option>
-                            <option value="descontinuada" {% if producto_edit and producto_edit.status_ws == 'descontinuada' %}selected{% endif %}>Descontinuada</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="catalogo">Catálogo</label>
-                        <input type="text" id="catalogo" name="catalogo" class="input"
-                               value="{{ producto_edit.catalogo if producto_edit else '' }}"
-                               placeholder="Catálogo principal">
-                    </div>
+                <div class="form-group">
+                    <label for="moneda">Moneda *</label>
+                    <select id="moneda" name="moneda" class="select" required>
+                        {% for m in ['MXN','USD','EUR'] %}
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
+                            {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
+                        </option>
+                        {% endfor %}
+                    </select>
                 </div>
 
                 <div class="form-actions flex justify-end gap-2">
                     <button type="submit" class="btn primary">
-                        {{ producto_edit and '💾 Actualizar' or '💾 Guardar' }}
+                        {{ precio_edit and '💾 Actualizar' or '💾 Guardar' }}
                     </button>
                     <a href="{{ url_for('configuracion_precios') }}" class="btn secondary">
                         ↩️ Cancelar
@@ -276,24 +227,80 @@
 {% endblock %}
 
 <style>
-    .badge {
-        padding: 4px 8px;
-        border-radius: 12px;
-        font-size: 12px;
+    .alert {
+        padding: 12px 16px;
+        border-radius: 6px;
+        margin: 10px 0;
         font-weight: 500;
     }
-    
-    .badge.success {
-        background: #d4edda;
-        color: #155724;
+
+        .alert.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .alert.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .alert.warning {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+    .btn-success {
+        background: #28a745;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
     }
-    
-    .badge.warning {
-        background: #fff3cd;
-        color: #856404;
+
+        .btn-success:hover {
+            background: #218838;
+        }
+
+    .bg-success {
+        background: #28a745 !important;
     }
-    
-    .font-mono {
-        font-family: 'Courier New', monospace;
+
+    .bg-blue-50 {
+        background: #eff6ff;
+    }
+
+    .bg-info {
+        background: #17a2b8 !important;
     }
 </style>
+
+<script>
+    function cargarEstructura() {
+        fetch('/configuracion/precios/estructura')
+            .then(response => response.json())
+            .then(data => {
+                const contenedor = document.getElementById('columnas-dinamicas');
+                const columnasDinamicas = data.estructura.filter(col =>
+                    !['id', 'servicio', 'descripcion', 'precio', 'moneda'].includes(col.Field)
+                );
+
+                if (columnasDinamicas.length > 0) {
+                    let html = '<ul class="text-sm space-y-1">';
+                    columnasDinamicas.forEach(col => {
+                        html += `<li>• ${col.Field} (${col.Type})</li>`;
+                    });
+                    html += '</ul>';
+                    contenedor.innerHTML = html;
+                } else {
+                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas aún.</p>';
+                }
+            });
+    }
+
+    // Cargar estructura al abrir la página
+    document.addEventListener('DOMContentLoaded', cargarEstructura);
+</script>
