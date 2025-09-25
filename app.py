@@ -111,7 +111,7 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', '.xlsx'}
+ALLOWED_EXTENSIONS = {'pdf', 'txt', 'docx', 'xlsx'}
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
