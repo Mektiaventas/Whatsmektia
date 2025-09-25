@@ -1,9 +1,9 @@
 {% extends 'base.html' %}
-{% block title %}Configuración – Precios{% endblock %}
+{% block title %}Configuración – Productos y Precios{% endblock %}
 
 {% block content %}
 <div class="config-header">
-    <h2>Configuración: Precios</h2>
+    <h2>Configuración: Productos y Precios</h2>
     {% if guardado %}
     <div class="alert success">¡Guardado correctamente!</div>
     {% endif %}
@@ -25,21 +25,21 @@
 <!-- Sección de subida de PDF -->
 <div class="card mb-6">
     <div class="card-header bg-success text-white">
-        <h3>📄 Importar Servicios desde PDF</h3>
+        <h3>📄 Importar Productos desde PDF/Excel</h3>
     </div>
     <div class="card-body">
         <div class="grid grid-cols-2 gap-6">
             <div>
                 <form action="{{ url_for('subir_pdf_servicios') }}" method="POST" enctype="multipart/form-data">
                     <div class="form-group">
-                        <label for="pdf_file" class="block text-sm font-medium mb-2">Subir catálogo en PDF:</label>
+                        <label for="pdf_file" class="block text-sm font-medium mb-2">Subir catálogo en PDF/Excel:</label>
                         <input type="file" name="pdf_file" id="pdf_file"
-                               accept=".pdf,.txt, .xlsx" required
+                               accept=".pdf,.txt,.xlsx,.xls" required
                                class="w-full px-3 py-2 border border-gray-300 rounded-lg">
-                        <small class="text-muted">Formatos aceptados: PDF, TXT. Máx. 10MB</small>
+                        <small class="text-muted">Formatos aceptados: PDF, TXT, XLSX. Máx. 10MB</small>
                     </div>
                     <button type="submit" class="btn btn-success mt-3">
-                        🚀 Procesar PDF Automáticamente
+                        🚀 Procesar Catálogo Automáticamente
                     </button>
                 </form>
             </div>
@@ -47,18 +47,18 @@
             <div class="bg-blue-50 p-4 rounded-lg">
                 <h4 class="font-semibold mb-2">💡 ¿Cómo funciona?</h4>
                 <ul class="text-sm space-y-1">
-                    <li>• Sube tu catálogo de servicios en PDF</li>
+                    <li>• Sube tu catálogo de productos en PDF/Excel</li>
                     <li>• La IA analizará y extraerá automáticamente</li>
-                    <li>• Los servicios se guardarán en la base de datos</li>
+                    <li>• Los productos se guardarán en la base de datos</li>
                     <li>• La IA los usará para responder consultas</li>
                 </ul>
 
                 <h4 class="font-semibold mt-3 mb-2">📋 Para mejores resultados:</h4>
                 <ul class="text-sm space-y-1">
-                    <li>• PDF con texto editable (no escaneado)</li>
-                    <li>• Estructura clara de servicios y precios</li>
-                    <li>• Nombres específicos de servicios/platillos</li>
-                    <li>• Precios claramente identificados</li>
+                    <li>• Archivo con SKU, categorías y precios claros</li>
+                    <li>• Estructura clara de productos y categorías</li>
+                    <li>• Precios de mayoreo y menudeo identificados</li>
+                    <li>• Información completa de medidas y modelos</li>
                 </ul>
             </div>
         </div>
@@ -68,7 +68,7 @@
 <!-- Sección de estructura dinámica -->
 <div class="card mt-6">
     <div class="card-header bg-info text-white">
-        <h3>🏗️ Estructura de la Tabla de Precios</h3>
+        <h3>🏗️ Estructura de la Tabla de Productos</h3>
     </div>
     <div class="card-body">
         <div class="grid grid-cols-2 gap-4">
@@ -76,16 +76,30 @@
                 <h4 class="font-semibold mb-2">Columnas Base (Fijas):</h4>
                 <ul class="text-sm space-y-1">
                     <li>• id (Primary Key)</li>
-                    <li>• servicio (Unique)</li>
+                    <li>• sku (Unique)</li>
+                    <li>• servicio → producto</li>
                     <li>• descripcion</li>
-                    <li>• precio</li>
+                    <li>• precio → costo</li>
+                    <li>• precio_mayoreo</li>
+                    <li>• precio_menudeo</li>
                     <li>• moneda</li>
                 </ul>
             </div>
             <div>
-                <h4 class="font-semibold mb-2">Columnas Dinámicas:</h4>
+                <h4 class="font-semibold mb-2">Nuevas Columnas:</h4>
                 <div id="columnas-dinamicas">
-                    <p class="text-sm text-gray-600">Se agregarán automáticamente cuando subas archivos con información adicional.</p>
+                    <ul class="text-sm space-y-1">
+                        <li>• categoria</li>
+                        <li>• subcategoria</li>
+                        <li>• linea</li>
+                        <li>• modelo</li>
+                        <li>• medidas</li>
+                        <li>• imagen</li>
+                        <li>• status_ws</li>
+                        <li>• catalogo</li>
+                        <li>• catalogo2</li>
+                        <li>• catalogo3</li>
+                    </ul>
                 </div>
                 <button type="button" onclick="cargarEstructura()" class="btn small primary mt-2">
                     🔄 Actualizar Estructura
@@ -98,10 +112,10 @@
 <!-- Contenido principal: dos columnas -->
 <div class="config-content grid grid-cols-2 gap-6">
 
-    <!-- Tarjeta: Lista de precios -->
+    <!-- Tarjeta: Lista de productos -->
     <div class="card">
         <div class="card-header">
-            <h3>Servicios y Tarifas ({{ precios|length }} registros)</h3>
+            <h3>Productos y Precios ({{ precios|length }} registros)</h3>
         </div>
         <div class="card-body">
             {% if precios %}
@@ -109,10 +123,12 @@
                 <table class="table">
                     <thead>
                         <tr>
-                            <th>ID</th>
-                            <th>Servicio</th>
-                            <th>Descripción</th>
-                            <th>Precio</th>
+                            <th>SKU</th>
+                            <th>Producto</th>
+                            <th>Categoría</th>
+                            <th>Costo</th>
+                            <th>Mayoreo</th>
+                            <th>Menudeo</th>
                             <th>Moneda</th>
                             <th>Acciones</th>
                         </tr>
@@ -120,10 +136,12 @@
                     <tbody>
                         {% for precio in precios %}
                         <tr>
-                            <td>{{ precio.id }}</td>
+                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
                             <td class="font-medium">{{ precio.servicio }}</td>
-                            <td>{{ precio.descripcion or '-' }}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) }}</td>
+                            <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
+                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) if precio.precio else '-' }}</td>
+                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                             <td>{{ precio.moneda }}</td>
                             <td>
                                 <div class="flex space-x-2">
@@ -146,8 +164,8 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                <div class="text-gray-500 text-lg mb-2">📝 No hay servicios registrados</div>
-                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar servicios manualmente o sube un PDF arriba.</p>
+                <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
+                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar productos manualmente o sube un archivo arriba.</p>
             </div>
             {% endif %}
         </div>
@@ -156,46 +174,127 @@
     <!-- Tarjeta: Formulario alta/edición -->
     <div class="card">
         <div class="card-header">
-            <h3>{{ precio_edit and '✏️ Editar Servicio' or '➕ Agregar Servicio' }}</h3>
+            <h3>{{ precio_edit and '✏️ Editar Producto' or '➕ Agregar Producto' }}</h3>
         </div>
         <div class="card-body">
-            <form action="{{ url_for('configuracion_precio_guardar') }}" method="post">
+            <form action="{{ url_for('configuracion_precio_guardar') }}" method="post" enctype="multipart/form-data">
                 {% if precio_edit %}
                 <input type="hidden" name="id" value="{{ precio_edit.id }}">
                 {% endif %}
 
-                <div class="form-group">
-                    <label for="servicio">Servicio *</label>
-                    <input type="text" id="servicio" name="servicio" class="input" required
-                           value="{{ precio_edit.servicio if precio_edit else '' }}"
-                           placeholder="Ej: Página Web Corporativa">
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-group">
+                        <label for="sku">SKU *</label>
+                        <input type="text" id="sku" name="sku" class="input" required
+                               value="{{ precio_edit.sku if precio_edit else '' }}"
+                               placeholder="Ej: PROD-001">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="servicio">Producto *</label>
+                        <input type="text" id="servicio" name="servicio" class="input" required
+                               value="{{ precio_edit.servicio if precio_edit else '' }}"
+                               placeholder="Ej: Laptop Gaming">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="form-group">
+                        <label for="categoria">Categoría</label>
+                        <input type="text" id="categoria" name="categoria" class="input"
+                               value="{{ precio_edit.categoria if precio_edit else '' }}"
+                               placeholder="Ej: Electrónicos">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="subcategoria">Subcategoría</label>
+                        <input type="text" id="subcategoria" name="subcategoria" class="input"
+                               value="{{ precio_edit.subcategoria if precio_edit else '' }}"
+                               placeholder="Ej: Computadoras">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="linea">Línea</label>
+                        <input type="text" id="linea" name="linea" class="input"
+                               value="{{ precio_edit.linea if precio_edit else '' }}"
+                               placeholder="Ej: Gaming">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-group">
+                        <label for="modelo">Modelo</label>
+                        <input type="text" id="modelo" name="modelo" class="input"
+                               value="{{ precio_edit.modelo if precio_edit else '' }}"
+                               placeholder="Ej: XPS-15">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="medidas">Medidas</label>
+                        <input type="text" id="medidas" name="medidas" class="input"
+                               value="{{ precio_edit.medidas if precio_edit else '' }}"
+                               placeholder="Ej: 15.6 pulgadas">
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <label for="descripcion">Descripción</label>
                     <textarea id="descripcion" name="descripcion" class="textarea" rows="2"
-                              placeholder="Ej: Diseño responsive, 5 secciones, SEO básico">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
+                              placeholder="Ej: Laptop para gaming con RTX 4060, 16GB RAM, 1TB SSD">{{ precio_edit.descripcion if precio_edit else '' }}</textarea>
                 </div>
 
-                <div class="form-group">
-                    <label for="precio">Precio *</label>
-                    <div class="relative">
-                        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
-                        <input type="number" step="0.01" min="0" id="precio" name="precio" class="input pl-8" required
-                               value="{{ precio_edit.precio if precio_edit else '' }}"
-                               placeholder="0.00">
+                <div class="grid grid-cols-3 gap-4">
+                    <div class="form-group">
+                        <label for="precio">Costo *</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                            <input type="number" step="0.01" min="0" id="precio" name="precio" class="input pl-8" required
+                                   value="{{ precio_edit.precio if precio_edit else '' }}"
+                                   placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="precio_mayoreo">Precio Mayoreo</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                            <input type="number" step="0.01" min="0" id="precio_mayoreo" name="precio_mayoreo" class="input pl-8"
+                                   value="{{ precio_edit.precio_mayoreo if precio_edit else '' }}"
+                                   placeholder="0.00">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="precio_menudeo">Precio Menudeo</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                            <input type="number" step="0.01" min="0" id="precio_menudeo" name="precio_menudeo" class="input pl-8"
+                                   value="{{ precio_edit.precio_menudeo if precio_edit else '' }}"
+                                   placeholder="0.00">
+                        </div>
                     </div>
                 </div>
 
-                <div class="form-group">
-                    <label for="moneda">Moneda *</label>
-                    <select id="moneda" name="moneda" class="select" required>
-                        {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
-                            {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
-                        </option>
-                        {% endfor %}
-                    </select>
+                <div class="grid grid-cols-2 gap-4">
+                    <div class="form-group">
+                        <label for="moneda">Moneda *</label>
+                        <select id="moneda" name="moneda" class="select" required>
+                            {% for m in ['MXN','USD','EUR'] %}
+                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
+                                {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="imagen">Imagen</label>
+                        <input type="file" id="imagen" name="imagen" class="input"
+                               accept="image/*">
+                        {% if precio_edit and precio_edit.imagen %}
+                        <small class="text-muted">Imagen actual: {{ precio_edit.imagen }}</small>
+                        {% endif %}
+                    </div>
                 </div>
 
                 <div class="form-actions flex justify-end gap-2">
@@ -276,6 +375,14 @@
     .bg-info {
         background: #17a2b8 !important;
     }
+
+    .text-green-600 {
+        color: #059669;
+    }
+
+    .text-blue-600 {
+        color: #2563eb;
+    }
 </style>
 
 <script>
@@ -284,8 +391,9 @@
             .then(response => response.json())
             .then(data => {
                 const contenedor = document.getElementById('columnas-dinamicas');
+                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
                 const columnasDinamicas = data.estructura.filter(col =>
-                    !['id', 'servicio', 'descripcion', 'precio', 'moneda'].includes(col.Field)
+                    !columnasBase.includes(col.Field)
                 );
 
                 if (columnasDinamicas.length > 0) {
@@ -296,7 +404,7 @@
                     html += '</ul>';
                     contenedor.innerHTML = html;
                 } else {
-                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas aún.</p>';
+                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
                 }
             });
     }
