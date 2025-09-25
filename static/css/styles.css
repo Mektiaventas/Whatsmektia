@@ -608,9 +608,10 @@ body {
 
 /* --- Tarjetas de precios --- */
 .card {
-  background: var(--bg-config);
-  border-radius: 8px;
-  overflow: hidden;
+    background: var(--bg-config);
+    border-radius: 8px;
+    overflow: hidden;
+    width: 100%;
 }
 .card-header {
   background: var(--bg-card-header);
