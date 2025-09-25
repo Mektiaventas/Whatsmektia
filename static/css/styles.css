@@ -614,11 +614,12 @@ body {
     width: 100%;
 }
 .card-header {
-  background: var(--bg-card-header);
-  padding: 0.75rem 1rem;
-  font-weight: 600;
-  color: var(--text-light);
-  border-bottom: 1px solid rgba(255,255,255,0.1);
+    width: 100%;
+    background: var(--bg-card-header);
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    color: var(--text-light);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
 }
 .card-body {
   padding: 1rem;

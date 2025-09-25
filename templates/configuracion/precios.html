@@ -108,12 +108,16 @@
         </div>
     </div>
 </div>
-<!-- Tarjeta: Formulario alta/edición (AHORA ARRIBA) -->
-<div class="card">
-    <div class="card-header">
-        <h3>{{ precio_edit and '✏️ Editar Producto' or '➕ Agregar Producto' }}</h3>
+
+<!-- Tarjeta: Formulario colapsable para agregar/editar producto -->
+<div class="card mb-4">
+    <div class="card-header cursor-pointer" id="formulario-header" onclick="toggleFormulario()">
+        <h3 class="flex justify-between items-center">
+            <span>{{ precio_edit and '✏️ Editar Producto' or '➕ Agregar Producto' }}</span>
+            <span id="formulario-icon">▼</span>
+        </h3>
     </div>
-    <div class="card-body">
+    <div class="card-body hidden" id="formulario-body">
         <form action="{{ url_for('configuracion_precio_guardar') }}" method="post" enctype="multipart/form-data">
             {% if precio_edit %}
             <input type="hidden" name="id" value="{{ precio_edit.id }}">
@@ -217,7 +221,7 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda ==m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                         </option>
                         {% endfor %}
@@ -246,70 +250,65 @@
     </div>
 </div>
 
-<!-- Contenido principal: dos columnas -->
-<div class="config-content flex flex-col">
-
-
-    <!-- Tarjeta: Lista de productos (AHORA ABAJO) -->
-    <div class="card">
-        <div class="card-header">
-            <h3>Productos y Precios ({{ precios|length }} registros)</h3>
-        </div>
-        <div class="card-body">
-            {% if precios %}
-            <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>SKU</th>
-                            <th>Producto</th>
-                            <th>Categoría</th>
-                            <th>Costo</th>
-                            <th>Mayoreo</th>
-                            <th>Menudeo</th>
-                            <th>Moneda</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for precio in precios %}
-                        <tr>
-                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
-                            <td class="font-medium">{{ precio.servicio }}</td>
-                            <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) if precio.precio else '-' }}</td>
-                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                            <td>{{ precio.moneda }}</td>
-                            <td>
-                                <div class="flex space-x-2">
-                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                                       class="btn small primary">Editar</a>
-                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
-                                          method="post" class="inline-form">
-                                        <button type="submit"
-                                                class="btn small danger"
-                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
-                                            Borrar
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="text-center py-8">
-                <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
-                <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
-            </div>
-            {% endif %}
-        </div>
+<!-- Tarjeta: Lista de productos (ahora ocupa todo el ancho) -->
+<div class="card">
+    <div class="card-header">
+        <h3>Productos y Precios ({{ precios|length }} registros)</h3>
     </div>
-
+    <div class="card-body">
+        {% if precios %}
+        <div class="table-responsive">
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>SKU</th>
+                        <th>Producto</th>
+                        <th>Categoría</th>
+                        <th>Costo</th>
+                        <th>Mayoreo</th>
+                        <th>Menudeo</th>
+                        <th>Moneda</th>
+                        <th>Acciones</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for precio in precios %}
+                    <tr>
+                        <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
+                        <td class="font-medium">{{ precio.servicio }}</td>
+                        <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
+                        <td class="text-right">${{ "{:,.2f}".format(precio.precio) if precio.precio else '-' }}</td>
+                        <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                        <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                        <td>{{ precio.moneda }}</td>
+                        <td>
+                            <div class="flex space-x-2">
+                                <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                   class="btn small primary">Editar</a>
+                                <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
+                                      method="post" class="inline-form">
+                                    <button type="submit"
+                                            class="btn small danger"
+                                            onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
+                                        Borrar
+                                    </button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-center py-8">
+            <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
+            <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
+        </div>
+        {% endif %}
+    </div>
 </div>
+
 <!-- Mensajes Flash -->
 <div class="mt-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -382,6 +381,45 @@
     .text-blue-600 {
         color: #2563eb;
     }
+
+    /* Estilos para el formulario colapsable */
+    .cursor-pointer {
+        cursor: pointer;
+    }
+
+    .hidden {
+        display: none;
+    }
+
+    .card-header {
+        transition: background-color 0.2s;
+    }
+
+        .card-header:hover {
+            background-color: #f8f9fa;
+        }
+
+    /* Asegurar que la tabla ocupe todo el ancho */
+    .table-responsive {
+        width: 100%;
+        overflow-x: auto;
+    }
+
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+        .table th, .table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .table th {
+            background-color: #f8fafc;
+            font-weight: 600;
+        }
 </style>
 
 <script>
@@ -408,6 +446,26 @@
             });
     }
 
-    // Cargar estructura al abrir la página
-    document.addEventListener('DOMContentLoaded', cargarEstructura);
+    // Función para mostrar/ocultar el formulario
+    function toggleFormulario() {
+        const formularioBody = document.getElementById('formulario-body');
+        const formularioIcon = document.getElementById('formulario-icon');
+
+        if (formularioBody.classList.contains('hidden')) {
+            formularioBody.classList.remove('hidden');
+            formularioIcon.textContent = '▲';
+        } else {
+            formularioBody.classList.add('hidden');
+            formularioIcon.textContent = '▼';
+        }
+    }
+
+    // Si estamos editando un producto, mostrar el formulario abierto
+    document.addEventListener('DOMContentLoaded', function () {
+        {% if precio_edit %}
+        toggleFormulario(); // Abrir el formulario si estamos editando
+        {% endif %}
+
+        cargarEstructura(); // Cargar estructura al abrir la página
+    });
 </script>
