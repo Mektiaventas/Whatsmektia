@@ -112,65 +112,6 @@
 <!-- Contenido principal: dos columnas -->
 <div class="config-content flex flex-col">
 
-    <!-- Tarjeta: Lista de productos -->
-    <div class="card">
-        <div class="card-header">
-            <h3>Productos y Precios ({{ precios|length }} registros)</h3>
-        </div>
-        <div class="card-body">
-            {% if precios %}
-            <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>SKU</th>
-                            <th>Producto</th>
-                            <th>Categoría</th>
-                            <th>Costo</th>
-                            <th>Mayoreo</th>
-                            <th>Menudeo</th>
-                            <th>Moneda</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for precio in precios %}
-                        <tr>
-                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
-                            <td class="font-medium">{{ precio.servicio }}</td>
-                            <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
-                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) if precio.precio else '-' }}</td>
-                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                            <td>{{ precio.moneda }}</td>
-                            <td>
-                                <div class="flex space-x-2">
-                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                                       class="btn small primary">Editar</a>
-                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
-                                          method="post" class="inline-form">
-                                        <button type="submit"
-                                                class="btn small danger"
-                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
-                                            Borrar
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% else %}
-            <div class="text-center py-8">
-                <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
-                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar productos manualmente o sube un archivo arriba.</p>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-
     <!-- Tarjeta: Formulario alta/edición -->
     <div class="card">
         <div class="card-header">
@@ -280,7 +221,7 @@
                         <label for="moneda">Moneda *</label>
                         <select id="moneda" name="moneda" class="select" required>
                             {% for m in ['MXN','USD','EUR'] %}
-                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda ==m %}selected{% endif %}>
+                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                                 {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                             </option>
                             {% endfor %}
@@ -308,6 +249,67 @@
             </form>
         </div>
     </div>
+
+
+    <!-- Tarjeta: Lista de productos -->
+    <div class="card">
+        <div class="card-header">
+            <h3>Productos y Precios ({{ precios|length }} registros)</h3>
+        </div>
+        <div class="card-body">
+            {% if precios %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>SKU</th>
+                            <th>Producto</th>
+                            <th>Categoría</th>
+                            <th>Costo</th>
+                            <th>Mayoreo</th>
+                            <th>Menudeo</th>
+                            <th>Moneda</th>
+                            <th>Acciones</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for precio in precios %}
+                        <tr>
+                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
+                            <td class="font-medium">{{ precio.servicio }}</td>
+                            <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
+                            <td class="text-right">${{ "{:,.2f}".format(precio.precio) if precio.precio else '-' }}</td>
+                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                            <td>{{ precio.moneda }}</td>
+                            <td>
+                                <div class="flex space-x-2">
+                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                       class="btn small primary">Editar</a>
+                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
+                                          method="post" class="inline-form">
+                                        <button type="submit"
+                                                class="btn small danger"
+                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
+                                            Borrar
+                                        </button>
+                                    </form>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-center py-8">
+                <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
+                <p class="text-sm text-gray-400">Usa el formulario de la derecha para agregar productos manualmente o sube un archivo arriba.</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
 
 </div>
 
