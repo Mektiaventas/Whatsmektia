@@ -3529,7 +3529,7 @@ def webhook():
         es_imagen = False
         es_audio = False
         es_video = False
-        es_archivo = Fals
+        es_archivo = False
         es_documento = False
         es_mi_numero = False  # ← Add this initialization
          # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
