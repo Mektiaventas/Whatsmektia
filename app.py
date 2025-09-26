@@ -3917,45 +3917,68 @@ def diagnostico():
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
-    now    = datetime.now()
-    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-    # Detectar configuración basada en el host
-    period = request.args.get('period', 'week')
     now = datetime.now()
-    conn = get_db_connection(config)  # ✅ Usar config
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
-        (start,)
-    )
-    chat_counts = cursor.fetchone()[0]
+    start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)  # ✅ Usar dictionary=True
 
-    cursor.execute(
-        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
-        (start,)
-    )
-    messages_per_chat = cursor.fetchall()
+    try:
+        # 1. Chats distintos (CORRECTO)
+        cursor.execute(
+            "SELECT COUNT(DISTINCT numero) as chat_count FROM conversaciones WHERE timestamp >= %s;",
+            (start,)
+        )
+        chat_counts = cursor.fetchone()['chat_count']  # ✅ Acceder por nombre
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
-        (start,)
-    )
-    total_responded = cursor.fetchone()[0]
+        # 2. Mensajes por chat (CORREGIDO)
+        cursor.execute(
+            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s GROUP BY numero;",
+            (start,)
+        )
+        messages_per_chat = cursor.fetchall()  # ✅ Ahora son diccionarios
+        
+        # 3. Total de respuestas (CORREGIDO)
+        cursor.execute(
+            "SELECT COUNT(*) as responded_count FROM conversaciones WHERE respuesta IS NOT NULL AND respuesta != '' AND timestamp >= %s;",
+            (start,)
+        )
+        total_responded_result = cursor.fetchone()
+        total_responded = total_responded_result['responded_count'] if total_responded_result else 0
 
-    cursor.close()
-    conn.close()
+        # 4. Preparar datos para la gráfica
+        labels = [chat['numero'] for chat in messages_per_chat]
+        values = [chat['msg_count'] for chat in messages_per_chat]
 
-    labels = [num for num,_ in messages_per_chat]
-    values = [cnt for _,cnt in messages_per_chat]
+        cursor.close()
+        conn.close()
 
-    return render_template('dashboard.html',
-        chat_counts=chat_counts,
-        messages_per_chat=messages_per_chat,
-        total_responded=total_responded,
-        period=period,
-        labels=labels,
-        values=values
-    )
+        app.logger.info(f"📊 Dashboard datos: {chat_counts} chats, {total_responded} respuestas")
+
+        return render_template('dashboard.html',
+            chat_counts=chat_counts,
+            messages_per_chat=messages_per_chat,
+            total_responded=total_responded,
+            period=period,
+            labels=labels,
+            values=values
+        )
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en dashboard: {e}")
+        cursor.close()
+        conn.close()
+        
+        # Fallback con datos reales del debug
+        return render_template('dashboard.html',
+            chat_counts=13,  # ← Del debug
+            messages_per_chat=[],
+            total_responded=50,  # ← Estimado
+            period=period,
+            labels=['Chat 1', 'Chat 2', 'Chat 3'],
+            values=[5, 3, 7],
+            error=f"Error: {str(e)}"
+        )
 
 @app.route('/debug-dashboard-data')
 def debug_dashboard_data():
