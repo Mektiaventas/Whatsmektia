@@ -405,8 +405,15 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea del producto",
+                        "modelo": "Modelo o variante",
+                        "medidas": "Porción o medidas",
+                        "sku": "Código SKU si está disponible"
                     }}
                 ]
             }}
@@ -417,6 +424,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
+            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
             """
         else:
             prompt = f"""
@@ -433,8 +441,15 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
+                        "categoria": "Categoría del servicio",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea del producto",
+                        "modelo": "Modelo o variante",
+                        "medidas": "Medidas o especificaciones",
+                        "sku": "Código SKU si está disponible"
                     }}
                 ]
             }}
@@ -445,6 +460,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares
             5. Sé específico con los nombres
+            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
+            7. Intenta identificar categorías, subcategorías, líneas y modelos cuando sea posible
             """
         
         headers = {
@@ -498,22 +515,50 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     
                 descripcion = servicio.get('descripcion', '').strip()
                 precio = servicio.get('precio', '0.00')
+                precio_mayoreo = servicio.get('precio_mayoreo', '0.00')
+                precio_menudeo = servicio.get('precio_menudeo', '0.00')
                 moneda = servicio.get('moneda', 'MXN')
+                categoria = servicio.get('categoria', '').strip()
+                subcategoria = servicio.get('subcategoria', '').strip()
+                linea = servicio.get('linea', '').strip()
+                modelo = servicio.get('modelo', '').strip()
+                medidas = servicio.get('medidas', '').strip()
+                sku = servicio.get('sku', '').strip()
                 
-                # Convertir precio a decimal
+                # Convertir precios a decimal
                 try:
                     precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
                 except:
                     precio_decimal = Decimal('0.00')
                 
+                try:
+                    precio_mayoreo_decimal = Decimal(str(precio_mayoreo).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_mayoreo_decimal = Decimal('0.00')
+                
+                try:
+                    precio_menudeo_decimal = Decimal(str(precio_menudeo).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_menudeo_decimal = Decimal('0.00')
+                
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO precios (servicio, descripcion, precio, precio_mayoreo, precio_menudeo, moneda, 
+                                       categoria, subcategoria, linea, modelo, medidas, sku)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
                         descripcion = VALUES(descripcion),
                         precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                        precio_mayoreo = VALUES(precio_mayoreo),
+                        precio_menudeo = VALUES(precio_menudeo),
+                        moneda = VALUES(moneda),
+                        categoria = VALUES(categoria),
+                        subcategoria = VALUES(subcategoria),
+                        linea = VALUES(linea),
+                        modelo = VALUES(modelo),
+                        medidas = VALUES(medidas),
+                        sku = VALUES(sku)
+                """, (nombre_servicio, descripcion, precio_decimal, precio_mayoreo_decimal, 
+                      precio_menudeo_decimal, moneda, categoria, subcategoria, linea, modelo, medidas, sku))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -532,7 +577,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
-
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
