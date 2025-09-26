@@ -221,7 +221,7 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda ==m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                         </option>
                         {% endfor %}
@@ -252,10 +252,13 @@
 
 <!-- Tarjeta: Lista de productos (ahora ocupa todo el ancho) -->
 <div class="card">
-    <div class="card-header">
-        <h3>Productos y Precios ({{ precios|length }} registros)</h3>
+    <div class="card-header cursor-pointer" id="productos-header" onclick="toggleProductos()">
+        <h3 class="flex justify-between items-center">
+            <span>Productos y Precios ({{ precios|length }} registros)</span>
+            <span id="productos-icon">▼</span>
+        </h3>
     </div>
-    <div class="card-body">
+    <div class="card-body hidden" id="productos-body">
         {% if precios %}
         <div class="table-responsive">
             <table class="table">
@@ -457,6 +460,20 @@
         } else {
             formularioBody.classList.add('hidden');
             formularioIcon.textContent = '▼';
+        }
+    }
+
+    // Función para mostrar/ocultar la lista de productos
+    function toggleProductos() {
+        const productosBody = document.getElementById('productos-body');
+        const productosIcon = document.getElementById('productos-icon');
+
+        if (productosBody.classList.contains('hidden')) {
+            productosBody.classList.remove('hidden');
+            productosIcon.textContent = '▲';
+        } else {
+            productosBody.classList.add('hidden');
+            productosIcon.textContent = '▼';
         }
     }
 
