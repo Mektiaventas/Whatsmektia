@@ -664,7 +664,7 @@ def subir_pdf_servicios():
                 flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
+                for servicio in servicios.get('servicios', []):  # Mostrar primeros 10
                     app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
                 if len(servicios.get('servicios', [])) > 10:
                     app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
