@@ -615,7 +615,7 @@ def subir_pdf_servicios():
             return redirect(url_for('configuracion_precios'))
         
         if file and allowed_file(file.filename):
-            # Guardar archivo
+            # Guardar archivo temporal
             filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
@@ -641,7 +641,7 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
-            # Analizar con IA
+            # Analizar con IA (usando la función mejorada)
             servicios = analizar_pdf_servicios(texto_pdf, config)
             if not servicios or not servicios.get('servicios'):
                 flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
@@ -651,10 +651,10 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
-            # Guardar en base de datos
+            # Guardar en base de datos (usando la función mejorada)
             servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
             
-            # Limpiar archivo
+            # Limpiar archivo temporal
             try:
                 os.remove(filepath)
             except:
@@ -662,12 +662,43 @@ def subir_pdf_servicios():
             
             if servicios_guardados > 0:
                 flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
-                # Log detallado
+                
+                # Log detallado con nueva información
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
-                if len(servicios.get('servicios', [])) > 10:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+                servicios_lista = servicios.get('servicios', [])
+                
+                for i, servicio in enumerate(servicios_lista[:15]):  # Mostrar primeros 15
+                    categoria = servicio.get('categoria', 'Sin categoría')
+                    precio = servicio.get('precio', '0.00')
+                    precio_mayoreo = servicio.get('precio_mayoreo', '')
+                    precio_menudeo = servicio.get('precio_menudeo', '')
+                    
+                    log_msg = f"   {i+1}. {servicio.get('servicio')} [{categoria}] - ${precio}"
+                    
+                    # Agregar información de precios múltiples si existen
+                    if precio_mayoreo and precio_mayoreo != precio:
+                        log_msg += f" (Mayoreo: ${precio_mayoreo})"
+                    if precio_menudeo and precio_menudeo != precio:
+                        log_msg += f" (Menudeo: ${precio_menudeo})"
+                    
+                    # Agregar SKU si existe
+                    if servicio.get('sku'):
+                        log_msg += f" - SKU: {servicio.get('sku')}"
+                    
+                    app.logger.info(log_msg)
+                
+                if len(servicios_lista) > 15:
+                    app.logger.info(f"   ... y {len(servicios_lista) - 15} servicios más")
+                
+                # Estadísticas adicionales
+                categorias = [s.get('categoria', 'Sin categoría') for s in servicios_lista if s.get('categoria')]
+                if categorias:
+                    from collections import Counter
+                    cat_count = Counter(categorias)
+                    app.logger.info("📈 Distribución por categorías:")
+                    for cat, count in cat_count.most_common(5):
+                        app.logger.info(f"   - {cat}: {count} servicios")
+                
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
@@ -678,15 +709,17 @@ def subir_pdf_servicios():
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando PDF: {e}")
+        app.logger.error(f"🔴 Traceback completo: {traceback.format_exc()}")
         flash('❌ Error interno procesando el archivo', 'error')
+        
         # Limpiar archivo en caso de error
         try:
             if 'filepath' in locals():
                 os.remove(filepath)
         except:
             pass
+        
         return redirect(url_for('configuracion_precios'))
-
 
 def get_db_connection(config=None):
     if config is None:
