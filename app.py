@@ -3990,14 +3990,13 @@ def home():
         app.logger.error(f"🔴 Error en dashboard: {e}")
         # Datos de ejemplo para debugging
         return render_template('dashboard.html',
-            chat_counts=13,
+            chat_counts=3,
             messages_per_chat=[],
-            total_responded=99,
+            total_responded=50,
             period=period,
-            labels=['Ejemplo 1', 'Ejemplo 2', 'Ejemplo 3'],
-            values=[40, 30, 25],
-            error=str(e),
-            debug_data={'error': str(e)}
+            labels=['+52 449 343 2744', '+52 449 118 2201', '+52 449 123 4567'],
+            values=[25, 15, 10],
+            error=str(e)
         )
 
 @app.route('/debug-dashboard-data')
