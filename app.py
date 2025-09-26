@@ -453,7 +453,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             
             Reglas importantes:
             1. Extrae TODOS los servicios que encuentres
-            2. Si no hay precio específico, usa "0.00"
+            2. Si no hay precio específico, usa "0.00", recuerda que el precio tambien se puede llamar costo, tarifa, etc.
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares por categorías
             5. Sé específico con los nombres y descripciones
