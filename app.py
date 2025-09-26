@@ -3924,65 +3924,61 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Chats distintos (DEBUG EXTENDIDO)
+        # 1. Chats distintos (excluyendo NULL)
         cursor.execute(
-            "SELECT COUNT(DISTINCT numero) as chat_count FROM conversaciones WHERE timestamp >= %s;",
+            "SELECT COUNT(DISTINCT numero) as chat_count FROM conversaciones WHERE timestamp >= %s AND numero IS NOT NULL;",
             (start,)
         )
         result = cursor.fetchone()
         chat_counts = result['chat_count'] if result else 0
         app.logger.info(f"📊 TOTAL chats distintos: {chat_counts}")
 
-        # 2. Ver TODOS los chats sin límite para debugging
+        # 2. Mensajes por chat (excluyendo NULL y ordenando)
         cursor.execute(
-            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s GROUP BY numero ORDER BY msg_count DESC;",
+            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s AND numero IS NOT NULL GROUP BY numero ORDER BY msg_count DESC;",
             (start,)
         )
-        all_chats = cursor.fetchall()
-        app.logger.info(f"📊 TODOS los chats encontrados: {len(all_chats)}")
-        
-        # Log de todos los números encontrados
-        for i, chat in enumerate(all_chats):
-            app.logger.info(f"📞 Chat {i+1}: {chat['numero']} - {chat['msg_count']} mensajes")
+        messages_per_chat = cursor.fetchall()
+        app.logger.info(f"📊 TODOS los chats encontrados: {len(messages_per_chat)}")
 
-        # 3. Limitar a máximo 10 chats para la gráfica
-        messages_per_chat = all_chats[:10]
-        app.logger.info(f"📊 Chats para gráfica: {len(messages_per_chat)}")
+        # 3. Debug: mostrar cada chat
+        for i, chat in enumerate(messages_per_chat, 1):
+            app.logger.info(f"📞 Chat {i}: {chat['numero']} - {chat['msg_count']} mensajes")
 
-        # 4. Total de respuestas
+        # 4. Total de respuestas (excluyendo NULL)
         cursor.execute(
-            "SELECT COUNT(*) as responded_count FROM conversaciones WHERE respuesta IS NOT NULL AND respuesta != '' AND timestamp >= %s;",
+            "SELECT COUNT(*) as responded_count FROM conversaciones WHERE respuesta IS NOT NULL AND respuesta != '' AND timestamp >= %s AND numero IS NOT NULL;",
             (start,)
         )
         result = cursor.fetchone()
         total_responded = result['responded_count'] if result else 0
         app.logger.info(f"📊 total_responded: {total_responded}")
 
-        # 5. Preparar labels con nombres
+        # 5. Preparar datos para la gráfica (limitar a 10 para legibilidad)
         labels = []
-        for chat in messages_per_chat:
+        values = []
+        
+        for chat in messages_per_chat[:10]:  # Solo los primeros 10
             numero = chat['numero']
             
+            # Verificar que el número no sea None
+            if numero is None:
+                continue
+                
             # Buscar nombre en la base de datos
-            try:
-                cursor.execute(
-                    "SELECT COALESCE(alias, nombre) as nombre_mostrado FROM contactos WHERE numero_telefono = %s LIMIT 1;",
-                    (numero,)
-                )
-                contacto = cursor.fetchone()
-        
-                if contacto and contacto['nombre_mostrado']:
-                    labels.append(f"{contacto['nombre_mostrado']} (***{numero[-4:]})")
-                else:
-                    labels.append(f"Cliente (***{numero[-4:]})")
-            except Exception as e:
-                app.logger.error(f"Error buscando contacto {numero}: {e}")
+            cursor.execute(
+                "SELECT COALESCE(alias, nombre) as nombre_mostrado FROM contactos WHERE numero_telefono = %s LIMIT 1;",
+                (numero,)
+            )
+            contacto = cursor.fetchone()
+    
+            if contacto and contacto['nombre_mostrado']:
+                labels.append(f"{contacto['nombre_mostrado']} (***{numero[-4:]})")
+            else:
                 labels.append(f"Cliente (***{numero[-4:]})")
+            values.append(chat['msg_count'])
         
-        values = [chat['msg_count'] for chat in messages_per_chat]
-        
-        app.logger.info(f"📊 Gráfica - Labels finales: {labels}")
-        app.logger.info(f"📊 Gráfica - Values finales: {values}")
+        app.logger.info(f"📊 Chats para gráfica: {len(labels)}")
 
         cursor.close()
         conn.close()
@@ -3995,29 +3991,26 @@ def home():
             labels=labels,
             values=values,
             debug_data={
-                'total_chats_encontrados': len(all_chats),
-                'chats_para_grafica': len(messages_per_chat),
                 'chat_counts': chat_counts,
+                'total_chats': len(messages_per_chat),
                 'total_responded': total_responded,
                 'graph_labels': labels,
-                'graph_values': values,
-                'periodo_consultado': start.isoformat()
+                'graph_values': values
             }
         )
 
     except Exception as e:
         app.logger.error(f"🔴 Error en dashboard: {e}")
-        # Datos de ejemplo más realistas
         return render_template('dashboard.html',
-            chat_counts=8,  # Número más realista
+            chat_counts=0,
             messages_per_chat=[],
-            total_responded=99,
+            total_responded=0,
             period=period,
-            labels=['Eduardo (***2744)', 'Juan (***2201)', 'Maria (***4567)', 'Ana (***8910)', 'Carlos (***1122)'],
-            values=[40, 30, 25, 15, 10],
-            error=str(e),
-            debug_data={'error': str(e)}
+            labels=[],
+            values=[],
+            error=str(e)
         )
+
 @app.route('/debug-dashboard-data')
 def debug_dashboard_data():
     config = obtener_configuracion_por_host()
