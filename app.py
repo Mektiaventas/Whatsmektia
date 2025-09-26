@@ -3954,14 +3954,19 @@ def home():
         labels = []
         for chat in messages_per_chat:
             numero = chat['numero']
-            # Formatear número: +52 449 123 4567
-            if numero.startswith('52'):
-                formatted = f"+{numero[:2]} {numero[2:5]} {numero[5:8]} {numero[8:]}"
-            elif numero.startswith('521'):
-                formatted = f"+{numero[:3]} {numero[3:6]} {numero[6:9]} {numero[9:]}"
+    
+            # Buscar nombre en la base de datos
+            cursor.execute(
+                "SELECT COALESCE(alias, nombre) as nombre_mostrado FROM contactos WHERE numero_telefono = %s LIMIT 1;",
+                (numero,)
+            )
+            contacto = cursor.fetchone()
+    
+            if contacto and contacto['nombre_mostrado']:
+                labels.append(f"{contacto['nombre_mostrado']} (***{numero[-4:]})")
             else:
-                formatted = numero
-            labels.append(formatted)
+                # Formato simple para números
+                labels.append(f"Cliente (***{numero[-4:]})")
         values = [chat['msg_count'] for chat in messages_per_chat[:10]]
         
         app.logger.info(f"📊 Gráfica - Labels: {labels}")
