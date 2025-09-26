@@ -398,7 +398,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
@@ -424,13 +424,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                 ]
             }}
             
-            Reglas para restaurantes:
-            1. Extrae todos los platillos, bebidas y productos
-            2. Incluye descripciones de ingredientes si están disponibles
-            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
-            4. Si no hay precio, usa "0.00"
-            5. Moneda MXN por defecto
-            6. Para status_ws usa "disponible" por defecto
+            IMPORTANTE: 
+            - Devuelve ÚNICAMENTE el JSON, sin texto adicional
+            - Usa comillas dobles para las claves y valores
+            - Escapa correctamente los caracteres especiales
+            - Si un campo está vacío, usa cadena vacía ""
+            - Asegúrate de que el JSON sea válido
             """
         else:
             prompt = f"""
@@ -440,7 +439,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
@@ -466,14 +465,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                 ]
             }}
             
-            Reglas importantes:
-            1. Extrae TODOS los servicios que encuentres
-            2. Si no hay precio específico, usa "0.00"
-            3. La moneda por defecto es MXN
-            4. Para status_ws usa "disponible" por defecto
-            5. Agrupa servicios similares
-            6. Sé específico con los nombres
-            7. Si no encuentras información para algún campo, déjalo como cadena vacía ""
+            IMPORTANTE: 
+            - Devuelve ÚNICAMENTE el JSON, sin texto adicional
+            - Usa comillas dobles para las claves y valores
+            - Escapa correctamente los caracteres especiales
+            - Si un campo está vacío, usa cadena vacía ""
+            - Asegúrate de que el JSON sea válido
             """
         
         headers = {
@@ -485,27 +482,31 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000  # Aumentar tokens por los campos adicionales
+            "max_tokens": 4000
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)  # Aumentar timeout
         response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
-        if json_match:
-            servicios_extraidos = json.loads(json_match.group())
+        app.logger.info(f"📄 Respuesta IA recibida: {respuesta_ia[:500]}...")
+        
+        # Mejorar la extracción del JSON
+        servicios_extraidos = extraer_json_de_respuesta(respuesta_ia)
+        
+        if servicios_extraidos:
             app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
             return servicios_extraidos
         else:
-            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
+            app.logger.error("🔴 No se pudo extraer JSON válido de la respuesta IA")
+            app.logger.error(f"Respuesta completa: {respuesta_ia}")
             return None
             
     except Exception as e:
         app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
+        app.logger.error(traceback.format_exc())
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
@@ -636,7 +637,6 @@ def subir_pdf_servicios():
             texto_pdf = extraer_texto_pdf(filepath)
             if not texto_pdf:
                 flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
-                # Limpiar archivo
                 try:
                     os.remove(filepath)
                 except:
@@ -651,10 +651,12 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
+            app.logger.info(f"📊 Texto extraído: {len(texto_pdf)} caracteres")
+            
             # Analizar con IA
             servicios = analizar_pdf_servicios(texto_pdf, config)
             if not servicios or not servicios.get('servicios'):
-                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
+                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato o intenta con un archivo más simple.', 'error')
                 try:
                     os.remove(filepath)
                 except:
@@ -674,10 +676,10 @@ def subir_pdf_servicios():
                 flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
+                for servicio in servicios.get('servicios', [])[:5]:  # Mostrar primeros 5
                     app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
-                if len(servicios.get('servicios', [])) > 10:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+                if len(servicios.get('servicios', [])) > 5:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 5} más")
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
@@ -688,6 +690,7 @@ def subir_pdf_servicios():
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando PDF: {e}")
+        app.logger.error(traceback.format_exc())
         flash('❌ Error interno procesando el archivo', 'error')
         # Limpiar archivo en caso de error
         try:
@@ -696,7 +699,6 @@ def subir_pdf_servicios():
         except:
             pass
         return redirect(url_for('configuracion_precios'))
-
 
 def get_db_connection(config=None):
     if config is None:
@@ -1333,6 +1335,65 @@ def convertir_audio(audio_path):
         app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
         return None
 
+def extraer_json_de_respuesta(respuesta_ia):
+    """Extrae y valida JSON de la respuesta de la IA con múltiples métodos"""
+    try:
+        # Método 1: Buscar el primer JSON válido
+        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
+        if json_match:
+            json_str = json_match.group()
+            # Limpiar el JSON
+            json_str = re.sub(r',\s*}', '}', json_str)  # Quitar comas finales
+            json_str = re.sub(r',\s*]', ']', json_str)  # Quitar comas finales en arrays
+            
+            servicios_extraidos = json.loads(json_str)
+            app.logger.info("✅ JSON extraído con éxito (método 1)")
+            return servicios_extraidos
+    except json.JSONDecodeError as e:
+        app.logger.warning(f"⚠️ Método 1 falló, intentando método 2: {e}")
+    
+    try:
+        # Método 2: Buscar específicamente la estructura de servicios
+        if '"servicios"' in respuesta_ia:
+            start_idx = respuesta_ia.find('"servicios"')
+            # Buscar desde servicios hasta el final del objeto
+            json_str = respuesta_ia[start_idx:]
+            # Encontrar el objeto completo balanceando llaves
+            brace_count = 0
+            end_idx = 0
+            for i, char in enumerate(json_str):
+                if char == '{':
+                    brace_count += 1
+                elif char == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        end_idx = i + 1
+                        break
+            
+            if end_idx > 0:
+                json_str = '{' + json_str[:end_idx]  # Agregar llave inicial
+                servicios_extraidos = json.loads(json_str)
+                app.logger.info("✅ JSON extraído con éxito (método 2)")
+                return servicios_extraidos
+    except Exception as e:
+        app.logger.warning(f"⚠️ Método 2 falló: {e}")
+    
+    try:
+        # Método 3: Usar eval como último recurso (con precaución)
+        # Solo para desarrollo, en producción considerar alternativas
+        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
+        if json_match:
+            json_str = json_match.group()
+            # Reemplazar comillas simples por dobles
+            json_str = json_str.replace("'", '"')
+            servicios_extraidos = json.loads(json_str)
+            app.logger.info("✅ JSON extraído con éxito (método 3)")
+            return servicios_extraidos
+    except Exception as e:
+        app.logger.error(f"🔴 Todos los métodos fallaron: {e}")
+    
+    return None
+
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información"""
     if config is None:
@@ -1955,6 +2016,7 @@ def obtener_todos_los_precios(config=None):
     cursor.close()
     conn.close()
     return rows
+
 def obtener_precio_por_id(pid, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
