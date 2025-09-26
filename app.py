@@ -3973,7 +3973,7 @@ def home():
             contacto = cursor.fetchone()
     
             if contacto and contacto['nombre_mostrado']:
-                labels.append(f"{contacto['nombre_mostrado']} (***{numero[-4:]})")
+                labels.append(f"{contacto['nombre_mostrado']} /n (***{numero})")
             else:
                 labels.append(f"Cliente (***{numero[-4:]})")
             values.append(chat['msg_count'])
