@@ -84,7 +84,7 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-# Configuración por defecto (para backward compatibility)
+
 # Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
@@ -398,7 +398,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON válido con esta estructura exacta:
+            Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
                     {{
@@ -411,12 +411,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                 ]
             }}
             
-            Reglas importantes:
-            1. Devuelve ÚNICAMENTE el JSON, sin texto adicional
-            2. Usa comillas dobles para todas las claves y valores
-            3. Asegúrate de que todos los corchetes y llaves estén balanceados
+            Reglas para restaurantes:
+            1. Extrae todos los platillos, bebidas y productos
+            2. Incluye descripciones de ingredientes si están disponibles
+            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
-            5. Escapa caracteres especiales en los textos
+            5. Moneda MXN por defecto
             """
         else:
             prompt = f"""
@@ -426,7 +426,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON válido con esta estructura exacta:
+            Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
                     {{
@@ -440,11 +440,11 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             }}
             
             Reglas importantes:
-            1. Devuelve ÚNICAMENTE el JSON, sin texto adicional
-            2. Usa comillas dobles para todas las claves y valores
-            3. Asegúrate de que todos los corchetes y llaves estén balanceados
-            4. Si no hay precio, usa "0.00"
-            5. Escapa caracteres especiales en los textos
+            1. Extrae TODOS los servicios que encuentres
+            2. Si no hay precio específico, usa "0.00"
+            3. La moneda por defecto es MXN
+            4. Agrupa servicios similares
+            5. Sé específico con los nombres
             """
         
         headers = {
@@ -456,8 +456,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000,
-            "response_format": {"type": "json_object"}  # Forzar formato JSON
+            "max_tokens": 3000
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -466,16 +465,14 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        app.logger.info(f"📨 Respuesta IA recibida: {respuesta_ia[:500]}...")  # Log para debugging
-        
-        # Limpiar y validar el JSON
-        servicios_extraidos = limpiar_y_parsear_json(respuesta_ia)
-        
-        if servicios_extraidos:
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            servicios_extraidos = json.loads(json_match.group())
             app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
             return servicios_extraidos
         else:
-            app.logger.error("🔴 No se pudo extraer JSON válido de la respuesta IA")
+            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
@@ -488,52 +485,25 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Validar estructura de servicios
-        if not servicios or not isinstance(servicios, dict):
-            app.logger.error("🔴 Estructura de servicios inválida")
-            return 0
-            
-        servicios_list = servicios.get('servicios', [])
-        if not isinstance(servicios_list, list):
-            app.logger.error("🔴 'servicios' no es una lista")
-            return 0
-        
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
         servicios_guardados = 0
-        for servicio in servicios_list:
+        for servicio in servicios.get('servicios', []):
             try:
-                # Validar estructura del servicio
-                if not isinstance(servicio, dict):
-                    app.logger.warning("⚠️ Servicio ignorado: no es un diccionario")
-                    continue
-                    
                 # Limpiar y validar datos
-                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre')
+                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
-                    app.logger.warning(f"⚠️ Servicio sin nombre válido: {servicio}")
                     continue
                     
-                # Limpiar el nombre
-                nombre_servicio = str(nombre_servicio).strip()
-                if not nombre_servicio:
-                    continue
-                    
-                descripcion = str(servicio.get('descripcion', '')).strip()
+                descripcion = servicio.get('descripcion', '').strip()
                 precio = servicio.get('precio', '0.00')
                 moneda = servicio.get('moneda', 'MXN')
                 
-                # Convertir precio a decimal de forma segura
+                # Convertir precio a decimal
                 try:
-                    precio_limpio = str(precio).replace('$', '').replace(',', '').strip()
-                    precio_decimal = Decimal(precio_limpio) if precio_limpio else Decimal('0.00')
+                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
                 except:
-                    precio_decimal = Decimal('0.00')
-                
-                # Validar que el precio sea razonable
-                if precio_decimal > Decimal('1000000'):  # Límite de 1 millón
-                    app.logger.warning(f"⚠️ Precio muy alto para {nombre_servicio}: {precio_decimal}")
                     precio_decimal = Decimal('0.00')
                 
                 cursor.execute("""
@@ -563,7 +533,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
@@ -580,7 +549,7 @@ def subir_pdf_servicios():
             return redirect(url_for('configuracion_precios'))
         
         if file and allowed_file(file.filename):
-            # Guardar archivo temporal
+            # Guardar archivo
             filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
@@ -591,38 +560,48 @@ def subir_pdf_servicios():
             texto_pdf = extraer_texto_pdf(filepath)
             if not texto_pdf:
                 flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
-                limpiar_archivo(filepath)
+                # Limpiar archivo
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
                 return redirect(url_for('configuracion_precios'))
             
-            if len(texto_pdf.strip()) < 50:
+            if len(texto_pdf) < 50:  # Muy poco texto extraído
                 flash('❌ Se extrajo muy poco texto del PDF. ¿Está escaneado como imagen?', 'error')
-                limpiar_archivo(filepath)
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
                 return redirect(url_for('configuracion_precios'))
             
             # Analizar con IA
             servicios = analizar_pdf_servicios(texto_pdf, config)
-            if not servicios:
-                flash('❌ Error en el análisis del PDF con IA.', 'error')
-                limpiar_archivo(filepath)
-                return redirect(url_for('configuracion_precios'))
-            
-            if not servicios.get('servicios'):
+            if not servicios or not servicios.get('servicios'):
                 flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
-                limpiar_archivo(filepath)
+                try:
+                    os.remove(filepath)
+                except:
+                    pass
                 return redirect(url_for('configuracion_precios'))
             
             # Guardar en base de datos
             servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
             
             # Limpiar archivo
-            limpiar_archivo(filepath)
+            try:
+                os.remove(filepath)
+            except:
+                pass
             
             if servicios_guardados > 0:
                 flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for i, servicio in enumerate(servicios.get('servicios', [])[:5]):
-                    app.logger.info(f"   {i+1}. {servicio.get('servicio')}: ${servicio.get('precio')}")
+                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                if len(servicios.get('servicios', [])) > 10:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
@@ -635,8 +614,11 @@ def subir_pdf_servicios():
         app.logger.error(f"🔴 Error procesando PDF: {e}")
         flash('❌ Error interno procesando el archivo', 'error')
         # Limpiar archivo en caso de error
-        if 'filepath' in locals():
-            limpiar_archivo(filepath)
+        try:
+            if 'filepath' in locals():
+                os.remove(filepath)
+        except:
+            pass
         return redirect(url_for('configuracion_precios'))
 
 
@@ -3794,18 +3776,7 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-@app.route('/test-contacto')
-def test_contacto(numero = '5214493432744'):
-    """Endpoint para probar la obtención de información de contacto"""
-    config = obtener_configuracion_por_host()
-    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
-    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
-    return jsonify({
-        'numero': numero,
-        'nombre': nombre,
-        'imagen': imagen,
-        'config': config.get('dominio')
-    })
+
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -4039,6 +4010,48 @@ def home():
             values=[],
             error=str(e)
         )
+def home():
+    config = obtener_configuracion_por_host()
+    period = request.args.get('period', 'week')
+    now    = datetime.now()
+    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
+    # Detectar configuración basada en el host
+    period = request.args.get('period', 'week')
+    now = datetime.now()
+    conn = get_db_connection(config)  # ✅ Usar config
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
+        (start,)
+    )
+    chat_counts = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
+        (start,)
+    )
+    messages_per_chat = cursor.fetchall()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+        (start,)
+    )
+    total_responded = cursor.fetchone()[0]
+
+    cursor.close()
+    conn.close()
+
+    labels = [num for num,_ in messages_per_chat]
+    values = [cnt for _,cnt in messages_per_chat]
+
+    return render_template('dashboard.html',
+        chat_counts=chat_counts,
+        messages_per_chat=messages_per_chat,
+        total_responded=total_responded,
+        period=period,
+        labels=labels,
+        values=values
+    )
 
 @app.route('/chats')
 def ver_chats():
@@ -4288,45 +4301,6 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
-
-def limpiar_archivo(filepath):
-    """Limpia el archivo de forma segura"""
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-            app.logger.info(f"🗑️ Archivo temporal eliminado: {filepath}")
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo eliminar archivo temporal: {e}")
-
-def limpiar_y_parsear_json(respuesta_ia):
-    """Limpia y parsea el JSON de la respuesta de la IA"""
-    try:
-        # Intentar parsear directamente primero
-        return json.loads(respuesta_ia)
-    except json.JSONDecodeError:
-        # Si falla, intentar extraer el JSON
-        try:
-            # Buscar el primer { y el último }
-            inicio = respuesta_ia.find('{')
-            fin = respuesta_ia.rfind('}') + 1
-            
-            if inicio != -1 and fin != 0:
-                json_str = respuesta_ia[inicio:fin]
-                # Limpiar caracteres problemáticos
-                json_str = re.sub(r',\s*}', '}', json_str)  # Quitar comas finales
-                json_str = re.sub(r',\s*]', ']', json_str)  # Quitar comas finales en arrays
-                json_str = re.sub(r'\\\'', "'", json_str)   # Escapar comillas simples
-                
-                return json.loads(json_str)
-        except Exception as e:
-            app.logger.error(f"🔴 Error limpiando JSON: {e}")
-    
-    # Si todo falla, intentar construir un JSON básico
-    try:
-        app.logger.warning("⚠️ Construyendo JSON de respaldo")
-        return {"servicios": []}
-    except:
-        return None
 
 def limpiar_estados_antiguos():
     """Limpia estados de conversación con más de 2 horas"""
