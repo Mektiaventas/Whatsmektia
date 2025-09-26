@@ -3920,40 +3920,45 @@ def home():
     now = datetime.now()
     start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
     
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)  # ✅ Usar dictionary=True
-
     try:
-        # 1. Chats distintos (CORRECTO)
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Chats distintos
         cursor.execute(
             "SELECT COUNT(DISTINCT numero) as chat_count FROM conversaciones WHERE timestamp >= %s;",
             (start,)
         )
-        chat_counts = cursor.fetchone()['chat_count']  # ✅ Acceder por nombre
+        result = cursor.fetchone()
+        chat_counts = result['chat_count'] if result else 0
+        app.logger.info(f"📊 chat_counts: {chat_counts}")
 
-        # 2. Mensajes por chat (CORREGIDO)
+        # 2. Mensajes por chat
         cursor.execute(
-            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s GROUP BY numero;",
+            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s GROUP BY numero ORDER BY msg_count DESC LIMIT 10;",
             (start,)
         )
-        messages_per_chat = cursor.fetchall()  # ✅ Ahora son diccionarios
-        
-        # 3. Total de respuestas (CORREGIDO)
+        messages_per_chat = cursor.fetchall()
+        app.logger.info(f"📊 messages_per_chat: {len(messages_per_chat)} registros")
+
+        # 3. Total de respuestas
         cursor.execute(
             "SELECT COUNT(*) as responded_count FROM conversaciones WHERE respuesta IS NOT NULL AND respuesta != '' AND timestamp >= %s;",
             (start,)
         )
-        total_responded_result = cursor.fetchone()
-        total_responded = total_responded_result['responded_count'] if total_responded_result else 0
+        result = cursor.fetchone()
+        total_responded = result['responded_count'] if result else 0
+        app.logger.info(f"📊 total_responded: {total_responded}")
 
-        # 4. Preparar datos para la gráfica
-        labels = [chat['numero'] for chat in messages_per_chat]
-        values = [chat['msg_count'] for chat in messages_per_chat]
+        # 4. Preparar datos para la gráfica (limitar a 10 chats para que sea legible)
+        labels = [f"Chat {i+1}" for i in range(min(10, len(messages_per_chat)))]
+        values = [chat['msg_count'] for chat in messages_per_chat[:10]]
+        
+        app.logger.info(f"📊 Gráfica - Labels: {labels}")
+        app.logger.info(f"📊 Gráfica - Values: {values}")
 
         cursor.close()
         conn.close()
-
-        app.logger.info(f"📊 Dashboard datos: {chat_counts} chats, {total_responded} respuestas")
 
         return render_template('dashboard.html',
             chat_counts=chat_counts,
@@ -3961,23 +3966,28 @@ def home():
             total_responded=total_responded,
             period=period,
             labels=labels,
-            values=values
+            values=values,
+            debug_data={
+                'chat_counts': chat_counts,
+                'total_chats': len(messages_per_chat),
+                'total_responded': total_responded,
+                'graph_labels': labels,
+                'graph_values': values
+            }
         )
 
     except Exception as e:
         app.logger.error(f"🔴 Error en dashboard: {e}")
-        cursor.close()
-        conn.close()
-        
-        # Fallback con datos reales del debug
+        # Datos de ejemplo para debugging
         return render_template('dashboard.html',
-            chat_counts=13,  # ← Del debug
+            chat_counts=13,
             messages_per_chat=[],
-            total_responded=50,  # ← Estimado
+            total_responded=99,
             period=period,
-            labels=['Chat 1', 'Chat 2', 'Chat 3'],
-            values=[5, 3, 7],
-            error=f"Error: {str(e)}"
+            labels=['Ejemplo 1', 'Ejemplo 2', 'Ejemplo 3'],
+            values=[40, 30, 25],
+            error=str(e),
+            debug_data={'error': str(e)}
         )
 
 @app.route('/debug-dashboard-data')
