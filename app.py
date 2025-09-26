@@ -382,7 +382,7 @@ def extraer_texto_pdf(file_path):
         return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios"""
+    """Usa IA para analizar el PDF y extraer servicios y precios con todos los campos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -402,11 +402,24 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             {{
                 "servicios": [
                     {{
+                        "sku": "Código SKU si está disponible",
+                        "categoria": "Categoría principal",
+                        "subcategoria": "Subcategoría si aplica",
+                        "linea": "Línea de producto",
+                        "modelo": "Modelo o variante",
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
+                        "medidas": "Tamaño o porción",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                        "imagen": "Nombre de archivo de imagen si menciona",
+                        "status_ws": "disponible",
+                        "catalogo": "Catálogo principal",
+                        "catalogo2": "Subcatálogo",
+                        "catalogo3": "Categoría adicional",
+                        "proveedor": "Proveedor si se menciona"
                     }}
                 ]
             }}
@@ -417,6 +430,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
+            6. Para status_ws usa "disponible" por defecto
             """
         else:
             prompt = f"""
@@ -430,11 +444,24 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             {{
                 "servicios": [
                     {{
+                        "sku": "Código SKU si está disponible",
+                        "categoria": "Categoría del servicio",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea de producto/servicio",
+                        "modelo": "Modelo o versión",
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
+                        "medidas": "Especificaciones técnicas o medidas",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
+                        "imagen": "Nombre de imagen relacionada",
+                        "status_ws": "disponible",
+                        "catalogo": "Catálogo principal",
+                        "catalogo2": "Catálogo secundario",
+                        "catalogo3": "Catálogo adicional",
+                        "proveedor": "Proveedor o fabricante"
                     }}
                 ]
             }}
@@ -443,8 +470,10 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             1. Extrae TODOS los servicios que encuentres
             2. Si no hay precio específico, usa "0.00"
             3. La moneda por defecto es MXN
-            4. Agrupa servicios similares
-            5. Sé específico con los nombres
+            4. Para status_ws usa "disponible" por defecto
+            5. Agrupa servicios similares
+            6. Sé específico con los nombres
+            7. Si no encuentras información para algún campo, déjalo como cadena vacía ""
             """
         
         headers = {
@@ -456,7 +485,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000  # Aumentar tokens por los campos adicionales
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -480,7 +509,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos"""
+    """Guarda los servicios extraídos del PDF en la base de datos con todos los campos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -496,24 +525,71 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
                     continue
                     
+                # Obtener todos los campos
+                sku = servicio.get('sku', '').strip()
+                categoria = servicio.get('categoria', '').strip()
+                subcategoria = servicio.get('subcategoria', '').strip()
+                linea = servicio.get('linea', '').strip()
+                modelo = servicio.get('modelo', '').strip()
                 descripcion = servicio.get('descripcion', '').strip()
+                medidas = servicio.get('medidas', '').strip()
                 precio = servicio.get('precio', '0.00')
+                precio_mayoreo = servicio.get('precio_mayoreo', '0.00')
+                precio_menudeo = servicio.get('precio_menudeo', '0.00')
                 moneda = servicio.get('moneda', 'MXN')
+                imagen = servicio.get('imagen', '').strip()
+                status_ws = servicio.get('status_ws', 'disponible').strip()
+                catalogo = servicio.get('catalogo', '').strip()
+                catalogo2 = servicio.get('catalogo2', '').strip()
+                catalogo3 = servicio.get('catalogo3', '').strip()
+                proveedor = servicio.get('proveedor', '').strip()
                 
-                # Convertir precio a decimal
+                # Convertir precios a decimal
                 try:
                     precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
                 except:
                     precio_decimal = Decimal('0.00')
                 
+                try:
+                    precio_mayoreo_decimal = Decimal(str(precio_mayoreo).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_mayoreo_decimal = Decimal('0.00')
+                
+                try:
+                    precio_menudeo_decimal = Decimal(str(precio_menudeo).replace('$', '').replace(',', '').strip())
+                except:
+                    precio_menudeo_decimal = Decimal('0.00')
+                
+                # Insertar o actualizar con todos los campos
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO precios (
+                        sku, categoria, subcategoria, linea, modelo, servicio, 
+                        descripcion, medidas, precio, precio_mayoreo, precio_menudeo, 
+                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
+                        sku = VALUES(sku),
+                        categoria = VALUES(categoria),
+                        subcategoria = VALUES(subcategoria),
+                        linea = VALUES(linea),
+                        modelo = VALUES(modelo),
                         descripcion = VALUES(descripcion),
+                        medidas = VALUES(medidas),
                         precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                        precio_mayoreo = VALUES(precio_mayoreo),
+                        precio_menudeo = VALUES(precio_menudeo),
+                        moneda = VALUES(moneda),
+                        imagen = VALUES(imagen),
+                        status_ws = VALUES(status_ws),
+                        catalogo = VALUES(catalogo),
+                        catalogo2 = VALUES(catalogo2),
+                        catalogo3 = VALUES(catalogo3),
+                        proveedor = VALUES(proveedor)
+                """, (
+                    sku, categoria, subcategoria, linea, modelo, nombre_servicio,
+                    descripcion, medidas, precio_decimal, precio_mayoreo_decimal, precio_menudeo_decimal,
+                    moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                ))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -1853,10 +1929,24 @@ def obtener_todos_los_precios(config=None):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS precios (
             id INT AUTO_INCREMENT PRIMARY KEY,
+            sku VARCHAR(50),
+            categoria VARCHAR(100),
+            subcategoria VARCHAR(100),
+            linea VARCHAR(100),
+            modelo VARCHAR(100),
             servicio VARCHAR(100) NOT NULL,
             descripcion TEXT,
+            medidas VARCHAR(100),
             precio DECIMAL(10,2) NOT NULL,
+            precio_mayoreo DECIMAL(10,2),
+            precio_menudeo DECIMAL(10,2),
             moneda CHAR(3) NOT NULL,
+            imagen VARCHAR(255),
+            status_ws VARCHAR(50),
+            catalogo VARCHAR(100),
+            catalogo2 VARCHAR(100),
+            catalogo3 VARCHAR(100),
+            proveedor VARCHAR(100),
             UNIQUE(servicio)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
@@ -1865,7 +1955,6 @@ def obtener_todos_los_precios(config=None):
     cursor.close()
     conn.close()
     return rows
-
 def obtener_precio_por_id(pid, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
