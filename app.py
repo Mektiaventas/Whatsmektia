@@ -84,7 +84,7 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-# Configuración por defecto (para backward compatibility)
+
 # Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
@@ -398,15 +398,22 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea del producto",
+                        "modelo": "Modelo o variante",
+                        "medidas": "Porción o medidas",
+                        "sku": "Código SKU si está disponible"
                     }}
                 ]
             }}
@@ -417,6 +424,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
+            6. Si no hay información para algún campo, déjalo como cadena vacía ""
+            7. Asegúrate de que el JSON sea válido
             """
         else:
             prompt = f"""
@@ -426,15 +435,22 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
+                        "precio_mayoreo": "90.00",
+                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
+                        "categoria": "Categoría del servicio",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea del producto",
+                        "modelo": "Modelo o variante",
+                        "medidas": "Medidas o especificaciones",
+                        "sku": "Código SKU si está disponible"
                     }}
                 ]
             }}
@@ -445,6 +461,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares
             5. Sé específico con los nombres
+            6. Si no hay información para algún campo, déjalo como cadena vacía ""
+            7. Asegúrate de que el JSON sea válido - usa comillas dobles y escapa caracteres especiales
             """
         
         headers = {
@@ -456,7 +474,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000  # Aumenté los tokens para respuestas más largas
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -465,14 +483,33 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        # Log para debugging
+        app.logger.info(f"📄 Respuesta IA recibida: {respuesta_ia[:500]}...")
+        
+        # Mejorar la extracción del JSON
+        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
         if json_match:
-            servicios_extraidos = json.loads(json_match.group())
-            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
-            return servicios_extraidos
+            json_str = json_match.group()
+            try:
+                servicios_extraidos = json.loads(json_str)
+                app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
+                return servicios_extraidos
+            except json.JSONDecodeError as e:
+                app.logger.error(f"🔴 Error decodificando JSON: {e}")
+                app.logger.error(f"🔴 JSON problemático: {json_str}")
+                # Intentar limpiar el JSON
+                try:
+                    # Limpiar comillas simples y otros problemas comunes
+                    json_limpio = json_str.replace("'", '"')
+                    servicios_extraidos = json.loads(json_limpio)
+                    app.logger.info(f"✅ JSON limpiado exitosamente")
+                    return servicios_extraidos
+                except:
+                    app.logger.error("🔴 No se pudo reparar el JSON")
+                    return None
         else:
-            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
+            app.logger.error("🔴 No se pudo encontrar JSON en la respuesta IA")
+            app.logger.error(f"🔴 Respuesta completa: {respuesta_ia}")
             return None
             
     except Exception as e:
@@ -491,29 +528,56 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
             try:
-                # Limpiar y validar datos
+                # Limpiar y validar datos con valores por defecto más robustos
                 nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
                     continue
                     
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
+                descripcion = servicio.get('descripcion', '').strip() or ''
+                precio = servicio.get('precio', '0.00') or '0.00'
+                precio_mayoreo = servicio.get('precio_mayoreo', '0.00') or '0.00'
+                precio_menudeo = servicio.get('precio_menudeo', '0.00') or '0.00'
+                moneda = servicio.get('moneda', 'MXN') or 'MXN'
+                categoria = servicio.get('categoria', '').strip() or ''
+                subcategoria = servicio.get('subcategoria', '').strip() or ''
+                linea = servicio.get('linea', '').strip() or ''
+                modelo = servicio.get('modelo', '').strip() or ''
+                medidas = servicio.get('medidas', '').strip() or ''
+                sku = servicio.get('sku', '').strip() or ''
                 
-                # Convertir precio a decimal
-                try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
+                # Convertir precios a decimal de manera más segura
+                def safe_decimal(value):
+                    try:
+                        # Remover caracteres no numéricos excepto punto decimal
+                        cleaned = re.sub(r'[^\d.]', '', str(value))
+                        if not cleaned:
+                            return Decimal('0.00')
+                        return Decimal(cleaned)
+                    except:
+                        return Decimal('0.00')
+                
+                precio_decimal = safe_decimal(precio)
+                precio_mayoreo_decimal = safe_decimal(precio_mayoreo)
+                precio_menudeo_decimal = safe_decimal(precio_menudeo)
                 
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO precios (servicio, descripcion, precio, precio_mayoreo, precio_menudeo, moneda, 
+                                       categoria, subcategoria, linea, modelo, medidas, sku)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
                         descripcion = VALUES(descripcion),
                         precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                        precio_mayoreo = VALUES(precio_mayoreo),
+                        precio_menudeo = VALUES(precio_menudeo),
+                        moneda = VALUES(moneda),
+                        categoria = VALUES(categoria),
+                        subcategoria = VALUES(subcategoria),
+                        linea = VALUES(linea),
+                        modelo = VALUES(modelo),
+                        medidas = VALUES(medidas),
+                        sku = VALUES(sku)
+                """, (nombre_servicio, descripcion, precio_decimal, precio_mayoreo_decimal, 
+                      precio_menudeo_decimal, moneda, categoria, subcategoria, linea, modelo, medidas, sku))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -533,7 +597,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
@@ -3777,18 +3840,7 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-@app.route('/test-contacto')
-def test_contacto(numero = '5214493432744'):
-    """Endpoint para probar la obtención de información de contacto"""
-    config = obtener_configuracion_por_host()
-    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
-    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
-    return jsonify({
-        'numero': numero,
-        'nombre': nombre,
-        'imagen': imagen,
-        'config': config.get('dominio')
-    })
+
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -4022,6 +4074,48 @@ def home():
             values=[],
             error=str(e)
         )
+def home():
+    config = obtener_configuracion_por_host()
+    period = request.args.get('period', 'week')
+    now    = datetime.now()
+    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
+    # Detectar configuración basada en el host
+    period = request.args.get('period', 'week')
+    now = datetime.now()
+    conn = get_db_connection(config)  # ✅ Usar config
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
+        (start,)
+    )
+    chat_counts = cursor.fetchone()[0]
+
+    cursor.execute(
+        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
+        (start,)
+    )
+    messages_per_chat = cursor.fetchall()
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+        (start,)
+    )
+    total_responded = cursor.fetchone()[0]
+
+    cursor.close()
+    conn.close()
+
+    labels = [num for num,_ in messages_per_chat]
+    values = [cnt for _,cnt in messages_per_chat]
+
+    return render_template('dashboard.html',
+        chat_counts=chat_counts,
+        messages_per_chat=messages_per_chat,
+        total_responded=total_responded,
+        period=period,
+        labels=labels,
+        values=values
+    )
 
 @app.route('/chats')
 def ver_chats():
