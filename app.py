@@ -3951,7 +3951,7 @@ def home():
         app.logger.info(f"📊 total_responded: {total_responded}")
 
         # 4. Preparar datos para la gráfica (limitar a 10 chats para que sea legible)
-        labels = [f"Chat {i+1}" for i in range(min(10, len(messages_per_chat)))]
+        labels = [num for i in range(min(10, len(messages_per_chat)))]
         values = [chat['msg_count'] for chat in messages_per_chat[:10]]
         
         app.logger.info(f"📊 Gráfica - Labels: {labels}")
