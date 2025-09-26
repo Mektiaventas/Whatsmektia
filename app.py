@@ -402,35 +402,38 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             {{
                 "servicios": [
                     {{
-                        "servicio": "Nombre del platillo/producto",
-                        "descripcion": "Descripción o ingredientes",
-                        "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
-                        "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
-                        "subcategoria": "Subcategoría específica",
+                        "sku": "Código SKU",
+                        "categoria": "Categoría principal",
+                        "subcategoria": "Subcategoría",
                         "linea": "Línea del producto",
-                        "modelo": "Modelo o variante",
-                        "medidas": "Porción o medidas",
-                        "sku": "Código SKU si está disponible"
+                        "modelo": "Modelo específico",
+                        "servicio": "Nombre del producto/servicio",
+                        "descripcion": "Descripción completa",
+                        "medidas": "Medidas/dimensiones",
+                        "precio": "Precio base",
+                        "precio_mayoreo": "Precio para mayoreo", 
+                        "precio_menudeo": "Precio para menudeo",
+                        "moneda": "MXN",
+                        "catalogo": "Catálogo principal",
+                        "catalogo2": "Catálogo secundario",
+                        "catalogo3": "Catálogo terciario"
                     }}
                 ]
             }}
             
-            Reglas para restaurantes:
-            1. Extrae todos los platillos, bebidas y productos
-            2. Incluye descripciones de ingredientes si están disponibles
-            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
-            4. Si no hay precio, usa "0.00"
-            5. Moneda MXN por defecto
-            6. Si no hay información para algún campo, déjalo como cadena vacía ""
-            7. Asegúrate de que el JSON sea válido
+            Reglas importantes:
+            1. Extrae TODOS los productos/servicios de la tabla
+            2. El campo PRECIO debe ser el COSTO (columna H en Excel)
+            3. PRECIO_MAYOREO = COSTO / 0.65
+            4. PRECIO_MENUDEO = COSTO / 0.72  
+            5. Si no hay COSTO, usa "0.00"
+            6. Moneda MXN por defecto
+            7. Si no hay información para algún campo, déjalo como cadena vacía ""
             """
         else:
             prompt = f"""
-            Eres un asistente especializado en extraer servicios y precios de catálogos.
-            Analiza el siguiente texto y extrae TODOS los servicios:
+            Eres un asistente especializado en extraer productos de catálogos de muebles y sillas.
+            Analiza el siguiente texto de Excel/PDF y extrae TODOS los productos:
             
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
@@ -439,30 +442,38 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             {{
                 "servicios": [
                     {{
-                        "servicio": "Nombre del servicio",
-                        "descripcion": "Descripción breve",
-                        "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
+                        "sku": "Código SKU (columna A)",
+                        "categoria": "CATEGORIA (columna B)",
+                        "subcategoria": "SUBCATEGORIA (columna C)", 
+                        "linea": "LINEA (columna D)",
+                        "modelo": "MODELO (columna E)",
+                        "servicio": "Nombre del producto",
+                        "descripcion": "DESCRIPCION (columna F)",
+                        "medidas": "MEDIDAS (columna G)",
+                        "precio": "COSTO (columna H - valor numérico)",
+                        "precio_mayoreo": "PRECIO MAYOREO (H/0.65)",
+                        "precio_menudeo": "PRECIO MENUDEO (H/0.72)",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio",
-                        "subcategoria": "Subcategoría específica",
-                        "linea": "Línea del producto",
-                        "modelo": "Modelo o variante",
-                        "medidas": "Medidas o especificaciones",
-                        "sku": "Código SKU si está disponible"
+                        "catalogo": "CATALOGO (columna N)",
+                        "catalogo2": "CATALOGO 2 (columna O)", 
+                        "catalogo3": "CATALOGO 3 (columna P)"
                     }}
                 ]
             }}
             
-            Reglas importantes:
-            1. Extrae TODOS los servicios que encuentres
-            2. Si no hay precio específico, usa "0.00"
-            3. La moneda por defecto es MXN
-            4. Agrupa servicios similares
-            5. Sé específico con los nombres
-            6. Si no hay información para algún campo, déjalo como cadena vacía ""
-            7. Asegúrate de que el JSON sea válido - usa comillas dobles y escapa caracteres especiales
+            INSTRUCCIONES ESPECÍFICAS PARA ESTE CATÁLOGO:
+            1. El PRECIO principal debe ser el COSTO de la columna H
+            2. CALCULAR: precio_mayoreo = precio / 0.65
+            3. CALCULAR: precio_menudeo = precio / 0.72
+            4. Extraer SKU de la columna A
+            5. Extraer CATEGORIA de la columna B  
+            6. Extraer SUBCATEGORIA de la columna C
+            7. Extraer LINEA de la columna D
+            8. Extraer MODELO de la columna E
+            9. Extraer DESCRIPCION de la columna F
+            10. Extraer MEDIDAS de la columna G
+            11. Si el COSTO está vacío o es #VALUE!, usar "0.00"
+            12. Moneda siempre MXN
             """
         
         headers = {
@@ -474,7 +485,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000  # Aumenté los tokens para respuestas más largas
+            "max_tokens": 4000
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -499,7 +510,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                 app.logger.error(f"🔴 JSON problemático: {json_str}")
                 # Intentar limpiar el JSON
                 try:
-                    # Limpiar comillas simples y otros problemas comunes
                     json_limpio = json_str.replace("'", '"')
                     servicios_extraidos = json.loads(json_limpio)
                     app.logger.info(f"✅ JSON limpiado exitosamente")
@@ -509,7 +519,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                     return None
         else:
             app.logger.error("🔴 No se pudo encontrar JSON en la respuesta IA")
-            app.logger.error(f"🔴 Respuesta completa: {respuesta_ia}")
             return None
             
     except Exception as e:
@@ -528,27 +537,31 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
             try:
-                # Limpiar y validar datos con valores por defecto más robustos
-                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
-                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
-                    continue
-                    
-                descripcion = servicio.get('descripcion', '').strip() or ''
-                precio = servicio.get('precio', '0.00') or '0.00'
-                precio_mayoreo = servicio.get('precio_mayoreo', '0.00') or '0.00'
-                precio_menudeo = servicio.get('precio_menudeo', '0.00') or '0.00'
-                moneda = servicio.get('moneda', 'MXN') or 'MXN'
+                # Limpiar y validar datos con valores por defecto
+                sku = servicio.get('sku', '').strip() or ''
                 categoria = servicio.get('categoria', '').strip() or ''
                 subcategoria = servicio.get('subcategoria', '').strip() or ''
                 linea = servicio.get('linea', '').strip() or ''
                 modelo = servicio.get('modelo', '').strip() or ''
+                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
+                descripcion = servicio.get('descripcion', '').strip() or ''
                 medidas = servicio.get('medidas', '').strip() or ''
-                sku = servicio.get('sku', '').strip() or ''
+                precio = servicio.get('precio', '0.00') or '0.00'
+                precio_mayoreo = servicio.get('precio_mayoreo', '0.00') or '0.00'
+                precio_menudeo = servicio.get('precio_menudeo', '0.00') or '0.00'
+                moneda = servicio.get('moneda', 'MXN') or 'MXN'
+                catalogo = servicio.get('catalogo', '').strip() or ''
+                catalogo2 = servicio.get('catalogo2', '').strip() or ''
+                catalogo3 = servicio.get('catalogo3', '').strip() or ''
                 
-                # Convertir precios a decimal de manera más segura
+                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
+                    continue
+                
+                # Función segura para convertir a decimal
                 def safe_decimal(value):
                     try:
-                        # Remover caracteres no numéricos excepto punto decimal
+                        if isinstance(value, (int, float)):
+                            return Decimal(str(value))
                         cleaned = re.sub(r'[^\d.]', '', str(value))
                         if not cleaned:
                             return Decimal('0.00')
@@ -560,27 +573,39 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 precio_mayoreo_decimal = safe_decimal(precio_mayoreo)
                 precio_menudeo_decimal = safe_decimal(precio_menudeo)
                 
+                # Si los precios de mayoreo/menudeo son 0, calcularlos basado en el costo
+                if precio_mayoreo_decimal == Decimal('0.00') and precio_decimal > Decimal('0.00'):
+                    precio_mayoreo_decimal = precio_decimal / Decimal('0.65')
+                
+                if precio_menudeo_decimal == Decimal('0.00') and precio_decimal > Decimal('0.00'):
+                    precio_menudeo_decimal = precio_decimal / Decimal('0.72')
+                
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, precio_mayoreo, precio_menudeo, moneda, 
-                                       categoria, subcategoria, linea, modelo, medidas, sku)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO precios (sku, categoria, subcategoria, linea, modelo, servicio, descripcion, 
+                                       medidas, precio, precio_mayoreo, precio_menudeo, moneda, 
+                                       catalogo, catalogo2, catalogo3)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
-                        descripcion = VALUES(descripcion),
-                        precio = VALUES(precio),
-                        precio_mayoreo = VALUES(precio_mayoreo),
-                        precio_menudeo = VALUES(precio_menudeo),
-                        moneda = VALUES(moneda),
+                        sku = VALUES(sku),
                         categoria = VALUES(categoria),
                         subcategoria = VALUES(subcategoria),
                         linea = VALUES(linea),
                         modelo = VALUES(modelo),
+                        descripcion = VALUES(descripcion),
                         medidas = VALUES(medidas),
-                        sku = VALUES(sku)
-                """, (nombre_servicio, descripcion, precio_decimal, precio_mayoreo_decimal, 
-                      precio_menudeo_decimal, moneda, categoria, subcategoria, linea, modelo, medidas, sku))
+                        precio = VALUES(precio),
+                        precio_mayoreo = VALUES(precio_mayoreo),
+                        precio_menudeo = VALUES(precio_menudeo),
+                        moneda = VALUES(moneda),
+                        catalogo = VALUES(catalogo),
+                        catalogo2 = VALUES(catalogo2),
+                        catalogo3 = VALUES(catalogo3)
+                """, (sku, categoria, subcategoria, linea, modelo, nombre_servicio, descripcion,
+                      medidas, precio_decimal, precio_mayoreo_decimal, precio_menudeo_decimal, moneda,
+                      catalogo, catalogo2, catalogo3))
                 
                 servicios_guardados += 1
-                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
+                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - Costo: ${precio_decimal}")
                 
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
