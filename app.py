@@ -3957,6 +3957,52 @@ def home():
         values=values
     )
 
+@app.route('/debug-dashboard-data')
+def debug_dashboard_data():
+    config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Verificar estructura de la tabla
+        cursor.execute("DESCRIBE conversaciones")
+        estructura = cursor.fetchall()
+        
+        # 2. Verificar conteo real de datos
+        cursor.execute("SELECT COUNT(*) as total FROM conversaciones")
+        total_conversaciones = cursor.fetchone()['total']
+        
+        # 3. Verificar datos de la última semana (periodo por defecto)
+        start = datetime.now() - timedelta(days=7)
+        cursor.execute("""
+            SELECT 
+                COUNT(DISTINCT numero) as chats_distintos,
+                COUNT(*) as total_mensajes,
+                MAX(timestamp) as ultimo_mensaje
+            FROM conversaciones 
+            WHERE timestamp >= %s
+        """, (start,))
+        datos_semana = cursor.fetchone()
+        
+        # 4. Verificar algunos registros de ejemplo
+        cursor.execute("SELECT * FROM conversaciones ORDER BY timestamp DESC LIMIT 5")
+        ejemplos = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        return jsonify({
+            'estructura_tabla': [col['Field'] for col in estructura],
+            'total_conversaciones': total_conversaciones,
+            'datos_ultima_semana': datos_semana,
+            'ejemplos_registros': ejemplos,
+            'periodo_consultado': start.isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
