@@ -405,8 +405,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
+                        "precio_menudeo": "100.00",
+                        "precio_mayoreo": "90.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
+                        "subcategoria": "Específica si aplica",
+                        "sku": "Código único si existe"
                     }}
                 ]
             }}
@@ -417,6 +421,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
+            6. Si hay precios diferentes para mayoreo/menudeo, inclúyelos
             """
         else:
             prompt = f"""
@@ -433,8 +438,15 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
+                        "precio_menudeo": "100.00",
+                        "precio_mayoreo": "90.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
+                        "categoria": "Categoría principal",
+                        "subcategoria": "Subcategoría específica",
+                        "linea": "Línea de producto",
+                        "modelo": "Modelo si aplica",
+                        "medidas": "Medidas o especificaciones",
+                        "sku": "Código SKU si existe"
                     }}
                 ]
             }}
@@ -443,8 +455,9 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             1. Extrae TODOS los servicios que encuentres
             2. Si no hay precio específico, usa "0.00"
             3. La moneda por defecto es MXN
-            4. Agrupa servicios similares
-            5. Sé específico con los nombres
+            4. Agrupa servicios similares por categorías
+            5. Sé específico con los nombres y descripciones
+            6. Si identificas modelos, líneas o medidas, inclúyelas
             """
         
         headers = {
@@ -456,7 +469,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000  # Aumentado por los campos adicionales
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -495,25 +508,66 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
                     continue
+                
+                # Generar SKU automático si no viene
+                sku = servicio.get('sku', '').strip()
+                if not sku:
+                    sku = generar_sku_automatico(nombre_servicio)
+                
+                # Procesar precios
+                precio_principal = servicio.get('precio', '0.00')
+                precio_mayoreo = servicio.get('precio_mayoreo', precio_principal)
+                precio_menudeo = servicio.get('precio_menudeo', precio_principal)
+                
+                def limpiar_precio(precio_str):
+                    """Convierte string de precio a decimal"""
+                    if isinstance(precio_str, (int, float, Decimal)):
+                        return Decimal(str(precio_str))
                     
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
+                    precio_limpio = str(precio_str).replace('$', '').replace(',', '').strip()
+                    try:
+                        return Decimal(precio_limpio) if precio_limpio else Decimal('0.00')
+                    except:
+                        return Decimal('0.00')
                 
-                # Convertir precio a decimal
-                try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
+                precio_decimal = limpiar_precio(precio_principal)
+                precio_mayoreo_decimal = limpiar_precio(precio_mayoreo)
+                precio_menudeo_decimal = limpiar_precio(precio_menudeo)
                 
+                # Insertar con todos los campos disponibles
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
+                    INSERT INTO precios (
+                        sku, categoria, subcategoria, linea, modelo, servicio, 
+                        descripcion, medidas, precio, precio_mayoreo, precio_menudeo, 
+                        moneda, status_ws
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
+                        categoria = VALUES(categoria),
+                        subcategoria = VALUES(subcategoria),
+                        linea = VALUES(linea),
+                        modelo = VALUES(modelo),
                         descripcion = VALUES(descripcion),
+                        medidas = VALUES(medidas),
                         precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                        precio_mayoreo = VALUES(precio_mayoreo),
+                        precio_menudeo = VALUES(precio_menudeo),
+                        moneda = VALUES(moneda),
+                        status_ws = VALUES(status_ws)
+                """, (
+                    sku,
+                    servicio.get('categoria', '').strip(),
+                    servicio.get('subcategoria', '').strip(),
+                    servicio.get('linea', '').strip(),
+                    servicio.get('modelo', '').strip(),
+                    nombre_servicio,
+                    servicio.get('descripcion', '').strip(),
+                    servicio.get('medidas', '').strip(),
+                    precio_decimal,
+                    precio_mayoreo_decimal,
+                    precio_menudeo_decimal,
+                    servicio.get('moneda', 'MXN'),
+                    'activo'  # status_ws por defecto
+                ))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -532,6 +586,17 @@ def guardar_servicios_desde_pdf(servicios, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
+
+def generar_sku_automatico(nombre_servicio):
+    """Genera un SKU automático basado en el nombre del servicio"""
+    # Tomar las primeras 3 letras de cada palabra y unir con guiones
+    palabras = nombre_servicio.upper().split()[:3]  # Máximo 3 palabras
+    sku_base = '-'.join([palabra[:3] for palabra in palabras if palabra])
+    
+    # Añadir timestamp para hacerlo único
+    timestamp = str(int(time.time()))[-4:]
+    
+    return f"{sku_base}-{timestamp}"
 
 # Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
