@@ -84,7 +84,7 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-
+# Configuración por defecto (para backward compatibility)
 # Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
@@ -405,15 +405,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
                         "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida",
-                        "subcategoria": "Subcategoría específica",
-                        "linea": "Línea del producto",
-                        "modelo": "Modelo o variante",
-                        "medidas": "Porción o medidas",
-                        "sku": "Código SKU si está disponible"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
                     }}
                 ]
             }}
@@ -424,7 +417,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
-            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
             """
         else:
             prompt = f"""
@@ -441,15 +433,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
                         "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "categoria": "Categoría del servicio",
-                        "subcategoria": "Subcategoría específica",
-                        "linea": "Línea del producto",
-                        "modelo": "Modelo o variante",
-                        "medidas": "Medidas o especificaciones",
-                        "sku": "Código SKU si está disponible"
+                        "categoria": "Categoría del servicio"
                     }}
                 ]
             }}
@@ -460,8 +445,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares
             5. Sé específico con los nombres
-            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
-            7. Intenta identificar categorías, subcategorías, líneas y modelos cuando sea posible
             """
         
         headers = {
@@ -515,50 +498,22 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     
                 descripcion = servicio.get('descripcion', '').strip()
                 precio = servicio.get('precio', '0.00')
-                precio_mayoreo = servicio.get('precio_mayoreo', '0.00')
-                precio_menudeo = servicio.get('precio_menudeo', '0.00')
                 moneda = servicio.get('moneda', 'MXN')
-                categoria = servicio.get('categoria', '').strip()
-                subcategoria = servicio.get('subcategoria', '').strip()
-                linea = servicio.get('linea', '').strip()
-                modelo = servicio.get('modelo', '').strip()
-                medidas = servicio.get('medidas', '').strip()
-                sku = servicio.get('sku', '').strip()
                 
-                # Convertir precios a decimal
+                # Convertir precio a decimal
                 try:
                     precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
                 except:
                     precio_decimal = Decimal('0.00')
                 
-                try:
-                    precio_mayoreo_decimal = Decimal(str(precio_mayoreo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_mayoreo_decimal = Decimal('0.00')
-                
-                try:
-                    precio_menudeo_decimal = Decimal(str(precio_menudeo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_menudeo_decimal = Decimal('0.00')
-                
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, precio_mayoreo, precio_menudeo, moneda, 
-                                       categoria, subcategoria, linea, modelo, medidas, sku)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO precios (servicio, descripcion, precio, moneda)
+                    VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
                         descripcion = VALUES(descripcion),
                         precio = VALUES(precio),
-                        precio_mayoreo = VALUES(precio_mayoreo),
-                        precio_menudeo = VALUES(precio_menudeo),
-                        moneda = VALUES(moneda),
-                        categoria = VALUES(categoria),
-                        subcategoria = VALUES(subcategoria),
-                        linea = VALUES(linea),
-                        modelo = VALUES(modelo),
-                        medidas = VALUES(medidas),
-                        sku = VALUES(sku)
-                """, (nombre_servicio, descripcion, precio_decimal, precio_mayoreo_decimal, 
-                      precio_menudeo_decimal, moneda, categoria, subcategoria, linea, modelo, medidas, sku))
+                        moneda = VALUES(moneda)
+                """, (nombre_servicio, descripcion, precio_decimal, moneda))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -577,6 +532,8 @@ def guardar_servicios_desde_pdf(servicios, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
+
+# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
@@ -3820,7 +3777,18 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-
+@app.route('/test-contacto')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -3958,102 +3926,6 @@ def diagnostico():
         return jsonify({'error': str(e)})    
 
 @app.route('/home')
-def home():
-    config = obtener_configuracion_por_host()
-    period = request.args.get('period', 'week')
-    now = datetime.now()
-    start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-
-        # 1. Chats distintos (excluyendo NULL)
-        cursor.execute(
-            "SELECT COUNT(DISTINCT numero) as chat_count FROM conversaciones WHERE timestamp >= %s AND numero IS NOT NULL;",
-            (start,)
-        )
-        result = cursor.fetchone()
-        chat_counts = result['chat_count'] if result else 0
-        app.logger.info(f"📊 TOTAL chats distintos: {chat_counts}")
-
-        # 2. Mensajes por chat (excluyendo NULL y ordenando)
-        cursor.execute(
-            "SELECT numero, COUNT(*) as msg_count FROM conversaciones WHERE timestamp >= %s AND numero IS NOT NULL GROUP BY numero ORDER BY msg_count DESC;",
-            (start,)
-        )
-        messages_per_chat = cursor.fetchall()
-        app.logger.info(f"📊 TODOS los chats encontrados: {len(messages_per_chat)}")
-
-        # 3. Debug: mostrar cada chat
-        for i, chat in enumerate(messages_per_chat, 1):
-            app.logger.info(f"📞 Chat {i}: {chat['numero']} - {chat['msg_count']} mensajes")
-
-        # 4. Total de respuestas (excluyendo NULL)
-        cursor.execute(
-            "SELECT COUNT(*) as responded_count FROM conversaciones WHERE respuesta IS NOT NULL AND respuesta != '' AND timestamp >= %s AND numero IS NOT NULL;",
-            (start,)
-        )
-        result = cursor.fetchone()
-        total_responded = result['responded_count'] if result else 0
-        app.logger.info(f"📊 total_responded: {total_responded}")
-
-        # 5. Preparar datos para la gráfica (limitar a 10 para legibilidad)
-        labels = []
-        values = []
-        
-        for chat in messages_per_chat[:10]:  # Solo los primeros 10
-            numero = chat['numero']
-            
-            # Verificar que el número no sea None
-            if numero is None:
-                continue
-                
-            # Buscar nombre en la base de datos
-            cursor.execute(
-                "SELECT COALESCE(alias, nombre) as nombre_mostrado FROM contactos WHERE numero_telefono = %s LIMIT 1;",
-                (numero,)
-            )
-            contacto = cursor.fetchone()
-    
-            if contacto and contacto['nombre_mostrado']:
-                labels.append(f"{contacto['nombre_mostrado']} \n (📞{numero})")
-            else:
-                labels.append(f"(📞{numero})")
-            values.append(chat['msg_count'])
-        
-        app.logger.info(f"📊 Chats para gráfica: {len(labels)}")
-
-        cursor.close()
-        conn.close()
-
-        return render_template('dashboard.html',
-            chat_counts=chat_counts,
-            messages_per_chat=messages_per_chat,
-            total_responded=total_responded,
-            period=period,
-            labels=labels,
-            values=values,
-            debug_data={
-                'chat_counts': chat_counts,
-                'total_chats': len(messages_per_chat),
-                'total_responded': total_responded,
-                'graph_labels': labels,
-                'graph_values': values
-            }
-        )
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en dashboard: {e}")
-        return render_template('dashboard.html',
-            chat_counts=0,
-            messages_per_chat=[],
-            total_responded=0,
-            period=period,
-            labels=[],
-            values=[],
-            error=str(e)
-        )
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
