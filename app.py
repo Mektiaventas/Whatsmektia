@@ -3951,7 +3951,17 @@ def home():
         app.logger.info(f"📊 total_responded: {total_responded}")
 
         # 4. Preparar datos para la gráfica (limitar a 10 chats para que sea legible)
-        labels = [f"Chat {i+1}" for i in range(min(10, len(messages_per_chat)))]
+        labels = []
+        for chat in messages_per_chat:
+            numero = chat['numero']
+            # Formatear número: +52 449 123 4567
+            if numero.startswith('52'):
+                formatted = f"+{numero[:2]} {numero[2:5]} {numero[5:8]} {numero[8:]}"
+            elif numero.startswith('521'):
+                formatted = f"+{numero[:3]} {numero[3:6]} {numero[6:9]} {numero[9:]}"
+            else:
+                formatted = numero
+            labels.append(formatted)
         values = [chat['msg_count'] for chat in messages_per_chat[:10]]
         
         app.logger.info(f"📊 Gráfica - Labels: {labels}")
