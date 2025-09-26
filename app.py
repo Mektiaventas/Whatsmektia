@@ -84,7 +84,7 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-
+# Configuración por defecto (para backward compatibility)
 # Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
@@ -382,7 +382,7 @@ def extraer_texto_pdf(file_path):
         return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios con todos los campos"""
+    """Usa IA para analizar el PDF y extraer servicios y precios"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -398,38 +398,25 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON válido con esta estructura exacta:
+            Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
                     {{
-                        "sku": "Código SKU si está disponible",
-                        "categoria": "Categoría principal",
-                        "subcategoria": "Subcategoría si aplica",
-                        "linea": "Línea de producto",
-                        "modelo": "Modelo o variante",
                         "servicio": "Nombre del platillo/producto",
                         "descripcion": "Descripción o ingredientes",
-                        "medidas": "Tamaño o porción",
                         "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "imagen": "Nombre de archivo de imagen si menciona",
-                        "status_ws": "disponible",
-                        "catalogo": "Catálogo principal",
-                        "catalogo2": "Subcatálogo",
-                        "catalogo3": "Categoría adicional",
-                        "proveedor": "Proveedor si se menciona"
+                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
                     }}
                 ]
             }}
             
-            IMPORTANTE: 
-            - Devuelve ÚNICAMENTE el JSON, sin texto adicional
-            - Usa comillas dobles para las claves y valores
-            - Escapa correctamente los caracteres especiales
-            - Si un campo está vacío, usa cadena vacía ""
-            - Asegúrate de que el JSON sea válido
+            Reglas para restaurantes:
+            1. Extrae todos los platillos, bebidas y productos
+            2. Incluye descripciones de ingredientes si están disponibles
+            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
+            4. Si no hay precio, usa "0.00"
+            5. Moneda MXN por defecto
             """
         else:
             prompt = f"""
@@ -439,38 +426,25 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON válido con esta estructura exacta:
+            Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
                     {{
-                        "sku": "Código SKU si está disponible",
-                        "categoria": "Categoría del servicio",
-                        "subcategoria": "Subcategoría específica",
-                        "linea": "Línea de producto/servicio",
-                        "modelo": "Modelo o versión",
                         "servicio": "Nombre del servicio",
                         "descripcion": "Descripción breve",
-                        "medidas": "Especificaciones técnicas o medidas",
                         "precio": "100.00",
-                        "precio_mayoreo": "90.00",
-                        "precio_menudeo": "100.00",
                         "moneda": "MXN",
-                        "imagen": "Nombre de imagen relacionada",
-                        "status_ws": "disponible",
-                        "catalogo": "Catálogo principal",
-                        "catalogo2": "Catálogo secundario",
-                        "catalogo3": "Catálogo adicional",
-                        "proveedor": "Proveedor o fabricante"
+                        "categoria": "Categoría del servicio"
                     }}
                 ]
             }}
             
-            IMPORTANTE: 
-            - Devuelve ÚNICAMENTE el JSON, sin texto adicional
-            - Usa comillas dobles para las claves y valores
-            - Escapa correctamente los caracteres especiales
-            - Si un campo está vacío, usa cadena vacía ""
-            - Asegúrate de que el JSON sea válido
+            Reglas importantes:
+            1. Extrae TODOS los servicios que encuentres
+            2. Si no hay precio específico, usa "0.00"
+            3. La moneda por defecto es MXN
+            4. Agrupa servicios similares
+            5. Sé específico con los nombres
             """
         
         headers = {
@@ -482,35 +456,31 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000
+            "max_tokens": 3000
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)  # Aumentar timeout
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
         response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        app.logger.info(f"📄 Respuesta IA recibida: {respuesta_ia[:500]}...")
-        
-        # Mejorar la extracción del JSON
-        servicios_extraidos = extraer_json_de_respuesta(respuesta_ia)
-        
-        if servicios_extraidos:
+        # Extraer JSON de la respuesta
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            servicios_extraidos = json.loads(json_match.group())
             app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
             return servicios_extraidos
         else:
-            app.logger.error("🔴 No se pudo extraer JSON válido de la respuesta IA")
-            app.logger.error(f"Respuesta completa: {respuesta_ia}")
+            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
         app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
-        app.logger.error(traceback.format_exc())
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos con todos los campos"""
+    """Guarda los servicios extraídos del PDF en la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -526,71 +496,24 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
                     continue
                     
-                # Obtener todos los campos
-                sku = servicio.get('sku', '').strip()
-                categoria = servicio.get('categoria', '').strip()
-                subcategoria = servicio.get('subcategoria', '').strip()
-                linea = servicio.get('linea', '').strip()
-                modelo = servicio.get('modelo', '').strip()
                 descripcion = servicio.get('descripcion', '').strip()
-                medidas = servicio.get('medidas', '').strip()
                 precio = servicio.get('precio', '0.00')
-                precio_mayoreo = servicio.get('precio_mayoreo', '0.00')
-                precio_menudeo = servicio.get('precio_menudeo', '0.00')
                 moneda = servicio.get('moneda', 'MXN')
-                imagen = servicio.get('imagen', '').strip()
-                status_ws = servicio.get('status_ws', 'disponible').strip()
-                catalogo = servicio.get('catalogo', '').strip()
-                catalogo2 = servicio.get('catalogo2', '').strip()
-                catalogo3 = servicio.get('catalogo3', '').strip()
-                proveedor = servicio.get('proveedor', '').strip()
                 
-                # Convertir precios a decimal
+                # Convertir precio a decimal
                 try:
                     precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
                 except:
                     precio_decimal = Decimal('0.00')
                 
-                try:
-                    precio_mayoreo_decimal = Decimal(str(precio_mayoreo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_mayoreo_decimal = Decimal('0.00')
-                
-                try:
-                    precio_menudeo_decimal = Decimal(str(precio_menudeo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_menudeo_decimal = Decimal('0.00')
-                
-                # Insertar o actualizar con todos los campos
                 cursor.execute("""
-                    INSERT INTO precios (
-                        sku, categoria, subcategoria, linea, modelo, servicio, 
-                        descripcion, medidas, precio, precio_mayoreo, precio_menudeo, 
-                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO precios (servicio, descripcion, precio, moneda)
+                    VALUES (%s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE 
-                        sku = VALUES(sku),
-                        categoria = VALUES(categoria),
-                        subcategoria = VALUES(subcategoria),
-                        linea = VALUES(linea),
-                        modelo = VALUES(modelo),
                         descripcion = VALUES(descripcion),
-                        medidas = VALUES(medidas),
                         precio = VALUES(precio),
-                        precio_mayoreo = VALUES(precio_mayoreo),
-                        precio_menudeo = VALUES(precio_menudeo),
-                        moneda = VALUES(moneda),
-                        imagen = VALUES(imagen),
-                        status_ws = VALUES(status_ws),
-                        catalogo = VALUES(catalogo),
-                        catalogo2 = VALUES(catalogo2),
-                        catalogo3 = VALUES(catalogo3),
-                        proveedor = VALUES(proveedor)
-                """, (
-                    sku, categoria, subcategoria, linea, modelo, nombre_servicio,
-                    descripcion, medidas, precio_decimal, precio_mayoreo_decimal, precio_menudeo_decimal,
-                    moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                ))
+                        moneda = VALUES(moneda)
+                """, (nombre_servicio, descripcion, precio_decimal, moneda))
                 
                 servicios_guardados += 1
                 app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
@@ -610,6 +533,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
+# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
@@ -637,6 +561,7 @@ def subir_pdf_servicios():
             texto_pdf = extraer_texto_pdf(filepath)
             if not texto_pdf:
                 flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
+                # Limpiar archivo
                 try:
                     os.remove(filepath)
                 except:
@@ -651,12 +576,10 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
-            app.logger.info(f"📊 Texto extraído: {len(texto_pdf)} caracteres")
-            
             # Analizar con IA
             servicios = analizar_pdf_servicios(texto_pdf, config)
             if not servicios or not servicios.get('servicios'):
-                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato o intenta con un archivo más simple.', 'error')
+                flash('❌ No se pudieron identificar servicios en el PDF. Revisa el formato.', 'error')
                 try:
                     os.remove(filepath)
                 except:
@@ -676,10 +599,10 @@ def subir_pdf_servicios():
                 flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:5]:  # Mostrar primeros 5
+                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
                     app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
-                if len(servicios.get('servicios', [])) > 5:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 5} más")
+                if len(servicios.get('servicios', [])) > 10:
+                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
@@ -690,7 +613,6 @@ def subir_pdf_servicios():
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando PDF: {e}")
-        app.logger.error(traceback.format_exc())
         flash('❌ Error interno procesando el archivo', 'error')
         # Limpiar archivo en caso de error
         try:
@@ -699,6 +621,7 @@ def subir_pdf_servicios():
         except:
             pass
         return redirect(url_for('configuracion_precios'))
+
 
 def get_db_connection(config=None):
     if config is None:
@@ -1335,65 +1258,6 @@ def convertir_audio(audio_path):
         app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
         return None
 
-def extraer_json_de_respuesta(respuesta_ia):
-    """Extrae y valida JSON de la respuesta de la IA con múltiples métodos"""
-    try:
-        # Método 1: Buscar el primer JSON válido
-        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
-        if json_match:
-            json_str = json_match.group()
-            # Limpiar el JSON
-            json_str = re.sub(r',\s*}', '}', json_str)  # Quitar comas finales
-            json_str = re.sub(r',\s*]', ']', json_str)  # Quitar comas finales en arrays
-            
-            servicios_extraidos = json.loads(json_str)
-            app.logger.info("✅ JSON extraído con éxito (método 1)")
-            return servicios_extraidos
-    except json.JSONDecodeError as e:
-        app.logger.warning(f"⚠️ Método 1 falló, intentando método 2: {e}")
-    
-    try:
-        # Método 2: Buscar específicamente la estructura de servicios
-        if '"servicios"' in respuesta_ia:
-            start_idx = respuesta_ia.find('"servicios"')
-            # Buscar desde servicios hasta el final del objeto
-            json_str = respuesta_ia[start_idx:]
-            # Encontrar el objeto completo balanceando llaves
-            brace_count = 0
-            end_idx = 0
-            for i, char in enumerate(json_str):
-                if char == '{':
-                    brace_count += 1
-                elif char == '}':
-                    brace_count -= 1
-                    if brace_count == 0:
-                        end_idx = i + 1
-                        break
-            
-            if end_idx > 0:
-                json_str = '{' + json_str[:end_idx]  # Agregar llave inicial
-                servicios_extraidos = json.loads(json_str)
-                app.logger.info("✅ JSON extraído con éxito (método 2)")
-                return servicios_extraidos
-    except Exception as e:
-        app.logger.warning(f"⚠️ Método 2 falló: {e}")
-    
-    try:
-        # Método 3: Usar eval como último recurso (con precaución)
-        # Solo para desarrollo, en producción considerar alternativas
-        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
-        if json_match:
-            json_str = json_match.group()
-            # Reemplazar comillas simples por dobles
-            json_str = json_str.replace("'", '"')
-            servicios_extraidos = json.loads(json_str)
-            app.logger.info("✅ JSON extraído con éxito (método 3)")
-            return servicios_extraidos
-    except Exception as e:
-        app.logger.error(f"🔴 Todos los métodos fallaron: {e}")
-    
-    return None
-
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información"""
     if config is None:
@@ -1990,24 +1854,10 @@ def obtener_todos_los_precios(config=None):
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS precios (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            sku VARCHAR(50),
-            categoria VARCHAR(100),
-            subcategoria VARCHAR(100),
-            linea VARCHAR(100),
-            modelo VARCHAR(100),
             servicio VARCHAR(100) NOT NULL,
             descripcion TEXT,
-            medidas VARCHAR(100),
             precio DECIMAL(10,2) NOT NULL,
-            precio_mayoreo DECIMAL(10,2),
-            precio_menudeo DECIMAL(10,2),
             moneda CHAR(3) NOT NULL,
-            imagen VARCHAR(255),
-            status_ws VARCHAR(50),
-            catalogo VARCHAR(100),
-            catalogo2 VARCHAR(100),
-            catalogo3 VARCHAR(100),
-            proveedor VARCHAR(100),
             UNIQUE(servicio)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
@@ -3927,7 +3777,18 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
-
+@app.route('/test-contacto')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -4161,52 +4022,6 @@ def home():
             values=[],
             error=str(e)
         )
-
-@app.route('/debug-dashboard-data')
-def debug_dashboard_data():
-    config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # 1. Verificar estructura de la tabla
-        cursor.execute("DESCRIBE conversaciones")
-        estructura = cursor.fetchall()
-        
-        # 2. Verificar conteo real de datos
-        cursor.execute("SELECT COUNT(*) as total FROM conversaciones")
-        total_conversaciones = cursor.fetchone()['total']
-        
-        # 3. Verificar datos de la última semana (periodo por defecto)
-        start = datetime.now() - timedelta(days=7)
-        cursor.execute("""
-            SELECT 
-                COUNT(DISTINCT numero) as chats_distintos,
-                COUNT(*) as total_mensajes,
-                MAX(timestamp) as ultimo_mensaje
-            FROM conversaciones 
-            WHERE timestamp >= %s
-        """, (start,))
-        datos_semana = cursor.fetchone()
-        
-        # 4. Verificar algunos registros de ejemplo
-        cursor.execute("SELECT * FROM conversaciones ORDER BY timestamp DESC LIMIT 5")
-        ejemplos = cursor.fetchall()
-        
-        cursor.close()
-        conn.close()
-        
-        return jsonify({
-            'estructura_tabla': [col['Field'] for col in estructura],
-            'total_conversaciones': total_conversaciones,
-            'datos_ultima_semana': datos_semana,
-            'ejemplos_registros': ejemplos,
-            'periodo_consultado': start.isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/chats')
 def ver_chats():
