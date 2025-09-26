@@ -398,7 +398,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL MENÚ:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
@@ -424,7 +424,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
             4. Si no hay precio, usa "0.00"
             5. Moneda MXN por defecto
-            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
+            6. Si no hay información para algún campo, déjalo como cadena vacía ""
+            7. Asegúrate de que el JSON sea válido
             """
         else:
             prompt = f"""
@@ -434,7 +435,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:6000]}
             
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido con esta estructura exacta:
             {{
                 "servicios": [
                     {{
@@ -460,8 +461,8 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares
             5. Sé específico con los nombres
-            6. Para precios de mayoreo/menudeo, infiere si hay descuentos por cantidad
-            7. Intenta identificar categorías, subcategorías, líneas y modelos cuando sea posible
+            6. Si no hay información para algún campo, déjalo como cadena vacía ""
+            7. Asegúrate de que el JSON sea válido - usa comillas dobles y escapa caracteres especiales
             """
         
         headers = {
@@ -473,7 +474,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000  # Aumenté los tokens para respuestas más largas
         }
         
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
@@ -482,14 +483,33 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        # Extraer JSON de la respuesta
-        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        # Log para debugging
+        app.logger.info(f"📄 Respuesta IA recibida: {respuesta_ia[:500]}...")
+        
+        # Mejorar la extracción del JSON
+        json_match = re.search(r'\{[\s\S]*\}', respuesta_ia)
         if json_match:
-            servicios_extraidos = json.loads(json_match.group())
-            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
-            return servicios_extraidos
+            json_str = json_match.group()
+            try:
+                servicios_extraidos = json.loads(json_str)
+                app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
+                return servicios_extraidos
+            except json.JSONDecodeError as e:
+                app.logger.error(f"🔴 Error decodificando JSON: {e}")
+                app.logger.error(f"🔴 JSON problemático: {json_str}")
+                # Intentar limpiar el JSON
+                try:
+                    # Limpiar comillas simples y otros problemas comunes
+                    json_limpio = json_str.replace("'", '"')
+                    servicios_extraidos = json.loads(json_limpio)
+                    app.logger.info(f"✅ JSON limpiado exitosamente")
+                    return servicios_extraidos
+                except:
+                    app.logger.error("🔴 No se pudo reparar el JSON")
+                    return None
         else:
-            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
+            app.logger.error("🔴 No se pudo encontrar JSON en la respuesta IA")
+            app.logger.error(f"🔴 Respuesta completa: {respuesta_ia}")
             return None
             
     except Exception as e:
@@ -508,38 +528,37 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
             try:
-                # Limpiar y validar datos
+                # Limpiar y validar datos con valores por defecto más robustos
                 nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
                 if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
                     continue
                     
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                precio_mayoreo = servicio.get('precio_mayoreo', '0.00')
-                precio_menudeo = servicio.get('precio_menudeo', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
-                categoria = servicio.get('categoria', '').strip()
-                subcategoria = servicio.get('subcategoria', '').strip()
-                linea = servicio.get('linea', '').strip()
-                modelo = servicio.get('modelo', '').strip()
-                medidas = servicio.get('medidas', '').strip()
-                sku = servicio.get('sku', '').strip()
+                descripcion = servicio.get('descripcion', '').strip() or ''
+                precio = servicio.get('precio', '0.00') or '0.00'
+                precio_mayoreo = servicio.get('precio_mayoreo', '0.00') or '0.00'
+                precio_menudeo = servicio.get('precio_menudeo', '0.00') or '0.00'
+                moneda = servicio.get('moneda', 'MXN') or 'MXN'
+                categoria = servicio.get('categoria', '').strip() or ''
+                subcategoria = servicio.get('subcategoria', '').strip() or ''
+                linea = servicio.get('linea', '').strip() or ''
+                modelo = servicio.get('modelo', '').strip() or ''
+                medidas = servicio.get('medidas', '').strip() or ''
+                sku = servicio.get('sku', '').strip() or ''
                 
-                # Convertir precios a decimal
-                try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
+                # Convertir precios a decimal de manera más segura
+                def safe_decimal(value):
+                    try:
+                        # Remover caracteres no numéricos excepto punto decimal
+                        cleaned = re.sub(r'[^\d.]', '', str(value))
+                        if not cleaned:
+                            return Decimal('0.00')
+                        return Decimal(cleaned)
+                    except:
+                        return Decimal('0.00')
                 
-                try:
-                    precio_mayoreo_decimal = Decimal(str(precio_mayoreo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_mayoreo_decimal = Decimal('0.00')
-                
-                try:
-                    precio_menudeo_decimal = Decimal(str(precio_menudeo).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_menudeo_decimal = Decimal('0.00')
+                precio_decimal = safe_decimal(precio)
+                precio_mayoreo_decimal = safe_decimal(precio_mayoreo)
+                precio_menudeo_decimal = safe_decimal(precio_menudeo)
                 
                 cursor.execute("""
                     INSERT INTO precios (servicio, descripcion, precio, precio_mayoreo, precio_menudeo, moneda, 
@@ -577,6 +596,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
+
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
     """Endpoint para subir PDF y extraer servicios automáticamente"""
