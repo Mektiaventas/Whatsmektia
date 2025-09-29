@@ -302,7 +302,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
             CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:8000]}  # Limitar tamaño para evitar tokens excesivos
+            {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
             
             Proporciona un análisis en este formato:
             
@@ -326,7 +326,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
             CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:8000]}
+            {texto_archivo[:80000]}
             
             Proporciona un análisis en este formato:
             
@@ -413,51 +413,74 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         
         if es_porfirianna:
             prompt = f"""
-            Eres un asistente especializado en analizar menús de restaurantes. 
-            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
-            
-            TEXTO DEL MENÚ:
-            {texto_pdf[:6000]}
-            
-            Devuelve SOLO un JSON con esta estructura:
-            {{
-                "servicios": [
-                    {{
-                        "servicio": "Nombre del platillo/producto",
-                        "descripcion": "Descripción o ingredientes",
-                        "precio": "100.00",
-                        "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
-                    }}
-                ]
-            }}
-            
-            Reglas para restaurantes:
-            1. Extrae todos los platillos, bebidas y productos
-            2. Incluye descripciones de ingredientes si están disponibles
-            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
-            4. Si no hay precio, usa "0.00"
-            5. Moneda MXN por defecto
-            """
+                Eres un asistente especializado en extraer productos y servicios de catálogos.
+                Analiza el siguiente texto y extrae TODOS los productos/servicios con TODOS estos campos:
+
+                Devuelve SOLO un JSON con esta estructura:
+                {{
+                    "servicios": [
+                        {{
+                            "sku": "",
+                            "servicio": "",
+                            "categoria": "",
+                            "subcategoria": "",
+                            "linea": "",
+                            "modelo": "",
+                            "descripcion": "",
+                            "medidas": "",
+                            "precio": "",
+                            "precio_mayoreo": "",
+                            "precio_menudeo": "",
+                            "moneda": "",
+                            "imagen": "",
+                            "status_ws": "",
+                            "catalogo": "",
+                            "catalogo2": "",
+                            "catalogo3": "",
+                            "proveedor": ""
+                        }}
+                    ]
+                }}
+
+                Reglas:
+                - Si algún dato no está disponible, deja el campo vacío ("").
+                - No agregues texto fuera del JSON.
+                - Usa el formato exacto de los campos.
+                - "precio", "precio_mayoreo" y "precio_menudeo" deben ser numéricos (ej: "100.00").
+                - "moneda" debe ser "MXN" por defecto si no se especifica.
+                """
         else:
             prompt = f"""
             Eres un asistente especializado en extraer servicios y precios de catálogos.
             Analiza el siguiente texto y extrae TODOS los servicios:
             
             TEXTO DEL DOCUMENTO:
-            {texto_pdf[:6000]}
+            {texto_pdf[:60000]}
             
             Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
-                    {{
-                        "servicio": "Nombre del servicio",
-                        "descripcion": "Descripción breve",
-                        "precio": "100.00",
-                        "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
-                    }}
-                ]
+                        {{
+                            "sku": "",
+                            "servicio": "",
+                            "categoria": "",
+                            "subcategoria": "",
+                            "linea": "",
+                            "modelo": "",
+                            "descripcion": "",
+                            "medidas": "",
+                            "precio": "",
+                            "precio_mayoreo": "",
+                            "precio_menudeo": "",
+                            "moneda": "",
+                            "imagen": "",
+                            "status_ws": "",
+                            "catalogo": "",
+                            "catalogo2": "",
+                            "catalogo3": "",
+                            "proveedor": ""
+                        }}
+                    ]
             }}
             
             Reglas importantes:
@@ -502,55 +525,71 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos"""
+    """Guarda los servicios extraídos del PDF en la base de datos, llenando todos los campos."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
         servicios_guardados = 0
         for servicio in servicios.get('servicios', []):
-            try:
-                # Limpiar y validar datos
-                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
-                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
-                    continue
-                    
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
-                
-                # Convertir precio a decimal
+            # Extraer y limpiar todos los campos esperados
+            campos = [
+                servicio.get('sku', '').strip(),
+                servicio.get('servicio', '').strip(),
+                servicio.get('categoria', '').strip(),
+                servicio.get('subcategoria', '').strip(),
+                servicio.get('linea', '').strip(),
+                servicio.get('modelo', '').strip(),
+                servicio.get('descripcion', '').strip(),
+                servicio.get('medidas', '').strip(),
+                servicio.get('precio', '0.00') or '0.00',
+                servicio.get('precio_mayoreo', '0.00') or '0.00',
+                servicio.get('precio_menudeo', '0.00') or '0.00',
+                servicio.get('moneda', 'MXN').strip() or 'MXN',
+                servicio.get('imagen', '').strip(),
+                servicio.get('status_ws', '').strip(),
+                servicio.get('catalogo', '').strip(),
+                servicio.get('catalogo2', '').strip(),
+                servicio.get('catalogo3', '').strip(),
+                servicio.get('proveedor', '').strip(),
+            ]
+            # Convertir precios a decimal si es posible
+            for i in [8, 9, 10]:
                 try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
-                
-                cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        descripcion = VALUES(descripcion),
-                        precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
-                
-                servicios_guardados += 1
-                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
-                
-            except Exception as e:
-                app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
-                continue
-        
+                    campos[i] = str(float(campos[i]))
+                except Exception:
+                    campos[i] = '0.00'
+            cursor.execute("""
+                INSERT INTO precios (
+                    sku, servicio, categoria, subcategoria, linea, modelo,
+                    descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
+                    moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE
+                    sku=VALUES(sku),
+                    categoria=VALUES(categoria),
+                    subcategoria=VALUES(subcategoria),
+                    linea=VALUES(linea),
+                    modelo=VALUES(modelo),
+                    descripcion=VALUES(descripcion),
+                    medidas=VALUES(medidas),
+                    precio=VALUES(precio),
+                    precio_mayoreo=VALUES(precio_mayoreo),
+                    precio_menudeo=VALUES(precio_menudeo),
+                    moneda=VALUES(moneda),
+                    imagen=VALUES(imagen),
+                    status_ws=VALUES(status_ws),
+                    catalogo=VALUES(catalogo),
+                    catalogo2=VALUES(catalogo2),
+                    catalogo3=VALUES(catalogo3),
+                    proveedor=VALUES(proveedor)
+            """, campos)
+            servicios_guardados += 1
         conn.commit()
         cursor.close()
         conn.close()
-        
-        app.logger.info(f"✅ {servicios_guardados} servicios guardados en la base de datos")
         return servicios_guardados
-        
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
