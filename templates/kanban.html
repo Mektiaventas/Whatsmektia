@@ -61,10 +61,7 @@
         <div class="column-header">
             <img src="{{ col.icono }}" class="col-icon" alt="">
             <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
-            <div class="add-column-form" style="margin-bottom: 1em;">
-                <input type="text" id="nuevo-nombre-columna" placeholder="Nombre de la columna" />
-                <button type="button" onclick="agregarColumnaKanban()">➕ Agregar columna</button>
-            </div>
+            <button class="add-chat-btn" title="Agregar aquí">+</button>
         </div>
         <div class="column-list" data-col-id="{{ col.id }}">
             {% for chat in chats if chat.columna_id == col.id %}
@@ -297,23 +294,7 @@
                 flagElement.remove();
             }
         }
-        function agregarColumnaKanban() {
-            const nombre = document.getElementById('nuevo-nombre-columna').value.trim();
-            if (!nombre) return alert('Escribe un nombre para la columna');
-            fetch('/kanban/columna/agregar', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre })
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (data.success) {
-                        location.reload(); // Recarga la página para ver la nueva columna
-                    } else {
-                        alert(data.error || 'Error al agregar columna');
-                    }
-                });
-        }
+
         function agregarNuevoChat(chat) {
             const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
             if (!columna) return;
