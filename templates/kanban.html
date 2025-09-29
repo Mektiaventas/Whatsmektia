@@ -211,12 +211,14 @@
             // Actualizar tiempo (ahora solo hora:minuto)
             const timeElement = elemento.querySelector('.card-time');
             if (timeElement && chat.ultima_fecha) {
-                const nuevoTiempo = new Date(chat.ultima_fecha).toLocaleTimeString('es-ES', {
-                    hour: '2-digit',
-                    minute: '2-digit'
-                });
-                if (timeElement.textContent !== nuevoTiempo) {
-                    timeElement.textContent = nuevoTiempo;
+                const fechaObj = new Date(chat.ultima_fecha);
+                const dia = fechaObj.getDate();
+                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
+                const anio = fechaObj.getFullYear();
+                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+                const fechaFormateada = `${dia}-${mes}-${anio} ${hora}`;
+                if (timeElement.textContent !== fechaFormateada) {
+                    timeElement.textContent = fechaFormateada;
                 }
             }
 
