@@ -113,6 +113,8 @@
 <script>
     let editingColId = null;
     let editingColText = null;
+    let kanbanAutoRefresh = true;
+    let refreshInterval = 500;
 
     // Detecta cuando el usuario empieza a editar un título
     document.addEventListener('focusin', function (e) {
@@ -229,10 +231,7 @@
             });
         });
 
-        // El resto de tu código JavaScript existente...
-        let kanbanAutoRefresh = true;
-        let refreshInterval = 500;
-        setInterval(actualizarKanban, 500); // cada medio segundo
+        
 
         console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');    
         function actualizarIncremental(data) {
@@ -465,9 +464,9 @@
         document.addEventListener('visibilitychange', function () {
             kanbanAutoRefresh = !document.hidden;
         });
-
-        setTimeout(actualizarKanban, 1000);
     });
+    // El resto de tu código JavaScript existente...
     
+    setInterval(actualizarKanban, refreshInterval); // cada medio segundo
 </script>
 {% endblock %}
