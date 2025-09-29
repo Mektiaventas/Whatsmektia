@@ -221,7 +221,7 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda == m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                         </option>
                         {% endfor %}
@@ -237,7 +237,40 @@
                     {% endif %}
                 </div>
             </div>
-
+            <div class="grid grid-cols-2 gap-4">
+                <div class="form-group">
+                    <label for="status_ws">Status WS</label>
+                    <input type="text" id="status_ws" name="status_ws" class="input"
+                           value="{{ precio_edit.status_ws if precio_edit else '' }}"
+                           placeholder="Ej: activo">
+                </div>
+                <div class="form-group">
+                    <label for="catalogo">Catálogo</label>
+                    <input type="text" id="catalogo" name="catalogo" class="input"
+                           value="{{ precio_edit.catalogo if precio_edit else '' }}"
+                           placeholder="Ej: Catálogo 1">
+                </div>
+            </div>
+            <div class="grid grid-cols-3 gap-4">
+                <div class="form-group">
+                    <label for="catalogo2">Catálogo 2</label>
+                    <input type="text" id="catalogo2" name="catalogo2" class="input"
+                           value="{{ precio_edit.catalogo2 if precio_edit else '' }}"
+                           placeholder="Ej: Catálogo 2">
+                </div>
+                <div class="form-group">
+                    <label for="catalogo3">Catálogo 3</label>
+                    <input type="text" id="catalogo3" name="catalogo3" class="input"
+                           value="{{ precio_edit.catalogo3 if precio_edit else '' }}"
+                           placeholder="Ej: Catálogo 3">
+                </div>
+                <div class="form-group">
+                    <label for="proveedor">Proveedor</label>
+                    <input type="text" id="proveedor" name="proveedor" class="input"
+                           value="{{ precio_edit.proveedor if precio_edit else '' }}"
+                           placeholder="Ej: Proveedor S.A.">
+                </div>
+            </div>
             <div class="form-actions flex justify-end gap-2">
                 <button type="submit" class="btn primary">
                     {{ precio_edit and '💾 Actualizar' or '💾 Guardar' }}

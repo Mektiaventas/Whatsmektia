@@ -357,7 +357,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             "max_tokens": 1500
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         
         data = response.json()
@@ -4397,36 +4397,37 @@ def configuracion_precio_editar(pid):
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
-        config = obtener_configuracion_por_host()
-        data = request.form.to_dict()
-        conn   = get_db_connection(config)
-        cursor = conn.cursor()
-        if data.get('id'):
-            cursor.execute("""
-                UPDATE precios
-                   SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
-                 WHERE id=%s;
-            """, (
-                data['servicio'],
-                data.get('descripcion',''),
-                data['precio'],
-                data['moneda'],
-                data['id']
-            ))
-        else:
-            cursor.execute("""
-                INSERT INTO precios (servicio, descripcion, precio, moneda)
-                VALUES (%s,%s,%s,%s);
-            """, (
-                data['servicio'],
-                data.get('descripcion',''),
-                data['precio'],
-                data['moneda']
-            ))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return redirect(url_for('configuracion_precios'))
+    config = obtener_configuracion_por_host()
+    data = request.form.to_dict()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    campos = [
+        'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
+        'descripcion', 'medidas', 'precio', 'precio_mayoreo', 'precio_menudeo',
+        'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+    ]
+    valores = [data.get(campo) for campo in campos]
+
+    if data.get('id'):
+        cursor.execute(f"""
+            UPDATE precios SET
+                sku=%s, servicio=%s, categoria=%s, subcategoria=%s, linea=%s, modelo=%s,
+                descripcion=%s, medidas=%s, precio=%s, precio_mayoreo=%s, precio_menudeo=%s,
+                moneda=%s, imagen=%s, status_ws=%s, catalogo=%s, catalogo2=%s, catalogo3=%s, proveedor=%s
+            WHERE id=%s;
+        """, valores + [data['id']])
+    else:
+        cursor.execute(f"""
+            INSERT INTO precios (
+                sku, servicio, categoria, subcategoria, linea, modelo,
+                descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
+                moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+            ) VALUES ({','.join(['%s']*18)});
+        """, valores)
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return redirect(url_for('configuracion_precios'))
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
