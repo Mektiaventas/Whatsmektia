@@ -3772,7 +3772,7 @@ def webhook():
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
-       
+        actualizar_kanban()
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
