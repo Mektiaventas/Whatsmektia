@@ -111,66 +111,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
-    let editingColId = null;
-    let editingColText = null;
-    let kanbanAutoRefresh = true;
-    let refreshInterval = 500;
-
-    // Detecta cuando el usuario empieza a editar un título
-    document.addEventListener('focusin', function (e) {
-        if (e.target.classList.contains('col-name')) {
-            editingColId = e.target.dataset.colId;
-            editingColText = e.target.textContent;
-        }
-    });
-
-    // Detecta cuando termina de editar
-    document.addEventListener('focusout', function (e) {
-        if (e.target.classList.contains('col-name')) {
-            editingColId = null;
-            editingColText = null;
-        }
-    });
-
-    function actualizarKanban() {
-        if (!kanbanAutoRefresh) return;
-        const scrollPosition = window.scrollY;
-
-        fetch('/kanban/data')
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error('Error en la respuesta del servidor');
-                }
-                return response.json();
-            })
-            .then(data => {
-                actualizarIncremental(data);
-
-                // --- Restaurar edición si corresponde ---
-                if (editingColId) {
-                    const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
-                    if (colHeader) {
-                        colHeader.setAttribute('contenteditable', 'true');
-                        colHeader.focus();
-                        // Opcional: restaurar texto temporal
-                        if (editingColText) colHeader.textContent = editingColText;
-                        // Mover el cursor al final
-                        const range = document.createRange();
-                        range.selectNodeContents(colHeader);
-                        range.collapse(false);
-                        const sel = window.getSelection();
-                        sel.removeAllRanges();
-                        sel.addRange(range);
-                    }
-                }
-                setTimeout(() => {
-                    window.scrollTo(0, scrollPosition);
-                }, 10);
-            })
-            .catch(error => {
-                console.error('❌ Error actualizando Kanban:', error);
-            });
-    }
+    
     // Permitir editar el nombre de la columna Kanban y guardar en BD
     document.querySelectorAll('.col-name[contenteditable="true"]').forEach(function (header) {
         header.addEventListener('blur', function () {
@@ -231,9 +172,36 @@
             });
         });
 
-        
+        // El resto de tu código JavaScript existente...
+        let kanbanAutoRefresh = true;
+        let refreshInterval = 500;
+        setInterval(actualizarKanban, 500); // cada medio segundo
 
-        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');    
+        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+
+        function actualizarKanban() {
+            if (!kanbanAutoRefresh) return;
+            const scrollPosition = window.scrollY;
+
+            fetch('/kanban/data')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error en la respuesta del servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    actualizarIncremental(data);
+                    console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
+                    setTimeout(() => {
+                        window.scrollTo(0, scrollPosition);
+                    }, 10);
+                })
+                .catch(error => {
+                    console.error('❌ Error actualizando Kanban:', error);
+                });
+        }
+
         function actualizarIncremental(data) {
             // Actualizar nombres de columnas si cambiaron
             data.columnas.forEach(col => {
@@ -464,9 +432,9 @@
         document.addEventListener('visibilitychange', function () {
             kanbanAutoRefresh = !document.hidden;
         });
+
+        setTimeout(actualizarKanban, 1000);
     });
-    // El resto de tu código JavaScript existente...
-    
-    setInterval(actualizarKanban, refreshInterval); // cada medio segundo
+   
 </script>
 {% endblock %}
