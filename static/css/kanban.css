@@ -82,12 +82,11 @@
 
 .card-avatar-section {
   margin-right: 11px;
-  display: flex;
   align-items: center;
 }
 .card-avatar {
-  width: 44px;
-  height: 44px;
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
   object-fit: cover;
   background: #fff;
