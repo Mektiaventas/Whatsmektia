@@ -5006,8 +5006,7 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
         conn.commit()
         cursor.close()
         conn.close()
-    # Notifica a todos los clientes que deben refrescar el Kanban
-    socketio.emit('kanban_update', broadcast=True)
+    # No emitas ningún evento aquí
 
 
 def actualizar_columna_chat(numero, columna_id, config=None):
