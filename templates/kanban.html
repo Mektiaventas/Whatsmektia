@@ -212,28 +212,29 @@
                 eliminarChat(numero);
             });
         }
-
+        document.addEventListener('DOMContentLoaded', function () {
+            const addBtn = document.querySelector('.add-chat-btn');
+            if (addBtn) {
+                addBtn.addEventListener('click', function (e) {
+                    e.preventDefault(); // Evita submit o navegación
+                    fetch('/kanban/columna/agregar', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ nombre: 'nueva columna' })
+                    })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                location.reload();
+                            } else {
+                                alert(data.error || 'Error al agregar columna');
+                            }
+                        });
+                });
+            }
+        });
         function actualizarChatExistente(elemento, chat) {
-            document.addEventListener('DOMContentLoaded', function () {
-                const addBtn = document.querySelector('.add-chat-btn');
-                if (addBtn) {
-                    addBtn.addEventListener('click', function () {
-                        fetch('/kanban/columna/agregar', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ nombre: 'nueva columna' })
-                        })
-                            .then(res => res.json())
-                            .then(data => {
-                                if (data.success) {
-                                    location.reload(); // Recarga la página para mostrar la nueva columna
-                                } else {
-                                    alert(data.error || 'Error al agregar columna');
-                                }
-                            });
-                    });
-                }
-            });
+            
             // Actualizar avatar si cambió
             const avatar = elemento.querySelector('.card-avatar');
             const nuevoAvatar = chat.avatar || '/static/icons/default-avatar.png';
