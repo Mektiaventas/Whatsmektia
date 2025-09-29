@@ -14,7 +14,7 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
+from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
 from dotenv import load_dotenv
 import pandas as pd
@@ -24,7 +24,6 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
-from flask import current_app as app
 from werkzeug.utils import secure_filename
 from PIL import Image
 from openai import OpenAI
