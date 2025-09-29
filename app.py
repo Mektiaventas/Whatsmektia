@@ -903,6 +903,29 @@ def renombrar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'nombre': nuevo_nombre})
 
+@app.route('/kanban/columna/agregar', methods=['POST'])
+def agregar_columna_kanban():
+    config = obtener_configuracion_por_host()
+    data = request.json or {}
+    nombre = data.get('nombre', '').strip()
+    color = data.get('color', '#007bff')
+    if not nombre:
+        return jsonify({'error': 'El nombre es obligatorio'}), 400
+
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM kanban_columnas")
+    orden = cursor.fetchone()[0]
+    cursor.execute(
+        "INSERT INTO kanban_columnas (nombre, orden, color) VALUES (%s, %s, %s)",
+        (nombre, orden, color)
+    )
+    conn.commit()
+    columna_id = cursor.lastrowid
+    cursor.close()
+    conn.close()
+    return jsonify({'success': True, 'id': columna_id, 'nombre': nombre, 'orden': orden, 'color': color})
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
