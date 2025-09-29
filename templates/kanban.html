@@ -214,8 +214,7 @@
                 const fechaObj = new Date(chat.ultima_fecha);
                 const dia = fechaObj.getDate();
                 const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
-                const anio = fechaObj.getFullYear();
-                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
                 const fechaFormateada = `${dia}-${mes}-${anio} ${hora}`;
                 if (timeElement.textContent !== fechaFormateada) {
                     timeElement.textContent = fechaFormateada;
