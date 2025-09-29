@@ -3721,7 +3721,6 @@ def webhook():
         change = entry['changes'][0]['value']
         mensajes = change.get('messages', [])
         data = request.get_json()
-        actualizar_kanban(numero, columna_id, config)
         try:
             # Extraer información del contacto del payload
             if 'contacts' in data['entry'][0]['changes'][0]['value']:
@@ -3761,7 +3760,6 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
         # Agregar esto inmediatamente:
-        
        # CORRECCIÓN: Manejo robusto de texto
         texto = ''
         es_imagen = False
