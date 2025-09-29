@@ -32,7 +32,7 @@ import fitz
 from werkzeug.utils import secure_filename
 from flask_socketio import SocketIO
 
-socketio = SocketIO(app)
+
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -42,7 +42,7 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
-
+socketio = SocketIO(app)
 @app.template_filter('format_time_24h')
 def format_time_24h(dt):
     """Formatea la fecha en formato 24h: DD/MM HH:MM"""
