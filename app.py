@@ -489,12 +489,13 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         # Extraer JSON de la respuesta
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
-            servicios_extraidos = json.loads(json_match.group())
-            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
-            return servicios_extraidos
-        else:
-            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
-            return None
+            json_str = json_match.group()
+            try:
+                servicios_extraidos = json.loads(json_str)
+                # ...
+            except json.JSONDecodeError as e:
+                app.logger.error(f"❌ JSON inválido de la IA: {e}\nRespuesta IA:\n{json_str}")
+                return None
             
     except Exception as e:
         app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
