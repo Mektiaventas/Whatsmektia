@@ -413,82 +413,87 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         
         if es_porfirianna:
             prompt = f"""
-                Eres un asistente especializado en extraer productos y servicios de catálogos.
-                Analiza el siguiente texto y extrae TODOS los productos/servicios con TODOS estos campos:
+            Eres un asistente especializado en extraer productos y servicios de catálogos de RESTAURANTES.
+            Analiza el siguiente texto y extrae TODOS los productos/servicios con TODOS estos campos:
 
-                Devuelve SOLO un JSON con esta estructura:
-                {{
-                    "servicios": [
-                        {{
-                            "sku": "",
-                            "servicio": "",
-                            "categoria": "",
-                            "subcategoria": "",
-                            "linea": "",
-                            "modelo": "",
-                            "descripcion": "",
-                            "medidas": "",
-                            "precio": "",
-                            "precio_mayoreo": "",
-                            "precio_menudeo": "",
-                            "moneda": "",
-                            "imagen": "",
-                            "status_ws": "",
-                            "catalogo": "",
-                            "catalogo2": "",
-                            "catalogo3": "",
-                            "proveedor": ""
-                        }}
-                    ]
-                }}
-
-                Reglas:
-                - Si algún dato no está disponible, deja el campo vacío ("").
-                - No agregues texto fuera del JSON.
-                - Usa el formato exacto de los campos.
-                - "precio", "precio_mayoreo" y "precio_menudeo" deben ser numéricos (ej: "100.00").
-                - "moneda" debe ser "MXN" por defecto si no se especifica.
-                """
-        else:
-            prompt = f"""
-            Eres un asistente especializado en extraer servicios y precios de catálogos.
-            Analiza el siguiente texto y extrae TODOS los servicios:
-            
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:60000]}
-            
+
             Devuelve SOLO un JSON con esta estructura:
             {{
                 "servicios": [
-                        {{
-                            "sku": "",
-                            "servicio": "",
-                            "categoria": "",
-                            "subcategoria": "",
-                            "linea": "",
-                            "modelo": "",
-                            "descripcion": "",
-                            "medidas": "",
-                            "precio": "",
-                            "precio_mayoreo": "",
-                            "precio_menudeo": "",
-                            "moneda": "",
-                            "imagen": "",
-                            "status_ws": "",
-                            "catalogo": "",
-                            "catalogo2": "",
-                            "catalogo3": "",
-                            "proveedor": ""
-                        }}
-                    ]
+                    {{
+                        "sku": "código único si existe",
+                        "servicio": "nombre del platillo o producto",
+                        "categoria": "categoría principal",
+                        "subcategoria": "subcategoría si aplica",
+                        "linea": "línea o tipo de comida",
+                        "modelo": "",
+                        "descripcion": "descripción detallada",
+                        "medidas": "porción o tamaño",
+                        "precio": "precio principal",
+                        "precio_mayoreo": "",
+                        "precio_menudeo": "",
+                        "moneda": "MXN",
+                        "imagen": "",
+                        "status_ws": "activo",
+                        "catalogo": "La Porfirianna",
+                        "catalogo2": "",
+                        "catalogo3": "",
+                        "proveedor": ""
+                    }}
+                ]
             }}
-            
+
+            Reglas CRÍTICAS:
+            - Si algún dato no está disponible, deja el campo vacío ("").
+            - NO agregues texto fuera del JSON.
+            - "precio" debe ser numérico (ej: "100.00").
+            - "moneda" debe ser "MXN" por defecto.
+            - Extrae TODOS los productos que encuentres en el texto.
+            - Para restaurantes, enfócate en platillos, bebidas, postres.
+            """
+        else:
+            prompt = f"""
+            Eres un asistente especializado en extraer servicios digitales de catálogos.
+            Analiza el siguiente texto y extrae TODOS los servicios:
+
+            TEXTO DEL DOCUMENTO:
+            {texto_pdf[:60000]}
+
+            Devuelve SOLO un JSON con esta estructura:
+            {{
+                "servicios": [
+                    {{
+                        "sku": "código único si existe",
+                        "servicio": "nombre del servicio",
+                        "categoria": "categoría principal",
+                        "subcategoria": "subcategoría si aplica",
+                        "linea": "línea de servicio",
+                        "modelo": "",
+                        "descripcion": "descripción detallada",
+                        "medidas": "",
+                        "precio": "precio principal",
+                        "precio_mayoreo": "precio por volumen",
+                        "precio_menudeo": "precio individual",
+                        "moneda": "MXN",
+                        "imagen": "",
+                        "status_ws": "activo",
+                        "catalogo": "Mektia",
+                        "catalogo2": "",
+                        "catalogo3": "",
+                        "proveedor": ""
+                    }}
+                ]
+            }}
+
             Reglas importantes:
             1. Extrae TODOS los servicios que encuentres
             2. Si no hay precio específico, usa "0.00"
             3. La moneda por defecto es MXN
             4. Agrupa servicios similares
             5. Sé específico con los nombres
+            6. NO agregues texto fuera del JSON
             """
         
         headers = {
@@ -500,14 +505,18 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000,
+            "response_format": {"type": "json_object"}  # 🔥 FORZAR RESPUESTA JSON
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        app.logger.info("🔄 Enviando PDF a IA para análisis...")
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        app.logger.info(f"✅ Respuesta IA recibida: {len(respuesta_ia)} caracteres")
         
         # Extraer JSON de la respuesta
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
@@ -515,85 +524,173 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             json_str = json_match.group()
             try:
                 servicios_extraidos = json.loads(json_str)
-                # ...
+                
+                # Validar estructura básica
+                if 'servicios' in servicios_extraidos and isinstance(servicios_extraidos['servicios'], list):
+                    app.logger.info(f"✅ JSON válido extraído: {len(servicios_extraidos['servicios'])} servicios")
+                    
+                    # Validar y limpiar cada servicio
+                    servicios_limpios = []
+                    for servicio in servicios_extraidos['servicios']:
+                        servicio_limpio = validar_y_limpiar_servicio(servicio)
+                        if servicio_limpio:
+                            servicios_limpios.append(servicio_limpio)
+                    
+                    servicios_extraidos['servicios'] = servicios_limpios
+                    app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
+                    
+                    return servicios_extraidos
+                else:
+                    app.logger.error("❌ Estructura JSON inválida: falta clave 'servicios'")
+                    return None
+                    
             except json.JSONDecodeError as e:
-                app.logger.error(f"❌ JSON inválido de la IA: {e}\nRespuesta IA:\n{json_str}")
+                app.logger.error(f"❌ JSON inválido de la IA: {e}")
+                app.logger.error(f"📄 Respuesta IA problemática: {respuesta_ia[:500]}...")
                 return None
+            
+        else:
+            app.logger.error("❌ No se encontró JSON en la respuesta de la IA")
+            app.logger.error(f"📄 Respuesta IA: {respuesta_ia[:500]}...")
+            return None
             
     except Exception as e:
         app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
+        app.logger.error(traceback.format_exc())
+        return None
+
+def validar_y_limpiar_servicio(servicio):
+    """Valida y limpia los datos de un servicio individual"""
+    try:
+        servicio_limpio = {}
+        
+        # Campos de texto - asegurar que sean strings
+        campos_texto = ['sku', 'servicio', 'categoria', 'subcategoria', 'linea', 
+                       'modelo', 'descripcion', 'medidas', 'moneda', 'imagen', 
+                       'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor']
+        
+        for campo in campos_texto:
+            valor = servicio.get(campo, '')
+            servicio_limpio[campo] = str(valor).strip() if valor else ""
+        
+        # Campos de precio - convertir a formato numérico
+        campos_precio = ['precio', 'precio_mayoreo', 'precio_menudeo']
+        for campo in campos_precio:
+            valor = servicio.get(campo, '0.00')
+            try:
+                # Limpiar y convertir precio
+                if isinstance(valor, (int, float)):
+                    precio_limpio = f"{float(valor):.2f}"
+                else:
+                    # Remover símbolos de moneda y espacios
+                    valor_limpio = re.sub(r'[^\d.,]', '', str(valor))
+                    # Reemplazar comas por puntos si es necesario
+                    valor_limpio = valor_limpio.replace(',', '.')
+                    # Convertir a float y luego formatear
+                    precio_limpio = f"{float(valor_limpio):.2f}" if valor_limpio else "0.00"
+                
+                servicio_limpio[campo] = precio_limpio
+            except (ValueError, TypeError):
+                servicio_limpio[campo] = "0.00"
+        
+        # Validar que tenga al menos nombre del servicio
+        if not servicio_limpio.get('servicio'):
+            app.logger.warning("⚠️ Servicio sin nombre, omitiendo")
+            return None
+        
+        # Establecer valores por defecto
+        if not servicio_limpio.get('moneda'):
+            servicio_limpio['moneda'] = 'MXN'
+        if not servicio_limpio.get('status_ws'):
+            servicio_limpio['status_ws'] = 'activo'
+        
+        return servicio_limpio
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error validando servicio: {e}")
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
-    """Guarda los servicios extraídos del PDF en la base de datos, llenando todos los campos."""
+    """Guarda los servicios extraídos del PDF en la base de datos"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
     try:
+        if not servicios or not servicios.get('servicios'):
+            app.logger.error("❌ No hay servicios para guardar")
+            return 0
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
         servicios_guardados = 0
-        for servicio in servicios.get('servicios', []):
-            # Extraer y limpiar todos los campos esperados
-            campos = [
-                servicio.get('sku', '').strip(),
-                servicio.get('servicio', '').strip(),
-                servicio.get('categoria', '').strip(),
-                servicio.get('subcategoria', '').strip(),
-                servicio.get('linea', '').strip(),
-                servicio.get('modelo', '').strip(),
-                servicio.get('descripcion', '').strip(),
-                servicio.get('medidas', '').strip(),
-                servicio.get('precio', '0.00') or '0.00',
-                servicio.get('precio_mayoreo', '0.00') or '0.00',
-                servicio.get('precio_menudeo', '0.00') or '0.00',
-                servicio.get('moneda', 'MXN').strip() or 'MXN',
-                servicio.get('imagen', '').strip(),
-                servicio.get('status_ws', '').strip(),
-                servicio.get('catalogo', '').strip(),
-                servicio.get('catalogo2', '').strip(),
-                servicio.get('catalogo3', '').strip(),
-                servicio.get('proveedor', '').strip(),
-            ]
-            # Convertir precios a decimal si es posible
-            for i in [8, 9, 10]:
-                try:
-                    campos[i] = str(float(campos[i]))
-                except Exception:
-                    campos[i] = '0.00'
-            cursor.execute("""
-                INSERT INTO precios (
-                    sku, servicio, categoria, subcategoria, linea, modelo,
-                    descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
-                    moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-                ON DUPLICATE KEY UPDATE
-                    sku=VALUES(sku),
-                    categoria=VALUES(categoria),
-                    subcategoria=VALUES(subcategoria),
-                    linea=VALUES(linea),
-                    modelo=VALUES(modelo),
-                    descripcion=VALUES(descripcion),
-                    medidas=VALUES(medidas),
-                    precio=VALUES(precio),
-                    precio_mayoreo=VALUES(precio_mayoreo),
-                    precio_menudeo=VALUES(precio_menudeo),
-                    moneda=VALUES(moneda),
-                    imagen=VALUES(imagen),
-                    status_ws=VALUES(status_ws),
-                    catalogo=VALUES(catalogo),
-                    catalogo2=VALUES(catalogo2),
-                    catalogo3=VALUES(catalogo3),
-                    proveedor=VALUES(proveedor)
-            """, campos)
-            servicios_guardados += 1
+        
+        for servicio in servicios['servicios']:
+            try:
+                # Preparar campos
+                campos = [
+                    servicio.get('sku', '').strip(),
+                    servicio.get('servicio', '').strip(),
+                    servicio.get('categoria', '').strip(),
+                    servicio.get('subcategoria', '').strip(),
+                    servicio.get('linea', '').strip(),
+                    servicio.get('modelo', '').strip(),
+                    servicio.get('descripcion', '').strip(),
+                    servicio.get('medidas', '').strip(),
+                    servicio.get('precio', '0.00'),
+                    servicio.get('precio_mayoreo', '0.00'),
+                    servicio.get('precio_menudeo', '0.00'),
+                    servicio.get('moneda', 'MXN').strip(),
+                    servicio.get('imagen', '').strip(),
+                    servicio.get('status_ws', 'activo').strip(),
+                    servicio.get('catalogo', '').strip(),
+                    servicio.get('catalogo2', '').strip(),
+                    servicio.get('catalogo3', '').strip(),
+                    servicio.get('proveedor', '').strip(),
+                ]
+                
+                # Validar precios
+                for i in [8, 9, 10]:  # índices de precios
+                    try:
+                        precio_limpio = re.sub(r'[^\d.]', '', str(campos[i]))
+                        campos[i] = f"{float(precio_limpio):.2f}" if precio_limpio else "0.00"
+                    except (ValueError, TypeError):
+                        campos[i] = "0.00"
+                
+                cursor.execute("""
+                    INSERT INTO precios (
+                        sku, servicio, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
+                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        servicio=VALUES(servicio),
+                        categoria=VALUES(categoria),
+                        subcategoria=VALUES(subcategoria),
+                        descripcion=VALUES(descripcion),
+                        precio=VALUES(precio),
+                        precio_mayoreo=VALUES(precio_mayoreo),
+                        precio_menudeo=VALUES(precio_menudeo),
+                        moneda=VALUES(moneda),
+                        status_ws=VALUES(status_ws)
+                """, campos)
+                
+                servicios_guardados += 1
+                app.logger.info(f"✅ Servicio guardado: {servicio.get('servicio')}")
+                
+            except Exception as e:
+                app.logger.error(f"🔴 Error guardando servicio individual: {e}")
+                continue
+        
         conn.commit()
         cursor.close()
         conn.close()
+        
+        app.logger.info(f"📊 Total servicios guardados: {servicios_guardados}")
         return servicios_guardados
+        
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
-
 # Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
