@@ -54,17 +54,10 @@
     .kanban-card {
         transition: all 0.3s ease;
     }
-
-    /* Estilos para el formato de hora similar a la imagen */
-    .card-time {
-        font-size: 12px;
-        color: #666;
-        font-weight: 500;
-    }
 </style>
 
 <div id="kanban-board" class="kanban-board">
-    {% for col in columnas %}
+    {% for col in columnas %}  <!-- ¡ESTE LOOP FALTABA! -->
     <div class="kanban-column" data-col-id="{{ col.id }}">
         <div class="column-header">
             <img src="{{ col.icono }}" class="col-icon" alt="">
@@ -99,7 +92,7 @@
                         <span class="card-num">{{ chat.numero }}</span>
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
-                            {{ format_time_24h(chat.ultima_fecha) }}
+                            {{ chat.ultima_fecha.strftime('%d/%m %H:%M') }}
                             {% endif %}
                         </span>
                     </div>
@@ -123,19 +116,6 @@
         let refreshInterval = 5000; // 5 segundos
 
         console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
-
-        // Función para formatear fecha en formato 24h como en la imagen (24/09 09:11)
-        function formatTime24h(dateString) {
-            if (!dateString) return '';
-
-            const date = new Date(dateString);
-            const day = String(date.getDate()).padStart(2, '0');
-            const month = String(date.getMonth() + 1).padStart(2, '0');
-            const hours = String(date.getHours()).padStart(2, '0');
-            const minutes = String(date.getMinutes()).padStart(2, '0');
-
-            return `${day}/${month} ${hours}:${minutes}`;
-        }
 
         // Función para actualizar el Kanban de forma incremental
         function actualizarKanban() {
@@ -227,10 +207,10 @@
                 aliasView.textContent = chat.nombre_mostrado;
             }
 
-            // Actualizar tiempo en formato 24h
+            // Actualizar tiempo
             const timeElement = elemento.querySelector('.card-time');
             if (timeElement && chat.ultima_fecha) {
-                const nuevoTiempo = formatTime24h(chat.ultima_fecha);
+                const nuevoTiempo = new Date(chat.ultima_fecha).toLocaleString();
                 if (timeElement.textContent !== nuevoTiempo) {
                     timeElement.textContent = nuevoTiempo;
                 }
@@ -308,7 +288,7 @@
                     <div class="card-meta-row">
                         <span class="card-num">${chat.numero}</span>
                         <span class="card-time">
-                            ${formatTime24h(chat.ultima_fecha)}
+                            ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleString() : ''}
                         </span>
                     </div>
                     <div class="card-msg">${chat.ultimo_mensaje || '&nbsp;'}</div>
