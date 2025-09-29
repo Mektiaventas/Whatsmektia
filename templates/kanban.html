@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
 <style>
-    /* Tus estilos de animación existentes... */
+    /* Tus estilos de animación existentes se mantienen igual */
     @keyframes fadeIn {
         from {
             opacity: 0;
@@ -66,41 +66,41 @@
         <div class="column-list" data-col-id="{{ col.id }}">
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
-                <!-- Nueva estructura del chat -->
-                <div class=".card-avatar-section">
-                    <div class="card-avatar">
-                        <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}"
-                             class="chat-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                <!-- Misma estructura pero reorganizada -->
+                <div class="card-avatar-section">
+                    <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}"
+                         class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                <div class="card-content">
+                    <div class="card-title-row">
+                        {% set bandera = chat.numero | bandera %}
+                        {% if bandera %}
+                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                        {% endif %}
+                        <span class="alias-view" data-num="{{ chat.numero }}">
+                            {{ chat.nombre_mostrado }}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                        </span>
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
+                            ✏️
+                        </button>
                     </div>
-                    <div class="chat-info">
-                        <div class="chat-name-row">
-                            {% set bandera = chat.numero | bandera %}
-                            {% if bandera %}
-                            <img src="{{ bandera }}" class="chat-flag" alt="País" title="País">
-                            {% endif %}
-                            <span class="chat-name">{{ chat.nombre_mostrado }}</span>
-                            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
-                                ✏️
-                            </button>
-                        </div>
-                        <div class="chat-number">{{ chat.numero }}</div>
-                    </div>
-                    <div class="chat-meta">
-                        <span class="chat-time">
+                    <div class="card-meta-row">
+                        <span class="card-num">{{ chat.numero }}</span>
+                        <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha.strftime('%H:%M') }}
                             {% endif %}
                         </span>
                         {% if chat.sin_leer > 0 %}
-                        <span class="chat-unread">{{ chat.sin_leer }}</span>
+                        <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
+                    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
                 </div>
-                <div class="chat-message-preview">
-                    {{ chat.ultimo_mensaje or "&nbsp;" }}
-                </div>
-                <!-- Fin de nueva estructura -->
             </a>
             {% endfor %}
         </div>
@@ -111,34 +111,104 @@
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        // Tu código JavaScript existente...
-        // Solo necesitarás actualizar los selectores en las funciones
-        // actualizarChatExistente, agregarNuevoChat, etc. para que coincidan
-        // con la nueva estructura HTML
+        // Tu código JavaScript existente funciona igual
+        // porque mantenemos las mismas clases
 
-        // Por ejemplo, en actualizarChatExistente:
+        let kanbanAutoRefresh = true;
+        let refreshInterval = 5000;
+
+        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+
+        function actualizarKanban() {
+            if (!kanbanAutoRefresh) return;
+            const scrollPosition = window.scrollY;
+
+            fetch('/kanban/data')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Error en la respuesta del servidor');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    actualizarIncremental(data);
+                    console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
+                    setTimeout(() => {
+                        window.scrollTo(0, scrollPosition);
+                    }, 10);
+                })
+                .catch(error => {
+                    console.error('❌ Error actualizando Kanban:', error);
+                });
+        }
+
+        function actualizarIncremental(data) {
+            // Actualizar nombres de columnas si cambiaron
+            data.columnas.forEach(col => {
+                const colHeader = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
+                if (colHeader && colHeader.textContent !== col.nombre) {
+                    colHeader.textContent = col.nombre;
+                }
+            });
+
+            // Crear un mapa de los chats actuales para comparación rápida
+            const chatsActuales = new Map();
+            document.querySelectorAll('.kanban-card').forEach(card => {
+                chatsActuales.set(card.dataset.chatNum, {
+                    element: card,
+                    columnaId: card.closest('.kanban-column').dataset.colId
+                });
+            });
+
+            // Procesar cada chat de los datos recibidos
+            data.chats.forEach(chat => {
+                const chatExistente = chatsActuales.get(chat.numero);
+
+                if (chatExistente) {
+                    // El chat ya existe, actualizar si es necesario
+                    actualizarChatExistente(chatExistente.element, chat);
+
+                    // Mover a otra columna si es necesario
+                    if (chatExistente.columnaId !== chat.columna_id.toString()) {
+                        moverChatAColumna(chat.numero, chat.columna_id);
+                    }
+
+                    // Eliminar del mapa para marcar como procesado
+                    chatsActuales.delete(chat.numero);
+                } else {
+                    // Chat nuevo, agregarlo
+                    agregarNuevoChat(chat);
+                }
+            });
+
+            // Eliminar chats que ya no existen
+            chatsActuales.forEach((info, numero) => {
+                eliminarChat(numero);
+            });
+        }
+
         function actualizarChatExistente(elemento, chat) {
-            // Actualizar avatar
-            const avatar = elemento.querySelector('.chat-avatar');
+            // Actualizar avatar si cambió
+            const avatar = elemento.querySelector('.card-avatar');
             const nuevoAvatar = chat.avatar || '/static/icons/default-avatar.png';
             if (avatar.src !== nuevoAvatar) {
                 avatar.src = nuevoAvatar;
             }
 
-            // Actualizar nombre
-            const nameElement = elemento.querySelector('.chat-name');
-            if (nameElement && nameElement.textContent !== chat.nombre_mostrado) {
-                nameElement.textContent = chat.nombre_mostrado;
+            // Actualizar nombre mostrado
+            const aliasView = elemento.querySelector('.alias-view');
+            if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
+                aliasView.textContent = chat.nombre_mostrado;
             }
 
             // Actualizar número
-            const numberElement = elemento.querySelector('.chat-number');
-            if (numberElement && numberElement.textContent !== chat.numero) {
-                numberElement.textContent = chat.numero;
+            const numElement = elemento.querySelector('.card-num');
+            if (numElement && numElement.textContent !== chat.numero) {
+                numElement.textContent = chat.numero;
             }
 
-            // Actualizar tiempo
-            const timeElement = elemento.querySelector('.chat-time');
+            // Actualizar tiempo (ahora solo hora:minuto)
+            const timeElement = elemento.querySelector('.card-time');
             if (timeElement && chat.ultima_fecha) {
                 const nuevoTiempo = new Date(chat.ultima_fecha).toLocaleTimeString('es-ES', {
                     hour: '2-digit',
@@ -149,8 +219,8 @@
                 }
             }
 
-            // Actualizar mensaje preview
-            const msgElement = elemento.querySelector('.chat-message-preview');
+            // Actualizar último mensaje
+            const msgElement = elemento.querySelector('.card-msg');
             const nuevoMensaje = chat.ultimo_mensaje || '&nbsp;';
             if (msgElement.textContent !== nuevoMensaje) {
                 msgElement.textContent = nuevoMensaje;
@@ -164,23 +234,23 @@
                 }
             }
 
-            // Actualizar contador de no leídos
-            const unreadElement = elemento.querySelector('.chat-unread');
+            // Actualizar contador de no leídos (ahora en card-meta-row)
+            const unreadElement = elemento.querySelector('.card-unread');
             if (chat.sin_leer > 0) {
                 if (unreadElement) {
                     unreadElement.textContent = chat.sin_leer;
                 } else {
                     const newUnread = document.createElement('span');
-                    newUnread.className = 'chat-unread';
+                    newUnread.className = 'card-unread';
                     newUnread.textContent = chat.sin_leer;
-                    elemento.querySelector('.chat-meta').appendChild(newUnread);
+                    elemento.querySelector('.card-meta-row').appendChild(newUnread);
                 }
             } else if (unreadElement) {
                 unreadElement.remove();
             }
 
             // Actualizar bandera
-            const flagElement = elemento.querySelector('.chat-flag');
+            const flagElement = elemento.querySelector('.card-flag');
             const nuevaBandera = getCountryFlag(chat.numero);
             if (nuevaBandera) {
                 if (flagElement) {
@@ -188,17 +258,16 @@
                 } else {
                     const banderaImg = document.createElement('img');
                     banderaImg.src = nuevaBandera;
-                    banderaImg.className = 'chat-flag';
+                    banderaImg.className = 'card-flag';
                     banderaImg.alt = 'País';
                     banderaImg.title = 'País';
-                    elemento.querySelector('.chat-name-row').prepend(banderaImg);
+                    elemento.querySelector('.card-title-row').prepend(banderaImg);
                 }
             } else if (flagElement) {
                 flagElement.remove();
             }
         }
 
-        // Y en agregarNuevoChat:
         function agregarNuevoChat(chat) {
             const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
             if (!columna) return;
@@ -206,28 +275,32 @@
             const bandera = getCountryFlag(chat.numero);
             const nuevoChatHTML = `
             <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration: none; color: inherit; display: block;">
-                <div class="chat-header">
-                    <div class="chat-avatar-container">
-                        <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
-                             class="chat-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                <div class="card-avatar-section">
+                    <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
+                         class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                <div class="card-content">
+                    <div class="card-title-row">
+                        ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
+                        <span class="alias-view" data-num="${chat.numero}">
+                            ${chat.nombre_mostrado}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+                        </span>
+                        <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
+                            ✏️
+                        </button>
                     </div>
-                    <div class="chat-info">
-                        <div class="chat-name-row">
-                            ${bandera ? `<img src="${bandera}" class="chat-flag" alt="País" title="País">` : ''}
-                            <span class="chat-name">${chat.nombre_mostrado}</span>
-                        </div>
-                        <div class="chat-number">${chat.numero}</div>
-                    </div>
-                    <div class="chat-meta">
-                        <span class="chat-time">
+                    <div class="card-meta-row">
+                        <span class="card-num">${chat.numero}</span>
+                        <span class="card-time">
                             ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''}
                         </span>
-                        ${chat.sin_leer > 0 ? `<span class="chat-unread">${chat.sin_leer}</span>` : ''}
+                        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
                     </div>
-                </div>
-                <div class="chat-message-preview">
-                    ${chat.ultimo_mensaje || '&nbsp;'}
+                    <div class="card-msg">${chat.ultimo_mensaje || '&nbsp;'}</div>
                 </div>
             </a>`;
 
@@ -241,7 +314,66 @@
             }, 2500);
         }
 
-        // El resto de tu código JavaScript permanece igual...
+        function moverChatAColumna(numero, nuevaColumnaId) {
+            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+            const nuevaColumna = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
+
+            if (chatElement && nuevaColumna) {
+                nuevaColumna.appendChild(chatElement);
+            }
+        }
+
+        function eliminarChat(numero) {
+            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+            if (chatElement) {
+                chatElement.remove();
+            }
+        }
+
+        function getCountryFlag(numero) {
+            if (!numero) return null;
+            const prefijos = {
+                '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
+                '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec'
+            };
+
+            const numStr = numero.toString().replace('+', '');
+            for (let i = 3; i > 0; i--) {
+                const prefijo = numStr.substring(0, i);
+                if (prefijos[prefijo]) {
+                    return `https://flagcdn.com/24x18/${prefijos[prefijo]}.png`;
+                }
+            }
+            return null;
+        }
+
+        function inicializarSortable() {
+            document.querySelectorAll('.column-list').forEach(list => {
+                new Sortable(list, {
+                    group: 'kanban',
+                    animation: 150,
+                    ghostClass: 'sortable-ghost',
+                    onEnd: evt => {
+                        const numero = evt.item.dataset.chatNum;
+                        const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
+                        fetch('/kanban/mover', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ numero, columna_id: nuevaCol })
+                        });
+                    }
+                });
+            });
+        }
+
+        inicializarSortable();
+        setInterval(actualizarKanban, refreshInterval);
+
+        document.addEventListener('visibilitychange', function () {
+            kanbanAutoRefresh = !document.hidden;
+        });
+
+        setTimeout(actualizarKanban, 1000);
     });
 </script>
 {% endblock %}
