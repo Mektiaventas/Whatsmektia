@@ -31,6 +31,9 @@ from openai import OpenAI
 import PyPDF2
 import fitz 
 from werkzeug.utils import secure_filename
+from flask_socketio import SocketIO
+
+socketio = SocketIO(app)
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -4987,18 +4990,22 @@ def reparar_contactos():
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
-def actualizar_kanban(numero, columna_id=1, config=None):
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, columna_id)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
-                                fecha_actualizacion = CURRENT_TIMESTAMP
-    """, (numero, columna_id))
-    conn.commit()
-    cursor.close()
-    conn.close()
+def actualizar_kanban(numero=None, columna_id=None, config=None):
+    # Actualiza la base de datos si se pasan parámetros
+    if numero and columna_id:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
+                                    fecha_actualizacion = CURRENT_TIMESTAMP
+        """, (numero, columna_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    # Notifica a todos los clientes que deben refrescar el Kanban
+    socketio.emit('kanban_update', broadcast=True)
 
 
 def actualizar_columna_chat(numero, columna_id, config=None):
@@ -5169,4 +5176,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     
-    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+    socketio.run(app, host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
