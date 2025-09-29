@@ -40,6 +40,26 @@ app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.logger.setLevel(logging.INFO)
 
+@app.template_filter('format_time_24h')
+def format_time_24h(dt):
+    """Formatea la fecha en formato 24h: DD/MM HH:MM"""
+    if not dt:
+        return ""
+    
+    try:
+        # Si ya es un datetime con timezone, convertir a hora local
+        if hasattr(dt, 'astimezone'):
+            # Verificar si ya está en la zona horaria correcta
+            if dt.tzinfo is not None:
+                dt = dt.astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir UTC y convertir
+                dt = pytz.utc.localize(dt).astimezone(tz_mx)
+        
+        return dt.strftime('%d/%m %H:%M')
+    except Exception as e:
+        app.logger.error(f"Error formateando fecha {dt}: {e}")
+        return ""
 # ——— Env vars ———
 
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
@@ -2534,26 +2554,6 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "informacion_util": f"Usuario {numero} necesita ayuda humana",
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
-@app.template_filter('format_time_24h')
-def format_time_24h(dt):
-    """Formatea la fecha en formato 24h: DD/MM HH:MM"""
-    if not dt:
-        return ""
-    
-    try:
-        # Si ya es un datetime con timezone, convertir a hora local
-        if hasattr(dt, 'astimezone'):
-            # Verificar si ya está en la zona horaria correcta
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir UTC y convertir
-                dt = pytz.utc.localize(dt).astimezone(tz_mx)
-        
-        return dt.strftime('%d/%m %H:%M')
-    except Exception as e:
-        app.logger.error(f"Error formateando fecha {dt}: {e}")
-        return ""
 def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     """
     Actualiza la información del contacto usando el nombre proporcionado desde el webhook
