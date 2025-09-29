@@ -80,19 +80,20 @@
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
 <script>
-  const ctx = document.getElementById('barChart').getContext('2d');
-  const rawValues = {{ values|safe }};
+   const ctx = document.getElementById('barChart').getContext('2d');
+   const rawValues = {{ values| tojson }};
+
 
   // Calculamos el valor máximo con 10% extra como margen
   const maxValor = Math.max(...rawValues);
   const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5;
 
   const data = {
-    labels: {{ labels|safe }},
+        labels: {{ labels| tojson }},
     datasets: [{
-      label: 'Mensajes por número',
-      data: rawValues,
-      backgroundColor: '#1f4e79'
+        label: 'Mensajes por número',
+        data: rawValues,
+        backgroundColor: '#1f4e79'
     }]
   };
 
