@@ -111,6 +111,31 @@
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
+    // Permitir editar el nombre de la columna Kanban y guardar en BD
+    document.querySelectorAll('.col-name[contenteditable="true"]').forEach(function (header) {
+        header.addEventListener('blur', function () {
+            const columnaId = header.dataset.colId;
+            const nuevoNombre = header.textContent.trim();
+            fetch(`/kanban/columna/${columnaId}/renombrar`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ nombre: nuevoNombre })
+            })
+                .then(res => res.json())
+                .then(data => {
+                    if (!data.success) {
+                        alert('Error al guardar el nombre de la columna');
+                    }
+                });
+        });
+        // Opcional: guardar al presionar Enter
+        header.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                header.blur();
+            }
+        });
+    });
     document.addEventListener('DOMContentLoaded', function () {
         // Tu código JavaScript existente funciona igual
         // porque mantenemos las mismas clases

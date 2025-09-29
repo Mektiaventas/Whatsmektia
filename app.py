@@ -670,6 +670,24 @@ def get_db_connection(config=None):
         app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
         raise
 
+@app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
+def renombrar_columna_kanban(columna_id):
+    config = obtener_configuracion_por_host()
+    nuevo_nombre = request.json.get('nombre', '').strip()
+    if not nuevo_nombre:
+        return jsonify({'error': 'Nombre vacío'}), 400
+
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE kanban_columnas SET nombre=%s WHERE id=%s",
+        (nuevo_nombre, columna_id)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({'success': True, 'nombre': nuevo_nombre})
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
