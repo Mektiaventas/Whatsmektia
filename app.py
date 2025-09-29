@@ -31,6 +31,9 @@ from openai import OpenAI
 import PyPDF2
 import fitz 
 from werkzeug.utils import secure_filename
+from flask_socketio import SocketIO, emit
+
+socketio = SocketIO(app)
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -2938,6 +2941,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
         actualizar_columna_chat(numero, nueva_columna, config)
+        socketio.emit('kanban_update', broadcast=True)
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
@@ -5168,4 +5172,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     
-    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+    socketio.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción

@@ -673,7 +673,11 @@
   // Toggle lista de chats en móvil
   function toggleChatList() {
     const chatList = document.querySelector('.chat-list-v2');
-    chatList.classList.toggle('mobile-visible');
-  }
+      chatList.classList.toggle('mobile-visible');
+
+    }
+    if (window.location.pathname === '/kanban') {
+        actualizarKanban();
+    }
 </script>
 {% endblock %}
