@@ -68,7 +68,7 @@
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
                 <!-- Nueva estructura del chat -->
                 <div class="chat-header">
-                    <div class="chat-avatar-container">
+                    <div class="card-avatar">
                         <img src="{{ chat.avatar or '/static/icons/default-avatar.png' }}"
                              class="chat-avatar" alt="Avatar"
                              onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
