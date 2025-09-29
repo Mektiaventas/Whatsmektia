@@ -3793,6 +3793,7 @@ def webhook():
         nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
+        actualizar_kanban()
          # 🔥 ACTUALIZAR CONTACTO CON NOMBRE DEL WEBHOOK (SI EXISTE)
         if nombre_desde_webhook:
             actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
