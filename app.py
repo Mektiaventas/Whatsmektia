@@ -925,6 +925,37 @@ def agregar_columna_kanban():
     conn.close()
     return jsonify({'success': True, 'id': columna_id, 'nombre': nombre, 'orden': orden})
 
+@app.route('/kanban/columna/<int:columna_id>/eliminar', methods=['POST'])
+def eliminar_columna_kanban(columna_id):
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+
+    # Obtener todas las columnas
+    cursor.execute("SELECT id FROM kanban_columnas ORDER BY orden")
+    columnas = cursor.fetchall()
+    if len(columnas) <= 1:
+        cursor.close()
+        conn.close()
+        return jsonify({'success': False, 'error': 'No se puede eliminar la última columna'}), 400
+
+    # Ver a cuál columna transferir (elige la primera distinta)
+    otras = [c['id'] for c in columnas if c['id'] != columna_id]
+    if not otras:
+        cursor.close()
+        conn.close()
+        return jsonify({'success': False, 'error': 'No hay otra columna a la cual transferir los chats'}), 400
+    columna_destino = otras[0]
+
+    # Transferir los chats
+    cursor.execute("UPDATE chat_meta SET columna_id=%s WHERE columna_id=%s", (columna_destino, columna_id))
+    # Eliminar la columna
+    cursor.execute("DELETE FROM kanban_columnas WHERE id=%s", (columna_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({'success': True, 'columna_destino': columna_destino})
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:

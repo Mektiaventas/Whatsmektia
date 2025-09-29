@@ -177,6 +177,11 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.delete-col-btn:hover {
+    color: #fff;
+    background: #c00;
+    border-radius: 50%;
+}
 .card-msg {
     color: #e2e5ed;
     font-size: 0.98em;
