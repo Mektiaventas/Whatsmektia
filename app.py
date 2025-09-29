@@ -14,7 +14,7 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
+from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
 from dotenv import load_dotenv
 import pandas as pd
@@ -2941,7 +2941,10 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
         actualizar_columna_chat(numero, nueva_columna, config)
-        socketio.emit('kanban_update', broadcast=True)
+
+
+        with current_app.app_context():
+            socketio.emit('kanban_update', broadcast=True)
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
