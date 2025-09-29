@@ -110,7 +110,6 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 <script>
     let editingColId = null;
     let editingColText = null;
@@ -470,10 +469,5 @@
         setTimeout(actualizarKanban, 1000);
     });
     
-    const socket = io();
-    socket.on('kanban_update', function() {
-        actualizarKanban();
-});
-
 </script>
 {% endblock %}
