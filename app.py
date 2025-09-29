@@ -419,7 +419,9 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:60000]}
 
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido, sin texto adicional, sin comentarios, sin explicaciones. Si la lista es larga,
+            asegúrate de que cada objeto esté separado por comas y que la sintaxis sea estrictamente válida,
+            con esta estructura:
             {{
                 "servicios": [
                     {{
@@ -461,7 +463,9 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             TEXTO DEL DOCUMENTO:
             {texto_pdf[:60000]}
 
-            Devuelve SOLO un JSON con esta estructura:
+            Devuelve SOLO un JSON válido, sin texto adicional, sin comentarios, sin explicaciones. Si la lista es larga,
+            asegúrate de que cada objeto esté separado por comas y que la sintaxis sea estrictamente válida,
+            con esta estructura:
             {{
                 "servicios": [
                     {{
