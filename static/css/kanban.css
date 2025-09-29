@@ -180,7 +180,14 @@
 .card-msg {
     color: #e2e5ed;
     font-size: 0.98em;
-    -webkit-line-clamp: 2;
+    display: -webkit-box;
+    -webkit-line-clamp: 2; /* Muestra máximo 2 líneas */
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal; /* Permite saltos de línea */
+    min-height: 2.5em; /* Opcional: asegura altura mínima para 2 líneas */
+    font-size: 0.95em;
     font-weight: 400;
     max-width: 90%;
     overflow: hidden;
