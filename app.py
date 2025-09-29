@@ -9,6 +9,8 @@ from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
 import pytz
 import os
+import eventlet
+import eventlet.wsgi
 import logging
 import json 
 import base64
@@ -5174,5 +5176,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    
-    socketio.run(app, host='0.0.0.0', port=args.port, debug=False, allow_unsafe_werkzeug=True)
+    socketio.run(app, host='0.0.0.0', port=args.port)
