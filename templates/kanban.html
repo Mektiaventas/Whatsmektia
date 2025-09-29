@@ -136,10 +136,42 @@
             }
         });
     });
-    document.addEventListener('DOMContentLoaded', function () {
-        // Tu código JavaScript existente funciona igual
-        // porque mantenemos las mismas clases
 
+    // CORRECCIÓN: Agregar columnas - funciona para todos los botones
+    document.addEventListener('DOMContentLoaded', function () {
+        // Agregar evento a TODOS los botones de agregar columna
+        document.querySelectorAll('.add-chat-btn').forEach(button => {
+            button.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+
+                const columna = this.closest('.kanban-column');
+                const columnaId = columna.dataset.colId;
+
+                fetch('/kanban/columna/agregar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        nombre: 'Nueva Columna',
+                        columna_referencia: columnaId // Opcional: para posicionamiento
+                    })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert(data.error || 'Error al agregar columna');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                        alert('Error de conexión');
+                    });
+            });
+        });
+
+        // El resto de tu código JavaScript existente...
         let kanbanAutoRefresh = true;
         let refreshInterval = 5000;
 
@@ -212,9 +244,8 @@
                 eliminarChat(numero);
             });
         }
-        
+
         function actualizarChatExistente(elemento, chat) {
-            
             // Actualizar avatar si cambió
             const avatar = elemento.querySelector('.card-avatar');
             const nuevoAvatar = chat.avatar || '/static/icons/default-avatar.png';
@@ -234,14 +265,14 @@
                 numElement.textContent = chat.numero;
             }
 
-            // Actualizar tiempo (ahora solo hora:minuto)
+            // Actualizar tiempo
             const timeElement = elemento.querySelector('.card-time');
             if (timeElement && chat.ultima_fecha) {
                 const fechaObj = new Date(chat.ultima_fecha);
                 const dia = fechaObj.getDate();
                 const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
                 const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-                const fechaFormateada = `${dia}-${mes}-${anio} ${hora}`;
+                const fechaFormateada = `${dia}-${mes} ${hora}`;
                 if (timeElement.textContent !== fechaFormateada) {
                     timeElement.textContent = fechaFormateada;
                 }
@@ -262,7 +293,7 @@
                 }
             }
 
-            // Actualizar contador de no leídos (ahora en card-meta-row)
+            // Actualizar contador de no leídos
             const unreadElement = elemento.querySelector('.card-unread');
             if (chat.sin_leer > 0) {
                 if (unreadElement) {
@@ -402,27 +433,6 @@
         });
 
         setTimeout(actualizarKanban, 1000);
-    });
-    document.addEventListener('DOMContentLoaded', function () {
-        const addBtn = document.querySelectorAll('.add-chat-btn');
-        if (addBtn) {
-            addBtn.addEventListener('click', function (e) {
-                e.preventDefault(); // Evita submit o navegación
-                fetch('/kanban/columna/agregar', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nombre: 'nueva columna' })
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            location.reload();
-                        } else {
-                            alert(data.error || 'Error al agregar columna');
-                        }
-                    });
-            });
-        }
     });
 </script>
 {% endblock %}
