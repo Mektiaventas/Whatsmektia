@@ -2535,43 +2535,6 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
 
-def enviar_alerta_intervencion_humana(info_intervencion, config=None):
-    """Envía alerta de intervención humana al administrador"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        mensaje = f"""🚨 *SOLICITUD DE INTERVENCIÓN HUMANA*
-
-📞 *Cliente:* {info_intervencion.get('telefono', 'Número no disponible')}
-⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
-🚨 *Urgencia:* {info_intervencion.get('urgencia', 'media').upper()}
-
-📋 *Problema principal:*
-{info_intervencion.get('problema_principal', 'No especificado')}
-
-🔍 *Intentos previos:*
-{info_intervencion.get('intentos_previos', 'No detectados')}
-
-💡 *Información útil:*
-{info_intervencion.get('informacion_util', 'Sin información adicional')}
-
-📝 *Resumen:*
-{info_intervencion.get('resumen', 'Solicitud de intervención humana')}
-
-⚠️ *Acción requerida:* Contactar al cliente urgentemente.
-"""
-        
-        # Enviar a ambos números de administración
-        enviar_mensaje(ALERT_NUMBER, mensaje, config)
-        enviar_mensaje('5214493432744', mensaje, config)
-        
-        app.logger.info(f"✅ Alerta de intervención humana enviada a administradores")
-        
-    except Exception as e:
-        app.logger.error(f"Error enviando alerta de intervención: {e}")
-
-
 def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     """
     Actualiza la información del contacto usando el nombre proporcionado desde el webhook
@@ -3813,50 +3776,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     if result:
         return result['alias'] or result['nombre']
     return None
-
-def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Versión corregida de tu función actual"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Formatear número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Usar el endpoint CORRECTO
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': 'contacts',
-            'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token']
-        }
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        app.logger.info(f"🔍 Solicitando imagen para: {numero_formateado}")
-        response = requests.get(url, params=params, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                profile = contacto.get('profile', {})
-                imagen_url = profile.get('picture', {}).get('url')
-                nombre = profile.get('name')
-                
-                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                
-                return imagen_url
-        
-        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
-    
+  
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host"""
     try:
