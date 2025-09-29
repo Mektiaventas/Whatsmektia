@@ -915,7 +915,7 @@ def agregar_columna_kanban():
     cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM kanban_columnas")
     orden = cursor.fetchone()[0]
     cursor.execute(
-        "INSERT INTO kanban_columnas (nombre, orden) VALUES (%s, %s, %s)",
+        "INSERT INTO kanban_columnas (nombre, orden) VALUES (%s, %s)",
         (nombre, orden)
     )
     conn.commit()
