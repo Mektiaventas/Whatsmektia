@@ -404,7 +404,7 @@
         setTimeout(actualizarKanban, 1000);
     });
     document.addEventListener('DOMContentLoaded', function () {
-        const addBtn = document.querySelector('.add-chat-btn');
+        const addBtn = document.querySelectorAll('.add-chat-btn');
         if (addBtn) {
             addBtn.addEventListener('click', function (e) {
                 e.preventDefault(); // Evita submit o navegación
