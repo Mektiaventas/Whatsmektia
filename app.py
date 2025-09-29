@@ -907,7 +907,6 @@ def renombrar_columna_kanban(columna_id):
 def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
     nombre = request.json.get('nombre', 'nueva columna').strip()
-    color = request.json.get('color', '#007bff')
     if not nombre:
         return jsonify({'error': 'El nombre es obligatorio'}), 400
 
@@ -916,14 +915,14 @@ def agregar_columna_kanban():
     cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM kanban_columnas")
     orden = cursor.fetchone()[0]
     cursor.execute(
-        "INSERT INTO kanban_columnas (nombre, orden, color) VALUES (%s, %s, %s)",
-        (nombre, orden, color)
+        "INSERT INTO kanban_columnas (nombre, orden) VALUES (%s, %s, %s)",
+        (nombre, orden)
     )
     conn.commit()
     columna_id = cursor.lastrowid
     cursor.close()
     conn.close()
-    return jsonify({'success': True, 'id': columna_id, 'nombre': nombre, 'orden': orden, 'color': color})
+    return jsonify({'success': True, 'id': columna_id, 'nombre': nombre, 'orden': orden})
 
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
