@@ -212,27 +212,7 @@
                 eliminarChat(numero);
             });
         }
-        document.addEventListener('DOMContentLoaded', function () {
-            const addBtn = document.querySelector('.add-chat-btn');
-            if (addBtn) {
-                addBtn.addEventListener('click', function (e) {
-                    e.preventDefault(); // Evita submit o navegación
-                    fetch('/kanban/columna/agregar', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ nombre: 'nueva columna' })
-                    })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                location.reload();
-                            } else {
-                                alert(data.error || 'Error al agregar columna');
-                            }
-                        });
-                });
-            }
-        });
+        
         function actualizarChatExistente(elemento, chat) {
             
             // Actualizar avatar si cambió
@@ -422,6 +402,27 @@
         });
 
         setTimeout(actualizarKanban, 1000);
+    });
+    document.addEventListener('DOMContentLoaded', function () {
+        const addBtn = document.querySelector('.add-chat-btn');
+        if (addBtn) {
+            addBtn.addEventListener('click', function (e) {
+                e.preventDefault(); // Evita submit o navegación
+                fetch('/kanban/columna/agregar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ nombre: 'nueva columna' })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            location.reload();
+                        } else {
+                            alert(data.error || 'Error al agregar columna');
+                        }
+                    });
+            });
+        }
     });
 </script>
 {% endblock %}

@@ -906,9 +906,8 @@ def renombrar_columna_kanban(columna_id):
 @app.route('/kanban/columna/agregar', methods=['POST'])
 def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
-    data = request.json or {}
-    nombre = data.get('nombre', '').strip()
-    color = data.get('color', '#007bff')
+    nombre = request.json.get('nombre', 'nueva columna').strip()
+    color = request.json.get('color', '#007bff')
     if not nombre:
         return jsonify({'error': 'El nombre es obligatorio'}), 400
 
