@@ -93,7 +93,7 @@
                         <span class="card-num">{{ chat.numero }}</span>
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {{ chat.ultima_fecha.strftime('%-d-%b-%Y').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
                             {% endif %}
                         </span>
                         {% if chat.sin_leer > 0 %}
