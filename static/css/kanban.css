@@ -186,13 +186,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: normal; /* Permite saltos de línea */
-    min-height: 2.5em; /* Opcional: asegura altura mínima para 2 líneas */
+    min-height: 2.5em;
     font-size: 0.95em;
     font-weight: 400;
     max-width: 90%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
     letter-spacing: 0.01em;
     margin-top: 3px;
 }
