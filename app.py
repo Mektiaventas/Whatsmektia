@@ -3924,7 +3924,7 @@ def webhook():
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
-
+        actualizar_kanban(numero, columna_id, config)
         return 'OK', 200
         
     except Exception as e:
