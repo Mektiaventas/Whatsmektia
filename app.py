@@ -9,8 +9,6 @@ from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
 import pytz
 import os
-import eventlet
-import eventlet.wsgi
 import logging
 import json 
 import base64
@@ -32,7 +30,6 @@ from openai import OpenAI
 import PyPDF2
 import fitz 
 from werkzeug.utils import secure_filename
-from flask_socketio import SocketIO
 
 
 processed_messages = {}
@@ -5176,4 +5173,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    socketio.run(app, host='0.0.0.0', port=args.port)
+    app.run(host='0.0.0.0', port=args.port)

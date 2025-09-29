@@ -172,6 +172,12 @@
             });
         });
 
+        // El resto de tu código JavaScript existente...
+        let kanbanAutoRefresh = true;
+        let refreshInterval = 500;
+
+        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+
         function actualizarKanban() {
             if (!kanbanAutoRefresh) return;
             const scrollPosition = window.scrollY;
