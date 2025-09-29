@@ -85,8 +85,8 @@
   align-items: center;
 }
 .card-avatar {
-  width: 22px;
-  height: 22px;
+  width: 35px;
+  height: 35px;
   border-radius: 50%;
   object-fit: cover;
   background: #fff;
