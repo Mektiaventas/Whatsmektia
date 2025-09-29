@@ -3746,6 +3746,7 @@ def webhook():
                 conn.close()
             
                 app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
+                actualizar_kanban()
         
             # Continuar con el procesamiento normal del mensaje
             # ... tu código existente para procesar mensajes ...
@@ -3772,7 +3773,6 @@ def webhook():
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
-        actualizar_kanban()
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
