@@ -24,35 +24,37 @@
 
         <div class="chat-items">
             {% for chat in chats %}
-            <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
-                <div class="chat-avatar">
-                    <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
-                         alt="Avatar"
-                         onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-                         width="40" height="40">
-                </div>
-                {% set bandera = chat.numero | bandera %}
-                {% if bandera %}
-                <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-                {% endif %}
-                <div class="chat-info">
-                    <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
-                        <span class="alias-view">
+            <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
+                        </div>
+                        {% set bandera = chat.numero | bandera %}
+                        {% if bandera %}
+                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                        {% endif %}
+                        <span class="alias-view" data-num="{{ chat.numero }}">
                             {{ chat.nombre_mostrado }}
                         </span>
                         <span class="alias-edit" style="display:none;">
                             <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
                         </span>
-                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
                             ✏️
                         </button>
                     </div>
-                    {% if chat.alias or chat.nombre %}
-                    <div class="chat-num" style="font-size:11px;color:#888;">
-                        {{ chat.numero }}
+                    <div class="card-meta-row">
+                        <span class="card-num">{{ chat.numero }}</span>
+                        <span class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </span>
                     </div>
-                    {% endif %}
-                    <div class="chat-preview">
+                    <div class="card-msg">
                         {% if chat.ultimo_mensaje %}
                         {% if chat.tipo_mensaje == 'imagen' %}
                         📷 Imagen
@@ -63,12 +65,6 @@
                         Sin mensajes
                         {% endif %}
                     </div>
-                </div>
-                <div class="chat-meta">
-                    {% if chat.ultima_fecha %}
-                    <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
-                    <div class="chat-time">{{ chat.ultima_fecha.strftime("%H:%M") }}</div>
-                    {% endif %}
                 </div>
             </a>
             {% endfor %}
