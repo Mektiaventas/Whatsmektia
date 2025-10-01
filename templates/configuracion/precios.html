@@ -288,10 +288,8 @@
     <div class="card-header bg-gray-100" id="productos-cliente-header">
         <h3 class="flex justify-between items-center">
             <span>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</span>
-            <button type="button"
-                    class="btn-toggle px-3 py-1 rounded bg-white"
-                    data-target="#productos-cliente-body"
-                    aria-expanded="false">
+            <button type="button" class="btn-toggle px-3 py-1 rounded bg-white"
+                    onclick="toggleSimple('productos-cliente-body')">
                 <span class="toggle-icon">▼</span>
             </button>
         </h3>
@@ -353,10 +351,8 @@
     <div class="card-header bg-blue-100" id="productos-admin-header">
         <h3 class="flex justify-between items-center">
             <span>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</span>
-            <button type="button"
-                    class="btn-toggle px-3 py-1 rounded bg-white"
-                    data-target="#productos-admin-body"
-                    aria-expanded="false">
+            <button type="button" class="btn-toggle px-3 py-1 rounded bg-white"
+                    onclick="toggleSimple('productos-admin-body')">
                 <span class="toggle-icon">▼</span>
             </button>
         </h3>
@@ -541,30 +537,27 @@
     function toggleFormulario() {
         const body = document.getElementById('formulario-body');
         const icon = document.getElementById('formulario-icon');
-        if (!body || !icon) return;
-        const hidden = body.classList.toggle('hidden');
-        icon.textContent = hidden ? '▼' : '▲';
+        if (body) {
+            body.classList.toggle('hidden');
+            if (icon) {
+                icon.textContent = body.classList.contains('hidden') ? '▼' : '▲';
+            }
+        }
     }
 
-    // One delegated listener for all toggle buttons
-    document.addEventListener('click', function (e) {
-        const btn = e.target.closest('.btn-toggle');
-        if (!btn) return;
+    function toggleSimple(id) {
+        console.log("Toggle clicked for", id);
+        const element = document.getElementById(id);
+        const button = event.currentTarget;
+        const icon = button.querySelector('.toggle-icon');
 
-        e.preventDefault();
-        const targetSel = btn.getAttribute('data-target');
-        const target = document.querySelector(targetSel);
-        if (!target) return;
-
-        const hidden = target.classList.toggle('hidden');
-
-        // Update icon inside the button
-        const icon = btn.querySelector('.toggle-icon');
-        if (icon) icon.textContent = hidden ? '▼' : '▲';
-
-        // A11y
-        btn.setAttribute('aria-expanded', String(!hidden));
-    });
+        if (element) {
+            element.classList.toggle('hidden');
+            if (icon) {
+                icon.textContent = element.classList.contains('hidden') ? '▼' : '▲';
+            }
+        }
+    }
 
     document.addEventListener('DOMContentLoaded', function () {
         {% if precio_edit %} toggleFormulario(); {% endif %}
@@ -573,15 +566,24 @@
 
     function cargarEstructura() {
         fetch('/configuracion/precios/estructura')
-            .then(r => r.json())
+            .then(response => response.json())
             .then(data => {
                 const cont = document.getElementById('columnas-dinamicas');
                 if (!cont) return;
+
                 const base = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
                 const dyn = (data.estructura || []).filter(c => !base.includes(c.Field));
-                cont.innerHTML = dyn.length
-                    ? '<ul class="text-sm space-y-1">' + dyn.map(c => `<li>• ${c.Field} (${c.Type})</li>`).join('') + '</ul>'
-                    : '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
+
+                if (dyn.length > 0) {
+                    let html = '<ul class="text-sm space-y-1">';
+                    dyn.forEach(c => {
+                        html += `<li>• ${c.Field} (${c.Type})</li>`;
+                    });
+                    html += '</ul>';
+                    cont.innerHTML = html;
+                } else {
+                    cont.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
+                }
             })
             .catch(err => console.error('Error cargando estructura:', err));
     }
