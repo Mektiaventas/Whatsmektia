@@ -2873,9 +2873,12 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
         # IA normal
-        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
+        if numero not in IA_ESTADOS:
+            IA_ESTADOS[numero] = {'activa': True, 'prefiere_voz': False}
+        elif 'prefiere_voz' not in IA_ESTADOS[numero]:
+            IA_ESTADOS[numero]['prefiere_voz'] = False
         respuesta = ""
-        
+        responder_con_voz = False
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
             if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
@@ -4661,7 +4664,6 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios"""
     datos_requeridos = ['platillos', 'direccion']
-    
     for dato in datos_requeridos:
         if not datos_obtenidos.get(dato):
             return False
@@ -5211,8 +5213,7 @@ def actualizar_kanban_inmediato(numero, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute("""
-            UPDATE chat_meta SET columna_id = %s, 
-            fecha_actualizacion = CURRENT_TIMESTAMP
+            UPDATE chat_meta SET columna_id = %s
             WHERE numero = %s
         """, (nueva_columna, numero))
         conn.commit()
