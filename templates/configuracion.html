@@ -44,7 +44,7 @@
     <a href="/whatsapp-refresh-contactos" class="btn btn-info">Actualizar Contactos</a>
 </div>
 
-<form class="config-form" method="POST">
+<form class="config-form" method="POST" enctype="multipart/form-data">
     <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
@@ -67,6 +67,11 @@
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
     </div>
+    {% if datos.app_logo %}
+    <input type="hidden" name="app_logo_actual" value="{{ datos.app_logo }}">
+    {% endif %}
+
+
     <div class="form-row">
         <div class="form-card">
             <label>Nombre de la Aplicación</label>
