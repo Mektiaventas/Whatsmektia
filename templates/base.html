@@ -14,10 +14,12 @@
             <div style="display:none">Debug: {{ app_logo }}</div>
             <div class="sidebar-logo">
                 {% if app_logo %}
-                <img src="{{ app_logo }}?v={{ now().timestamp() }}" alt="{{ app_nombre or 'SmartWhats' }}">
+                <img src="{{ app_logo }}?v={{ range(1000, 9999) | random }}" alt="{{ app_nombre or 'SmartWhats' }}">
                 {% else %}
                 <img src="{{ url_for('static', filename='img/logo.png') }}" alt="SmartWhats">
                 {% endif %}
+                <!-- Make the debug visible temporarily -->
+                <div style="color: white; font-size: 10px;">Debug: '{{ app_logo|default('No logo set') }}' | App name: '{{ app_nombre|default('No name set') }}'</div>
             </div>
             <div class="sidebar-title">{{ app_nombre or 'SmartWhats' }}</div>
             <ul class="sidebar-nav">
