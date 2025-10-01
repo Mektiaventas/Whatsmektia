@@ -1009,34 +1009,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Auto-recargar página cada medio segundo
-    (function () {
-        let autoReload = true;
-        const reloadInterval = 500; // medio segundo
-
-        function startAutoReload() {
-            setInterval(function () {
-                // Solo recargar si autoReload es true, 
-                // no hay elementos activos de edición,
-                // y no está abierto el selector de emojis
-                if (autoReload &&
-                    !document.querySelector('.alias-edit[style*="display: flex"]') &&
-                    !document.querySelector('.emoji-picker.active')) {
-                    window.location.reload();
-                }
-            }, reloadInterval);
-        }
-
-        // Pausar cuando la pestaña no está visible
-        document.addEventListener('visibilitychange', function () {
-            autoReload = !document.hidden;
-        });
-
-        // Iniciar la recarga automática cuando se carga la página
-        document.addEventListener('DOMContentLoaded', function () {
-            startAutoReload();
-        });
-    })();
+   
 
 </script>
 {% endblock %}
