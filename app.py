@@ -305,33 +305,54 @@ def extraer_texto_e_imagenes_pdf(file_path):
             # Extraer imágenes
             image_list = page.get_images(full=True)
             for img_idx, img_info in enumerate(image_list):
-                xref = img_info[0]
-                base_img = doc.extract_image(xref)
-                
-                # Obtener la imagen en bytes
-                imagen_bytes = base_img["image"]
-                
-                # Determinar formato de imagen
-                extension = base_img["ext"]
-                
-                # Crear nombre único para la imagen
-                img_filename = f"producto_{page_num+1}_{img_idx+1}_{int(time.time())}.{extension}"
-                img_path = os.path.join(img_dir, img_filename)
-                
-                # Guardar la imagen
-                with open(img_path, "wb") as img_file:
-                    img_file.write(imagen_bytes)
-                
-                # Agregar a la lista de imágenes con metadatos útiles
-                imagenes.append({
-                    'filename': img_filename,
-                    'path': img_path,
-                    'page': page_num,
-                    'size': len(imagen_bytes),
-                    'position': img_info[1:],  # Info de posición para asociar con texto
-                    'xref': xref,
-                    'rect': page.get_image_bbox(xref)  # Rectángulo que ocupa la imagen
-                })
+                try:
+                    xref = img_info[0]
+                    
+                    # Verificar si la imagen es válida antes de procesarla
+                    try:
+                        base_img = doc.extract_image(xref)
+                        
+                        # Obtener la imagen en bytes
+                        imagen_bytes = base_img["image"]
+                        
+                        # Determinar formato de imagen
+                        extension = base_img["ext"]
+                        
+                        # Crear nombre único para la imagen
+                        img_filename = f"producto_{page_num+1}_{img_idx+1}_{int(time.time())}.{extension}"
+                        img_path = os.path.join(img_dir, img_filename)
+                        
+                        # Guardar la imagen
+                        with open(img_path, "wb") as img_file:
+                            img_file.write(imagen_bytes)
+                        
+                        # Intentar obtener el rectángulo de la imagen de manera segura
+                        try:
+                            rect = page.get_image_bbox(xref)
+                        except ValueError:
+                            # Si falla, usar un rectángulo vacío
+                            rect = fitz.Rect(0, 0, 0, 0)
+                        
+                        # Agregar a la lista de imágenes con metadatos útiles
+                        imagenes.append({
+                            'filename': img_filename,
+                            'path': img_path,
+                            'page': page_num,
+                            'size': len(imagen_bytes),
+                            'position': img_info[1:],  # Info de posición para asociar con texto
+                            'xref': xref,
+                            'rect': rect
+                        })
+                        
+                        app.logger.info(f"✅ Imagen extraída: {img_filename}")
+                        
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Error extrayendo imagen específica {xref}: {e}")
+                        continue
+                        
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error procesando imagen {img_idx} en página {page_num+1}: {e}")
+                    continue
         
         doc.close()
         
@@ -343,7 +364,14 @@ def extraer_texto_e_imagenes_pdf(file_path):
     except Exception as e:
         app.logger.error(f"🔴 Error extrayendo contenido PDF: {e}")
         app.logger.error(traceback.format_exc())
-        return None, []
+        
+        # Intenta al menos extraer el texto usando el método anterior
+        try:
+            texto = extraer_texto_pdf(file_path)
+            app.logger.info(f"✅ Se pudo extraer texto con método alternativo: {len(texto)} caracteres")
+            return texto, []  # Devolver texto pero sin imágenes
+        except:
+            return None, []
 
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
