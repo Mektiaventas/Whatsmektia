@@ -3899,7 +3899,7 @@ def webhook():
                 texto = "Error al procesar el audio"
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-            
+        guardar_mensaje_inmediato()
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
@@ -3961,6 +3961,35 @@ def webhook():
         app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
+
+# Add this function to save user message immediately
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, NULL, NOW(), %s, %s)
+        """, (numero, texto, imagen_url, es_imagen))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"💾 Mensaje inmediato guardado para {numero}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
+        return False
     
 def extraer_nombre_desde_webhook(payload):
     """
