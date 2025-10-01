@@ -582,9 +582,7 @@
             .catch(error => console.error("Error:", error));
     }
 
-    // Initialize on page load
-    document.addEventListener('DOMContentLoaded', function () {
-        {% if precio_edit %} toggleFormulario();{% endif %}
-        cargarEstructura();
-    });
+    // ✅ ELIMINA el DOMContentLoaded y deja solo esto:
+    {% if precio_edit %} toggleFormulario(); {% endif %}
+    cargarEstructura();
 </script>
