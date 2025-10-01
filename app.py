@@ -3790,6 +3790,7 @@ def webhook():
         msg = mensajes[0]
         numero = msg['from']
         # Manejo robusto de texto/flags
+        actualizar_kanban_inmediato(numero, config)
         texto = ''
         es_imagen = False
         es_audio = False
@@ -3819,7 +3820,6 @@ def webhook():
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
         actualizar_kanban()
-        actualizar_kanban_inmediato()
         if nombre_desde_webhook:
             actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
         else:
