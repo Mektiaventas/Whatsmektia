@@ -285,10 +285,12 @@
 
 <!-- Tarjeta: Lista de productos (Vista Cliente) -->
 <div class="card mb-4">
-    <div class="card-header cursor-pointer" id="productos-cliente-header" onclick="toggleProductosCliente()">
+    <div class="card-header bg-gray-100" id="productos-cliente-header">
         <h3 class="flex justify-between items-center">
             <span>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</span>
-            <span id="productos-cliente-icon">▼</span>
+            <button type="button" id="btn-toggle-cliente" class="btn-toggle px-3 py-1 rounded bg-white">
+                <span id="productos-cliente-icon">▼</span>
+            </button>
         </h3>
     </div>
     <div class="card-body hidden" id="productos-cliente-body">
@@ -345,10 +347,12 @@
 
 <!-- Tarjeta: Lista de productos completa (Vista Admin) -->
 <div class="card">
-    <div class="card-header cursor-pointer bg-blue-100" id="productos-admin-header" onclick="toggleProductosAdmin()">
+    <div class="card-header bg-blue-100" id="productos-admin-header">
         <h3 class="flex justify-between items-center">
             <span>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</span>
-            <span id="productos-admin-icon">▼</span>
+            <button type="button" id="btn-toggle-admin" class="btn-toggle px-3 py-1 rounded bg-white">
+                <span id="productos-admin-icon">▼</span>
+            </button>
         </h3>
     </div>
     <div class="card-body hidden" id="productos-admin-body">
@@ -528,69 +532,97 @@
 </style>
 
 <script>
-    function toggleProductosCliente(event) {
-        if (event) event.preventDefault();
-
-        console.log("Toggling productos cliente");
-        const productosBody = document.getElementById('productos-cliente-body');
-        const productosIcon = document.getElementById('productos-cliente-icon');
-
-        if (!productosBody || !productosIcon) {
-            console.error("No se encontraron los elementos necesarios");
-            return;
-        }
-
-        console.log("Estado actual:", productosBody.classList.contains('hidden') ? "oculto" : "visible");
-
-        if (productosBody.classList.contains('hidden')) {
-            productosBody.classList.remove('hidden');
-            productosIcon.textContent = '▲';
-        } else {
-            productosBody.classList.add('hidden');
-            productosIcon.textContent = '▼';
-        }
-    }
-
-    function toggleProductosAdmin(event) {
-        if (event) event.preventDefault();
-
-        console.log("Toggling productos admin");
-        const productosBody = document.getElementById('productos-admin-body');
-        const productosIcon = document.getElementById('productos-admin-icon');
-
-        if (!productosBody || !productosIcon) {
-            console.error("No se encontraron los elementos necesarios");
-            return;
-        }
-
-        console.log("Estado actual:", productosBody.classList.contains('hidden') ? "oculto" : "visible");
-
-        if (productosBody.classList.contains('hidden')) {
-            productosBody.classList.remove('hidden');
-            productosIcon.textContent = '▲';
-        } else {
-            productosBody.classList.add('hidden');
-            productosIcon.textContent = '▼';
-        }
-    }
-
-    // Asignar eventos directamente al cargar la página
     document.addEventListener('DOMContentLoaded', function () {
-        const clienteHeader = document.getElementById('productos-cliente-header');
-        const adminHeader = document.getElementById('productos-admin-header');
+        // Toggle para el formulario
+        const formularioHeader = document.getElementById('formulario-header');
+        if (formularioHeader) {
+            formularioHeader.addEventListener('click', function () {
+                const formularioBody = document.getElementById('formulario-body');
+                const formularioIcon = document.getElementById('formulario-icon');
 
-        if (clienteHeader) {
-            clienteHeader.addEventListener('click', toggleProductosCliente);
+                if (formularioBody.classList.contains('hidden')) {
+                    formularioBody.classList.remove('hidden');
+                    formularioIcon.textContent = '▲';
+                } else {
+                    formularioBody.classList.add('hidden');
+                    formularioIcon.textContent = '▼';
+                }
+            });
         }
 
-        if (adminHeader) {
-            adminHeader.addEventListener('click', toggleProductosAdmin);
+        // Toggle para productos cliente (botón explícito)
+        const btnToggleCliente = document.getElementById('btn-toggle-cliente');
+        if (btnToggleCliente) {
+            btnToggleCliente.addEventListener('click', function (e) {
+                e.stopPropagation(); // Importante: evita propagación
+                const productosBody = document.getElementById('productos-cliente-body');
+                const productosIcon = document.getElementById('productos-cliente-icon');
+
+                if (productosBody.classList.contains('hidden')) {
+                    productosBody.classList.remove('hidden');
+                    productosIcon.textContent = '▲';
+                } else {
+                    productosBody.classList.add('hidden');
+                    productosIcon.textContent = '▼';
+                }
+            });
         }
 
+        // Toggle para productos admin (botón explícito)
+        const btnToggleAdmin = document.getElementById('btn-toggle-admin');
+        if (btnToggleAdmin) {
+            btnToggleAdmin.addEventListener('click', function (e) {
+                e.stopPropagation(); // Importante: evita propagación
+                const productosBody = document.getElementById('productos-admin-body');
+                const productosIcon = document.getElementById('productos-admin-icon');
+
+                if (productosBody.classList.contains('hidden')) {
+                    productosBody.classList.remove('hidden');
+                    productosIcon.textContent = '▲';
+                } else {
+                    productosBody.classList.add('hidden');
+                    productosIcon.textContent = '▼';
+                }
+            });
+        }
+
+        // Abrir el formulario si estamos editando
         {% if precio_edit %}
-        toggleFormulario();
+        const formularioBody = document.getElementById('formulario-body');
+        const formularioIcon = document.getElementById('formulario-icon');
+        if (formularioBody && formularioIcon) {
+            formularioBody.classList.remove('hidden');
+            formularioIcon.textContent = '▲';
+        }
         {% endif %}
 
+        // Cargar estructura
         cargarEstructura();
     });
+
+    function cargarEstructura() {
+        fetch('/configuracion/precios/estructura')
+            .then(response => response.json())
+            .then(data => {
+                const contenedor = document.getElementById('columnas-dinamicas');
+                if (!contenedor) return;
+
+                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
+                const columnasDinamicas = data.estructura.filter(col =>
+                    !columnasBase.includes(col.Field)
+                );
+
+                if (columnasDinamicas.length > 0) {
+                    let html = '<ul class="text-sm space-y-1">';
+                    columnasDinamicas.forEach(col => {
+                        html += `<li>• ${col.Field} (${col.Type})</li>`;
+                    });
+                    html += '</ul>';
+                    contenedor.innerHTML = html;
+                } else {
+                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
+                }
+            })
+            .catch(error => console.error("Error cargando estructura:", error));
+    }
 </script>
