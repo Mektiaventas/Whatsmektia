@@ -4997,6 +4997,17 @@ def configuracion_precio_borrar(pid):
         conn.close()
         return redirect(url_for('configuracion_precios'))
 
+@app.route('/debug-image/<filename>')
+def debug_image(filename):
+    """Endpoint to debug image paths and existence"""
+    full_path = os.path.join(UPLOAD_FOLDER, filename)
+    exists = os.path.isfile(full_path)
+    return jsonify({
+        'filename': filename,
+        'full_path': full_path,
+        'exists': exists,
+        'url': url_for('serve_uploaded_file', filename=filename, _external=True)
+    })
 
 def aplicar_restricciones(respuesta_ia, numero, config=None):
     """Aplica las restricciones configuradas a las respuestas de la IA"""

@@ -386,8 +386,12 @@
                         <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                         <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                         <td>
+                            <!-- Add this debugging block right after the image element in both tables -->
                             {% if precio.imagen %}
                             <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                            <div class="text-xs text-gray-500">{{ precio.imagen }}</div>
+                            <a href="{{ url_for('debug_image', filename=precio.imagen) }}"
+                               class="text-xs text-blue-500" target="_blank">Debug</a>
                             {% else %}
                             -
                             {% endif %}
