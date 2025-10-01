@@ -187,8 +187,20 @@ def obtener_archivo_whatsapp(media_id, config=None):
 
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
-    # Tus campos existentes
-    app_nombre = request.form.get('app_nombre', 'SmartWhats')
+    config = obtener_configuracion_por_host()
+    
+    # Recopilar todos los datos del formulario
+    datos = {
+        'ia_nombre': request.form.get('ia_nombre'),
+        'negocio_nombre': request.form.get('negocio_nombre'),
+        'descripcion': request.form.get('descripcion'),
+        'url': request.form.get('url'),
+        'direccion': request.form.get('direccion'),
+        'telefono': request.form.get('telefono'),
+        'correo': request.form.get('correo'),
+        'que_hace': request.form.get('que_hace'),
+        'app_nombre': request.form.get('app_nombre', 'SmartWhats')
+    }
     
     # Manejar la subida del logo
     if 'app_logo' in request.files and request.files['app_logo'].filename != '':
@@ -203,15 +215,44 @@ def guardar_configuracion_negocio():
         logo.save(upload_path)
         
         # Guardar la ruta en la BD
-        app_logo = f"/uploads/logos/{filename}"
-    else:
-        # Mantener el logo existente o ninguno
-        app_logo = request.form.get('app_logo_actual', None)
+        datos['app_logo'] = f"/static/uploads/logos/{filename}"
+    elif request.form.get('app_logo_actual'):
+        # Mantener el logo existente
+        datos['app_logo'] = request.form.get('app_logo_actual')
     
     # Guardar en la base de datos
-    # [Tu código para actualizar la BD]
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
     
-    return redirect(url_for('configuracion_tab', tab='negocio'))
+    # Verificar si existe una configuración
+    cursor.execute("SELECT COUNT(*) FROM configuracion")
+    count = cursor.fetchone()[0]
+    
+    if count > 0:
+        # Actualizar configuración existente
+        set_parts = []
+        values = []
+        
+        for key, value in datos.items():
+            if value is not None:  # Solo incluir campos con valores
+                set_parts.append(f"{key} = %s")
+                values.append(value)
+        
+        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+        cursor.execute(sql, values)
+    else:
+        # Insertar nueva configuración
+        fields = ', '.join(datos.keys())
+        placeholders = ', '.join(['%s'] * len(datos))
+        sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
+        cursor.execute(sql, [1] + list(datos.values()))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    flash("✅ Configuración guardada correctamente", "success")
+    return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
 
 @app.context_processor
 def inject_app_config():
