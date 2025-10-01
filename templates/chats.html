@@ -280,6 +280,76 @@
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
 <style>
+    /* Los estilos existentes quedan intactos... */
+
+    /* Estilos para el botón de emojis */
+    .emoji-btn {
+        background: none;
+        border: none;
+        font-size: 20px;
+        cursor: pointer;
+        padding: 5px 10px;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+
+        .emoji-btn:hover {
+            background-color: #f1f1f1;
+        }
+
+    .input-group {
+        display: flex;
+        align-items: center;
+        position: relative;
+    }
+
+    .reply-input-line {
+        flex-grow: 1;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+    }
+
+    /* Estilos para el selector de emojis */
+    .emoji-picker {
+        position: absolute;
+        bottom: 60px;
+        left: 0;
+        z-index: 1000;
+        background-color: white;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        box-shadow: 0 0 15px rgba(0,0,0,0.1);
+        width: 320px;
+        max-height: 200px;
+        overflow-y: auto;
+        display: none;
+    }
+
+        .emoji-picker.active {
+            display: block;
+        }
+
+    .emoji-grid {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 8px;
+        padding: 12px;
+    }
+
+    .emoji-item {
+        cursor: pointer;
+        font-size: 24px;
+        padding: 5px;
+        text-align: center;
+        border-radius: 6px;
+        transition: background-color 0.2s;
+        user-select: none;
+    }
+
+        .emoji-item:hover {
+            background-color: #f1f1f1;
+        }
     .whatsapp-image {
         max-width: 300px;
         max-height: 300px;
@@ -863,5 +933,110 @@ document.addEventListener('DOMContentLoaded', function() {
     if (window.location.pathname === '/kanban') {
         actualizarKanban();
     }
+
+    // Función para el selector de emojis
+    document.addEventListener('DOMContentLoaded', function () {
+        // Lista de emojis comunes
+        const commonEmojis = [
+            '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊',
+            '😇', '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙',
+            '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+            '👍', '👎', '❤️', '🔥', '🎉', '🎂', '🎁', '👏', '🙏', '👋',
+            '💯', '⭐', '✨', '⚡', '🌟', '🌈', '☀️', '☁️', '🌧️', '❄️',
+            '🍕', '🍔', '🍟', '🌮', '🍰', '🍩', '☕', '🍷', '🥂', '🍺'
+        ];
+
+        const emojiButton = document.getElementById('emoji-button');
+        if (emojiButton) {
+            // Crear el selector de emojis
+            const emojiPicker = document.createElement('div');
+            emojiPicker.className = 'emoji-picker';
+
+            // Crear la cuadrícula de emojis
+            const emojiGrid = document.createElement('div');
+            emojiGrid.className = 'emoji-grid';
+
+            // Agregar los emojis a la cuadrícula
+            commonEmojis.forEach(emoji => {
+                const emojiItem = document.createElement('div');
+                emojiItem.className = 'emoji-item';
+                emojiItem.textContent = emoji;
+
+                // Agregar emoji al campo de texto cuando se hace clic
+                emojiItem.addEventListener('click', function () {
+                    const mensajeInput = document.getElementById('mensaje-texto');
+                    if (mensajeInput) {
+                        // Insertar emoji en la posición del cursor
+                        const cursorPos = mensajeInput.selectionStart;
+                        const textBefore = mensajeInput.value.substring(0, cursorPos);
+                        const textAfter = mensajeInput.value.substring(cursorPos);
+
+                        mensajeInput.value = textBefore + emoji + textAfter;
+
+                        // Actualizar posición del cursor
+                        const newCursorPos = cursorPos + emoji.length;
+                        mensajeInput.setSelectionRange(newCursorPos, newCursorPos);
+                        mensajeInput.focus();
+                    }
+
+                    // Cerrar el selector después de elegir
+                    emojiPicker.classList.remove('active');
+                });
+
+                emojiGrid.appendChild(emojiItem);
+            });
+
+            emojiPicker.appendChild(emojiGrid);
+
+            // Agregar el selector al DOM
+            const replyForm = document.querySelector('.reply-form');
+            if (replyForm) {
+                replyForm.appendChild(emojiPicker);
+
+                // Mostrar/ocultar el selector al hacer clic en el botón
+                emojiButton.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    emojiPicker.classList.toggle('active');
+                });
+
+                // Cerrar el selector al hacer clic fuera
+                document.addEventListener('click', function (e) {
+                    if (!emojiButton.contains(e.target) && !emojiPicker.contains(e.target)) {
+                        emojiPicker.classList.remove('active');
+                    }
+                });
+            }
+        }
+    });
+
+    // Auto-recargar página cada medio segundo
+    (function () {
+        let autoReload = true;
+        const reloadInterval = 500; // medio segundo
+
+        function startAutoReload() {
+            setInterval(function () {
+                // Solo recargar si autoReload es true, 
+                // no hay elementos activos de edición,
+                // y no está abierto el selector de emojis
+                if (autoReload &&
+                    !document.querySelector('.alias-edit[style*="display: flex"]') &&
+                    !document.querySelector('.emoji-picker.active')) {
+                    window.location.reload();
+                }
+            }, reloadInterval);
+        }
+
+        // Pausar cuando la pestaña no está visible
+        document.addEventListener('visibilitychange', function () {
+            autoReload = !document.hidden;
+        });
+
+        // Iniciar la recarga automática cuando se carga la página
+        document.addEventListener('DOMContentLoaded', function () {
+            startAutoReload();
+        });
+    })();
+
 </script>
 {% endblock %}
