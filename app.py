@@ -283,6 +283,187 @@ def determinar_extension(mime_type, filename):
     
     return extension or 'bin'
 
+def extraer_texto_e_imagenes_pdf(file_path):
+    """Extrae texto e imágenes de un archivo PDF"""
+    try:
+        texto = ""
+        imagenes = []
+        
+        # Abrir el PDF con PyMuPDF
+        doc = fitz.open(file_path)
+        
+        # Crear directorio para imágenes si no existe
+        img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+        os.makedirs(img_dir, exist_ok=True)
+        
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            # Extraer texto
+            texto += page.get_text()
+            
+            # Extraer imágenes
+            image_list = page.get_images(full=True)
+            for img_idx, img_info in enumerate(image_list):
+                xref = img_info[0]
+                base_img = doc.extract_image(xref)
+                
+                # Obtener la imagen en bytes
+                imagen_bytes = base_img["image"]
+                
+                # Determinar formato de imagen
+                extension = base_img["ext"]
+                
+                # Crear nombre único para la imagen
+                img_filename = f"producto_{page_num+1}_{img_idx+1}_{int(time.time())}.{extension}"
+                img_path = os.path.join(img_dir, img_filename)
+                
+                # Guardar la imagen
+                with open(img_path, "wb") as img_file:
+                    img_file.write(imagen_bytes)
+                
+                # Agregar a la lista de imágenes con metadatos útiles
+                imagenes.append({
+                    'filename': img_filename,
+                    'path': img_path,
+                    'page': page_num,
+                    'size': len(imagen_bytes),
+                    'position': img_info[1:],  # Info de posición para asociar con texto
+                    'xref': xref,
+                    'rect': page.get_image_bbox(xref)  # Rectángulo que ocupa la imagen
+                })
+        
+        doc.close()
+        
+        app.logger.info(f"✅ Texto extraído: {len(texto)} caracteres")
+        app.logger.info(f"🖼️ Imágenes extraídas: {len(imagenes)}")
+        
+        return texto.strip(), imagenes
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo contenido PDF: {e}")
+        app.logger.error(traceback.format_exc())
+        return None, []
+
+def asociar_imagenes_productos(servicios, imagenes):
+    """Asocia imágenes extraídas con los productos correspondientes usando IA"""
+    if not imagenes or not servicios or not servicios.get('servicios'):
+        return servicios
+    
+    try:
+        app.logger.info(f"🔄 Asociando {len(imagenes)} imágenes con {len(servicios['servicios'])} productos")
+        
+        # Asignar imágenes a productos según su posición en la lista
+        # Esta es una asignación simple; podría mejorarse con análisis de contenido
+        for i, servicio in enumerate(servicios['servicios']):
+            # Asignar una imagen si está disponible (rotación cíclica si hay menos imágenes que productos)
+            if imagenes:
+                img_index = i % len(imagenes)
+                img_filename = imagenes[img_index]['filename']
+                servicio['imagen'] = img_filename
+                app.logger.info(f"✅ Producto '{servicio['servicio']}' asociado con imagen: {img_filename}")
+            else:
+                servicio['imagen'] = ''
+        
+        return servicios
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error asociando imágenes: {e}")
+        return servicios
+
+def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
+    """Versión avanzada: Usa OpenAI para asociar imágenes a productos basado en contexto"""
+    if not imagenes or not servicios or not servicios.get('servicios'):
+        return servicios
+    
+    try:
+        # Convertir algunas imágenes a base64 para análisis con OpenAI
+        imagenes_analisis = []
+        for idx, img in enumerate(imagenes[:min(5, len(imagenes))]):  # Analizar máximo 5 imágenes
+            try:
+                with open(img['path'], 'rb') as img_file:
+                    img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                    imagenes_analisis.append({
+                        'index': idx,
+                        'filename': img['filename'],
+                        'base64': f"data:image/jpeg;base64,{img_data}"
+                    })
+            except Exception as e:
+                app.logger.error(f"Error codificando imagen {img['path']}: {e}")
+        
+        if not imagenes_analisis:
+            return servicios
+        
+        # Preparar prompt para OpenAI
+        productos_texto = "\n".join([
+            f"{i+1}. {p.get('servicio', 'Producto')}: {p.get('descripcion', 'Sin descripción')}"
+            for i, p in enumerate(servicios['servicios'][:20])  # Máximo 20 productos
+        ])
+        
+        prompt = f"""
+        Analiza estas imágenes de productos y asocia cada una con el producto correcto de la lista.
+        
+        PRODUCTOS DETECTADOS:
+        {productos_texto}
+        
+        Para cada imagen, responde con el formato JSON:
+        {{
+            "imagen_filename": "nombre_archivo.jpg",
+            "producto_index": 3,  # índice del producto en la lista (comenzando desde 1)
+            "confianza": 0.85,  # qué tan seguro estás (0-1)
+            "razon": "Breve explicación"
+        }}
+        
+        Responde SOLO con un array JSON de estas asociaciones.
+        """
+        
+        # Configurar payload para GPT-4V
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        messages = [{"role": "user", "content": []}]
+        
+        # Agregar texto del prompt
+        messages[0]["content"].append({"type": "text", "text": prompt})
+        
+        # Agregar imágenes
+        for img in imagenes_analisis:
+            messages[0]["content"].append({
+                "type": "image_url",
+                "image_url": {"url": img['base64']}
+            })
+        
+        # Realizar la consulta
+        response = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=messages,
+            max_tokens=2000
+        )
+        
+        # Procesar respuesta
+        text_response = response.choices[0].message.content
+        
+        # Extraer JSON
+        json_match = re.search(r'\[.*\]', text_response, re.DOTALL)
+        if json_match:
+            asociaciones = json.loads(json_match.group())
+            
+            # Asociar imágenes según análisis de AI
+            for asoc in asociaciones:
+                if asoc.get('confianza', 0) > 0.6:  # Solo asociaciones con confianza razonable
+                    img_filename = asoc.get('imagen_filename')
+                    producto_idx = asoc.get('producto_index')
+                    
+                    if producto_idx and 1 <= producto_idx <= len(servicios['servicios']):
+                        servicios['servicios'][producto_idx-1]['imagen'] = img_filename
+                        app.logger.info(f"✅ IA asoció '{img_filename}' con '{servicios['servicios'][producto_idx-1].get('servicio')}' (confianza: {asoc.get('confianza')})")
+        
+        return servicios
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en asociación IA: {e}")
+        app.logger.error(traceback.format_exc())
+        # Fallback a asociación simple
+        return asociar_imagenes_productos(servicios, imagenes)
+
 def extraer_texto_archivo(filepath, extension):
     """Extrae texto de diferentes tipos de archivos"""
     try:
@@ -689,6 +870,17 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         
         for servicio in servicios['servicios']:
             try:
+                # Handle image if present
+                imagen_nombre = servicio.get('imagen', '')
+                if imagen_nombre:
+                    # Check if image exists
+                    img_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_nombre)
+                    if os.path.exists(img_path):
+                        app.logger.info(f"✅ Imagen encontrada para {servicio.get('servicio')}: {imagen_nombre}")
+                    else:
+                        imagen_nombre = ''  # Reset if image doesn't exist
+                        app.logger.warning(f"⚠️ Imagen no encontrada: {img_path}")
+            
                 # Preparar campos
                 campos = [
                     servicio.get('sku', '').strip(),
@@ -704,14 +896,14 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('precio_mayoreo', '0.00'),
                     servicio.get('precio_menudeo', '0.00'),
                     servicio.get('moneda', 'MXN').strip(),
-                    servicio.get('imagen', '').strip(),  # ← Este campo ahora se incluye en el UPDATE
+                    imagen_nombre,
                     servicio.get('status_ws', 'activo').strip(),
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
                     servicio.get('catalogo3', '').strip(),
                     servicio.get('proveedor', '').strip(),
                 ]
-                
+            
                 # Validar precios
                 for i in [8, 9, 10, 11]:  # índices de precios y costo
                     try:
@@ -758,10 +950,9 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
-    """Endpoint para subir PDF y extraer servicios automáticamente"""
+    """Endpoint para subir PDF y extraer servicios y sus imágenes automáticamente"""
     config = obtener_configuracion_por_host()
     
     try:
@@ -782,11 +973,11 @@ def subir_pdf_servicios():
             
             app.logger.info(f"📄 PDF guardado: {filepath}")
             
-            # Extraer texto del PDF
-            texto_pdf = extraer_texto_pdf(filepath)
+            # Extraer texto e imágenes del PDF
+            texto_pdf, imagenes_pdf = extraer_texto_e_imagenes_pdf(filepath)
+            
             if not texto_pdf:
                 flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
-                # Limpiar archivo
                 try:
                     os.remove(filepath)
                 except:
@@ -811,6 +1002,9 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
+            # Asociar imágenes con productos
+            servicios = asociar_imagenes_productos(servicios, imagenes_pdf)
+            
             # Guardar en base de datos
             servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
             
@@ -821,11 +1015,11 @@ def subir_pdf_servicios():
                 pass
             
             if servicios_guardados > 0:
-                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
+                flash(f'✅ {servicios_guardados} servicios extraídos con imágenes y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
                 for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')} - Imagen: {bool(servicio.get('imagen'))}")
                 if len(servicios.get('servicios', [])) > 10:
                     app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
             else:
@@ -838,6 +1032,7 @@ def subir_pdf_servicios():
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando PDF: {e}")
+        app.logger.error(traceback.format_exc())
         flash('❌ Error interno procesando el archivo', 'error')
         # Limpiar archivo en caso de error
         try:
@@ -846,7 +1041,6 @@ def subir_pdf_servicios():
         except:
             pass
         return redirect(url_for('configuracion_precios'))
-
 
 def get_db_connection(config=None):
     if config is None:
