@@ -4368,7 +4368,11 @@ def ver_chat(numero):
         
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+        result = cursor.fetchone()
+        ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
         
+        IA_ESTADOS[numero] = {'activa': ia_active}
         # Consulta para los datos del chat
         cursor.execute("""
             SELECT DISTINCT
@@ -4468,18 +4472,27 @@ def toggle_ai(numero, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Cambiar el valor (si es 1 pasa a 0, si es 0 pasa a 1)
+        # First, get the current state
+        cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+        result = cursor.fetchone()
+        current_state = result[0] if result else True  # Default to True if not found
+        
+        # Toggle the state in database
+        new_state = not current_state
         cursor.execute("""
             UPDATE contactos
-            SET ia_activada = NOT COALESCE(ia_activada, 1)
+            SET ia_activada = %s
             WHERE numero_telefono = %s
-        """, (numero,))
+        """, (new_state, numero))
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"🔘 Estado IA cambiado para {numero}")
+        # IMPORTANT: Update the in-memory state
+        IA_ESTADOS[numero] = {'activa': new_state}
+        
+        app.logger.info(f"🔘 Estado IA cambiado para {numero}: {new_state}")
     except Exception as e:
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
