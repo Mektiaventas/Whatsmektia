@@ -601,6 +601,126 @@
             color: #128C7E;
             font-size: 12px;
         }
+    /* Estilos para chats al estilo kanban */
+    .chat-item {
+        display: block;
+        background-color: white;
+        border-radius: 8px;
+        margin-bottom: 10px;
+        padding: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        transition: all 0.2s ease;
+        text-decoration: none;
+        color: inherit;
+    }
+
+        .chat-item:hover {
+            background-color: #f8f9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+        }
+
+        .chat-item.selected {
+            background-color: #e7f3ff;
+            border-left: 3px solid #2684FF;
+        }
+
+    .card-content {
+        width: 100%;
+    }
+
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        margin-bottom: 8px;
+    }
+
+    .card-avatar-section {
+        margin-right: 10px;
+    }
+
+    .card-avatar {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        object-fit: cover;
+    }
+
+    .card-meta-row {
+        display: flex;
+        justify-content: space-between;
+        font-size: 11px;
+        color: #888;
+        margin-bottom: 6px;
+    }
+
+    .card-num {
+        color: #888;
+        font-size: 11px;
+    }
+
+    .card-time {
+        font-size: 11px;
+        color: #888;
+    }
+
+    .card-msg {
+        color: #666;
+        font-size: 13px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.3;
+    }
+
+    .edit-alias-btn {
+        border: none;
+        background: none;
+        cursor: pointer;
+        font-size: 12px;
+        padding: 2px 5px;
+        margin-left: 5px;
+        opacity: 0.6;
+    }
+
+        .edit-alias-btn:hover {
+            opacity: 1;
+        }
+
+    .card-flag {
+        width: 18px;
+        height: 14px;
+        border-radius: 3px;
+        margin-right: 5px;
+        vertical-align: middle;
+        object-fit: cover;
+        box-shadow: 0 0 2px rgba(0,0,0,0.1);
+        border: 1px solid #ddd;
+    }
+
+    .alias-view {
+        font-weight: 500;
+        flex-grow: 1;
+    }
+
+    /* Animación de chat nuevo */
+    @keyframes highlightChat {
+        0% {
+            background-color: inherit;
+        }
+
+        30% {
+            background-color: #e7f3ff;
+        }
+
+        100% {
+            background-color: inherit;
+        }
+    }
+
+    .chat-item.new-message {
+        animation: highlightChat 2s ease-in-out;
+    }
 </style>
 
 <script>
