@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -19,11 +18,11 @@
         </form>
         <div class="mensajes">
             {% for msg in mensajes %}
-                <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}">{{ msg[2] }}</div>
+            <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}">{{ msg[2] }}</div>
             {% endfor %}
         </div>
     </div>
-<script>
+    <script>
 function toggleIA() {
     fetch("/toggle_ia/{{ chat[1] }}", { method: "POST" })
         .then(r => r.json())
@@ -31,6 +30,37 @@ function toggleIA() {
             document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
         });
 }
-</script>
+
+// Auto-refresh de la página
+let autoRefresh = true;
+const refreshInterval = 500; // Medio segundo
+
+function startAutoRefresh() {
+    setInterval(function() {
+        if (autoRefresh && !document.activeElement.tagName === 'TEXTAREA') {
+            window.location.reload();
+        }
+    }, refreshInterval);
+}
+
+// Pausar el refresco cuando la página no está visible
+document.addEventListener('visibilitychange', function() {
+    autoRefresh = !document.hidden;
+});
+
+// Pausar el refresco mientras se está escribiendo en el textarea
+document.querySelector('textarea').addEventListener('focus', function() {
+    autoRefresh = false;
+});
+
+document.querySelector('textarea').addEventListener('blur', function() {
+    autoRefresh = true;
+});
+
+// Iniciar el refresco automático
+document.addEventListener('DOMContentLoaded', function() {
+    startAutoRefresh();
+});
+    </script>
 </body>
 </html>
