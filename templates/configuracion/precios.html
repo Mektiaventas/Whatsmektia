@@ -535,24 +535,25 @@
 </style>
 
 <script>
-    // Simple function to toggle any element by ID
+    // Simple function to toggle any element by ID - FIXED VERSION
     function toggleTable(tableId, iconId) {
         const table = document.getElementById(tableId);
         const icon = document.getElementById(iconId);
 
         if (table) {
-            // Toggle visibility using direct style property instead of class
-            if (table.style.display === 'none' || table.classList.contains('hidden')) {
-                table.style.display = 'block';
-                table.classList.remove('hidden');
+            // Check if currently visible
+            const isHidden = window.getComputedStyle(table).display === 'none';
+
+            // Force the correct display state
+            if (isHidden) {
+                table.style.display = 'block'; // Show table
                 if (icon) icon.textContent = '▲';
             } else {
-                table.style.display = 'none';
-                table.classList.add('hidden');
+                table.style.display = 'none'; // Hide table
                 if (icon) icon.textContent = '▼';
             }
 
-            console.log(tableId + " visibility:", table.style.display !== 'none');
+            console.log(`${tableId} is now ${isHidden ? 'visible' : 'hidden'}`);
         } else {
             console.error("Element not found:", tableId);
         }
@@ -584,7 +585,22 @@
             .catch(error => console.error("Error:", error));
     }
 
-    // ✅ ELIMINA el DOMContentLoaded y deja solo esto:
-    {% if precio_edit %} toggleFormulario(); {% endif %}
-    cargarEstructura();
+    // Execute after DOM is fully loaded
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log("DOM fully loaded");
+
+        // Ensure tables start in correct hidden state
+        const tables = document.querySelectorAll('.card-body.hidden');
+        tables.forEach(table => {
+            table.style.display = 'none';
+            console.log(`Set initial state for ${table.id}`);
+        });
+
+        // Handle form editing state - properly using Jinja inside DOMContentLoaded
+        {% if precio_edit %}
+        toggleFormulario();
+        {% endif %}
+
+        cargarEstructura();
+    });
 </script>
