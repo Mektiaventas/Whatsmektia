@@ -595,19 +595,20 @@
 </style>
 
 <script>
-// Auto-refresh functionality for chat list
-let chatAutoRefresh = true;
-let refreshInterval = 500; // Half a second
-let selectedChatId = "{{ selected }}";
-let lastUpdateTimestamp = new Date().getTime();
+    // Auto-refresh functionality for chat list
+    let chatAutoRefresh = true;
+    let refreshInterval = 500; // Half a second
+    let selectedChatId = "{{ selected }}";
+    let lastUpdateTimestamp = new Date().getTime();
+    let isUpdatingContent = false; // Para evitar actualizaciones durante cambios de interfaz
 
-function startChatRefresh() {
-  console.log("🔄 Starting chat list auto-refresh");
-  setInterval(actualizarListaChats, refreshInterval);
-}
+    function startChatRefresh() {
+        console.log("🔄 Starting chat list auto-refresh");
+        setInterval(actualizarListaChats, refreshInterval);
+    }
 
     function actualizarListaChats() {
-        if (!chatAutoRefresh) return;
+        if (!chatAutoRefresh || isUpdatingContent) return;
 
         // Guardar la posición del scroll antes de actualizar
         const msgsContainer = document.getElementById('msgs');
@@ -630,7 +631,6 @@ function startChatRefresh() {
 
                 lastUpdateTimestamp = data.timestamp;
                 actualizarListaChatsIncremental(data.chats);
-
                 // Restaurar la posición del scroll después de actualizar
                 if (msgsContainer) {
                     if (isScrolledToBottom) {
@@ -764,16 +764,34 @@ style.textContent = `
 document.head.appendChild(style);
 
 // Pause refresh when tab is not visible to save resources
-document.addEventListener('visibilitychange', function() {
-  chatAutoRefresh = !document.hidden;
-});
+        document.addEventListener('visibilitychange', function () {
+            chatAutoRefresh = !document.hidden;
+        });
 
-// Start the refresh cycle when page loads
-document.addEventListener('DOMContentLoaded', function() {
-  if (document.querySelector('.chat-items')) {
-    startChatRefresh();
-  }
-});
+        // Start the refresh cycle when page loads
+        document.addEventListener('DOMContentLoaded', function () {
+            // Obtener referencias al campo de entrada manual
+            const mensajeInput = document.getElementById('mensaje-texto');
+            if (mensajeInput) {
+                // Pausar auto-refresh cuando el campo está en foco
+                mensajeInput.addEventListener('focus', function () {
+                    chatAutoRefresh = false;
+                    console.log("🛑 Auto-refresh paused - input focus");
+                });
+
+                // Reanudar auto-refresh cuando el campo pierde el foco
+                mensajeInput.addEventListener('blur', function () {
+                    // Solo reanudar si no está abierto el selector de emojis
+                    if (!document.querySelector('.emoji-picker.active')) {
+                        chatAutoRefresh = true;
+                        console.log("▶️ Auto-refresh resumed - input blur");
+                    }
+                });
+            }
+
+            if (document.querySelector('.chat-items')) {
+                startChatRefresh();
+            }
   // Función para scroll al final de los mensajes
   function scrollToBottom() {
     const msgsContainer = document.getElementById('msgs');
@@ -934,87 +952,93 @@ document.addEventListener('DOMContentLoaded', function() {
         actualizarKanban();
     }
 
-    // Función para el selector de emojis
-    document.addEventListener('DOMContentLoaded', function () {
-        // Lista de emojis comunes
-        const commonEmojis = [
-            '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊',
-            '😇', '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙',
-            '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
-            '👍', '👎', '❤️', '🔥', '🎉', '🎂', '🎁', '👏', '🙏', '👋',
-            '💯', '⭐', '✨', '⚡', '🌟', '🌈', '☀️', '☁️', '🌧️', '❄️',
-            '🍕', '🍔', '🍟', '🌮', '🍰', '🍩', '☕', '🍷', '🥂', '🍺'
-        ];
+            // Función para el selector de emojis
+            document.addEventListener('DOMContentLoaded', function () {
+                // Lista de emojis comunes
+                const commonEmojis = [
+                    '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊',
+                    '😇', '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙',
+                    '😋', '😛', '😜', '🤪', '😝', '🤑', '🤗', '🤭', '🤫', '🤔',
+                    '👍', '👎', '❤️', '🔥', '🎉', '🎂', '🎁', '👏', '🙏', '👋',
+                    '💯', '⭐', '✨', '⚡', '🌟', '🌈', '☀️', '☁️', '🌧️', '❄️',
+                    '🍕', '🍔', '🍟', '🌮', '🍰', '🍩', '☕', '🍷', '🥂', '🍺'
+                ];
 
-        const emojiButton = document.getElementById('emoji-button');
-        if (emojiButton) {
-            // Crear el selector de emojis
-            const emojiPicker = document.createElement('div');
-            emojiPicker.className = 'emoji-picker';
+                const emojiButton = document.getElementById('emoji-button');
+                if (emojiButton) {
+                    // Crear el selector de emojis
+                    const emojiPicker = document.createElement('div');
+                    emojiPicker.className = 'emoji-picker';
 
-            // Crear la cuadrícula de emojis
-            const emojiGrid = document.createElement('div');
-            emojiGrid.className = 'emoji-grid';
+                    // Crear la cuadrícula de emojis
+                    const emojiGrid = document.createElement('div');
+                    emojiGrid.className = 'emoji-grid';
 
-            // Agregar los emojis a la cuadrícula
-            commonEmojis.forEach(emoji => {
-                const emojiItem = document.createElement('div');
-                emojiItem.className = 'emoji-item';
-                emojiItem.textContent = emoji;
+                    // Agregar los emojis a la cuadrícula
+                    commonEmojis.forEach(emoji => {
+                        const emojiItem = document.createElement('div');
+                        emojiItem.className = 'emoji-item';
+                        emojiItem.textContent = emoji;
 
-                // Agregar emoji al campo de texto cuando se hace clic
-                emojiItem.addEventListener('click', function () {
-                    const mensajeInput = document.getElementById('mensaje-texto');
-                    if (mensajeInput) {
-                        // Insertar emoji en la posición del cursor
-                        const cursorPos = mensajeInput.selectionStart;
-                        const textBefore = mensajeInput.value.substring(0, cursorPos);
-                        const textAfter = mensajeInput.value.substring(cursorPos);
+                        emojiItem.addEventListener('click', function () {
+                            const mensajeInput = document.getElementById('mensaje-texto');
+                            if (mensajeInput) {
+                                // Insertar emoji en la posición del cursor
+                                const cursorPos = mensajeInput.selectionStart;
+                                const textBefore = mensajeInput.value.substring(0, cursorPos);
+                                const textAfter = mensajeInput.value.substring(cursorPos);
 
-                        mensajeInput.value = textBefore + emoji + textAfter;
+                                mensajeInput.value = textBefore + emoji + textAfter;
 
-                        // Actualizar posición del cursor
-                        const newCursorPos = cursorPos + emoji.length;
-                        mensajeInput.setSelectionRange(newCursorPos, newCursorPos);
-                        mensajeInput.focus();
+                                // Actualizar posición del cursor
+                                const newCursorPos = cursorPos + emoji.length;
+                                mensajeInput.setSelectionRange(newCursorPos, newCursorPos);
+                                mensajeInput.focus();
+                            }
+
+                            // Cerrar el selector después de elegir
+                            emojiPicker.classList.remove('active');
+                            // Después de cerrar, reanudamos el auto-refresh
+                            setTimeout(() => chatAutoRefresh = true, 100);
+                        });
+
+                        emojiGrid.appendChild(emojiItem);
+                    });
+
+                    emojiPicker.appendChild(emojiGrid);
+
+                    // Agregar el selector al DOM
+                    const replyForm = document.querySelector('.reply-form');
+                    if (replyForm) {
+                        replyForm.appendChild(emojiPicker);
+
+                        // Mostrar/ocultar el selector al hacer clic en el botón
+                        emojiButton.addEventListener('click', function (e) {
+                            e.preventDefault();
+                            const wasActive = emojiPicker.classList.contains('active');
+                            emojiPicker.classList.toggle('active');
+
+                            if (!wasActive) {
+                                chatAutoRefresh = false; // Pausar cuando se abre
+                                console.log("🛑 Auto-refresh paused - emoji picker open");
+                            } else {
+                                chatAutoRefresh = true; // Reanudar cuando se cierra
+                                console.log("▶️ Auto-refresh resumed - emoji picker closed");
+                            }
+                        });
+
+                        // Cerrar el selector al hacer clic fuera
+                        document.addEventListener('click', function (e) {
+                            if (!emojiButton.contains(e.target) && !emojiPicker.contains(e.target)) {
+                                if (emojiPicker.classList.contains('active')) {
+                                    emojiPicker.classList.remove('active');
+                                    chatAutoRefresh = true; // Reanudar auto-refresh
+                                }
+                            }
+                        });
                     }
-
-                    // Cerrar el selector después de elegir
-                    emojiPicker.classList.remove('active');
-                });
-
-                emojiGrid.appendChild(emojiItem);
-            });
-
-            emojiPicker.appendChild(emojiGrid);
-
-            // Agregar el selector al DOM
-            const replyForm = document.querySelector('.reply-form');
-            if (replyForm) {
-                replyForm.appendChild(emojiPicker);
-
-                // Mostrar/ocultar el selector al hacer clic en el botón
-                emojiButton.addEventListener('click', function (e) {
-                    e.preventDefault();
-                    emojiPicker.classList.toggle('active');
-                });
-
-                if (!wasActive) {
-                    chatAutoRefresh = false; // Pausar cuando se abre
-                    console.log("🛑 Auto-refresh paused - emoji picker open");
-                } else {
-                    chatAutoRefresh = true; // Reanudar cuando se cierra
-                    console.log("▶️ Auto-refresh resumed - emoji picker closed");
                 }
-                // Cerrar el selector al hacer clic fuera
-                document.addEventListener('click', function (e) {
-                    if (!emojiButton.contains(e.target) && !emojiPicker.contains(e.target)) {
-                        emojiPicker.classList.remove('active');
-                    }
-                });
-            }
-        }
-    });
+            });
 
    
 
