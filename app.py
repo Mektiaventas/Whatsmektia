@@ -488,155 +488,54 @@ def analizar_pdf_servicios(texto_pdf, config=None):
     
     try:
         # Limitar el texto para evitar tokens excesivos
-        texto_limitado = texto_pdf[:100000]  # Reducido para evitar truncamiento
+        texto_limitado = texto_pdf[:40000]  # Mantenemos un límite razonable
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
         # Determinar el tipo de negocio para el prompt
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # PROMPT MÁS ESTRICTO Y OPTIMIZADO
+        # PROMPT MÁS ESTRICTO Y OPTIMIZADO - con menos caracteres para evitar errores
         if es_porfirianna:
-            prompt = f"""
-            EXTRACCIÓN DE PRODUCTOS PARA RESTAURANTE - FORMATO JSON ESTRICTO
-
-            TEXTO DEL MENÚ/CATÁLOGO:
-            {texto_limitado}
-
-            INSTRUCCIONES CRÍTICAS:
-            1. Extrae SOLO los productos principales (máximo 20)
-            2. Devuelve EXCLUSIVAMENTE JSON válido
-            3. Si el campo no existe, usa ""
-            4. PRECIOS deben ser números (ej: "150.00")
-            5. MONEDA siempre "MXN"
-            6. COSTO: Extrae el costo de producción si aparece (o estima un 70% del precio venta)
-
-            ESTRUCTURA JSON REQUERIDA:
-            {{
-                "servicios": [
-                    {{
-                        "sku": "",
-                        "servicio": "NOMBRE_PLATILLO",
-                        "categoria": "COMIDA/BEBIDA/POSTRE",
-                        "subcategoria": "",
-                        "linea": "",
-                        "modelo": "",
-                        "descripcion": "DESCRIPCIÓN_BREVE",
-                        "medidas": "PORCIÓN",
-                        "precio": "PRECIO_NUMÉRICO",
-                        "precio_mayoreo": "",
-                        "precio_menudeo": "",
-                        "costo": "COSTO_PRODUCCIÓN",
-                        "moneda": "MXN",
-                        "imagen": "",
-                        "status_ws": "activo",
-                        "catalogo": "La Porfirianna",
-                        "catalogo2": "",
-                        "catalogo3": "",
-                        "proveedor": ""
-                    }}
-                ]
-            }}
-
-            EJEMPLO:
-            {{
-                "servicios": [
-                    {{
-                        "sku": "GOR-001",
-                        "servicio": "Gordita de Chicharrón",
-                        "categoria": "COMIDA",
-                        "subcategoria": "ANTIOJITOS",
-                        "descripcion": "Gordita rellena de chicharrón prensado",
-                        "medidas": "1 pieza",
-                        "precio": "25.00",
-                        "costo": "15.00",
-                        "moneda": "MXN",
-                        "status_ws": "activo",
-                        "catalogo": "La Porfirianna"
-                    }}
-                ]
-            }}
-
-            ¡SOLO JSON! Sin texto adicional.
-            """
+            prompt = f"""Extrae los productos del siguiente texto como JSON:
+{texto_limitado[:15000]}
+Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA/BEBIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
+Solo extrae hasta 20 productos principales."""
         else:
-            prompt = f"""
-            EXTRACCIÓN DE SERVICIOS DIGITALES - FORMATO JSON ESTRICTO
-
-            TEXTO DEL DOCUMENTO:
-            {texto_limitado}
-
-            INSTRUCCIONES CRÍTICAS:
-            1. Extrae SOLO los servicios principales (máximo 15)
-            2. Devuelve EXCLUSIVAMENTE JSON válido
-            3. Si el campo no existe, usa ""
-            4. PRECIOS deben ser números (ej: "5000.00")
-            5. MONEDA siempre "MXN"
-            6. COSTO: Extrae el costo de producción si aparece (o estima un 70% del precio de venta)
-
-            ESTRUCTURA JSON REQUERIDA:
-            {{
-                "servicios": [
-                    {{
-                        "sku": "",
-                        "servicio": "NOMBRE_SERVICIO",
-                        "categoria": "CATEGORÍA_PRINCIPAL",
-                        "subcategoria": "",
-                        "linea": "",
-                        "modelo": "",
-                        "descripcion": "DESCRIPCIÓN_BREVE",
-                        "medidas": "",
-                        "precio": "PRECIO_NUMÉRICO",
-                        "precio_mayoreo": "",
-                        "precio_menudeo": "",
-                        "costo": "COSTO_PRODUCCIÓN",
-                        "moneda": "MXN",
-                        "imagen": "",
-                        "status_ws": "activo",
-                        "catalogo": "Mektia",
-                        "catalogo2": "",
-                        "catalogo3": "",
-                        "proveedor": ""
-                    }}
-                ]
-            }}
-
-            EJEMPLO:
-            {{
-                "servicios": [
-                    {{
-                        "sku": "WEB-001",
-                        "servicio": "Página Web Corporativa",
-                        "categoria": "DESARROLLO_WEB",
-                        "subcategoria": "SITIOS_WEB",
-                        "descripcion": "Desarrollo de sitio web responsive con CMS",
-                        "precio": "15000.00",
-                        "costo": "7500.00",
-                        "moneda": "MXN",
-                        "status_ws": "activo",
-                        "catalogo": "Mektia"
-                    }}
-                ]
-            }}
-
-            ¡SOLO JSON! Sin texto adicional.
-            """
+            prompt = f"""Extrae los servicios del siguiente texto como JSON:
+{texto_limitado[:15000]}
+Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_SERVICIO","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"","precio_menudeo":"","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
+Solo extrae hasta 20 servicios principales."""
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
         }
         
+        # Payload simplificado para evitar errores
         payload = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 15000,  # Aumentado significativamente
-            "response_format": {"type": "json_object"}
+            "max_tokens": 4000
         }
         
         app.logger.info("🔄 Enviando PDF a IA para análisis...")
+        
+        # Añadir más logs para diagnóstico
+        app.logger.info(f"🔍 API URL: {DEEPSEEK_API_URL}")
+        app.logger.info(f"🔍 Headers: {json.dumps({k: '***' if k == 'Authorization' else v for k, v in headers.items()})}")
+        app.logger.info(f"🔍 Payload: {json.dumps(payload)[:500]}...")
+        
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=180)
+        
+        # Log detallado de la respuesta para diagnóstico
+        app.logger.info(f"🔍 Response status: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error response from API: {response.text[:1000]}")
+            return None
+            
         response.raise_for_status()
         
         data = response.json()
@@ -665,18 +564,6 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
         
-        # Método 3: Buscar estructura específica
-        if not servicios_extraidos:
-            try:
-                # Buscar el array de servicios específicamente
-                servicios_match = re.search(r'"servicios"\s*:\s*\[.*\]', respuesta_ia, re.DOTALL)
-                if servicios_match:
-                    json_str = "{" + servicios_match.group() + "}"
-                    servicios_extraidos = json.loads(json_str)
-                    app.logger.info("✅ JSON extraído por estructura servicios")
-            except (json.JSONDecodeError, AttributeError) as e:
-                app.logger.warning(f"⚠️ Extracción por estructura falló: {e}")
-        
         # Validar estructura final
         if servicios_extraidos and 'servicios' in servicios_extraidos:
             if isinstance(servicios_extraidos['servicios'], list):
@@ -704,12 +591,13 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         return None
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error de conexión con IA: {e}")
+        if hasattr(e, 'response') and e.response:
+            app.logger.error(f"🔴 Detalles de error: {e.response.text[:1000]}")
         return None
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
-
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
     try:
