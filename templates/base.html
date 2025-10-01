@@ -6,35 +6,39 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
-  <div class="layout">
+    <div class="layout">
 
-    <!-- Sidebar principal FIJO -->
-    <aside class="sidebar">
-      <div class="sidebar-logo">
-        <img src="{{ url_for('static', filename='img/logo.png') }}" alt="CIEA Design Solutions">
-      </div>
-      <div class="sidebar-title">SmartWhats</div>
-      <ul class="sidebar-nav">
-        <li><a href="{{ url_for('home') }}">Home</a></li>
-		<li class="{{ 'active' if request.path.startswith('/kanban') else '' }}">
-			<a href="{{ url_for('ver_kanban') }}">Kanban</a>
-		</li>
+        <!-- Sidebar principal FIJO -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                {% if app_logo %}
+                <img src="{{ app_logo }}" alt="{{ app_nombre or 'SmartWhats' }}">
+                {% else %}
+                <img src="{{ url_for('static', filename='img/logo.png') }}" alt="SmartWhats">
+                {% endif %}
+            </div>
+            <div class="sidebar-title">{{ app_nombre or 'SmartWhats' }}</div>
+            <ul class="sidebar-nav">
+                <li><a href="{{ url_for('home') }}">Home</a></li>
+                <li class="{{ 'active' if request.path.startswith('/kanban') else '' }}">
+                    <a href="{{ url_for('ver_kanban') }}">Kanban</a>
+                </li>
 
-        <li><a href="{{ url_for('ver_chats') }}">Chats</a></li>
-        <li><a href="{{ url_for('configuracion_tab', tab='negocio') }}">Configuración</a></li>
-		<!-- Dentro de <nav> o en el footer -->
-		<li><a href="{{ url_for('privacy_policy') }}">Política de Privacidad</a></li>
-		<li><a href="{{ url_for('terms_of_service') }}">Términos de Servicio</a></li>
-		<li><a href="{{ url_for('data_deletion') }}">Eliminación de Datos</a></li>
-      </ul>
-    </aside>
+                <li><a href="{{ url_for('ver_chats') }}">Chats</a></li>
+                <li><a href="{{ url_for('configuracion_tab', tab='negocio') }}">Configuración</a></li>
+                <!-- Dentro de <nav> o en el footer -->
+                <li><a href="{{ url_for('privacy_policy') }}">Política de Privacidad</a></li>
+                <li><a href="{{ url_for('terms_of_service') }}">Términos de Servicio</a></li>
+                <li><a href="{{ url_for('data_deletion') }}">Eliminación de Datos</a></li>
+            </ul>
+        </aside>
 
-    <!-- Contenido principal -->
-    <main class="main-content">
-      {% block content %}{% endblock %}
-    </main>
-	
-  </div>
+        <!-- Contenido principal -->
+        <main class="main-content">
+            {% block content %}{% endblock %}
+        </main>
+
+    </div>
   <!-- Al final del body de base.html -->
 <script>
 // Función para manejar redimensionamiento responsive

@@ -185,6 +185,43 @@ def obtener_archivo_whatsapp(media_id, config=None):
         app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
         return None, None, None
 
+@app.route('/configuracion/negocio', methods=['POST'])
+def guardar_configuracion_negocio():
+    # Tus campos existentes
+    app_nombre = request.form.get('app_nombre', 'SmartWhats')
+    
+    # Manejar la subida del logo
+    if 'app_logo' in request.files and request.files['app_logo'].filename != '':
+        logo = request.files['app_logo']
+        filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
+        
+        # Asegúrate de que la carpeta existe
+        os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+        
+        # Guardar el archivo
+        logo.save(upload_path)
+        
+        # Guardar la ruta en la BD
+        app_logo = f"/uploads/logos/{filename}"
+    else:
+        # Mantener el logo existente o ninguno
+        app_logo = request.form.get('app_logo_actual', None)
+    
+    # Guardar en la base de datos
+    # [Tu código para actualizar la BD]
+    
+    return redirect(url_for('configuracion_tab', tab='negocio'))
+
+@app.context_processor
+def inject_app_config():
+    # Obtener de la BD
+    config = obtener_configuracion_de_bd()
+    return {
+        'app_nombre': config.get('app_nombre', 'SmartWhats'),
+        'app_logo': config.get('app_logo')
+    }
+
 def determinar_extension(mime_type, filename):
     """Determina la extensión del archivo basado en MIME type y nombre"""
     mime_to_extension = {
