@@ -2869,7 +2869,6 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
-# REEMPLAZA la llamada a procesar_mensaje en el webhook con:
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
     """Procesa mensajes normales (no citas/intervenciones)"""
     try:
@@ -2887,7 +2886,8 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+            
+        # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
             app.logger.info(f"📎 Procesando archivo enviado por {numero}")
             
@@ -2926,42 +2926,39 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             else:
                 respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
             
-            # Enviar respuesta y guardar conversación
+            # Enviar respuesta y actualizar conversación existente
             enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
             return
-        
-            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+            
+        # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
         if responder_con_voz and not es_imagen:
-                # Intentar enviar respuesta de voz
-                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-                actualizar_respuesta(biner, texto, respuesta, config)
-                if audio_url_local:
-                    # URL pública del audio (ajusta según tu configuración)
-                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
-                    
-                    if enviar_mensaje_voz(numero, audio_url_publica, config):
-                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, config=config)
-                    else:
-                        # Fallback a texto
-                        enviar_mensaje(numero, respuesta, config)
-                        guardar_conversacion(numero, texto, respuesta, config=config)
+            # Intentar enviar respuesta de voz
+            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+            if audio_url_local:
+                # URL pública del audio (ajusta según tu configuración)
+                audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+                
+                if enviar_mensaje_voz(numero, audio_url_publica, config):
+                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
                 else:
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
-                    guardar_conversacion(numero, texto, respuesta, config=config)
-        else:
-                # Respuesta normal de texto
+            else:
+                # Fallback a texto
                 enviar_mensaje(numero, respuesta, config)
-                guardar_conversacion(numero, texto, respuesta, config=config)
-                actualizar_respuesta(biner, texto, respuesta, config)
-            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+        else:
+            # Respuesta normal de texto
+            enviar_mensaje(numero, respuesta, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+            
+        # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
-                app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-                resumen = resumen_rafa(numero, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
+            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+            resumen = resumen_rafa(numero, config)
+            enviar_alerta_humana(numero, texto, resumen, config)
         
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
@@ -2973,7 +2970,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
-
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
@@ -3982,7 +3978,7 @@ def webhook():
                 texto = "Error al procesar el audio"
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-        guardar_mensaje_inmediato(numero, texto,)
+        guardar_mensaje_inmediato(numero, texto, config)
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
