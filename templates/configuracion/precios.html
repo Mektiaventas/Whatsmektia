@@ -291,7 +291,7 @@
             <span id="productos-cliente-icon">▼</span>
         </h3>
     </div>
-    <div class="card-body hidden" id="productos-cliente-body">
+    <div class="card-body" id="productos-cliente-body">
         {% if precios %}
         <div class="table-responsive">
             <table class="table">
@@ -301,6 +301,7 @@
                         <th>Producto</th>
                         <th>Categoría</th>
                         <th>Descripción</th>
+                        <th>Imagen</th>
                         <th>Mayoreo</th>
                         <th>Menudeo</th>
                         <th>Moneda</th>
@@ -313,7 +314,14 @@
                         <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
                         <td class="font-medium">{{ precio.servicio }}</td>
                         <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
-                        <td>{{ precio.descripcion|truncate(30) }}</td>
+                        <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                        <td>
+                            {% if precio.imagen %}
+                            <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
                         <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                         <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                         <td>{{ precio.moneda }}</td>
@@ -343,7 +351,7 @@
             <span id="productos-admin-icon">▼</span>
         </h3>
     </div>
-    <div class="card-body hidden" id="productos-admin-body">
+    <div class="card-body" id="productos-admin-body">
         {% if precios %}
         <div class="table-responsive">
             <table class="table">
@@ -355,6 +363,7 @@
                         <th>Costo</th>
                         <th>Mayoreo</th>
                         <th>Menudeo</th>
+                        <th>Imagen</th>
                         <th>Moneda</th>
                         <th>Proveedor</th>
                         <th>Acciones</th>
@@ -369,6 +378,13 @@
                         <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else "{:,.2f}".format(precio.precio) }}</td>
                         <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                         <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                        <td>
+                            {% if precio.imagen %}
+                            <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                            {% else %}
+                            -
+                            {% endif %}
+                        </td>
                         <td>{{ precio.moneda }}</td>
                         <td>{{ precio.proveedor or '-' }}</td>
                         <td>
@@ -564,7 +580,7 @@
     }
 
     // Si estamos editando un producto, mostrar el formulario abierto
-    document.addEventListener('DOMContentLoaded'10 limite, function () {
+    document.addEventListener('DOMContentLoaded', function () {
         {% if precio_edit %}
         toggleFormulario(); // Abrir el formulario si estamos editando
         {% endif %}
