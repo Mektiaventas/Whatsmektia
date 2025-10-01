@@ -288,8 +288,11 @@
     <div class="card-header bg-gray-100" id="productos-cliente-header">
         <h3 class="flex justify-between items-center">
             <span>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</span>
-            <button type="button" onclick="toggleCliente()" class="btn-toggle px-3 py-1 rounded bg-white">
-                <span id="productos-cliente-icon">▼</span>
+            <button type="button"
+                    class="btn-toggle px-3 py-1 rounded bg-white"
+                    data-target="#productos-cliente-body"
+                    aria-expanded="false">
+                <span class="toggle-icon">▼</span>
             </button>
         </h3>
     </div>
@@ -350,15 +353,18 @@
     <div class="card-header bg-blue-100" id="productos-admin-header">
         <h3 class="flex justify-between items-center">
             <span>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</span>
-            <button type="button" onclick="toggleAdmin()" class="btn-toggle px-3 py-1 rounded bg-white">
-                <span id="productos-admin-icon">▼</span>
+            <button type="button"
+                    class="btn-toggle px-3 py-1 rounded bg-white"
+                    data-target="#productos-admin-body"
+                    aria-expanded="false">
+                <span class="toggle-icon">▼</span>
             </button>
         </h3>
     </div>
     <div class="card-body hidden" id="productos-admin-body">
         {% if precios %}
         <div class="table-responsive">
-            <table class="table" id="clientito" visible="False">
+            <table class="table">
                 <thead>
                     <tr>
                         <th>SKU</th>
