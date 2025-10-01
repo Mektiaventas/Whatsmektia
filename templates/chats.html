@@ -94,8 +94,8 @@
 
             <div class="chat-controls">
                 <!-- BADGE DE ESTADO IA/MANUAL -->
-                <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}">
-                    {% if IA_ESTADOS.get(selected, True) %}
+                <span class="badge {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}bg-success{% else %}bg-warning{% endif %}">
+                    {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
                     🤖 IA ACTIVADA
                     {% else %}
                     👤 MODO MANUAL
@@ -104,8 +104,8 @@
 
                 <!-- Botón toggle IA -->
                 <form action="/toggle_ai/{{ selected }}" method="POST">
-                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, True) else 'off' }}">
-                        IA {{ 'ON' if IA_ESTADOS.get(selected, True) else 'OFF' }}
+                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'off' }}">
+                        IA {{ 'ON' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'OFF' }}
                     </button>
                 </form>
             </div>
@@ -215,7 +215,8 @@
         <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
-                <input type="text" name="texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
+                <button type="button" id="emoji-button" class="emoji-btn">😊</button>
+                <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form>
