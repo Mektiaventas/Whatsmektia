@@ -221,7 +221,7 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda==m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                         </option>
                         {% endfor %}
@@ -291,56 +291,61 @@
             <span id="productos-cliente-icon">▼</span>
         </h3>
     </div>
-    <div class="card-body" id="productos-cliente-body">
-        {% if precios %}
-        <div class="table-responsive">
-            <table class="table">
-                <thead>
-                    <tr>
-                        <th>SKU</th>
-                        <th>Producto</th>
-                        <th>Categoría</th>
-                        <th>Descripción</th>
-                        <th>Imagen</th>
-                        <th>Mayoreo</th>
-                        <th>Menudeo</th>
-                        <th>Moneda</th>
-                        <th>Acciones</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for precio in precios %}
-                    <tr>
-                        <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
-                        <td class="font-medium">{{ precio.servicio }}</td>
-                        <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
-                        <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
-                        <td>
-                            {% if precio.imagen %}
-                            <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
-                            {% else %}
-                            -
-                            {% endif %}
-                        </td>
-                        <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                        <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                        <td>{{ precio.moneda }}</td>
-                        <td>
-                            <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                               class="btn small primary">Editar</a>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <div class="text-center py-8">
-            <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
-            <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
-        </div>
-        {% endif %}
+    <div class="card-body hidden" id="productos-cliente-body">
+        <!-- Contenido actual... -->
     </div>
+</div>
+
+<div class="card-body hidden" id="productos-cliente-body">
+    {% if precios %}
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Producto</th>
+                    <th>Categoría</th>
+                    <th>Descripción</th>
+                    <th>Imagen</th>
+                    <th>Mayoreo</th>
+                    <th>Menudeo</th>
+                    <th>Moneda</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for precio in precios %}
+                <tr>
+                    <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
+                    <td class="font-medium">{{ precio.servicio }}</td>
+                    <td>{{ precio.categoria or '-' }}{% if precio.subcategoria %} / {{ precio.subcategoria }}{% endif %}</td>
+                    <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                    <td>
+                        {% if precio.imagen %}
+                        <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                        {% else %}
+                        -
+                        {% endif %}
+                    </td>
+                    <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                    <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                    <td>{{ precio.moneda }}</td>
+                    <td>
+                        <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                           class="btn small primary">Editar</a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="text-center py-8">
+        <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
+        <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
+    </div>
+    {% endif %}
+</div>
 </div>
 
 <!-- Tarjeta: Lista de productos completa (Vista Admin) -->
@@ -351,7 +356,7 @@
             <span id="productos-admin-icon">▼</span>
         </h3>
     </div>
-    <div class="card-body" id="productos-admin-body">
+    <div class="card-body hidden" id="productos-admin-body">
         {% if precios %}
         <div class="table-responsive">
             <table class="table">

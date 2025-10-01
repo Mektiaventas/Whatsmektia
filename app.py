@@ -709,7 +709,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         cursor = conn.cursor()
         servicios_guardados = 0
         
-        # Primero, verificar si la columna costo existe
+        # Verificar columna costo
         try:
             cursor.execute("SHOW COLUMNS FROM precios LIKE 'costo'")
             columna_existe = cursor.fetchone()
@@ -718,7 +718,6 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 app.logger.info("🔧 Columna 'costo' no existe, creándola...")
                 cursor.execute("ALTER TABLE precios ADD COLUMN costo DECIMAL(10,2) DEFAULT 0.00 AFTER precio")
                 conn.commit()
-                app.logger.info("✅ Columna 'costo' creada correctamente")
         except Exception as e:
             app.logger.error(f"❌ Error verificando/creando columna 'costo': {e}")
         
@@ -735,11 +734,11 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('descripcion', '').strip(),
                     servicio.get('medidas', '').strip(),
                     servicio.get('precio', '0.00'),
-                    servicio.get('costo', '0.00'),  # Agregado costo
+                    servicio.get('costo', '0.00'),
                     servicio.get('precio_mayoreo', '0.00'),
                     servicio.get('precio_menudeo', '0.00'),
                     servicio.get('moneda', 'MXN').strip(),
-                    servicio.get('imagen', '').strip(),
+                    servicio.get('imagen', '').strip(),  # ← Este campo ahora se incluye en el UPDATE
                     servicio.get('status_ws', 'activo').strip(),
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
@@ -770,6 +769,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                         costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
+                        imagen=VALUES(imagen),
                         moneda=VALUES(moneda),
                         status_ws=VALUES(status_ws)
                 """, campos)
