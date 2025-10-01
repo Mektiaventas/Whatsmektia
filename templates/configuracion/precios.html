@@ -288,7 +288,7 @@
     <div class="card-header bg-gray-100" id="productos-cliente-header">
         <h3 class="flex justify-between items-center">
             <span>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</span>
-            <button type="button" id="btn-toggle-cliente" class="btn-toggle px-3 py-1 rounded bg-white">
+            <button type="button" onclick="toggleCliente()" class="btn-toggle px-3 py-1 rounded bg-white">
                 <span id="productos-cliente-icon">▼</span>
             </button>
         </h3>
@@ -350,7 +350,7 @@
     <div class="card-header bg-blue-100" id="productos-admin-header">
         <h3 class="flex justify-between items-center">
             <span>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</span>
-            <button type="button" id="btn-toggle-admin" class="btn-toggle px-3 py-1 rounded bg-white">
+            <button type="button" onclick="toggleAdmin()" class="btn-toggle px-3 py-1 rounded bg-white">
                 <span id="productos-admin-icon">▼</span>
             </button>
         </h3>
@@ -532,97 +532,79 @@
 </style>
 
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        // Toggle para el formulario
-        const formularioHeader = document.getElementById('formulario-header');
-        if (formularioHeader) {
-            formularioHeader.addEventListener('click', function () {
-                const formularioBody = document.getElementById('formulario-body');
-                const formularioIcon = document.getElementById('formulario-icon');
-
-                if (formularioBody.classList.contains('hidden')) {
-                    formularioBody.classList.remove('hidden');
-                    formularioIcon.textContent = '▲';
-                } else {
-                    formularioBody.classList.add('hidden');
-                    formularioIcon.textContent = '▼';
-                }
-            });
-        }
-
-        // Toggle para productos cliente (botón explícito)
-        const btnToggleCliente = document.getElementById('btn-toggle-cliente');
-        if (btnToggleCliente) {
-            btnToggleCliente.addEventListener('click', function (e) {
-                e.stopPropagation(); // Importante: evita propagación
-                const productosBody = document.getElementById('productos-cliente-body');
-                const productosIcon = document.getElementById('productos-cliente-icon');
-
-                if (productosBody.classList.contains('hidden')) {
-                    productosBody.classList.remove('hidden');
-                    productosIcon.textContent = '▲';
-                } else {
-                    productosBody.classList.add('hidden');
-                    productosIcon.textContent = '▼';
-                }
-            });
-        }
-
-        // Toggle para productos admin (botón explícito)
-        const btnToggleAdmin = document.getElementById('btn-toggle-admin');
-        if (btnToggleAdmin) {
-            btnToggleAdmin.addEventListener('click', function (e) {
-                e.stopPropagation(); // Importante: evita propagación
-                const productosBody = document.getElementById('productos-admin-body');
-                const productosIcon = document.getElementById('productos-admin-icon');
-
-                if (productosBody.classList.contains('hidden')) {
-                    productosBody.classList.remove('hidden');
-                    productosIcon.textContent = '▲';
-                } else {
-                    productosBody.classList.add('hidden');
-                    productosIcon.textContent = '▼';
-                }
-            });
-        }
-
-        // Abrir el formulario si estamos editando
-        {% if precio_edit %}
+        function toggleFormulario() {
         const formularioBody = document.getElementById('formulario-body');
         const formularioIcon = document.getElementById('formulario-icon');
-        if (formularioBody && formularioIcon) {
+
+        if (formularioBody.classList.contains('hidden')) {
             formularioBody.classList.remove('hidden');
-            formularioIcon.textContent = '▲';
+        formularioIcon.textContent = '▲';
+        } else {
+            formularioBody.classList.add('hidden');
+        formularioIcon.textContent = '▼';
         }
+    }
+
+        function toggleCliente() {
+            console.log("Toggle Cliente clicked");
+        const productosBody = document.getElementById('productos-cliente-body');
+        const productosIcon = document.getElementById('productos-cliente-icon');
+
+        if (productosBody.classList.contains('hidden')) {
+            productosBody.classList.remove('hidden');
+        productosIcon.textContent = '▲';
+        } else {
+            productosBody.classList.add('hidden');
+        productosIcon.textContent = '▼';
+        }
+    }
+
+        function toggleAdmin() {
+            console.log("Toggle Admin clicked");
+        const productosBody = document.getElementById('productos-admin-body');
+        const productosIcon = document.getElementById('productos-admin-icon');
+
+        if (productosBody.classList.contains('hidden')) {
+            productosBody.classList.remove('hidden');
+        productosIcon.textContent = '▲';
+        } else {
+            productosBody.classList.add('hidden');
+        productosIcon.textContent = '▼';
+        }
+    }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            {% if precio_edit %}
+        toggleFormulario();
         {% endif %}
 
-        // Cargar estructura
         cargarEstructura();
     });
 
-    function cargarEstructura() {
-        fetch('/configuracion/precios/estructura')
-            .then(response => response.json())
-            .then(data => {
-                const contenedor = document.getElementById('columnas-dinamicas');
-                if (!contenedor) return;
+        function cargarEstructura() {
+            fetch('/configuracion/precios/estructura')
+                .then(response => response.json())
+                .then(data => {
+                    const contenedor = document.getElementById('columnas-dinamicas');
+                    if (!contenedor) return;
 
-                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
-                const columnasDinamicas = data.estructura.filter(col =>
-                    !columnasBase.includes(col.Field)
-                );
+                    const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
+                    const columnasDinamicas = data.estructura.filter(col =>
+                        !columnasBase.includes(col.Field)
+                    );
 
-                if (columnasDinamicas.length > 0) {
-                    let html = '<ul class="text-sm space-y-1">';
-                    columnasDinamicas.forEach(col => {
-                        html += `<li>• ${col.Field} (${col.Type})</li>`;
-                    });
-                    html += '</ul>';
-                    contenedor.innerHTML = html;
-                } else {
-                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
-                }
-            })
-            .catch(error => console.error("Error cargando estructura:", error));
+                    if (columnasDinamicas.length > 0) {
+                        let html = '<ul class="text-sm space-y-1">';
+                        columnasDinamicas.forEach(col => {
+                            html += `<li>• ${col.Field} (${col.Type})</li>`;
+                        });
+                        html += '</ul>';
+                        contenedor.innerHTML = html;
+                    } else {
+                        contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
+                    }
+                })
+                .catch(error => console.error("Error cargando estructura:", error));
     }
+
 </script>
