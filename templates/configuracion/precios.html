@@ -500,7 +500,7 @@
     }
 
     .hidden {
-        display: none;
+        display: none !important;
     }
 
     .card-header {
@@ -541,16 +541,18 @@
         const icon = document.getElementById(iconId);
 
         if (table) {
-            // Toggle visibility
-            table.classList.toggle('hidden');
-
-            // Update icon if found
-            if (icon) {
-                icon.textContent = table.classList.contains('hidden') ? '▼' : '▲';
+            // Toggle visibility using direct style property instead of class
+            if (table.style.display === 'none' || table.classList.contains('hidden')) {
+                table.style.display = 'block';
+                table.classList.remove('hidden');
+                if (icon) icon.textContent = '▲';
+            } else {
+                table.style.display = 'none';
+                table.classList.add('hidden');
+                if (icon) icon.textContent = '▼';
             }
 
-            // Debug info
-            console.log(tableId + " visibility:", !table.classList.contains('hidden'));
+            console.log(tableId + " visibility:", table.style.display !== 'none');
         } else {
             console.error("Element not found:", tableId);
         }
