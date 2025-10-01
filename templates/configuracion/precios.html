@@ -289,9 +289,10 @@
         <h3 class="flex justify-between items-center">
             <span>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</span>
             <button type="button" class="btn-toggle px-3 py-1 rounded bg-white"
-                    onclick="toggleSimple('productos-cliente-body')">
-                <span class="toggle-icon">▼</span>
+                    onclick="toggleTable('productos-cliente-body', 'cliente-icon')">
+                <span id="cliente-icon" class="toggle-icon">▼</span>
             </button>
+
         </h3>
     </div>
     <div class="card-body hidden" id="productos-cliente-body">
@@ -352,8 +353,8 @@
         <h3 class="flex justify-between items-center">
             <span>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</span>
             <button type="button" class="btn-toggle px-3 py-1 rounded bg-white"
-                    onclick="toggleSimple('productos-admin-body')">
-                <span class="toggle-icon">▼</span>
+                    onclick="toggleTable('productos-admin-body', 'admin-icon')">
+                <span id="admin-icon" class="toggle-icon">▼</span>
             </button>
         </h3>
     </div>
@@ -534,57 +535,56 @@
 </style>
 
 <script>
+    // Simple function to toggle any element by ID
+    function toggleTable(tableId, iconId) {
+        const table = document.getElementById(tableId);
+        const icon = document.getElementById(iconId);
+
+        if (table) {
+            // Toggle visibility
+            table.classList.toggle('hidden');
+
+            // Update icon if found
+            if (icon) {
+                icon.textContent = table.classList.contains('hidden') ? '▼' : '▲';
+            }
+
+            // Debug info
+            console.log(tableId + " visibility:", !table.classList.contains('hidden'));
+        } else {
+            console.error("Element not found:", tableId);
+        }
+    }
+
     function toggleFormulario() {
-        const body = document.getElementById('formulario-body');
-        const icon = document.getElementById('formulario-icon');
-        if (body) {
-            body.classList.toggle('hidden');
-            if (icon) {
-                icon.textContent = body.classList.contains('hidden') ? '▼' : '▲';
-            }
-        }
+        toggleTable('formulario-body', 'formulario-icon');
     }
-
-    function toggleSimple(id) {
-        console.log("Toggle clicked for", id);
-        const element = document.getElementById(id);
-        const button = event.currentTarget;
-        const icon = button.querySelector('.toggle-icon');
-
-        if (element) {
-            element.classList.toggle('hidden');
-            if (icon) {
-                icon.textContent = element.classList.contains('hidden') ? '▼' : '▲';
-            }
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', function () {
-        {% if precio_edit %} toggleFormulario(); {% endif %}
-        cargarEstructura();
-    });
 
     function cargarEstructura() {
         fetch('/configuracion/precios/estructura')
             .then(response => response.json())
             .then(data => {
-                const cont = document.getElementById('columnas-dinamicas');
-                if (!cont) return;
+                const contenedor = document.getElementById('columnas-dinamicas');
+                if (!contenedor) return;
 
                 const base = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
-                const dyn = (data.estructura || []).filter(c => !base.includes(c.Field));
+                let html = '<ul class="text-sm space-y-1">';
 
-                if (dyn.length > 0) {
-                    let html = '<ul class="text-sm space-y-1">';
-                    dyn.forEach(c => {
-                        html += `<li>• ${c.Field} (${c.Type})</li>`;
+                data.estructura
+                    .filter(col => !base.includes(col.Field))
+                    .forEach(col => {
+                        html += `<li>• ${col.Field} (${col.Type})</li>`;
                     });
-                    html += '</ul>';
-                    cont.innerHTML = html;
-                } else {
-                    cont.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
-                }
+
+                html += '</ul>';
+                contenedor.innerHTML = html || '<p class="text-sm text-gray-600">No hay columnas dinámicas</p>';
             })
-            .catch(err => console.error('Error cargando estructura:', err));
+            .catch(error => console.error("Error:", error));
     }
+
+    // Initialize on page load
+    document.addEventListener('DOMContentLoaded', function () {
+        {% if precio_edit %} toggleFormulario();{% endif %}
+        cargarEstructura();
+    });
 </script>
