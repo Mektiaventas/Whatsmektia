@@ -211,7 +211,7 @@
 
         <!-- FORMULARIO DE MENSAJE MANUAL -->
         {% if selected %}
-        {% if not IA_ESTADOS.get(selected, True) %}
+        {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
         <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
@@ -223,8 +223,8 @@
         <!-- Replace the existing toggle button in the ia-active-message div with this -->
         <div class="ia-active-message">
             <div class="ia-indicator">
-                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, True) else '👤' }}</span>
-                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, True) else 'Modo manual activado' }}</span>
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
             </div>
             <form action="/toggle_ai/{{ selected }}" method="POST">
                 {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
