@@ -2575,7 +2575,7 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
 
 def extraer_hora_del_mensaje(mensaje):
     """Extrae la hora del mensaje de forma simple"""
-    mensaje_lower = mensaje.lower()
+    mensaje_lower = mensaje.lower()# Convertir a minúsculas para facilitar la búsqueda
     
     # Patrones simples para horas
     patrones_hora = [
@@ -3723,7 +3723,6 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
 
-# REEMPLAZA la función webhook con esta versión mejorada
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -3780,7 +3779,6 @@ def webhook():
                 actualizar_kanban()
         
             # Continuar con el procesamiento normal del mensaje
-            # ... tu código existente para procesar mensajes ...
         
         except Exception as e:
             app.logger.error(f"Error procesando webhook: {str(e)}")
@@ -3791,16 +3789,15 @@ def webhook():
 
         msg = mensajes[0]
         numero = msg['from']
-        # Agregar esto inmediatamente:
-       # CORRECCIÓN: Manejo robusto de texto
+        # Manejo robusto de texto/flags
         texto = ''
         es_imagen = False
         es_audio = False
         es_video = False
         es_archivo = False
         es_documento = False
-        es_mi_numero = False  # ← Add this initialization
-         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+        es_mi_numero = False
+        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
@@ -3814,53 +3811,48 @@ def webhook():
                 
         if config is None:
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()  # Fallback a detección por host
+            config = obtener_configuracion_por_host()
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
-                # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        
+        # 🔥 Inicializar/actualizar contacto y kanban
         nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
         actualizar_kanban()
-         # 🔥 ACTUALIZAR CONTACTO CON NOMBRE DEL WEBHOOK (SI EXISTE)
         if nombre_desde_webhook:
             actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
         else:
-            actualizar_info_contacto(numero, config)  # Fallback al método normal
+            actualizar_info_contacto(numero, config)
+
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
             app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
             return 'OK', 200
             
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        message_id = msg.get('id')
-        if not message_id:
-            # Si no hay ID, crear uno basado en timestamp y contenido
-            timestamp = msg.get('timestamp', '')
-            message_id = f"{numero}_{timestamp}_{texto[:50]}"
-            
-        # Crear un hash único del mensaje para evitar duplicados
+        # Crear hash único
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
-        # Verificar si ya procesamos este mensaje (solo si no es un audio/imagen para evitar falsos positivos)
+        # Verificar duplicados (excepto audio/imagen)
         if not es_audio and not es_imagen and message_hash in processed_messages:
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
             
-        # Agregar a mensajes procesados (con timestamp para limpieza posterior)
+        # Agregar a mensajes procesados
         processed_messages[message_hash] = time.time()
 
         # Limpiar mensajes antiguos (más de 1 hora)
         current_time = time.time()
-        for msg_hash, timestamp in list(processed_messages.items()):
-            if current_time - timestamp > 3600:  # 1 hora
+        for msg_hash, ts in list(processed_messages.items()):
+            if current_time - ts > 3600:
                 del processed_messages[msg_hash]
         
         image_id = None
         imagen_base64 = None
         public_url = None
         transcripcion = None
-        # En el webhook, después de procesar el mensaje:
+
+        # Parsear el mensaje entrante
         actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
@@ -3868,24 +3860,36 @@ def webhook():
             es_imagen = True
             image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
-            texto = msg['image'].get('caption', '').strip()
-            if not texto:
-                texto = "El usuario envió una imagen"
-            
-            # Guardar solo el mensaje del usuario (sin respuesta aún)
+            texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
+            # Guardar mensaje entrante (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+            try:
+                meta = obtener_chat_meta(numero, config)
+                if not meta:
+                    inicializar_chat_meta(numero, config)
+                actualizar_columna_chat(numero, 2, config)  # En Conversación
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (imagen): {e}")
         elif 'document' in msg:
-                es_archivo = True
-                texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
-                app.logger.info(f"📎 Archivo detectado: {texto}")
-        
-                 # MODIFICAR LA LLAMADA A procesar_mensaje_normal
-                procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
+            es_archivo = True
+            texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
+            app.logger.info(f"📎 Archivo detectado: {texto}")
+            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+            try:
+                meta = obtener_chat_meta(numero, config)
+                if not meta:
+                    inicializar_chat_meta(numero, config)
+                actualizar_columna_chat(numero, 2, config)  # En Conversación
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (documento): {e}")
+            # Procesar y salir
+            procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
                                    imagen_base64, transcripcion, es_mi_numero, es_archivo)     
-                return 'OK', 200
+            return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
-            audio_id = msg['audio']['id']  # ✅ Para audio también
+            audio_id = msg['audio']['id']
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
             if audio_path:
                 transcripcion = transcribir_audio_con_openai(audio_path)
@@ -3896,6 +3900,18 @@ def webhook():
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
             
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
+
+        # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
+        try:
+            meta = obtener_chat_meta(numero, config)
+            if not meta:
+                inicializar_chat_meta(numero, config)
+            # Si es el primer mensaje de este chat -> Nuevos (1), si no -> En Conversación (2)
+            historial = obtener_historial(numero, limite=1, config=config)
+            nueva_columna = 1 if not historial else 2
+            actualizar_columna_chat(numero, nueva_columna, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (general): {e}")
         
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
@@ -3904,56 +3920,41 @@ def webhook():
         
         # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
         es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
-        
         if es_mi_numero:
             app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
         # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
-        
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
-
         if analisis_pedido and analisis_pedido.get('es_pedido'):
             app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
-    
             # Manejar el pedido automáticamente
             respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-    
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
+
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            
-            # Obtener historial para contexto
             historial = obtener_historial(numero, limite=5, config=config)
-            
-            # Extraer información con contexto
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                
-                # Enviar alerta al administrador
                 enviar_alerta_intervencion_humana(info_intervencion, config)
-                
-                # Responder al cliente
                 respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
                 respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            
-            # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             actualizar_kanban(numero, columna_id=1, config=config)
-            
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
-        actualizar_kanban(numero, columna_id, config)
-        return 'OK', 200
+        # ⛔ Se elimina llamada inválida con columna_id indefinido
+        # actualizar_kanban(numero, columna_id, config)  # ← eliminado
+        return 'OK', 200 
         
     except Exception as e:
         app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
