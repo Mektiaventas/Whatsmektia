@@ -30,37 +30,6 @@ function toggleIA() {
             document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
         });
 }
-
-// Auto-refresh de la página
-let autoRefresh = true;
-const refreshInterval = 500; // Medio segundo
-
-function startAutoRefresh() {
-    setInterval(function() {
-        if (autoRefresh && !document.activeElement.tagName === 'TEXTAREA') {
-            window.location.reload();
-        }
-    }, refreshInterval);
-}
-
-// Pausar el refresco cuando la página no está visible
-document.addEventListener('visibilitychange', function() {
-    autoRefresh = !document.hidden;
-});
-
-// Pausar el refresco mientras se está escribiendo en el textarea
-document.querySelector('textarea').addEventListener('focus', function() {
-    autoRefresh = false;
-});
-
-document.querySelector('textarea').addEventListener('blur', function() {
-    autoRefresh = true;
-});
-
-// Iniciar el refresco automático
-document.addEventListener('DOMContentLoaded', function() {
-    startAutoRefresh();
-});
     </script>
 </body>
 </html>
