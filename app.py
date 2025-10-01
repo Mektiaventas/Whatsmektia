@@ -216,7 +216,7 @@ def guardar_configuracion_negocio():
 @app.context_processor
 def inject_app_config():
     # Obtener de la BD
-    config = obtener_configuracion_de_bd()
+    config = obtener_configuracion_por_host()
     return {
         'app_nombre': config.get('app_nombre', 'SmartWhats'),
         'app_logo': config.get('app_logo')
