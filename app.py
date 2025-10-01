@@ -2936,7 +2936,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                 # Intentar enviar respuesta de voz
                 audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
                 audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-                
+                actualizar_respuesta(biner, texto, respuesta, config)
                 if audio_url_local:
                     # URL pública del audio (ajusta según tu configuración)
                     audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
@@ -2956,7 +2956,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                 # Respuesta normal de texto
                 enviar_mensaje(numero, respuesta, config)
                 guardar_conversacion(numero, texto, respuesta, config=config)
-            
+                actualizar_respuesta(biner, texto, respuesta, config)
             # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
                 app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
@@ -2974,6 +2974,41 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
+def actualizar_respuesta(numero, mensaje, respuesta, config=None):
+    """Actualiza la respuesta para un mensaje ya guardado"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
+        cursor.execute("""
+            UPDATE conversaciones 
+            SET respuesta = %s 
+            WHERE numero = %s 
+              AND mensaje = %s 
+              AND respuesta IS NULL 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        """, (respuesta, numero, mensaje))
+        
+        # Si no actualizó ninguna fila (no se encontró el mensaje), insertar nuevo
+        if cursor.rowcount == 0:
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
+                VALUES (%s, %s, %s, NOW())
+            """, (numero, mensaje, respuesta))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error actualizando respuesta: {e}")
+        # Fallback a guardar conversación normal
+        guardar_conversacion(numero, mensaje, respuesta, config)
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -3899,7 +3934,7 @@ def webhook():
                 texto = "Error al procesar el audio"
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-        guardar_mensaje_inmediato()
+        guardar_mensaje_inmediato(numero, texto,)
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
