@@ -4363,11 +4363,14 @@ def ver_chats():
 @app.route('/chats/<numero>')
 def ver_chat(numero):
     try:
+        try:
         config = obtener_configuracion_por_host()
         app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
         
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # Check if number exists in IA_ESTADOS
         if numero not in IA_ESTADOS:
             cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
             result = cursor.fetchone()
@@ -4375,10 +4378,9 @@ def ver_chat(numero):
             IA_ESTADOS[numero] = {'activa': ia_active}
             app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
         else:
+            # IMPORTANT: Don't try to set IA_ESTADOS again - it's already set
             app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
-            
-        
-        IA_ESTADOS[numero] = {'activa': ia_active}
+
         app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
         cursor.execute("""
