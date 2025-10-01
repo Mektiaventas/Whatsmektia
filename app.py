@@ -4922,6 +4922,12 @@ def configuracion_precio_guardar():
     data = request.form.to_dict()
     conn = get_db_connection(config)
     cursor = conn.cursor()
+    
+    # Process price fields - convert empty strings to None (NULL in database)
+    for field in ['precio', 'precio_mayoreo', 'precio_menudeo']:
+        if data.get(field) == '':
+            data[field] = None
+    
     campos = [
         'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
         'descripcion', 'medidas', 'precio', 'precio_mayoreo', 'precio_menudeo',
@@ -4930,7 +4936,7 @@ def configuracion_precio_guardar():
     valores = [data.get(campo) for campo in campos]
 
     if data.get('id'):
-        cursor.execute(f"""
+        cursor.execute("""
             UPDATE precios SET
                 sku=%s, servicio=%s, categoria=%s, subcategoria=%s, linea=%s, modelo=%s,
                 descripcion=%s, medidas=%s, precio=%s, precio_mayoreo=%s, precio_menudeo=%s,
@@ -4938,13 +4944,13 @@ def configuracion_precio_guardar():
             WHERE id=%s;
         """, valores + [data['id']])
     else:
-        cursor.execute(f"""
+        cursor.execute("""
             INSERT INTO precios (
                 sku, servicio, categoria, subcategoria, linea, modelo,
                 descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
                 moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-            ) VALUES ({','.join(['%s']*18)});
-        """, valores)
+            ) VALUES ({});
+        """.format(','.join(['%s']*18)), valores)
     conn.commit()
     cursor.close()
     conn.close()
