@@ -281,7 +281,7 @@
 
 <style>
     /* Solo reemplaza o añade estos estilos para mejorar la legibilidad */
-
+    
     .chat-item {
         display: block;
         background-color: white;
@@ -294,16 +294,16 @@
         color: inherit;
     }
 
-        .chat-item:hover {
-            background-color: #f0f5ff;
-            transform: translateY(-2px);
-            box-shadow: 0 3px 6px rgba(0,0,0,0.15);
-        }
+    .chat-item:hover {
+        background-color: #f0f5ff;
+        transform: translateY(-2px);
+        box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+    }
 
-        .chat-item.selected {
-            background-color: #e0f0ff;
-            border-left: 3px solid #1a73e8;
-        }
+    .chat-item.selected {
+        background-color: #e0f0ff;
+        border-left: 3px solid #1a73e8;
+    }
 
     .card-title-row {
         display: flex;
@@ -360,23 +360,15 @@
         opacity: 0.8;
     }
 
-        .edit-alias-btn:hover {
-            opacity: 1;
-        }
+    .edit-alias-btn:hover {
+        opacity: 1;
+    }
 
     /* Ajustes a la animación de resaltado */
     @keyframes highlightChat {
-        0% {
-            background-color: inherit;
-        }
-
-        30% {
-            background-color: #d6e8ff;
-        }
-        /* Azul más claro y más visible */
-        100% {
-            background-color: inherit;
-        }
+        0% { background-color: inherit; }
+        30% { background-color: #d6e8ff; } /* Azul más claro y más visible */
+        100% { background-color: inherit; }
     }
 
     .chat-item.new-message {
