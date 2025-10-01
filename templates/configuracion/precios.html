@@ -528,56 +528,20 @@
 </style>
 
 <script>
-    function cargarEstructura() {
-        fetch('/configuracion/precios/estructura')
-            .then(response => response.json())
-            .then(data => {
-                const contenedor = document.getElementById('columnas-dinamicas');
-                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
-                const columnasDinamicas = data.estructura.filter(col =>
-                    !columnasBase.includes(col.Field)
-                );
+    function toggleProductosCliente(event) {
+        if (event) event.preventDefault();
 
-                if (columnasDinamicas.length > 0) {
-                    let html = '<ul class="text-sm space-y-1">';
-                    columnasDinamicas.forEach(col => {
-                        html += `<li>• ${col.Field} (${col.Type})</li>`;
-                    });
-                    html += '</ul>';
-                    contenedor.innerHTML = html;
-                } else {
-                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
-                }
-            });
-    }
-
-    // Función para mostrar/ocultar el formulario
-    function toggleFormulario() {
-        const formularioBody = document.getElementById('formulario-body');
-        const formularioIcon = document.getElementById('formulario-icon');
-
-        if (formularioBody.classList.contains('hidden')) {
-            formularioBody.classList.remove('hidden');
-            formularioIcon.textContent = '▲';
-        } else {
-            formularioBody.classList.add('hidden');
-            formularioIcon.textContent = '▼';
-        }
-    }
-
-    // Si estamos editando un producto, mostrar el formulario abierto
-    document.addEventListener('DOMContentLoaded', function () {
-        {% if precio_edit %}
-        toggleFormulario(); // Abrir el formulario si estamos editando
-        {% endif %}
-
-        cargarEstructura(); // Cargar estructura al abrir la página
-    });
-    // Funciones para mostrar/ocultar las tablas
-    function toggleProductosCliente() {
+        console.log("Toggling productos cliente");
         const productosBody = document.getElementById('productos-cliente-body');
         const productosIcon = document.getElementById('productos-cliente-icon');
 
+        if (!productosBody || !productosIcon) {
+            console.error("No se encontraron los elementos necesarios");
+            return;
+        }
+
+        console.log("Estado actual:", productosBody.classList.contains('hidden') ? "oculto" : "visible");
+
         if (productosBody.classList.contains('hidden')) {
             productosBody.classList.remove('hidden');
             productosIcon.textContent = '▲';
@@ -587,10 +551,20 @@
         }
     }
 
-    function toggleProductosAdmin() {
+    function toggleProductosAdmin(event) {
+        if (event) event.preventDefault();
+
+        console.log("Toggling productos admin");
         const productosBody = document.getElementById('productos-admin-body');
         const productosIcon = document.getElementById('productos-admin-icon');
 
+        if (!productosBody || !productosIcon) {
+            console.error("No se encontraron los elementos necesarios");
+            return;
+        }
+
+        console.log("Estado actual:", productosBody.classList.contains('hidden') ? "oculto" : "visible");
+
         if (productosBody.classList.contains('hidden')) {
             productosBody.classList.remove('hidden');
             productosIcon.textContent = '▲';
@@ -599,4 +573,24 @@
             productosIcon.textContent = '▼';
         }
     }
+
+    // Asignar eventos directamente al cargar la página
+    document.addEventListener('DOMContentLoaded', function () {
+        const clienteHeader = document.getElementById('productos-cliente-header');
+        const adminHeader = document.getElementById('productos-admin-header');
+
+        if (clienteHeader) {
+            clienteHeader.addEventListener('click', toggleProductosCliente);
+        }
+
+        if (adminHeader) {
+            adminHeader.addEventListener('click', toggleProductosAdmin);
+        }
+
+        {% if precio_edit %}
+        toggleFormulario();
+        {% endif %}
+
+        cargarEstructura();
+    });
 </script>
