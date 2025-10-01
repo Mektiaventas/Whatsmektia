@@ -220,14 +220,15 @@
             </div>
         </form>
         {% else %}
+        <!-- Replace the existing toggle button in the ia-active-message div with this -->
         <div class="ia-active-message">
             <div class="ia-indicator">
-                <span class="ia-icon">🤖</span>
-                <span>La IA está respondiendo automáticamente</span>
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, True) else 'Modo manual activado' }}</span>
             </div>
             <form action="/toggle_ai/{{ selected }}" method="POST">
-                <button type="submit" class="toggle-btn off">
-                    Desactivar IA
+                <button type="submit" class="toggle-btn {{ 'off' if IA_ESTADOS.get(selected, True) else 'on' }}">
+                    {{ 'Desactivar IA' if IA_ESTADOS.get(selected, True) else 'Activar IA' }}
                 </button>
             </form>
         </div>
@@ -519,8 +520,6 @@
 </style>
 
 <script>
-    // Add this code to the end of your script section but before the final 
-
 // Auto-refresh functionality for chat list
 let chatAutoRefresh = true;
 let refreshInterval = 500; // Half a second
