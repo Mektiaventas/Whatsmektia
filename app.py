@@ -2004,6 +2004,10 @@ def serve_uploaded_file(filename):
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Also create the logos subdirectory
+os.makedirs(os.path.join(UPLOAD_FOLDER, 'logos'), exist_ok=True)
 
 def extraer_servicio_del_mensaje(mensaje, config=None):
     """Extrae el servicio del mensaje usando keywords simples"""
