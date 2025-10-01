@@ -4368,9 +4368,15 @@ def ver_chat(numero):
         
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
-        result = cursor.fetchone()
-        ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
+        if numero not in IA_ESTADOS:
+            cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+            result = cursor.fetchone()
+            ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
+            IA_ESTADOS[numero] = {'activa': ia_active}
+            app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
+        else:
+            app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
+            
         
         IA_ESTADOS[numero] = {'activa': ia_active}
         app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
