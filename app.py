@@ -431,6 +431,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Si el campo no existe, usa ""
             4. PRECIOS deben ser números (ej: "150.00")
             5. MONEDA siempre "MXN"
+            6. COSTO: Extrae el costo de producción si aparece (o estima un 70% del precio venta)
 
             ESTRUCTURA JSON REQUERIDA:
             {{
@@ -447,6 +448,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "precio": "PRECIO_NUMÉRICO",
                         "precio_mayoreo": "",
                         "precio_menudeo": "",
+                        "costo": "COSTO_PRODUCCIÓN",
                         "moneda": "MXN",
                         "imagen": "",
                         "status_ws": "activo",
@@ -469,6 +471,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "descripcion": "Gordita rellena de chicharrón prensado",
                         "medidas": "1 pieza",
                         "precio": "25.00",
+                        "costo": "15.00",
                         "moneda": "MXN",
                         "status_ws": "activo",
                         "catalogo": "La Porfirianna"
@@ -491,6 +494,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             3. Si el campo no existe, usa ""
             4. PRECIOS deben ser números (ej: "5000.00")
             5. MONEDA siempre "MXN"
+            6. COSTO: Extrae el costo de producción si aparece (o estima un 70% del precio de venta)
 
             ESTRUCTURA JSON REQUERIDA:
             {{
@@ -507,6 +511,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "precio": "PRECIO_NUMÉRICO",
                         "precio_mayoreo": "",
                         "precio_menudeo": "",
+                        "costo": "COSTO_PRODUCCIÓN",
                         "moneda": "MXN",
                         "imagen": "",
                         "status_ws": "activo",
@@ -528,6 +533,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
                         "subcategoria": "SITIOS_WEB",
                         "descripcion": "Desarrollo de sitio web responsive con CMS",
                         "precio": "15000.00",
+                        "costo": "7500.00",
                         "moneda": "MXN",
                         "status_ws": "activo",
                         "catalogo": "Mektia"
@@ -664,7 +670,7 @@ def validar_y_limpiar_servicio(servicio):
             servicio_limpio[campo] = str(valor).strip() if valor else valor_default
         
         # Campos de precio - conversión robusta
-        campos_precio = ['precio', 'precio_mayoreo', 'precio_menudeo']
+        campos_precio = ['precio', 'precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
         for campo in campos_precio:
             valor = servicio.get(campo, '0.00')
             precio_limpio = "0.00"
@@ -688,6 +694,7 @@ def validar_y_limpiar_servicio(servicio):
     except Exception as e:
         app.logger.error(f"🔴 Error validando servicio: {e}")
         return None
+
 def guardar_servicios_desde_pdf(servicios, config=None):
     """Guarda los servicios extraídos del PDF en la base de datos"""
     if config is None:
@@ -702,6 +709,19 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         cursor = conn.cursor()
         servicios_guardados = 0
         
+        # Primero, verificar si la columna costo existe
+        try:
+            cursor.execute("SHOW COLUMNS FROM precios LIKE 'costo'")
+            columna_existe = cursor.fetchone()
+            
+            if not columna_existe:
+                app.logger.info("🔧 Columna 'costo' no existe, creándola...")
+                cursor.execute("ALTER TABLE precios ADD COLUMN costo DECIMAL(10,2) DEFAULT 0.00 AFTER precio")
+                conn.commit()
+                app.logger.info("✅ Columna 'costo' creada correctamente")
+        except Exception as e:
+            app.logger.error(f"❌ Error verificando/creando columna 'costo': {e}")
+        
         for servicio in servicios['servicios']:
             try:
                 # Preparar campos
@@ -715,6 +735,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('descripcion', '').strip(),
                     servicio.get('medidas', '').strip(),
                     servicio.get('precio', '0.00'),
+                    servicio.get('costo', '0.00'),  # Agregado costo
                     servicio.get('precio_mayoreo', '0.00'),
                     servicio.get('precio_menudeo', '0.00'),
                     servicio.get('moneda', 'MXN').strip(),
@@ -727,7 +748,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 ]
                 
                 # Validar precios
-                for i in [8, 9, 10]:  # índices de precios
+                for i in [8, 9, 10, 11]:  # índices de precios y costo
                     try:
                         precio_limpio = re.sub(r'[^\d.]', '', str(campos[i]))
                         campos[i] = f"{float(precio_limpio):.2f}" if precio_limpio else "0.00"
@@ -737,15 +758,16 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, servicio, categoria, subcategoria, linea, modelo,
-                        descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
+                        descripcion, medidas, precio, costo, precio_mayoreo, precio_menudeo,
                         moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         servicio=VALUES(servicio),
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
                         descripcion=VALUES(descripcion),
                         precio=VALUES(precio),
+                        costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         moneda=VALUES(moneda),
@@ -769,6 +791,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
+
 # Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
