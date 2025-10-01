@@ -280,328 +280,8 @@
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
 <style>
-    /* Los estilos existentes quedan intactos... */
+    /* Solo reemplaza o añade estos estilos para mejorar la legibilidad */
 
-    /* Estilos para el botón de emojis */
-    .emoji-btn {
-        background: none;
-        border: none;
-        font-size: 20px;
-        cursor: pointer;
-        padding: 5px 10px;
-        border-radius: 4px;
-        transition: background-color 0.2s;
-    }
-
-        .emoji-btn:hover {
-            background-color: #f1f1f1;
-        }
-
-    .input-group {
-        display: flex;
-        align-items: center;
-        position: relative;
-    }
-
-    .reply-input-line {
-        flex-grow: 1;
-        padding: 10px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-    }
-
-    /* Estilos para el selector de emojis */
-    .emoji-picker {
-        position: absolute;
-        bottom: 60px;
-        left: 0;
-        z-index: 1000;
-        background-color: white;
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        box-shadow: 0 0 15px rgba(0,0,0,0.1);
-        width: 320px;
-        max-height: 200px;
-        overflow-y: auto;
-        display: none;
-    }
-
-        .emoji-picker.active {
-            display: block;
-        }
-
-    .emoji-grid {
-        display: grid;
-        grid-template-columns: repeat(8, 1fr);
-        gap: 8px;
-        padding: 12px;
-    }
-
-    .emoji-item {
-        cursor: pointer;
-        font-size: 24px;
-        padding: 5px;
-        text-align: center;
-        border-radius: 6px;
-        transition: background-color 0.2s;
-        user-select: none;
-    }
-
-        .emoji-item:hover {
-            background-color: #f1f1f1;
-        }
-    .whatsapp-image {
-        max-width: 300px;
-        max-height: 300px;
-        border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        margin-bottom: 8px;
-    }
-
-    .image-message {
-        padding: 8px;
-    }
-
-    .image-caption {
-        padding: 8px 12px;
-        background-color: #f0f0f0;
-        border-radius: 8px;
-        margin-top: 8px;
-        font-size: 14px;
-    }
-
-    .message-content {
-        margin-bottom: 4px;
-    }
-
-    .manual-indicator {
-        font-size: 12px;
-        color: #666;
-        margin-bottom: 4px;
-        font-style: italic;
-    }
-
-    .ia-active-message {
-        padding: 15px;
-        text-align: center;
-        background-color: #f8f9fa;
-        border-top: 1px solid #dee2e6;
-    }
-
-    .ia-indicator {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        margin-bottom: 10px;
-    }
-    .card-flag {
-        width: 18px;
-        height: 14px;
-        border-radius: 3px;
-        margin-right: 5px;
-        vertical-align: middle;
-        object-fit: cover;
-        box-shadow: 0 0 2px #0002;
-        border: 1px solid #ddd;
-    }
-    .ia-icon {
-        font-size: 20px;
-    }
-
-    .chat-controls {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }
-
-    .chat-header-info {
-        flex: 1;
-    }
-
-    .chat-title {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 4px;
-    }
-
-    .chat-number {
-        font-size: 12px;
-        color: #666;
-    }
-
-    .sidebar-section {
-        margin-bottom: 20px;
-    }
-
-        .sidebar-section h3 {
-            margin-bottom: 10px;
-            font-size: 14px;
-            color: #333;
-        }
-
-    .chat-info-stats {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .stat-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-    }
-
-    .stat-label {
-        font-size: 12px;
-        color: #666;
-    }
-
-    .stat-value {
-        font-size: 12px;
-        font-weight: 500;
-        color: #333;
-    }
-
-    /* Estilos para mensajes */
-    .msg-box {
-        display: flex;
-        flex-direction: column;
-        margin: 10px 0;
-        max-width: 70%;
-    }
-
-    .msg-user {
-        align-self: flex-start; /* Izquierda para usuario */
-        background-color: #e3f2fd; /* Azul claro */
-    }
-
-    .msg-ai {
-        align-self: flex-end; /* Derecha para IA */
-        background-color: #d1e7dd; /* Verde claro */
-    }
-
-    .msg-manual {
-        align-self: flex-end; /* Derecha para mensajes manuales */
-        background-color: #f8f9fa; /* Gris claro */
-    }
-
-    .message-content {
-        padding: 10px;
-        border-radius: 10px;
-    }
-
-    .text-message {
-        word-wrap: break-word;
-    }
-
-    .msg-meta {
-        font-size: 12px;
-        color: #666;
-        text-align: right;
-        margin-top: 4px;
-    }
-
-    /* Estilos para audio */
-    .audio-player {
-        background: #f8f9fa;
-        border-radius: 12px;
-        padding: 15px;
-        margin: 10px 0;
-        border: 1px solid #e9ecef;
-        max-width: 350px;
-    }
-
-    .whatsapp-audio {
-        display: none;
-    }
-
-    .audio-controls {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        margin-bottom: 8px;
-    }
-
-    .audio-play-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 14px;
-        padding: 8px;
-        border-radius: 50%;
-        background-color: #25D366;
-        color: white;
-        width: 32px;
-        height: 32px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        transition: background-color 0.2s;
-    }
-
-        .audio-play-btn:hover {
-            background-color: #128C7E;
-        }
-
-    .audio-progress {
-        flex: 1;
-        height: 6px;
-        background-color: #ddd;
-        border-radius: 3px;
-        overflow: hidden;
-        cursor: pointer;
-        position: relative;
-    }
-
-    .audio-progress-bar {
-        height: 100%;
-        background-color: #25D366;
-        width: 0%;
-        transition: width 0.1s ease;
-        border-radius: 3px;
-    }
-
-    .audio-duration {
-        font-size: 11px;
-        color: #666;
-        min-width: 35px;
-        text-align: center;
-        font-family: monospace;
-    }
-
-    .audio-download-btn {
-        background: none;
-        border: none;
-        cursor: pointer;
-        font-size: 14px;
-        padding: 6px;
-        border-radius: 4px;
-        color: #666;
-        transition: all 0.2s;
-    }
-
-        .audio-download-btn:hover {
-            color: #25D366;
-            background-color: #f0f0f0;
-        }
-
-    .audio-transcription {
-        background-color: #e8f5e8;
-        padding: 10px 12px;
-        border-radius: 8px;
-        margin-top: 10px;
-        font-size: 13px;
-        line-height: 1.4;
-        border-left: 3px solid #25D366;
-    }
-
-        .audio-transcription strong {
-            color: #128C7E;
-            font-size: 12px;
-        }
-    /* Estilos para chats al estilo kanban */
     .chat-item {
         display: block;
         background-color: white;
@@ -611,24 +291,19 @@
         box-shadow: 0 1px 3px rgba(0,0,0,0.12);
         transition: all 0.2s ease;
         text-decoration: none;
-        color: white;
+        color: inherit;
     }
 
         .chat-item:hover {
-            background-color: #f8f9fa;
+            background-color: #f0f5ff;
             transform: translateY(-2px);
             box-shadow: 0 3px 6px rgba(0,0,0,0.15);
         }
 
         .chat-item.selected {
-            background-color: #e7f3ff;
-            border-left: 3px solid #2684FF;
-            color: white;
+            background-color: #e0f0ff;
+            border-left: 3px solid #1a73e8;
         }
-
-    .card-content {
-        width: 100%;
-    }
 
     .card-title-row {
         display: flex;
@@ -640,90 +315,74 @@
         margin-right: 10px;
     }
 
-    .card-avatar {
-        width: 40px;
-        height: 40px;
-        border-radius: 50%;
-        object-fit: cover;
+    .alias-view {
+        font-weight: 600;
+        flex-grow: 1;
+        color: #333; /* Más oscuro para el nombre */
+        font-size: 14px; /* Ligeramente más grande */
     }
 
     .card-meta-row {
         display: flex;
         justify-content: space-between;
-        font-size: 11px;
-        color: #888;
+        font-size: 12px; /* Aumentado de 11px */
+        color: #555; /* Más oscuro que antes */
         margin-bottom: 6px;
     }
 
     .card-num {
-        color: #888;
-        font-size: 11px;
+        color: #444;
+        font-size: 12px;
     }
 
     .card-time {
-        font-size: 11px;
-        color: #888;
+        font-size: 12px;
+        color: #444;
+        font-weight: 500;
     }
 
     .card-msg {
-        color: #666;
-        font-size: 13px;
+        color: #222; /* Mucho más oscuro para mejor legibilidad */
+        font-size: 13.5px; /* Ligeramente más grande */
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        line-height: 1.3;
+        line-height: 1.4;
     }
 
     .edit-alias-btn {
         border: none;
         background: none;
         cursor: pointer;
-        font-size: 12px;
+        font-size: 14px;
         padding: 2px 5px;
         margin-left: 5px;
-        opacity: 0.6;
+        opacity: 0.8;
     }
 
         .edit-alias-btn:hover {
             opacity: 1;
         }
 
-    .card-flag {
-        width: 18px;
-        height: 14px;
-        border-radius: 3px;
-        margin-right: 5px;
-        vertical-align: middle;
-        object-fit: cover;
-        box-shadow: 0 0 2px rgba(0,0,0,0.1);
-        border: 1px solid #ddd;
-    }
-
-    .alias-view {
-        font-weight: 500;
-        flex-grow: 1;
-    }
-
-    /* Animación de chat nuevo */
+    /* Ajustes a la animación de resaltado */
     @keyframes highlightChat {
         0% {
             background-color: inherit;
         }
 
         30% {
-            background-color: #e7f3ff;
+            background-color: #d6e8ff;
         }
-
+        /* Azul más claro y más visible */
         100% {
             background-color: inherit;
         }
     }
 
     .chat-item.new-message {
-        animation: highlightChat 2s ease-in-out;
+        animation: highlightChat 2.5s ease-in-out;
     }
 </style>
-
 <script>
 // Auto-refresh functionality for chat list
 let chatAutoRefresh = true;
