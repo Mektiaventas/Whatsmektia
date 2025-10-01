@@ -10,9 +10,11 @@
 
         <!-- Sidebar principal FIJO -->
         <aside class="sidebar">
+            <!-- Add this before the sidebar logo -->
+            <div style="display:none">Debug: {{ app_logo }}</div>
             <div class="sidebar-logo">
                 {% if app_logo %}
-                <img src="{{ app_logo }}" alt="{{ app_nombre or 'SmartWhats' }}">
+                <img src="{{ app_logo }}?v={{ now().timestamp() }}" alt="{{ app_nombre or 'SmartWhats' }}">
                 {% else %}
                 <img src="{{ url_for('static', filename='img/logo.png') }}" alt="SmartWhats">
                 {% endif %}
