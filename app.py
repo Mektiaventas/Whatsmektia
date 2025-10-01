@@ -4168,10 +4168,18 @@ def home():
     )
     chat_counts = cursor.fetchone()[0]
 
-    cursor.execute(
-        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
-        (start,)
-    )
+    # 🔁 Unir con contactos y usar alias/nombre si existe
+    cursor.execute("""
+        SELECT 
+            conv.numero,
+            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+            COUNT(*) AS total
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+        WHERE conv.timestamp >= %s
+        GROUP BY conv.numero, nombre_mostrado
+        ORDER BY total DESC
+    """, (start,))
     messages_per_chat = cursor.fetchall()
 
     cursor.execute(
@@ -4183,8 +4191,9 @@ def home():
     cursor.close()
     conn.close()
 
-    labels = [num for num,_ in messages_per_chat]
-    values = [cnt for _,cnt in messages_per_chat]
+    # 🔁 Construir labels con el nombre mostrado y values con el total
+    labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
+    values = [row[2] for row in messages_per_chat]  # total
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
