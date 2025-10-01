@@ -64,51 +64,47 @@
         </div>
     </div>
 </div>
-
-<!-- Sección de estructura dinámica -->
-<div class="card mt-6">
-    <div class="card-header bg-info text-white">
-        <h3>🏗️ Estructura de la Tabla de Productos</h3>
+<!-- Add this after the PDF upload section -->
+<div class="card mb-6">
+    <div class="card-header bg-primary text-white">
+        <h3>📊 Importar Directamente desde Excel</h3>
     </div>
     <div class="card-body">
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-2 gap-6">
             <div>
-                <h4 class="font-semibold mb-2">Columnas Base (Fijas):</h4>
+                <form action="{{ url_for('importar_excel_directo') }}" method="POST" enctype="multipart/form-data">
+                    <div class="form-group">
+                        <label for="excel_file" class="block text-sm font-medium mb-2">Subir Excel con estructura predefinida:</label>
+                        <input type="file" name="excel_file" id="excel_file"
+                               accept=".xlsx,.xls,.csv" required
+                               class="w-full px-3 py-2 border border-gray-300 rounded-lg">
+                        <small class="text-muted">Las columnas deben coincidir con la base de datos. Formatos: XLSX, XLS, CSV</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary mt-3">
+                        📥 Importar Excel Directamente
+                    </button>
+                </form>
+            </div>
+
+            <div class="bg-blue-50 p-4 rounded-lg">
+                <h4 class="font-semibold mb-2">💡 Estructura Requerida</h4>
                 <ul class="text-sm space-y-1">
-                    <li>• id (Primary Key)</li>
-                    <li>• sku (Unique)</li>
-                    <li>• servicio → producto</li>
+                    <li>• sku</li>
+                    <li>• servicio</li>
+                    <li>• categoria</li>
                     <li>• descripcion</li>
-                    <li>• precio → costo</li>
+                    <li>• precio</li>
+                    <li>• costo</li>
                     <li>• precio_mayoreo</li>
                     <li>• precio_menudeo</li>
-                    <li>• moneda</li>
+                    <li>• imagen (opcional)</li>
+                    <li>• etc.</li>
                 </ul>
-            </div>
-            <div>
-                <h4 class="font-semibold mb-2">Nuevas Columnas:</h4>
-                <div id="columnas-dinamicas">
-                    <ul class="text-sm space-y-1">
-                        <li>• categoria</li>
-                        <li>• subcategoria</li>
-                        <li>• linea</li>
-                        <li>• modelo</li>
-                        <li>• medidas</li>
-                        <li>• imagen</li>
-                        <li>• status_ws</li>
-                        <li>• catalogo</li>
-                        <li>• catalogo2</li>
-                        <li>• catalogo3</li>
-                    </ul>
-                </div>
-                <button type="button" onclick="cargarEstructura()" class="btn small primary mt-2">
-                    🔄 Actualizar Estructura
-                </button>
+                <p class="text-xs mt-3">Los encabezados deben coincidir exactamente con los nombres de columna en la base de datos.</p>
             </div>
         </div>
     </div>
 </div>
-
 <!-- Tarjeta: Formulario colapsable para agregar/editar producto -->
 <div class="card mb-4">
     <div class="card-header cursor-pointer" id="formulario-header" onclick="toggleFormulario()">
@@ -221,7 +217,7 @@
                     <label for="moneda">Moneda *</label>
                     <select id="moneda" name="moneda" class="select" required>
                         {% for m in ['MXN','USD','EUR'] %}
-                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda==m %}selected{% endif %}>
+                        <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                             {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                         </option>
                         {% endfor %}

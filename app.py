@@ -373,6 +373,199 @@ def extraer_texto_e_imagenes_pdf(file_path):
         except:
             return None, []
 
+@app.route('/configuracion/precios/importar-excel', methods=['POST'])
+def importar_excel_directo():
+    """Importa datos directamente desde Excel sin análisis de IA"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        if 'excel_file' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        file = request.files['excel_file']
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        if file and allowed_file(file.filename):
+            # Guardar archivo temporalmente
+            filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            
+            app.logger.info(f"📄 Excel guardado: {filepath}")
+            
+            # Procesar el archivo Excel
+            productos_importados = importar_productos_desde_excel(filepath, config)
+            
+            # Eliminar el archivo temporal
+            try:
+                os.remove(filepath)
+            except:
+                pass
+                
+            if productos_importados > 0:
+                flash(f'✅ {productos_importados} productos importados exitosamente', 'success')
+            else:
+                flash('⚠️ No se pudieron importar productos. Revisa el formato del archivo.', 'warning')
+                
+        else:
+            flash('❌ Tipo de archivo no permitido. Solo se aceptan XLSX, XLS y CSV', 'error')
+        
+        return redirect(url_for('configuracion_precios'))
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error importando Excel: {e}")
+        app.logger.error(traceback.format_exc())
+        flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
+        return redirect(url_for('configuracion_precios'))
+
+def importar_productos_desde_excel(filepath, config=None):
+    """Importa productos directamente desde un archivo Excel"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar el tipo de archivo y leerlo
+        extension = os.path.splitext(filepath)[1].lower()
+        
+        if extension in ['.xlsx', '.xls']:
+            df = pd.read_excel(filepath)
+        elif extension == '.csv':
+            df = pd.read_csv(filepath)
+        else:
+            app.logger.error(f"Formato de archivo no soportado: {extension}")
+            return 0
+        
+        # Verificar columnas mínimas requeridas
+        columnas_requeridas = ['servicio', 'precio']
+        if not all(col in df.columns for col in columnas_requeridas):
+            app.logger.error(f"El archivo no tiene las columnas requeridas: {columnas_requeridas}")
+            return 0
+        
+        # Limpiar datos: reemplazar NaN con cadenas vacías
+        df = df.fillna('')
+        
+        # Crear conexión a BD
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Verificar columna costo
+        try:
+            cursor.execute("SHOW COLUMNS FROM precios LIKE 'costo'")
+            columna_existe = cursor.fetchone()
+            
+            if not columna_existe:
+                cursor.execute("ALTER TABLE precios ADD COLUMN costo DECIMAL(10,2) DEFAULT 0.00 AFTER precio")
+                conn.commit()
+        except Exception as e:
+            app.logger.error(f"❌ Error verificando/creando columna 'costo': {e}")
+        
+        # Definir campos esperados
+        campos_esperados = [
+            'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
+            'descripcion', 'medidas', 'precio', 'costo', 'precio_mayoreo', 'precio_menudeo',
+            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+        ]
+        
+        # Inicializar contador de productos importados
+        productos_importados = 0
+        
+        # Procesar cada fila
+        for _, row in df.iterrows():
+            try:
+                # Convertir fila a diccionario
+                producto = {}
+                for campo in campos_esperados:
+                    if campo in df.columns:
+                        producto[campo] = row[campo]
+                    else:
+                        producto[campo] = ''  # Valor por defecto
+                
+                # Validar que el producto tenga al menos un nombre
+                if not producto.get('servicio'):
+                    continue
+                
+                # Validar y convertir campos numéricos (precios)
+                for campo in ['precio', 'costo', 'precio_mayoreo', 'precio_menudeo']:
+                    try:
+                        valor = producto.get(campo, '')
+                        if valor != '':
+                            valor_numerico = float(str(valor).replace(',', '.'))
+                            producto[campo] = f"{valor_numerico:.2f}"
+                        else:
+                            producto[campo] = '0.00'
+                    except (ValueError, TypeError):
+                        producto[campo] = '0.00'
+                
+                # Establecer valores por defecto para campos críticos
+                if not producto.get('moneda'):
+                    producto['moneda'] = 'MXN'
+                
+                if not producto.get('status_ws'):
+                    producto['status_ws'] = 'activo'
+                
+                # Insertar en la base de datos
+                values = [
+                    producto.get('sku', ''),
+                    producto.get('servicio', ''),
+                    producto.get('categoria', ''),
+                    producto.get('subcategoria', ''),
+                    producto.get('linea', ''),
+                    producto.get('modelo', ''),
+                    producto.get('descripcion', ''),
+                    producto.get('medidas', ''),
+                    producto.get('precio', '0.00'),
+                    producto.get('costo', '0.00'),
+                    producto.get('precio_mayoreo', '0.00'),
+                    producto.get('precio_menudeo', '0.00'),
+                    producto.get('moneda', 'MXN'),
+                    producto.get('imagen', ''),
+                    producto.get('status_ws', 'activo'),
+                    producto.get('catalogo', ''),
+                    producto.get('catalogo2', ''),
+                    producto.get('catalogo3', ''),
+                    producto.get('proveedor', '')
+                ]
+                
+                cursor.execute("""
+                    INSERT INTO precios (
+                        sku, servicio, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, precio, costo, precio_mayoreo, precio_menudeo,
+                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        servicio=VALUES(servicio),
+                        categoria=VALUES(categoria),
+                        subcategoria=VALUES(subcategoria),
+                        descripcion=VALUES(descripcion),
+                        precio=VALUES(precio),
+                        costo=VALUES(costo),
+                        precio_mayoreo=VALUES(precio_mayoreo),
+                        precio_menudeo=VALUES(precio_menudeo),
+                        moneda=VALUES(moneda),
+                        status_ws=VALUES(status_ws)
+                """, values)
+                
+                productos_importados += 1
+                
+            except Exception as e:
+                app.logger.error(f"Error procesando fila: {e}")
+                continue
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"📊 Total productos importados: {productos_importados}")
+        return productos_importados
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
+        app.logger.error(traceback.format_exc())
+        return 0
+
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
     if not imagenes or not servicios or not servicios.get('servicios'):
