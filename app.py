@@ -4928,6 +4928,18 @@ def configuracion_precio_guardar():
         if data.get(field) == '':
             data[field] = None
     
+    # Handle image upload
+    imagen_nombre = None
+    if 'imagen' in request.files and request.files['imagen'].filename:
+        file = request.files['imagen']
+        # Create a secure filename with timestamp to avoid duplicates
+        filename = secure_filename(f"{int(time.time())}_{file.filename}")
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        file.save(filepath)
+        imagen_nombre = filename
+        # Update the data dictionary with the new image filename
+        data['imagen'] = imagen_nombre
+    
     campos = [
         'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
         'descripcion', 'medidas', 'precio', 'precio_mayoreo', 'precio_menudeo',
@@ -4936,13 +4948,31 @@ def configuracion_precio_guardar():
     valores = [data.get(campo) for campo in campos]
 
     if data.get('id'):
-        cursor.execute("""
-            UPDATE precios SET
-                sku=%s, servicio=%s, categoria=%s, subcategoria=%s, linea=%s, modelo=%s,
-                descripcion=%s, medidas=%s, precio=%s, precio_mayoreo=%s, precio_menudeo=%s,
-                moneda=%s, imagen=%s, status_ws=%s, catalogo=%s, catalogo2=%s, catalogo3=%s, proveedor=%s
-            WHERE id=%s;
-        """, valores + [data['id']])
+        # For update, only change image if a new one was uploaded
+        if not imagen_nombre:
+            # Remove imagen from the query if no new image was uploaded
+            update_fields = campos.copy()
+            update_values = valores.copy()
+            if 'imagen' in update_fields:
+                idx = update_fields.index('imagen')
+                update_fields.pop(idx)
+                update_values.pop(idx)
+            
+            # Build the update query without the image field
+            sql = f"""
+                UPDATE precios SET 
+                {', '.join([f"{field}=%s" for field in update_fields])}
+                WHERE id=%s
+            """
+            cursor.execute(sql, update_values + [data['id']])
+        else:
+            cursor.execute("""
+                UPDATE precios SET
+                    sku=%s, servicio=%s, categoria=%s, subcategoria=%s, linea=%s, modelo=%s,
+                    descripcion=%s, medidas=%s, precio=%s, precio_mayoreo=%s, precio_menudeo=%s,
+                    moneda=%s, imagen=%s, status_ws=%s, catalogo=%s, catalogo2=%s, catalogo3=%s, proveedor=%s
+                WHERE id=%s;
+            """, valores + [data['id']])
     else:
         cursor.execute("""
             INSERT INTO precios (
@@ -4951,11 +4981,11 @@ def configuracion_precio_guardar():
                 moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
             ) VALUES ({});
         """.format(','.join(['%s']*18)), valores)
+    
     conn.commit()
     cursor.close()
     conn.close()
     return redirect(url_for('configuracion_precios'))
-
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
         config = obtener_configuracion_por_host()
