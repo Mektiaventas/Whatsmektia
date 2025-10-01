@@ -606,69 +606,69 @@ function startChatRefresh() {
   setInterval(actualizarListaChats, refreshInterval);
 }
 
-function actualizarListaChats() {
-  if (!chatAutoRefresh) return;
+    function actualizarListaChats() {
+        if (!chatAutoRefresh) return;
 
-  fetch('/chats/data')
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Error fetching chat data');
-      }
-      return response.json();
-    })
-    .then(data => {
-      if (data.timestamp <= lastUpdateTimestamp) {
-        return; // No new data
-      }
+        // Guardar la posición del scroll antes de actualizar
+        const msgsContainer = document.getElementById('msgs');
+        let scrollPos = msgsContainer ? msgsContainer.scrollTop : 0;
+        const isScrolledToBottom = msgsContainer ?
+            (msgsContainer.scrollHeight - msgsContainer.clientHeight - msgsContainer.scrollTop < 20) :
+            false;
 
-      lastUpdateTimestamp = data.timestamp;
-      actualizarListaChatsIncremental(data.chats);
-      console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
-    })
-    .catch(error => {
-      console.error("❌ Error updating chat list:", error);
-    });
-}
+        fetch('/chats/data')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error fetching chat data');
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.timestamp <= lastUpdateTimestamp) {
+                    return; // No new data
+                }
 
-function actualizarListaChatsIncremental(nuevosChats) {
-  // Create map of existing chats for easy lookup
-  const chatsActuales = new Map();
-  document.querySelectorAll('.chat-item').forEach(item => {
-    const numero = item.getAttribute('href').split('/').pop();
-    chatsActuales.set(numero, item);
-  });
+                lastUpdateTimestamp = data.timestamp;
+                actualizarListaChatsIncremental(data.chats);
 
-  // Get container
-  const container = document.querySelector('.chat-items');
-  if (!container) return;
+                // Restaurar la posición del scroll después de actualizar
+                if (msgsContainer) {
+                    if (isScrolledToBottom) {
+                        // Si estaba al final, mantenerlo al final
+                        msgsContainer.scrollTop = msgsContainer.scrollHeight;
+                    } else {
+                        // Si no, mantener la posición anterior
+                        msgsContainer.scrollTop = scrollPos;
+                    }
+                }
 
-  // Process each chat in the new data
-  nuevosChats.forEach(chat => {
-    if (chatsActuales.has(chat.numero)) {
-      // Update existing chat
-      actualizarChatExistente(chatsActuales.get(chat.numero), chat);
-      chatsActuales.delete(chat.numero); // Mark as processed
-    } else {
-      // Add new chat
-      const nuevoChatHTML = crearNuevoChatHTML(chat);
-      container.insertAdjacentHTML('beforeend', nuevoChatHTML);
-
-      // Add click handler for the edit button
-      const nuevoChat = container.querySelector(`.chat-item[href="/chats/${chat.numero}"]`);
-      if (nuevoChat) {
-        const editBtn = nuevoChat.querySelector('.edit-alias-btn');
-        if (editBtn) {
-          editBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            e.stopPropagation();
-            activarEdicionAlias(this.closest('.chat-name'));
-          });
-        }
-      }
+                console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
+            })
+            .catch(error => {
+                console.error("❌ Error updating chat list:", error);
+            });
     }
-  });
-}
+    // Añadir un control para pausar la actualización cuando se está escribiendo
+    document.addEventListener('DOMContentLoaded', function () {
+        // Obtener referencias al campo de entrada manual
+        const mensajeInput = document.getElementById('mensaje-texto');
+        if (mensajeInput) {
+            // Pausar auto-refresh cuando el campo está en foco
+            mensajeInput.addEventListener('focus', function () {
+                chatAutoRefresh = false;
+                console.log("🛑 Auto-refresh paused - input focus");
+            });
 
+            // Reanudar auto-refresh cuando el campo pierde el foco
+            mensajeInput.addEventListener('blur', function () {
+                // Solo reanudar si no está abierto el selector de emojis
+                if (!document.querySelector('.emoji-picker.active')) {
+                    chatAutoRefresh = true;
+                    console.log("▶️ Auto-refresh resumed - input blur");
+                }
+            });
+        }
+    // Modificar la función actualizarListaChats para preservar la posición del scroll
 function actualizarChatExistente(elemento, chat) {
   // Update chat preview (last message)
   const previewElement = elemento.querySelector('.chat-preview');
@@ -999,6 +999,13 @@ document.addEventListener('DOMContentLoaded', function() {
                     emojiPicker.classList.toggle('active');
                 });
 
+                if (!wasActive) {
+                    chatAutoRefresh = false; // Pausar cuando se abre
+                    console.log("🛑 Auto-refresh paused - emoji picker open");
+                } else {
+                    chatAutoRefresh = true; // Reanudar cuando se cierra
+                    console.log("▶️ Auto-refresh resumed - emoji picker closed");
+                }
                 // Cerrar el selector al hacer clic fuera
                 document.addEventListener('click', function (e) {
                     if (!emojiButton.contains(e.target) && !emojiPicker.contains(e.target)) {
