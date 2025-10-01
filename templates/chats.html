@@ -227,9 +227,13 @@
                 <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, True) else 'Modo manual activado' }}</span>
             </div>
             <form action="/toggle_ai/{{ selected }}" method="POST">
-                <button type="submit" class="toggle-btn {{ 'off' if IA_ESTADOS.get(selected, True) else 'on' }}">
-                    {{ 'Desactivar IA' if IA_ESTADOS.get(selected, True) else 'Activar IA' }}
-                </button>
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <!-- AI is active, show 'Desactivar IA' -->
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <!-- AI is inactive, show 'Activar IA' -->
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
             </form>
         </div>
         {% endif %}

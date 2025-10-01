@@ -4373,6 +4373,7 @@ def ver_chat(numero):
         ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
         
         IA_ESTADOS[numero] = {'activa': ia_active}
+        app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
         cursor.execute("""
             SELECT DISTINCT
@@ -4469,6 +4470,9 @@ def log_configuracion():
 def toggle_ai(numero, config=None):
     config = obtener_configuracion_por_host()
     try:
+        app.logger.info(f"🔍 Toggle AI request for {numero}")
+        app.logger.info(f"🔍 Current IA_ESTADOS before toggle: {IA_ESTADOS.get(numero, {'activa': True})}")
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
@@ -4476,6 +4480,8 @@ def toggle_ai(numero, config=None):
         cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
         result = cursor.fetchone()
         current_state = result[0] if result else True  # Default to True if not found
+        
+        app.logger.info(f"🔍 Current state in database: {current_state}")
         
         # Toggle the state in database
         new_state = not current_state
@@ -4493,6 +4499,7 @@ def toggle_ai(numero, config=None):
         IA_ESTADOS[numero] = {'activa': new_state}
         
         app.logger.info(f"🔘 Estado IA cambiado para {numero}: {new_state}")
+        app.logger.info(f"🔍 Updated IA_ESTADOS after toggle: {IA_ESTADOS.get(numero)}")
     except Exception as e:
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
