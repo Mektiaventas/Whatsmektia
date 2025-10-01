@@ -2974,6 +2974,54 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
+@app.route('/chats/data')
+def obtener_datos_chat():
+    """Endpoint para obtener datos actualizados de la lista de chats"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Query to get chat list data
+    cursor.execute("""
+        SELECT 
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+          cont.alias,
+          cont.nombre,
+          (SELECT mensaje FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+          (SELECT CASE WHEN es_imagen THEN 'imagen' ELSE 'texto' END
+           FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS tipo_mensaje,
+          MAX(conv.timestamp) AS ultima_fecha
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
+        ORDER BY MAX(conv.timestamp) DESC
+    """)
+    chats = cursor.fetchall()
+    
+    # Convert timestamps to ISO format for JSON
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
+            else:
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx).isoformat()
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'chats': chats,
+        'timestamp': datetime.now().timestamp(),
+        'total_chats': len(chats)
+    })
+
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:

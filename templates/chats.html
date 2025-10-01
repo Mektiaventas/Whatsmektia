@@ -6,212 +6,211 @@
 {% set negocio_nombre = 'La Porfirianna' if es_porfirianna else 'Mektia' %}
 
 <div class="chat-list-header">
-  <h2>Conversaciones - {{ negocio_nombre }}</h2>
-  <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
-    {{ negocio_nombre }}
-  </span>
-  <span style="font-size: 12px; color: #ffffff; margin-left: 15px;">
-    (Base de datos: {{ tenant_config.db_name }})
-  </span>
+    <h2>Conversaciones - {{ negocio_nombre }}</h2>
+    <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
+        {{ negocio_nombre }}
+    </span>
+    <span style="font-size: 12px; color: #ffffff; margin-left: 15px;">
+        (Base de datos: {{ tenant_config.db_name }})
+    </span>
 </div>
 <div class="chat-layout-v2">
-  <!-- Lado izquierdo: Lista -->
-  <aside class="chat-list-v2">
-    <div class="chat-list-tools">
-      <button class="add-contact-btn">+ Agregar Contacto</button>
-      <input type="text" placeholder="Buscar chats..." class="search-input">
-    </div>
+    <!-- Lado izquierdo: Lista -->
+    <aside class="chat-list-v2">
+        <div class="chat-list-tools">
+            <button class="add-contact-btn">+ Agregar Contacto</button>
+            <input type="text" placeholder="Buscar chats..." class="search-input">
+        </div>
 
-    <div class="chat-items">
-      {% for chat in chats %}
-      <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
-        <div class="chat-avatar">
-          <img 
-            src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}" 
-            alt="Avatar"
-            onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
-            width="40" height="40">
-        </div>
-        <div class="chat-info">
-          <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
-            <span class="alias-view">
-              {{ chat.nombre_mostrado }}
-            </span>
-            <span class="alias-edit" style="display:none;">
-              <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
-            </span>
-            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
-              ✏️
-            </button>
-          </div>
-          {% if chat.alias or chat.nombre %}
-            <div class="chat-num" style="font-size:11px;color:#888;">
-              {{ chat.numero }}
-            </div>
-          {% endif %}
-          <div class="chat-preview">
-            {% if chat.ultimo_mensaje %}
-              {% if chat.tipo_mensaje == 'imagen' %}
-                📷 Imagen
-              {% else %}
-                {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
-              {% endif %}
-            {% else %}
-              Sin mensajes
-            {% endif %}
-          </div>
-        </div>
-        <div class="chat-meta">
-          {% if chat.ultima_fecha %}
-            <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
-            <div class="chat-time">{{ chat.ultima_fecha.strftime("%H:%M") }}</div>
-          {% endif %}
-        </div>
-      </a>
-      {% endfor %}
-    </div>
-  </aside>
-
-  <!-- Centro: Mensajes -->
-  <section class="chat-panel-v2">
-    {% if selected %}
-    <div class="chat-panel-header" data-num="{{ selected }}">
-      <div class="chat-header-info">
-        <div class="chat-title">
-          <span class="alias-view">
-            {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
-          </span>
-          <span class="alias-edit" style="display:none;">
-          {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
-          <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}" 
-                data-num="{{ selected }}" maxlength="100">
-          </span>
-          <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
-            ✏️
-          </button>
-        </div>
-        <span class="chat-number">{{ selected }}</span>
-      </div>
-      
-      <div class="chat-controls">
-        <!-- BADGE DE ESTADO IA/MANUAL -->
-        <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}">
-            {% if IA_ESTADOS.get(selected, True) %}
-                🤖 IA ACTIVADA
-            {% else %}
-                👤 MODO MANUAL
-            {% endif %}
-        </span>
-        
-        <!-- Botón toggle IA -->
-        <form action="/toggle_ai/{{ selected }}" method="POST">
-          <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, True) else 'off' }}">
-            IA {{ 'ON' if IA_ESTADOS.get(selected, True) else 'OFF' }}
-          </button>
-        </form>
-      </div>
-    </div>
-    {% else %}
-    <div class="chat-panel-header">
-      <span>Selecciona un chat</span>
-    </div>
-    {% endif %}
-    <div class="msgs-wrap-v2" id="msgs">
-      {% if mensajes %}
-        {% for msg in mensajes %}
-          <!-- Mensaje del usuario (con imagen a la izquierda) -->
-          {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-user">
-              <div class="message-content">
-                {% if msg.es_imagen and msg.imagen_url %}
-                  <div class="image-message">
-                    <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
-                    {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
-                      <div class="image-caption">
-                        {{ msg.mensaje }}
-                      </div>
-                    {% endif %}
-                  </div>
-                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
-                  <!-- Mostrar audio con reproductor funcional -->
-                  <div class="audio-player">
-                    <!-- Reproductor nativo (oculto pero funcional) -->
-                    <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
-                      <source src="{{ msg.contenido_extra }}" type="audio/ogg">
-                      <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
-                      Tu navegador no soporta el elemento de audio.
-                    </audio>
-                    
-                    <!-- Controles personalizados -->
-                    <div class="audio-controls">
-                      <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
-                        ▶️
-                      </button>
-                      <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
-                        <div class="audio-progress-bar"></div>
-                      </div>
-                      <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
-                      <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
-                        ⬇️
-                      </a>
+        <div class="chat-items">
+            {% for chat in chats %}
+            <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}">
+                <div class="chat-avatar">
+                    <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                         alt="Avatar"
+                         onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"
+                         width="40" height="40">
+                </div>
+                <div class="chat-info">
+                    <div class="chat-name" style="display:flex;align-items:center;" data-num="{{ chat.numero }}">
+                        <span class="alias-view">
+                            {{ chat.nombre_mostrado }}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                        </span>
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+                            ✏️
+                        </button>
                     </div>
-                    
-                    <!-- Transcripción -->
-                    {% if msg.transcripcion_audio %}
-                      <div class="audio-transcription">
-                        <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
-                      </div>
-                    {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-                      <div class="audio-transcription">
-                        <strong>Mensaje:</strong> {{ msg.mensaje }}
-                      </div>
+                    {% if chat.alias or chat.nombre %}
+                    <div class="chat-num" style="font-size:11px;color:#888;">
+                        {{ chat.numero }}
+                    </div>
                     {% endif %}
-                  </div>
-                {% else %}
-                  <!-- Mostrar texto normal -->
-                  <div class="text-message">
-                    {{ msg.mensaje }}
-                  </div>
-                {% endif %}
-              </div>
-              <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-            </div>
-          {% endif %}
-
-          <!-- Mensaje manual desde web -->
-          {% if msg.mensaje and msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
-            <div class="msg-box msg-manual">
-              <div class="message-content">
-                <div class="manual-indicator">📤 Mensaje enviado:</div>
-                <div class="text-message">
-                  {{ msg.respuesta }}
+                    <div class="chat-preview">
+                        {% if chat.ultimo_mensaje %}
+                        {% if chat.tipo_mensaje == 'imagen' %}
+                        📷 Imagen
+                        {% else %}
+                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+                        {% endif %}
+                        {% else %}
+                        Sin mensajes
+                        {% endif %}
+                    </div>
                 </div>
-              </div>
-              <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-            </div>
-          {% endif %}
-
-          <!-- Respuesta de la IA (a la derecha) -->
-          {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-ai">
-              <div class="message-content">
-                <div class="text-message">
-                  {{ msg.respuesta }}
+                <div class="chat-meta">
+                    {% if chat.ultima_fecha %}
+                    <div class="chat-date">{{ chat.ultima_fecha.strftime("%d/%m") }}</div>
+                    <div class="chat-time">{{ chat.ultima_fecha.strftime("%H:%M") }}</div>
+                    {% endif %}
                 </div>
-              </div>
-              <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
-            </div>
-          {% endif %}
-        {% endfor %}
-      {% else %}
-        <div class="no-chat-selected">
-          <p>Selecciona un chat para ver mensajes.</p>
+            </a>
+            {% endfor %}
         </div>
-      {% endif %}
-    </div>
+    </aside>
 
-    <!-- FORMULARIO DE MENSAJE MANUAL -->
-    {% if selected %}
+    <!-- Centro: Mensajes -->
+    <section class="chat-panel-v2">
+        {% if selected %}
+        <div class="chat-panel-header" data-num="{{ selected }}">
+            <div class="chat-header-info">
+                <div class="chat-title">
+                    <span class="alias-view">
+                        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
+                    </span>
+                    <span class="alias-edit" style="display:none;">
+                        {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
+                        <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}"
+                               data-num="{{ selected }}" maxlength="100">
+                    </span>
+                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
+                        ✏️
+                    </button>
+                </div>
+                <span class="chat-number">{{ selected }}</span>
+            </div>
+
+            <div class="chat-controls">
+                <!-- BADGE DE ESTADO IA/MANUAL -->
+                <span class="badge {% if IA_ESTADOS.get(selected, True) %}bg-success{% else %}bg-warning{% endif %}">
+                    {% if IA_ESTADOS.get(selected, True) %}
+                    🤖 IA ACTIVADA
+                    {% else %}
+                    👤 MODO MANUAL
+                    {% endif %}
+                </span>
+
+                <!-- Botón toggle IA -->
+                <form action="/toggle_ai/{{ selected }}" method="POST">
+                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, True) else 'off' }}">
+                        IA {{ 'ON' if IA_ESTADOS.get(selected, True) else 'OFF' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="chat-panel-header">
+            <span>Selecciona un chat</span>
+        </div>
+        {% endif %}
+        <div class="msgs-wrap-v2" id="msgs">
+            {% if mensajes %}
+            {% for msg in mensajes %}
+            <!-- Mensaje del usuario (con imagen a la izquierda) -->
+            {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-user">
+                <div class="message-content">
+                    {% if msg.es_imagen and msg.imagen_url %}
+                    <div class="image-message">
+                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
+                        {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                        <div class="image-caption">
+                            {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                    <!-- Mostrar audio con reproductor funcional -->
+                    <div class="audio-player">
+                        <!-- Reproductor nativo (oculto pero funcional) -->
+                        <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                            <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+
+                        <!-- Controles personalizados -->
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+
+                        <!-- Transcripción -->
+                        {% if msg.transcripcion_audio %}
+                        <div class="audio-transcription">
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                        </div>
+                        {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+                        <div class="audio-transcription">
+                            <strong>Mensaje:</strong> {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <!-- Mostrar texto normal -->
+                    <div class="text-message">
+                        {{ msg.mensaje }}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+            </div>
+            {% endif %}
+
+            <!-- Mensaje manual desde web -->
+            {% if msg.mensaje and msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+            <div class="msg-box msg-manual">
+                <div class="message-content">
+                    <div class="manual-indicator">📤 Mensaje enviado:</div>
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
+                </div>
+                <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+            </div>
+            {% endif %}
+
+            <!-- Respuesta de la IA (a la derecha) -->
+            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-ai">
+                <div class="message-content">
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
+                </div>
+                <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            <div class="no-chat-selected">
+                <p>Selecciona un chat para ver mensajes.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- FORMULARIO DE MENSAJE MANUAL -->
+        {% if selected %}
         {% if not IA_ESTADOS.get(selected, True) %}
         <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
@@ -222,304 +221,485 @@
         </form>
         {% else %}
         <div class="ia-active-message">
-          <div class="ia-indicator">
-            <span class="ia-icon">🤖</span>
-            <span>La IA está respondiendo automáticamente</span>
-          </div>
-          <form action="/toggle_ai/{{ selected }}" method="POST">
-            <button type="submit" class="toggle-btn off">
-              Desactivar IA
-            </button>
-          </form>
+            <div class="ia-indicator">
+                <span class="ia-icon">🤖</span>
+                <span>La IA está respondiendo automáticamente</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                <button type="submit" class="toggle-btn off">
+                    Desactivar IA
+                </button>
+            </form>
         </div>
         {% endif %}
-    {% endif %}
-  </section>
+        {% endif %}
+    </section>
 
-  <!-- Lado derecho - Info del chat -->
-  <aside class="sidebar-right">
-    {% if selected %}
-      <div class="sidebar-section">
-        <h3>Acciones</h3>
-        <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
-          <button type="submit" class="delete-btn">
-            🗑️ Eliminar Chat
-          </button>
-        </form>
-      </div>
-      
-      <div class="sidebar-section">
-        <h3>Información</h3>
-        <div class="chat-info-stats">
-          <div class="stat-item">
-            <span class="stat-label">Total mensajes:</span>
-            <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
-          </div>
-          <div class="stat-item">
-            <span class="stat-label">Última actividad:</span>
-            <span class="stat-value">
-              {% if mensajes and mensajes[-1].timestamp %}
-                {{ mensajes[-1].timestamp.strftime('%d/%m/%Y %H:%M') }}
-              {% else %}
-                N/A
-              {% endif %}
-            </span>
-          </div>
+    <!-- Lado derecho - Info del chat -->
+    <aside class="sidebar-right">
+        {% if selected %}
+        <div class="sidebar-section">
+            <h3>Acciones</h3>
+            <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
+                <button type="submit" class="delete-btn">
+                    🗑️ Eliminar Chat
+                </button>
+            </form>
         </div>
-      </div>
-    {% endif %}
-  </aside>
+
+        <div class="sidebar-section">
+            <h3>Información</h3>
+            <div class="chat-info-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total mensajes:</span>
+                    <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Última actividad:</span>
+                    <span class="stat-value">
+                        {% if mensajes and mensajes[-1].timestamp %}
+                        {{ mensajes[-1].timestamp.strftime('%d/%m/%Y %H:%M') }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </aside>
 </div>
 
 <!-- Botón móvil para mostrar/ocultar lista de chats -->
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
 <style>
-  .whatsapp-image {
-    max-width: 300px;
-    max-height: 300px;
-    border-radius: 12px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 8px;
-  }
+    .whatsapp-image {
+        max-width: 300px;
+        max-height: 300px;
+        border-radius: 12px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        margin-bottom: 8px;
+    }
 
-  .image-message {
-    padding: 8px;
-  }
+    .image-message {
+        padding: 8px;
+    }
 
-  .image-caption {
-    padding: 8px 12px;
-    background-color: #f0f0f0;
-    border-radius: 8px;
-    margin-top: 8px;
-    font-size: 14px;
-  }
+    .image-caption {
+        padding: 8px 12px;
+        background-color: #f0f0f0;
+        border-radius: 8px;
+        margin-top: 8px;
+        font-size: 14px;
+    }
 
-  .message-content {
-    margin-bottom: 4px;
-  }
+    .message-content {
+        margin-bottom: 4px;
+    }
 
-  .manual-indicator {
-    font-size: 12px;
-    color: #666;
-    margin-bottom: 4px;
-    font-style: italic;
-  }
+    .manual-indicator {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 4px;
+        font-style: italic;
+    }
 
-  .ia-active-message {
-    padding: 15px;
-    text-align: center;
-    background-color: #f8f9fa;
-    border-top: 1px solid #dee2e6;
-  }
+    .ia-active-message {
+        padding: 15px;
+        text-align: center;
+        background-color: #f8f9fa;
+        border-top: 1px solid #dee2e6;
+    }
 
-  .ia-indicator {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin-bottom: 10px;
-  }
+    .ia-indicator {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        margin-bottom: 10px;
+    }
 
-  .ia-icon {
-    font-size: 20px;
-  }
+    .ia-icon {
+        font-size: 20px;
+    }
 
-  .chat-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
+    .chat-controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
 
-  .chat-header-info {
-    flex: 1;
-  }
+    .chat-header-info {
+        flex: 1;
+    }
 
-  .chat-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 4px;
-  }
+    .chat-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 4px;
+    }
 
-  .chat-number {
-    font-size: 12px;
-    color: #666;
-  }
+    .chat-number {
+        font-size: 12px;
+        color: #666;
+    }
 
-  .sidebar-section {
-    margin-bottom: 20px;
-  }
+    .sidebar-section {
+        margin-bottom: 20px;
+    }
 
-  .sidebar-section h3 {
-    margin-bottom: 10px;
-    font-size: 14px;
-    color: #333;
-  }
+        .sidebar-section h3 {
+            margin-bottom: 10px;
+            font-size: 14px;
+            color: #333;
+        }
 
-  .chat-info-stats {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
+    .chat-info-stats {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
 
-  .stat-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
+    .stat-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
 
-  .stat-label {
-    font-size: 12px;
-    color: #666;
-  }
+    .stat-label {
+        font-size: 12px;
+        color: #666;
+    }
 
-  .stat-value {
-    font-size: 12px;
-    font-weight: 500;
-    color: #333;
-  }
+    .stat-value {
+        font-size: 12px;
+        font-weight: 500;
+        color: #333;
+    }
 
-  /* Estilos para mensajes */
-  .msg-box {
-    display: flex;
-    flex-direction: column;
-    margin: 10px 0;
-    max-width: 70%;
-  }
+    /* Estilos para mensajes */
+    .msg-box {
+        display: flex;
+        flex-direction: column;
+        margin: 10px 0;
+        max-width: 70%;
+    }
 
-  .msg-user {
-    align-self: flex-start; /* Izquierda para usuario */
-    background-color: #e3f2fd; /* Azul claro */
-  }
+    .msg-user {
+        align-self: flex-start; /* Izquierda para usuario */
+        background-color: #e3f2fd; /* Azul claro */
+    }
 
-  .msg-ai {
-    align-self: flex-end; /* Derecha para IA */
-    background-color: #d1e7dd; /* Verde claro */
-  }
+    .msg-ai {
+        align-self: flex-end; /* Derecha para IA */
+        background-color: #d1e7dd; /* Verde claro */
+    }
 
-  .msg-manual {
-    align-self: flex-end; /* Derecha para mensajes manuales */
-    background-color: #f8f9fa; /* Gris claro */
-  }
+    .msg-manual {
+        align-self: flex-end; /* Derecha para mensajes manuales */
+        background-color: #f8f9fa; /* Gris claro */
+    }
 
-  .message-content {
-    padding: 10px;
-    border-radius: 10px;
-  }
+    .message-content {
+        padding: 10px;
+        border-radius: 10px;
+    }
 
-  .text-message {
-    word-wrap: break-word;
-  }
+    .text-message {
+        word-wrap: break-word;
+    }
 
-  .msg-meta {
-    font-size: 12px;
-    color: #666;
-    text-align: right;
-    margin-top: 4px;
-  }
+    .msg-meta {
+        font-size: 12px;
+        color: #666;
+        text-align: right;
+        margin-top: 4px;
+    }
 
-  /* Estilos para audio */
-  .audio-player {
-    background: #f8f9fa;
-    border-radius: 12px;
-    padding: 15px;
-    margin: 10px 0;
-    border: 1px solid #e9ecef;
-    max-width: 350px;
-  }
+    /* Estilos para audio */
+    .audio-player {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 15px;
+        margin: 10px 0;
+        border: 1px solid #e9ecef;
+        max-width: 350px;
+    }
 
-  .whatsapp-audio {
-    display: none;
-  }
+    .whatsapp-audio {
+        display: none;
+    }
 
-  .audio-controls {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 8px;
-  }
+    .audio-controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 8px;
+    }
 
-  .audio-play-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-    padding: 8px;
-    border-radius: 50%;
-    background-color: #25D366;
-    color: white;
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: background-color 0.2s;
-  }
+    .audio-play-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 8px;
+        border-radius: 50%;
+        background-color: #25D366;
+        color: white;
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background-color 0.2s;
+    }
 
-  .audio-play-btn:hover {
-    background-color: #128C7E;
-  }
+        .audio-play-btn:hover {
+            background-color: #128C7E;
+        }
 
-  .audio-progress {
-    flex: 1;
-    height: 6px;
-    background-color: #ddd;
-    border-radius: 3px;
-    overflow: hidden;
-    cursor: pointer;
-    position: relative;
-  }
+    .audio-progress {
+        flex: 1;
+        height: 6px;
+        background-color: #ddd;
+        border-radius: 3px;
+        overflow: hidden;
+        cursor: pointer;
+        position: relative;
+    }
 
-  .audio-progress-bar {
-    height: 100%;
-    background-color: #25D366;
-    width: 0%;
-    transition: width 0.1s ease;
-    border-radius: 3px;
-  }
+    .audio-progress-bar {
+        height: 100%;
+        background-color: #25D366;
+        width: 0%;
+        transition: width 0.1s ease;
+        border-radius: 3px;
+    }
 
-  .audio-duration {
-    font-size: 11px;
-    color: #666;
-    min-width: 35px;
-    text-align: center;
-    font-family: monospace;
-  }
+    .audio-duration {
+        font-size: 11px;
+        color: #666;
+        min-width: 35px;
+        text-align: center;
+        font-family: monospace;
+    }
 
-  .audio-download-btn {
-    background: none;
-    border: none;
-    cursor: pointer;
-    font-size: 14px;
-    padding: 6px;
-    border-radius: 4px;
-    color: #666;
-    transition: all 0.2s;
-  }
+    .audio-download-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        padding: 6px;
+        border-radius: 4px;
+        color: #666;
+        transition: all 0.2s;
+    }
 
-  .audio-download-btn:hover {
-    color: #25D366;
-    background-color: #f0f0f0;
-  }
+        .audio-download-btn:hover {
+            color: #25D366;
+            background-color: #f0f0f0;
+        }
 
-  .audio-transcription {
-    background-color: #e8f5e8;
-    padding: 10px 12px;
-    border-radius: 8px;
-    margin-top: 10px;
-    font-size: 13px;
-    line-height: 1.4;
-    border-left: 3px solid #25D366;
-  }
+    .audio-transcription {
+        background-color: #e8f5e8;
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-top: 10px;
+        font-size: 13px;
+        line-height: 1.4;
+        border-left: 3px solid #25D366;
+    }
 
-  .audio-transcription strong {
-    color: #128C7E;
-    font-size: 12px;
-  }
+        .audio-transcription strong {
+            color: #128C7E;
+            font-size: 12px;
+        }
 </style>
 
 <script>
+    // Add this code to the end of your script section but before the final 
+
+// Auto-refresh functionality for chat list
+let chatAutoRefresh = true;
+let refreshInterval = 500; // Half a second
+let selectedChatId = "{{ selected }}";
+let lastUpdateTimestamp = new Date().getTime();
+
+function startChatRefresh() {
+  console.log("🔄 Starting chat list auto-refresh");
+  setInterval(actualizarListaChats, refreshInterval);
+}
+
+function actualizarListaChats() {
+  if (!chatAutoRefresh) return;
+
+  fetch('/chats/data')
+    .then(response => {
+      if (!response.ok) {
+        throw new Error('Error fetching chat data');
+      }
+      return response.json();
+    })
+    .then(data => {
+      if (data.timestamp <= lastUpdateTimestamp) {
+        return; // No new data
+      }
+
+      lastUpdateTimestamp = data.timestamp;
+      actualizarListaChatsIncremental(data.chats);
+      console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
+    })
+    .catch(error => {
+      console.error("❌ Error updating chat list:", error);
+    });
+}
+
+function actualizarListaChatsIncremental(nuevosChats) {
+  // Create map of existing chats for easy lookup
+  const chatsActuales = new Map();
+  document.querySelectorAll('.chat-item').forEach(item => {
+    const numero = item.getAttribute('href').split('/').pop();
+    chatsActuales.set(numero, item);
+  });
+
+  // Get container
+  const container = document.querySelector('.chat-items');
+  if (!container) return;
+
+  // Process each chat in the new data
+  nuevosChats.forEach(chat => {
+    if (chatsActuales.has(chat.numero)) {
+      // Update existing chat
+      actualizarChatExistente(chatsActuales.get(chat.numero), chat);
+      chatsActuales.delete(chat.numero); // Mark as processed
+    } else {
+      // Add new chat
+      const nuevoChatHTML = crearNuevoChatHTML(chat);
+      container.insertAdjacentHTML('beforeend', nuevoChatHTML);
+
+      // Add click handler for the edit button
+      const nuevoChat = container.querySelector(`.chat-item[href="/chats/${chat.numero}"]`);
+      if (nuevoChat) {
+        const editBtn = nuevoChat.querySelector('.edit-alias-btn');
+        if (editBtn) {
+          editBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            activarEdicionAlias(this.closest('.chat-name'));
+          });
+        }
+      }
+    }
+  });
+}
+
+function actualizarChatExistente(elemento, chat) {
+  // Update chat preview (last message)
+  const previewElement = elemento.querySelector('.chat-preview');
+  if (previewElement && chat.ultimo_mensaje) {
+    const nuevoTexto = chat.tipo_mensaje === 'imagen' ?
+      '📷 Imagen' :
+      `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
+
+    if (previewElement.textContent.trim() !== nuevoTexto.trim()) {
+      previewElement.textContent = nuevoTexto;
+      elemento.classList.add('new-message'); // Add highlight class
+      setTimeout(() => {
+        elemento.classList.remove('new-message');
+      }, 2500);
+    }
+  }
+
+  // Update time
+  const timeElement = elemento.querySelector('.chat-time');
+  if (timeElement && chat.ultima_fecha) {
+    const fecha = new Date(chat.ultima_fecha);
+    timeElement.textContent = fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+
+  // Update date
+  const dateElement = elemento.querySelector('.chat-date');
+  if (dateElement && chat.ultima_fecha) {
+    const fecha = new Date(chat.ultima_fecha);
+    dateElement.textContent = fecha.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+  }
+}
+
+function crearNuevoChatHTML(chat) {
+  const isSelected = chat.numero === selectedChatId;
+  const avatarUrl = chat.imagen_url || '/static/icons/default-avatar.png';
+  const nombreMostrado = chat.nombre_mostrado || chat.numero;
+  const ultimoMensaje = chat.tipo_mensaje === 'imagen' ?
+    '📷 Imagen' :
+    (chat.ultimo_mensaje ?
+      `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
+      'Sin mensajes');
+
+  return `
+<a href="/chats/${chat.numero}" class="chat-item ${isSelected ? 'selected' : ''}">
+    <div class="chat-avatar">
+        <img src="${avatarUrl}"
+             alt="Avatar"
+             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';"
+             width="40" height="40">
+    </div>
+    <div class="chat-info">
+        <div class="chat-name" style="display:flex;align-items:center;" data-num="${chat.numero}">
+            <span class="alias-view">
+                ${nombreMostrado}
+            </span>
+            <span class="alias-edit" style="display:none;">
+                <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+            </span>
+            <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
+                ✏️
+            </button>
+        </div>
+        ${(chat.alias || chat.nombre) ?
+        `<div class="chat-num" style="font-size:11px;color:#888;">
+            ${chat.numero}
+        </div>` : ''}
+        <div class="chat-preview">
+            ${ultimoMensaje}
+        </div>
+    </div>
+    <div class="chat-meta">
+        ${chat.ultima_fecha ?
+        `<div class="chat-date">${new Date(chat.ultima_fecha).toLocaleDateString([], {day: '2-digit', month: '2-digit'})}</div>
+        <div class="chat-time">${new Date(chat.ultima_fecha).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</div>` : ''}
+    </div>
+</a>
+  `;
+}
+
+// Add highlight animation style
+const style = document.createElement('style');
+style.textContent = `
+  @keyframes highlightChat {
+    0% { background-color: inherit; }
+    30% { background-color: #e7f3ff; }
+    100% { background-color: inherit; }
+  }
+
+  .chat-item.new-message {
+    animation: highlightChat 2s ease-in-out;
+  }
+`;
+document.head.appendChild(style);
+
+// Pause refresh when tab is not visible to save resources
+document.addEventListener('visibilitychange', function() {
+  chatAutoRefresh = !document.hidden;
+});
+
+// Start the refresh cycle when page loads
+document.addEventListener('DOMContentLoaded', function() {
+  if (document.querySelector('.chat-items')) {
+    startChatRefresh();
+  }
+});
   // Función para scroll al final de los mensajes
   function scrollToBottom() {
     const msgsContainer = document.getElementById('msgs');
@@ -557,9 +737,9 @@
 
     input.onblur = terminarEdicion;
     input.onkeydown = function(e) {
-      if (e.key === 'Enter') { 
+      if (e.key === 'Enter') {
         e.preventDefault();
-        terminarEdicion(); 
+        terminarEdicion();
       }
       if (e.key === 'Escape') {
         parent.querySelector('.alias-edit').style.display = 'none';
@@ -573,7 +753,7 @@
     const audioPlayer = document.getElementById(audioId);
     const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
     const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
-    
+
     if (audioPlayer.paused) {
       audioPlayer.play().then(() => {
         button.textContent = '⏸️';
@@ -600,7 +780,7 @@
     const rect = progressBar.getBoundingClientRect();
     const clickX = event.clientX - rect.left;
     const width = rect.width;
-    
+
     if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
       const clickTime = (clickX / width) * audioPlayer.duration;
       audioPlayer.currentTime = clickTime;
@@ -653,7 +833,7 @@
 
     const observer = new MutationObserver(function(mutations) {
       mutations.forEach(function(mutation) {
-        const isAudioChange = mutation.target.closest('.audio-player') || 
+        const isAudioChange = mutation.target.closest('.audio-player') ||
                              mutation.target.classList.contains('audio-progress-bar');
         if (mutation.addedNodes.length > 0 && !isAudioChange) {
           let shouldScroll = true;
