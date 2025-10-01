@@ -4363,7 +4363,6 @@ def ver_chats():
 @app.route('/chats/<numero>')
 def ver_chat(numero):
     try:
-        try:
         config = obtener_configuracion_por_host()
         app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
         
@@ -4380,6 +4379,7 @@ def ver_chat(numero):
         else:
             # IMPORTANT: Don't try to set IA_ESTADOS again - it's already set
             app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
+        
 
         app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
