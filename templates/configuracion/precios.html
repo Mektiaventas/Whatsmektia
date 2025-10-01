@@ -539,62 +539,50 @@
 
 <script>
     function toggleFormulario() {
-        const formularioBody = document.getElementById('formulario-body');
-        const formularioIcon = document.getElementById('formulario-icon');
-
-        if (!formularioBody || !formularioIcon) return;
-
-        const isHidden = formularioBody.classList.toggle('hidden');
-        formularioIcon.textContent = isHidden ? '▼' : '▲';
+        const body = document.getElementById('formulario-body');
+        const icon = document.getElementById('formulario-icon');
+        if (!body || !icon) return;
+        const hidden = body.classList.toggle('hidden');
+        icon.textContent = hidden ? '▼' : '▲';
     }
 
-    // Make handlers global so inline onclick can call them
-    window.toggleCliente = function () {
-        const productosBody = document.getElementById('productos-cliente-body');
-        const productosIcon = document.getElementById('productos-cliente-icon');
-        if (!productosBody || !productosIcon) return;
+    // One delegated listener for all toggle buttons
+    document.addEventListener('click', function (e) {
+        const btn = e.target.closest('.btn-toggle');
+        if (!btn) return;
 
-        const isHidden = productosBody.classList.toggle('hidden');
-        productosIcon.textContent = isHidden ? '▼' : '▲';
-    };
+        e.preventDefault();
+        const targetSel = btn.getAttribute('data-target');
+        const target = document.querySelector(targetSel);
+        if (!target) return;
 
-    window.toggleAdmin = function () {
-        const productosBody = document.getElementById('productos-admin-body');
-        const productosIcon = document.getElementById('productos-admin-icon');
-        if (!productosBody || !productosIcon) return;
+        const hidden = target.classList.toggle('hidden');
 
-        const isHidden = productosBody.classList.toggle('hidden');
-        productosIcon.textContent = isHidden ? '▼' : '▲';
-    };
+        // Update icon inside the button
+        const icon = btn.querySelector('.toggle-icon');
+        if (icon) icon.textContent = hidden ? '▼' : '▲';
+
+        // A11y
+        btn.setAttribute('aria-expanded', String(!hidden));
+    });
 
     document.addEventListener('DOMContentLoaded', function () {
-        {% if precio_edit %}
-        toggleFormulario();
-        {% endif %}
+        {% if precio_edit %} toggleFormulario(); {% endif %}
         cargarEstructura();
     });
 
     function cargarEstructura() {
         fetch('/configuracion/precios/estructura')
-            .then(response => response.json())
+            .then(r => r.json())
             .then(data => {
-                const contenedor = document.getElementById('columnas-dinamicas');
-                if (!contenedor) return;
-
-                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
-                const columnasDinamicas = data.estructura.filter(col => !columnasBase.includes(col.Field));
-
-                if (columnasDinamicas.length > 0) {
-                    let html = '<ul class="text-sm space-y-1">';
-                    columnasDinamicas.forEach(col => {
-                        html += `<li>• ${col.Field} (${col.Type})</li>`;
-                    });
-                    html += '</ul>';
-                    contenedor.innerHTML = html;
-                } else {
-                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
-                }
+                const cont = document.getElementById('columnas-dinamicas');
+                if (!cont) return;
+                const base = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
+                const dyn = (data.estructura || []).filter(c => !base.includes(c.Field));
+                cont.innerHTML = dyn.length
+                    ? '<ul class="text-sm space-y-1">' + dyn.map(c => `<li>• ${c.Field} (${c.Type})</li>`).join('') + '</ul>'
+                    : '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
             })
-            .catch(error => console.error("Error cargando estructura:", error));
+            .catch(err => console.error('Error cargando estructura:', err));
     }
 </script>
