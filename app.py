@@ -3819,6 +3819,7 @@ def webhook():
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
         actualizar_kanban()
+        actualizar_kanban_inmediato()
         if nombre_desde_webhook:
             actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
         else:
@@ -5045,6 +5046,48 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
         conn.close()
     # No emitas ningún evento aquí
 
+# Add this new function that updates chat_meta immediately when receiving a message
+def actualizar_kanban_inmediato(numero, config=None):
+    """Updates the Kanban board immediately when a message is received"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Ensure contact exists in chat_meta
+        meta = obtener_chat_meta(numero, config)
+        if not meta:
+            inicializar_chat_meta(numero, config)
+            app.logger.info(f"✅ Chat meta initialized for {numero}")
+        
+        # Determine appropriate column based on message history
+        historial = obtener_historial(numero, limite=2, config=config)
+        
+        if not historial:
+            # First message ever - put in "Nuevos"
+            nueva_columna = 1
+            app.logger.info(f"📊 First message from {numero} - moving to column 1 (Nuevos)")
+        else:
+            # Existing conversation - put in "En Conversación"
+            nueva_columna = 2
+            app.logger.info(f"📊 New message from {numero} - moving to column 2 (En Conversación)")
+        
+        # Update the database
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_meta SET columna_id = %s, 
+            fecha_actualizacion = CURRENT_TIMESTAMP
+            WHERE numero = %s
+        """, (nueva_columna, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Kanban updated immediately for {numero} to column {nueva_columna}")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error updating Kanban immediately: {e}")
+        return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
