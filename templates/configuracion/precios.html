@@ -532,79 +532,63 @@
 </style>
 
 <script>
-        function toggleFormulario() {
+    function toggleFormulario() {
         const formularioBody = document.getElementById('formulario-body');
         const formularioIcon = document.getElementById('formulario-icon');
 
-        if (formularioBody.classList.contains('hidden')) {
-            formularioBody.classList.remove('hidden');
-        formularioIcon.textContent = '▲';
-        } else {
-            formularioBody.classList.add('hidden');
-        formularioIcon.textContent = '▼';
-        }
+        if (!formularioBody || !formularioIcon) return;
+
+        const isHidden = formularioBody.classList.toggle('hidden');
+        formularioIcon.textContent = isHidden ? '▼' : '▲';
     }
 
-        function toggleCliente() {
-            console.log("Toggle Cliente clicked");
+    // Make handlers global so inline onclick can call them
+    window.toggleCliente = function () {
         const productosBody = document.getElementById('productos-cliente-body');
         const productosIcon = document.getElementById('productos-cliente-icon');
+        if (!productosBody || !productosIcon) return;
 
-        if (productosBody.classList.contains('hidden')) {
-            productosBody.classList.remove('hidden');
-        productosIcon.textContent = '▲';
-        } else {
-            productosBody.classList.add('hidden');
-        productosIcon.textContent = '▼';
-        }
-    }
+        const isHidden = productosBody.classList.toggle('hidden');
+        productosIcon.textContent = isHidden ? '▼' : '▲';
+    };
 
-        function toggleAdmin() {
-            console.log("Toggle Admin clicked");
+    window.toggleAdmin = function () {
         const productosBody = document.getElementById('productos-admin-body');
         const productosIcon = document.getElementById('productos-admin-icon');
+        if (!productosBody || !productosIcon) return;
 
-        if (productosBody.classList.contains('hidden')) {
-            productosBody.classList.remove('hidden');
-        productosIcon.textContent = '▲';
-        } else {
-            productosBody.classList.add('hidden');
-        productosIcon.textContent = '▼';
-        }
-    }
+        const isHidden = productosBody.classList.toggle('hidden');
+        productosIcon.textContent = isHidden ? '▼' : '▲';
+    };
 
-        document.addEventListener('DOMContentLoaded', function() {
-            {% if precio_edit %}
+    document.addEventListener('DOMContentLoaded', function () {
+        {% if precio_edit %}
         toggleFormulario();
         {% endif %}
-
         cargarEstructura();
     });
 
-        function cargarEstructura() {
-            fetch('/configuracion/precios/estructura')
-                .then(response => response.json())
-                .then(data => {
-                    const contenedor = document.getElementById('columnas-dinamicas');
-                    if (!contenedor) return;
+    function cargarEstructura() {
+        fetch('/configuracion/precios/estructura')
+            .then(response => response.json())
+            .then(data => {
+                const contenedor = document.getElementById('columnas-dinamicas');
+                if (!contenedor) return;
 
-                    const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
-                    const columnasDinamicas = data.estructura.filter(col =>
-                        !columnasBase.includes(col.Field)
-                    );
+                const columnasBase = ['id', 'sku', 'servicio', 'descripcion', 'precio', 'precio_mayoreo', 'precio_menudeo', 'moneda'];
+                const columnasDinamicas = data.estructura.filter(col => !columnasBase.includes(col.Field));
 
-                    if (columnasDinamicas.length > 0) {
-                        let html = '<ul class="text-sm space-y-1">';
-                        columnasDinamicas.forEach(col => {
-                            html += `<li>• ${col.Field} (${col.Type})</li>`;
-                        });
-                        html += '</ul>';
-                        contenedor.innerHTML = html;
-                    } else {
-                        contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
-                    }
-                })
-                .catch(error => console.error("Error cargando estructura:", error));
+                if (columnasDinamicas.length > 0) {
+                    let html = '<ul class="text-sm space-y-1">';
+                    columnasDinamicas.forEach(col => {
+                        html += `<li>• ${col.Field} (${col.Type})</li>`;
+                    });
+                    html += '</ul>';
+                    contenedor.innerHTML = html;
+                } else {
+                    contenedor.innerHTML = '<p class="text-sm text-gray-600">No hay columnas dinámicas adicionales.</p>';
+                }
+            })
+            .catch(error => console.error("Error cargando estructura:", error));
     }
-
 </script>
