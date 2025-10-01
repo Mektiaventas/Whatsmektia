@@ -488,7 +488,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
     
     try:
         # Limitar el texto para evitar tokens excesivos
-        texto_limitado = texto_pdf[:40000]  # Reducido para evitar truncamiento
+        texto_limitado = texto_pdf[:100000]  # Reducido para evitar truncamiento
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
@@ -631,7 +631,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 8000,  # Aumentado significativamente
+            "max_tokens": 15000,  # Aumentado significativamente
             "response_format": {"type": "json_object"}
         }
         
