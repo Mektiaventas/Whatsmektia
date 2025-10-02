@@ -28,7 +28,7 @@
         <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
             <div class="tab-icon">📊</div>
             <div>
-                <span class="tab-title">Carga con Template</span>
+                <span class="tab-title">Carga Template</span>
             </div>
         </button>
 
@@ -578,7 +578,7 @@
     .btn-primario {
         align-self: flex-start;
         padding: 12px 24px;
-        background: linear-gradient(135deg, green, yellow);
+        background: linear-gradient(135deg, green, blue);
         color: #fff;
         border: none;
         border-radius: 8px;
@@ -588,7 +588,7 @@
     }
 
         .btn-primario:hover {
-            background: linear-gradient(135deg, yellow, green);
+            background: linear-gradient(135deg, blue, green);
             transform: translateY(-2px);
         }
 
@@ -757,8 +757,8 @@
     document.addEventListener('DOMContentLoaded', function () {
         console.log("DOM loaded - initializing tab navigation");
 
-        // Default to the first section if no section is specified
-        let initialSection = 'batch-upload';
+        // Default to the user-list (client prices) section
+        let initialSection = 'user-list';
 
         {% if precio_edit %}
         // If editing a product, go directly to manual upload
