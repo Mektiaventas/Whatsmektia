@@ -117,9 +117,10 @@
         {% endif %}
         <div class="msgs-wrap-v2" id="msgs">
             {% if mensajes %}
+            <!-- Single loop that processes all message types in chronological order -->
             {% for msg in mensajes %}
-            <!-- Mensaje del usuario (con imagen a la izquierda) -->
             {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+            <!-- User message -->
             <div class="msg-box msg-user">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
@@ -177,8 +178,8 @@
             </div>
             {% endif %}
 
-            <!-- Mensaje manual desde web -->
-            {% if msg.mensaje and msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+            <!-- Mensaje manual desde web (se muestra en orden cronológico junto con los demás) -->
+            {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
             <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
@@ -190,7 +191,7 @@
             </div>
             {% endif %}
 
-            <!-- Respuesta de la IA (a la derecha) -->
+            <!-- Respuesta de la IA (se muestra en orden cronológico junto con los demás) -->
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai">
                 <div class="message-content">
@@ -737,29 +738,35 @@ function startChatRefresh() {
   setInterval(actualizarListaChats, refreshInterval);
 }
 
-function actualizarListaChats() {
-  if (!chatAutoRefresh) return;
+    function actualizarListaChats() {
+        if (!chatAutoRefresh) {
+            console.log("⏸️ Auto-refresh paused");
+            return;
+        }
 
-  fetch('/chats/data')
-    .then(response => {
-      if (!response.ok) {
-        throw new Error('Error fetching chat data');
-      }
-      return response.json();
-    })
-    .then(data => {
-      if (data.timestamp <= lastUpdateTimestamp) {
-        return; // No new data
-      }
+        fetch('/chats/data')
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Error fetching chat data');
+                }
+                return response.json();
+            })
+            .then(data => {
+                console.log(`📊 Got ${data.chats?.length || 0} chats from server`);
 
-      lastUpdateTimestamp = data.timestamp;
-      actualizarListaChatsIncremental(data.chats);
-      console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
-    })
-    .catch(error => {
-      console.error("❌ Error updating chat list:", error);
-    });
-}
+                if (data.timestamp <= lastUpdateTimestamp) {
+                    console.log("⏭️ No new data since last update");
+                    return; // No new data
+                }
+
+                lastUpdateTimestamp = data.timestamp;
+                actualizarListaChatsIncremental(data.chats);
+                console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
+            })
+            .catch(error => {
+                console.error("❌ Error updating chat list:", error);
+            });
+    }
 
     // Modificar la función actualizarListaChats para preservar la posición del scroll
 function actualizarChatExistente(elemento, chat) {
@@ -1102,7 +1109,120 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-   
+    function actualizarListaChatsIncremental(chats) {
+        const chatContainer = document.querySelector('.chat-items');
+        if (!chatContainer) return;
+
+        console.log(`🔄 Processing ${chats.length} chats for updates`);
+
+        // Process each chat from the API
+        chats.forEach(chat => {
+            // Check if this chat item already exists
+            const existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
+
+            if (existingChat) {
+                // Update existing chat item
+                const msgEl = existingChat.querySelector('.card-msg');
+                if (msgEl && chat.ultimo_mensaje) {
+                    const currentText = msgEl.textContent.trim();
+                    const newText = chat.tipo_mensaje === 'imagen' ?
+                        '📷 Imagen' :
+                        `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
+
+                    if (currentText !== newText) {
+                        msgEl.textContent = newText;
+                        existingChat.classList.add('new-message');
+                        setTimeout(() => {
+                            existingChat.classList.remove('new-message');
+                        }, 2000);
+                    }
+                }
+
+                // Update time
+                const timeEl = existingChat.querySelector('.card-time');
+                if (timeEl && chat.ultima_fecha) {
+                    const date = new Date(chat.ultima_fecha);
+                    timeEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            } else {
+                // This is a completely new chat, we need to add it to the list
+                const newChatElement = document.createElement('div');
+
+                // Create chat HTML without Jinja filters (they won't work in JS)
+                newChatElement.innerHTML = `
+                <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                    <div class="card-content">
+                        <div class="card-title-row">
+                            <div class="card-avatar-section">
+                                <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" 
+                                     class="card-avatar" alt="Avatar"
+                                     onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            </div>
+                            <span class="alias-view" data-num="${chat.numero}">
+                                ${chat.nombre_mostrado || chat.numero}
+                            </span>
+                            <span class="alias-edit" style="display:none;">
+                                <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+                            </span>
+                            <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
+                                ✏️
+                            </button>
+                        </div>
+                        <div class="card-meta-row">
+                            <span class="card-num">${chat.numero}</span>
+                            <span class="card-time">
+                                ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                        </div>
+                        <div class="card-msg">
+                            ${chat.tipo_mensaje === 'imagen' ?
+                        '📷 Imagen' :
+                        (chat.ultimo_mensaje ?
+                            `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
+                            'Sin mensajes')}
+                        </div>
+                    </div>
+                </a>
+            `;
+
+                // Add new chat to the container (at the top)
+                chatContainer.insertBefore(newChatElement.firstElementChild, chatContainer.firstChild);
+                newChatElement.firstElementChild.classList.add('new-message');
+
+                // Set up event listeners for the new chat item
+                const editButton = newChatElement.firstElementChild.querySelector('.edit-alias-btn');
+                if (editButton) {
+                    editButton.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const parent = this.closest('.card-title-row');
+                        activarEdicionAlias(parent);
+                    });
+                }
+
+                setTimeout(() => {
+                    newChatElement.firstElementChild.classList.remove('new-message');
+                }, 2000);
+            }
+        });
+    }
+
+    // Update refresh interval to something more reasonable
+    document.addEventListener('DOMContentLoaded', function () {
+        // Set a reasonable refresh interval (2 seconds)
+        refreshInterval = 2000;
+
+        // Start the refresh cycle
+        if (document.querySelector('.chat-items')) {
+            console.log("🚀 Starting chat auto-refresh");
+
+            // First immediate call to verify
+            actualizarListaChats();
+
+            // Then set up the regular interval
+            setInterval(actualizarListaChats, refreshInterval);
+        }
+    });
 
 </script>
 {% endblock %}
