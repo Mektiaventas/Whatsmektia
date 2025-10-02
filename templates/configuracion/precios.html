@@ -58,7 +58,7 @@
 </div>
 
 <!-- Sección: Carga desde PDF -->
-<div class="section hidden" id="pdf-upload">
+<div class="section" id="pdf-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
             <span>📄 Importar Productos desde PDF/Excel</span>
@@ -110,7 +110,7 @@
 </div>
 
 <!-- Sección: Carga Batch -->
-<div class="section hidden" id="batch-upload">
+<div class="section" id="batch-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
             <span>📊 Importar Directamente desde Excel</span>
@@ -161,7 +161,7 @@
 </div>
 
 <!-- Sección: Carga Manual -->
-<div class="section hidden" id="manual-upload">
+<div class="section" id="manual-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
             <span>✏️ {{ precio_edit and 'Editar Producto' or 'Agregar Producto Manualmente' }}</span>
@@ -274,7 +274,7 @@
                         <label for="moneda">Moneda *</label>
                         <select id="moneda" name="moneda" class="select" required>
                             {% for m in ['MXN','USD','EUR'] %}
-                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda==m %}selected{% endif %}>
+                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                                 {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                             </option>
                             {% endfor %}
@@ -362,7 +362,7 @@
 </div>
 
 <!-- Sección: Lista Usuario -->
-<div class="section hidden" id="user-list">
+<div class="section" id="user-list" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
             <span>👥 Lista de precios (Vista Cliente)</span>
@@ -435,7 +435,7 @@
 </div>
 
 <!-- Sección: Lista Admin -->
-<div class="section hidden" id="admin-list">
+<div class="section" id="admin-list" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
             <span>🔒 Lista de precios (Vista Completa Admin)</span>
@@ -531,7 +531,6 @@
     {% endif %}
     {% endwith %}
 </div>
-{% endblock %}
 
 <style>
     .alert {
@@ -690,19 +689,19 @@
 <script>
     // Function to show a specific section and hide others
     function showSection(sectionId) {
-        // First hide all sections
-        const allSections = document.querySelectorAll('.section');
-        allSections.forEach(section => {
-            section.classList.add('hidden');
+        // Hide all sections
+        const sections = document.querySelectorAll('.section');
+        sections.forEach(section => {
+            section.style.display = 'none';
         });
 
         // Hide the dashboard
-        document.getElementById('main-dashboard').classList.add('hidden');
+        document.getElementById('main-dashboard').style.display = 'none';
 
         // Show the requested section
         const targetSection = document.getElementById(sectionId);
         if (targetSection) {
-            targetSection.classList.remove('hidden');
+            targetSection.style.display = 'block';
             // Scroll to the section
             targetSection.scrollIntoView({ behavior: 'smooth' });
         }
@@ -711,64 +710,44 @@
     // Function to go back to the dashboard
     function backToDashboard() {
         // Hide all sections
-        const allSections = document.querySelectorAll('.section');
-        allSections.forEach(section => {
-            section.classList.add('hidden');
+        const sections = document.querySelectorAll('.section');
+        sections.forEach(section => {
+            section.style.display = 'none';
         });
 
         // Show the dashboard
-        document.getElementById('main-dashboard').classList.remove('hidden');
+        document.getElementById('main-dashboard').style.display = 'block';
         // Scroll to top
         window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
-    // Toggle functions from before
-    function toggleTable(tableId, iconId) {
-        const table = document.getElementById(tableId);
-        const icon = document.getElementById(iconId);
-
-        if (table) {
-            const isHidden = window.getComputedStyle(table).display === 'none';
-            if (isHidden) {
-                table.style.display = 'block';
-                if (icon) icon.textContent = '▲';
-            } else {
-                table.style.display = 'none';
-                if (icon) icon.textContent = '▼';
-            }
-        }
-    }
-
-    function toggleFormulario() {
-        toggleTable('formulario-body', 'formulario-icon');
-    }
-
+    // Image input toggle function
     function toggleImagenInput() {
         const tipo = document.getElementById('imagen-tipo').value;
         const archivoContainer = document.getElementById('imagen-archivo-container');
         const urlContainer = document.getElementById('imagen-url-container');
 
         if (tipo === 'archivo') {
-            archivoContainer.classList.remove('hidden');
-            urlContainer.classList.add('hidden');
+            archivoContainer.style.display = 'block';
+            urlContainer.style.display = 'none';
             document.getElementById('imagen_url').value = '';
         } else {
-            archivoContainer.classList.add('hidden');
-            urlContainer.classList.remove('hidden');
+            archivoContainer.style.display = 'none';
+            urlContainer.style.display = 'block';
             document.getElementById('imagen').value = '';
         }
     }
 
-    // Execute after DOM is fully loaded
+    // On document ready
     document.addEventListener('DOMContentLoaded', function () {
-        console.log("DOM fully loaded");
+        console.log("DOM loaded - initializing dashboard");
 
-        // Check if we need to automatically show a specific section
         {% if precio_edit %}
+        // If editing a product, go directly to manual upload
         showSection('manual-upload');
         {% endif %}
 
-        // Handle URL parameters to show specific section
+        // Check for URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const section = urlParams.get('section');
         if (section) {
@@ -776,3 +755,4 @@
         }
     });
 </script>
+{% endblock %}
