@@ -19,7 +19,6 @@
                 <img src="{{ url_for('static', filename='img/logo.png') }}" alt="SmartWhats">
                 {% endif %}
                 <!-- Make the debug visible temporarily -->
-                <div style="color: white; font-size: 10px;">Debug: '{{ app_logo|default('No logo set') }}' | App name: '{{ app_nombre|default('No name set') }}'</div>
             </div>
             <div class="sidebar-title">{{ app_nombre or 'SmartWhats' }}</div>
             <ul class="sidebar-nav">
