@@ -224,12 +224,37 @@
                     </select>
                 </div>
 
+                <<!-- Replace the existing image form group with this updated version -->
                 <div class="form-group">
                     <label for="imagen">Imagen</label>
-                    <input type="file" id="imagen" name="imagen" class="input"
-                           accept="image/*">
+                    <div class="mb-2">
+                        <select id="imagen-tipo" class="select mb-2" onchange="toggleImagenInput()">
+                            <option value="archivo">Subir archivo</option>
+                            <option value="url">Usar URL de internet</option>
+                        </select>
+                    </div>
+    
+                    <div id="imagen-archivo-container">
+                        <input type="file" id="imagen" name="imagen" class="input"
+                               accept="image/*">
+                        <small class="text-muted block mt-1">Sube una imagen desde tu dispositivo</small>
+                    </div>
+    
+                    <div id="imagen-url-container" class="hidden">
+                        <input type="text" id="imagen_url" name="imagen_url" class="input" 
+                               placeholder="https://ejemplo.com/imagen.jpg">
+                        <small class="text-muted block mt-1">Ingresa la URL completa de una imagen en internet</small>
+                    </div>
+    
                     {% if precio_edit and precio_edit.imagen %}
-                    <small class="text-muted">Imagen actual: {{ precio_edit.imagen }}</small>
+                    <div class="mt-2">
+                        <small class="text-muted">Imagen actual: {{ precio_edit.imagen }}</small>
+                        {% if precio_edit.imagen and precio_edit.imagen.startswith('http') %}
+                            <img src="{{ precio_edit.imagen }}" class="mt-1 h-16 w-auto object-contain border rounded" alt="Vista previa">
+                        {% elif precio_edit.imagen %}
+                            <img src="/uploads/{{ precio_edit.imagen }}" class="mt-1 h-16 w-auto object-contain border rounded" alt="Vista previa">
+                        {% endif %}
+                    </div>
                     {% endif %}
                 </div>
             </div>
@@ -317,7 +342,14 @@
                         <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
                         <td>
                             {% if precio.imagen %}
+                            {% if precio.imagen.startswith('http') %}
+                            <img src="{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                            {% else %}
                             <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                            {% endif %}
+                            <div class="text-xs text-gray-500">{{ precio.imagen }}</div>
+                            <a href="{{ url_for('debug_image', filename=precio.imagen) }}"
+                               class="text-xs text-blue-500" target="_blank">Debug</a>
                             {% else %}
                             -
                             {% endif %}
@@ -603,4 +635,21 @@
 
         cargarEstructura();
     });
+    function toggleImagenInput() {
+        const tipo = document.getElementById('imagen-tipo').value;
+        const archivoContainer = document.getElementById('imagen-archivo-container');
+        const urlContainer = document.getElementById('imagen-url-container');
+
+        if (tipo === 'archivo') {
+            archivoContainer.classList.remove('hidden');
+            urlContainer.classList.add('hidden');
+            // Clear URL input to avoid confusion
+            document.getElementById('imagen_url').value = '';
+        } else {
+            archivoContainer.classList.add('hidden');
+            urlContainer.classList.remove('hidden');
+            // Clear file input to avoid confusion
+            document.getElementById('imagen').value = '';
+        }
+    }
 </script>

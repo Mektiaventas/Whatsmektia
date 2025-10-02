@@ -5320,6 +5320,7 @@ def configuracion_precio_guardar():
     # Handle image upload
     imagen_nombre = None
     if 'imagen' in request.files and request.files['imagen'].filename:
+        # Handle file upload (priority over URL)
         file = request.files['imagen']
         # Create a secure filename with timestamp to avoid duplicates
         filename = secure_filename(f"{int(time.time())}_{file.filename}")
@@ -5328,6 +5329,12 @@ def configuracion_precio_guardar():
         imagen_nombre = filename
         # Update the data dictionary with the new image filename
         data['imagen'] = imagen_nombre
+    elif data.get('imagen_url') and data.get('imagen_url').strip():
+        # Handle image URL
+        imagen_url = data.get('imagen_url').strip()
+        # Use the URL directly as the image source
+        imagen_nombre = imagen_url
+        data['imagen'] = imagen_url
     
     campos = [
         'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
