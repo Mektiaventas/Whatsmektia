@@ -5319,7 +5319,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Crear resumen del pedido
+        # Create order summary (existing code)
         platillos = datos_pedido.get('platillos', [])
         cantidades = datos_pedido.get('cantidades', [])
         especificaciones = datos_pedido.get('especificaciones', [])
@@ -5329,7 +5329,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
         
-        # Guardar pedido en base de datos
+        # Save order to database
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
             'nombre_cliente': datos_pedido.get('nombre_cliente', 'Cliente'),
@@ -5340,9 +5340,14 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         
         pedido_id = guardar_cita(info_pedido, config)
         
-        # Mensaje de confirmación
+        # ADD THIS SECTION - Send alert to admin
+        app.logger.info(f"🚨 Sending admin alert for order #{pedido_id}")
+        alerta_enviada = enviar_alerta_cita_administrador(info_pedido, pedido_id, config)
+        app.logger.info(f"📤 Alert sent: {'✅ Success' if alerta_enviada else '❌ Failed'}")
+        
+        # Existing message creation code
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
-
+        
 📋 *Resumen de tu pedido:*
 {resumen_platillos}
 
