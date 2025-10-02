@@ -5398,6 +5398,59 @@ def debug_image(filename):
         'url': url_for('serve_uploaded_file', filename=filename, _external=True)
     })
 
+@app.route('/debug-image-full/<path:image_path>')
+def debug_image_full(image_path):
+    """Enhanced endpoint to debug images with more details"""
+    # Check different possible locations
+    possible_paths = [
+        os.path.join(UPLOAD_FOLDER, image_path),
+        os.path.join(app.static_folder, 'images', image_path),
+        os.path.join(app.static_folder, 'images', 'whatsapp', image_path),
+        os.path.join(UPLOAD_FOLDER, 'productos', image_path),
+        os.path.join(app.root_path, image_path)
+    ]
+    
+    results = []
+    for path in possible_paths:
+        exists = os.path.isfile(path)
+        size = os.path.getsize(path) if exists else 0
+        mime_type = None
+        
+        if exists:
+            try:
+                import magic
+                mime_type = magic.from_file(path, mime=True)
+            except ImportError:
+                # Fallback if python-magic not installed
+                if path.lower().endswith(('.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg'
+                elif path.lower().endswith('.png'):
+                    mime_type = 'image/png'
+                else:
+                    mime_type = 'unknown'
+        
+        results.append({
+            'path': path,
+            'exists': exists,
+            'size': size,
+            'mime_type': mime_type,
+            'url': url_for('static', filename=path.replace(app.static_folder, '').lstrip('/'), _external=True) 
+                  if path.startswith(app.static_folder) else None
+        })
+    
+    # Also check the original debug info
+    original_path = os.path.join(UPLOAD_FOLDER, image_path)
+    original_exists = os.path.isfile(original_path)
+    
+    return jsonify({
+        'filename': image_path,
+        'results': results,
+        'original_path': original_path,
+        'original_exists': original_exists,
+        'static_folder': app.static_folder,
+        'upload_folder': UPLOAD_FOLDER
+    })
+
 def aplicar_restricciones(respuesta_ia, numero, config=None):
     """Aplica las restricciones configuradas a las respuestas de la IA"""
     if config is None:
