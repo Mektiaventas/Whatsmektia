@@ -4825,8 +4825,13 @@ def webhook():
         # Crear hash único
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
-        # Verificar duplicados (excepto audio/imagen)
-        if not es_audio and not es_imagen and message_hash in processed_messages:
+        
+        # MODIFY THIS SECTION - Only check duplicates from last 10 minutes
+        current_time = time.time()
+    
+        # Check if it's a duplicate that was processed recently (last 10 minutes)
+        if (not es_audio and not es_imagen and message_hash in processed_messages and 
+            current_time - processed_messages[message_hash] < 600):  # 10 minutes = 600 seconds
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
             
