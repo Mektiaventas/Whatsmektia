@@ -5780,6 +5780,56 @@ def test_alerta():
     enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
     return "🚀 Test alerta disparada."
 
+@app.route('/test-calendar')
+def test_calendar():
+    """Endpoint para agendar un evento de prueba en Google Calendar"""
+    try:
+        config = obtener_configuracion_por_host()
+        
+        # Autenticar con Google Calendar
+        service = autenticar_google_calendar(config)
+        if not service:
+            return """
+            <h2>❌ Error de autenticación con Google Calendar</h2>
+            <p>Debes autorizar primero. <a href="/autorizar-manual">Haz clic aquí para autorizar</a>.</p>
+            """
+        
+        # Crear información de prueba para el evento
+        fecha_hora = datetime.now() + timedelta(hours=1)  # Evento para 1 hora después
+        info_evento = {
+            'servicio_solicitado': 'Evento de prueba desde API',
+            'fecha_sugerida': fecha_hora.strftime('%Y-%m-%d'),
+            'hora_sugerida': fecha_hora.strftime('%H:%M'),
+            'nombre_cliente': 'Test Calendar API',
+            'telefono': '5214493432744'  # Tu número
+        }
+        
+        # Crear el evento en Google Calendar
+        evento_id = crear_evento_calendar(service, info_evento, config)
+        
+        if evento_id:
+            return f"""
+            <h2>✅ Evento de prueba creado correctamente</h2>
+            <p>Se ha agendado un evento de prueba en tu Google Calendar.</p>
+            <p>ID del evento: {evento_id}</p>
+            <p>Fecha y hora: {fecha_hora.strftime('%Y-%m-%d %H:%M')}</p>
+            <p><a href="/autorizar-manual">Volver a autorización</a></p>
+            """
+        else:
+            return """
+            <h2>❌ Error al crear el evento de prueba</h2>
+            <p>No se pudo crear el evento en Google Calendar.</p>
+            <p><a href="/autorizar-manual">Volver a autorización</a></p>
+            """
+            
+    except Exception as e:
+        return f"""
+        <h2>❌ Error inesperado</h2>
+        <p>Ocurrió un error: {str(e)}</p>
+        <pre>{traceback.format_exc()}</pre>
+        <p><a href="/autorizar-manual">Volver a autorización</a></p>
+        """
+
 def obtener_chat_meta(numero, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
