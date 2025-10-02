@@ -4037,8 +4037,8 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
             return False
     
     # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
-    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
-        return False
+    #if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
+     #   return False
     
     mensaje_lower = mensaje_usuario.lower()
     
