@@ -1938,7 +1938,7 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
-@app.route('/completar_autorizacion')
+@app.route('/completar-autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
     try:
