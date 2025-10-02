@@ -5033,7 +5033,7 @@ def enviar_manual():
             conn = get_db_connection(config)
             cursor = conn.cursor()
             
-            timestamp_utc = datetime.utcnow()
+            timestamp_local = datetime.now(tz_mx)
             # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
