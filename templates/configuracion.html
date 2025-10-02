@@ -48,6 +48,9 @@
     <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
+        <small class="form-text text-muted">
+            Este nombre se mostrará en el sidebar y título de la página
+        </small>
     </div>
     <div class="form-card">
         <label>Nombre de tu Negocio</label>
@@ -68,16 +71,7 @@
         </div>
     </div>
 
-
-
     <div class="form-row">
-        <div class="form-card">
-            <label>Nombre de la Aplicación</label>
-            <input type="text" name="app_nombre" value="{{ datos.app_nombre or 'SmartWhats' }}" required>
-            <small class="form-text text-muted">
-                Este nombre se mostrará en el sidebar y título de la página
-            </small>
-        </div>
         <div class="form-card">
             <label>Logo de la Aplicación</label>
             <input type="file" name="app_logo" accept="image/png, image/jpeg, image/svg+xml">
@@ -91,12 +85,12 @@
             </div>
             {% endif %}
         </div>
-    </div>
-    <div class="form-row">
         <div class="form-card">
             <label>Teléfono</label>
             <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
+    </div>
+    <div class="form-row">
         <div class="form-card">
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">

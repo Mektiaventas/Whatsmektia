@@ -198,8 +198,7 @@ def guardar_configuracion_negocio():
         'direccion': request.form.get('direccion'),
         'telefono': request.form.get('telefono'),
         'correo': request.form.get('correo'),
-        'que_hace': request.form.get('que_hace'),
-        'app_nombre': request.form.get('app_nombre', 'SmartWhats')
+        'que_hace': request.form.get('que_hace')
     }
     
     # Manejar la subida del logo
@@ -224,6 +223,19 @@ def guardar_configuracion_negocio():
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
+    # Verificar si la columna app_logo existe
+    try:
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'app_logo'")
+        app_logo_existe = cursor.fetchone() is not None
+        
+        # Crear la columna si no existe
+        if not app_logo_existe:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN app_logo VARCHAR(255)")
+        
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"Error verificando/creando columna: {e}")
+    
     # Verificar si existe una configuración
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     count = cursor.fetchone()[0]
@@ -239,7 +251,27 @@ def guardar_configuracion_negocio():
                 values.append(value)
         
         sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-        cursor.execute(sql, values)
+        try:
+            cursor.execute(sql, values)
+        except Exception as e:
+            app.logger.error(f"Error al actualizar configuración: {e}")
+            # Filtrar columnas que causan problemas
+            if "Unknown column" in str(e):
+                # Obtener las columnas existentes
+                cursor.execute("SHOW COLUMNS FROM configuracion")
+                columnas_existentes = [col[0] for col in cursor.fetchall()]
+                
+                # Filtrar y volver a intentar
+                set_parts = []
+                values = []
+                for key, value in datos.items():
+                    if key in columnas_existentes and value is not None:
+                        set_parts.append(f"{key} = %s")
+                        values.append(value)
+                
+                if set_parts:
+                    sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+                    cursor.execute(sql, values)
     else:
         # Insertar nueva configuración
         fields = ', '.join(datos.keys())
@@ -258,9 +290,29 @@ def guardar_configuracion_negocio():
 def inject_app_config():
     # Obtener de la BD
     config = obtener_configuracion_por_host()
+    
+    # Conectar a la BD
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1")
+        cfg = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if cfg:
+            # Usar ia_nombre como nombre de la aplicación
+            return {
+                'app_nombre': cfg.get('ia_nombre', 'SmartWhats'),
+                'app_logo': cfg.get('app_logo')
+            }
+    except Exception as e:
+        app.logger.error(f"Error obteniendo configuración: {e}")
+    
+    # Valores por defecto
     return {
-        'app_nombre': config.get('app_nombre', 'SmartWhats'),
-        'app_logo': config.get('app_logo')
+        'app_nombre': 'SmartWhats',
+        'app_logo': None
     }
 
 def determinar_extension(mime_type, filename):
