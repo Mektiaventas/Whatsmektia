@@ -1938,53 +1938,6 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
-def detectar_y_procesar_cita(mensaje, numero, historial=None, config=None):
-    """
-    Detects appointment requests and processes them completely - from detection to Google Calendar to alerts
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # 1. Extract appointment information
-    info_cita = extraer_info_cita_mejorado(mensaje, numero, historial, config)
-    
-    if not info_cita or not info_cita.get('servicio_solicitado'):
-        app.logger.info("❌ No appointment info detected")
-        return False, None
-        
-    app.logger.info(f"✅ Appointment detected: {json.dumps(info_cita)}")
-    
-    # 2. Validate appointment data
-    datos_completos, mensaje_error = validar_datos_cita_completos(info_cita, config)
-    if not datos_completos:
-        app.logger.info(f"⚠️ Incomplete appointment data: {mensaje_error}")
-        return True, f"Para agendar tu cita necesito más información: {mensaje_error}"
-    
-    # 3. Save to database
-    app.logger.info("💾 Saving appointment to database")
-    cita_id = guardar_cita(info_cita, config)
-    if not cita_id:
-        return True, "Hubo un problema al agendar tu cita. Por favor intenta de nuevo."
-    
-    # 4. Create Google Calendar event
-    app.logger.info("📅 Creating Google Calendar event")
-    service = autenticar_google_calendar(config)
-    evento_id = None
-    if service:
-        evento_id = crear_evento_calendar(service, info_cita, config)
-        if evento_id:
-            app.logger.info(f"✅ Google Calendar event created: {evento_id}")
-    
-    # 5. Send confirmation to client
-    app.logger.info("📤 Sending client confirmation")
-    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-    
-    # 6. Send alert to admin
-    app.logger.info("🚨 Sending admin alert")
-    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-    
-    return True, f"✅ Tu cita ha sido agendada correctamente (ID: {cita_id}). Te enviaremos una confirmación por mensaje."
-
 @app.route('/completar-autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
@@ -2363,20 +2316,6 @@ def guardar_cita(info_cita, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # Handle null date/time values
-        fecha_propuesta = info_cita.get('fecha_sugerida')
-        hora_propuesta = info_cita.get('hora_sugerida')
-        
-        # If date or time is null, use current date + 1 day at noon
-        if not fecha_propuesta or not hora_propuesta or fecha_propuesta == 'null' or hora_propuesta == 'null':
-            tomorrow = datetime.now() + timedelta(days=1)
-            fecha_propuesta = tomorrow.strftime('%Y-%m-%d')
-            hora_propuesta = '12:00'
-            
-            # Update the info_cita with these values
-            info_cita['fecha_sugerida'] = fecha_propuesta
-            info_cita['hora_sugerida'] = hora_propuesta
-        
         cursor.execute('''
             INSERT INTO citas (
                 numero_cliente, servicio_solicitado, fecha_propuesta,
@@ -2385,9 +2324,9 @@ def guardar_cita(info_cita, config=None):
         ''', (
             info_cita.get('telefono'),
             info_cita.get('servicio_solicitado'),
-            fecha_propuesta,
-            hora_propuesta,
-            info_cita.get('nombre_cliente', 'Cliente sin nombre'),  # Default value
+            info_cita.get('fecha_sugerida'),
+            info_cita.get('hora_sugerida'),
+            info_cita.get('nombre_cliente'),
             info_cita.get('telefono'),
             'pendiente'
         ))
@@ -2397,7 +2336,21 @@ def guardar_cita(info_cita, config=None):
         cursor.close()
         conn.close()
         
-        # Rest of function remains the same...
+        # Agendar en Google Calendar
+        service = autenticar_google_calendar(config)
+        if service:
+            evento_id = crear_evento_calendar(service, info_cita, config)
+            if evento_id:
+                # Guardar el ID del evento en la base de datos
+                conn = get_db_connection(config)
+                cursor = conn.cursor()
+                cursor.execute('''
+                    UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                ''', (evento_id, cita_id))
+                conn.commit()
+                cursor.close()
+                conn.close()
+                app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
         
         return cita_id
         
@@ -2465,31 +2418,15 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
         """
         
-        # Ensure alerts are sent to both numbers
-        # First number (from env var)
-        result1 = False
-        result2 = False
-        
-        if ALERT_NUMBER:
-            app.logger.info(f"📱 Sending alert to ALERT_NUMBER: {ALERT_NUMBER}")
-            result1 = enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-            app.logger.info(f"📤 Alert to {ALERT_NUMBER}: {'✅ Sent' if result1 else '❌ Failed'}")
-        else:
-            app.logger.warning("⚠️ ALERT_NUMBER environment variable not set!")
-        
-        # Second number (hardcoded backup)
-        hardcoded_number = '5214493432744'  # Your personal number
-        app.logger.info(f"📱 Sending alert to hardcoded number: {hardcoded_number}")
-        result2 = enviar_mensaje(hardcoded_number, mensaje_alerta, config)
-        app.logger.info(f"📤 Alert to {hardcoded_number}: {'✅ Sent' if result2 else '❌ Failed'}")
-        
-        app.logger.info(f"✅ Alert sent for {tipo_solicitud} ID: {cita_id}")
-        return result1 or result2
+        # Enviar a ambos números
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        enviar_mensaje('5214493432744', mensaje_alerta, config)
+        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
         
     except Exception as e:
-        app.logger.error(f"❌ Error sending {tipo_solicitud} alert: {e}")
-        app.logger.error(traceback.format_exc())
-        return False
+        app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
+
+
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -4035,7 +3972,10 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     for alerta in alertas_sistema:
         if alerta in mensaje_usuario:
             return False
-
+    
+    # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
+    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
+        return False
     
     mensaje_lower = mensaje_usuario.lower()
     
@@ -4554,7 +4494,12 @@ def webhook():
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
-       
+        
+        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
+        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
+        if es_mi_numero:
+            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
+        
         # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
@@ -4565,15 +4510,7 @@ def webhook():
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
-        if 'laporfirianna' not in config.get('dominio', ''):  # Only for Mektia (non-restaurant)
-            es_cita, respuesta_cita = detectar_y_procesar_cita(texto, numero, historial, config)
-            if es_cita:
-                app.logger.info(f"📅 Appointment processed for {numero}")
-                # Send response and save conversation
-                if respuesta_cita:
-                    enviar_mensaje(numero, respuesta_cita, config)
-                    guardar_conversacion(numero, texto, respuesta_cita, config)
-                return 'OK', 200
+
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
@@ -4715,65 +4652,6 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
 def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
-
-@app.route('/test-cita-completa')
-def test_cita_completa():
-    """Test the complete appointment flow"""
-    config = obtener_configuracion_por_host()
-    
-    # Create test appointment info
-    fecha_hora = datetime.now() + timedelta(hours=24)  # Tomorrow
-    info_cita = {
-        'servicio_solicitado': 'Test de cita completa',
-        'fecha_sugerida': fecha_hora.strftime('%Y-%m-%d'),
-        'hora_sugerida': fecha_hora.strftime('%H:%M'),
-        'nombre_cliente': 'Cliente de Prueba',
-        'telefono': '5214493432744',  # Your number for testing
-        'estado': 'pendiente'
-    }
-    
-    # Process the appointment
-    cita_id = guardar_cita(info_cita, config)
-    
-    # Create Google Calendar event
-    service = autenticar_google_calendar(config)
-    evento_id = None
-    calendario_ok = False
-    
-    if service:
-        evento_id = crear_evento_calendar(service, info_cita, config)
-        calendario_ok = bool(evento_id)
-    
-    # Send alerts - With debugging logs
-    app.logger.info(f"🚨 Sending alert to administrators...")
-    try:
-        # Test alert to both numbers with verification
-        alert_sent1 = enviar_mensaje(ALERT_NUMBER, f"🚨 TEST ALERT: New appointment #{cita_id}", config) if ALERT_NUMBER else False
-        alert_sent2 = enviar_mensaje('5214493432744', f"🚨 TEST ALERT: New appointment #{cita_id}", config)
-        
-        # Send the full alert message
-        alerta_admin = enviar_alerta_cita_administrador(info_cita, cita_id, config)
-        
-        app.logger.info(f"✅ Alert status - ALERT_NUMBER: {alert_sent1}, Hardcoded number: {alert_sent2}")
-    except Exception as e:
-        app.logger.error(f"🔴 Error in test alerts: {e}")
-        app.logger.error(traceback.format_exc())
-        alerta_admin = False
-    
-    return jsonify({
-        'success': True,
-        'cita_id': cita_id,
-        'google_calendar': {
-            'success': calendario_ok,
-            'event_id': evento_id
-        },
-        'alerts': {
-            'admin': alerta_admin,
-            'alert_number': ALERT_NUMBER,
-            'alert_number_sent': bool(alert_sent1) if 'alert_sent1' in locals() else False,
-            'secondary_number_sent': bool(alert_sent2) if 'alert_sent2' in locals() else False
-        }
-    })
 
 @app.route('/test-contacto')
 def test_contacto(numero = '5214493432744'):
@@ -5296,7 +5174,7 @@ def verificar_pedido_completo(datos_obtenidos):
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes"""
     if not datos_obtenidos.get('platillos'):
-        return "¿Qué platillos te gustaría ordenar? Tenemos un menú delicioso, te lo camparto?."
+        return "¿Qué platillos te gustaría ordenar? Tenemos gorditas, tacos, quesadillas, sopes, etc."
     
     if not datos_obtenidos.get('cantidades') or len(datos_obtenidos['platillos']) != len(datos_obtenidos.get('cantidades', [])):
         platillos = datos_obtenidos['platillos']
@@ -5319,7 +5197,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Create order summary (existing code)
+        # Crear resumen del pedido
         platillos = datos_pedido.get('platillos', [])
         cantidades = datos_pedido.get('cantidades', [])
         especificaciones = datos_pedido.get('especificaciones', [])
@@ -5329,7 +5207,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
         
-        # Save order to database
+        # Guardar pedido en base de datos
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
             'nombre_cliente': datos_pedido.get('nombre_cliente', 'Cliente'),
@@ -5340,24 +5218,19 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         
         pedido_id = guardar_cita(info_pedido, config)
         
-        # ADD THIS SECTION - Send alert to admin
-        app.logger.info(f"🚨 Sending admin alert for order #{pedido_id}")
-        alerta_enviada = enviar_alerta_cita_administrador(info_pedido, pedido_id, config)
-        app.logger.info(f"📤 Alert sent: {'✅ Success' if alerta_enviada else '❌ Failed'}")
-        
-        # Existing message creation code
+        # Mensaje de confirmación
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
-        
-        📋 *Resumen de tu pedido:*
-        {resumen_platillos}
 
-        🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
-        👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
+📋 *Resumen de tu pedido:*
+{resumen_platillos}
 
-        ⏰ *Tiempo estimado:* 30-45 minutos
-        💳 *Forma de pago:* Efectivo al entregar
+🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
+👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
 
-        ¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
+⏰ *Tiempo estimado:* 30-45 minutos
+💳 *Forma de pago:* Efectivo al entregar
+
+¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
         
         # Limpiar estado
         actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
@@ -5779,56 +5652,6 @@ def test_alerta():
     config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
     enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
     return "🚀 Test alerta disparada."
-
-@app.route('/test-calendar')
-def test_calendar():
-    """Endpoint para agendar un evento de prueba en Google Calendar"""
-    try:
-        config = obtener_configuracion_por_host()
-        
-        # Autenticar con Google Calendar
-        service = autenticar_google_calendar(config)
-        if not service:
-            return """
-            <h2>❌ Error de autenticación con Google Calendar</h2>
-            <p>Debes autorizar primero. <a href="/autorizar-manual">Haz clic aquí para autorizar</a>.</p>
-            """
-        
-        # Crear información de prueba para el evento
-        fecha_hora = datetime.now() + timedelta(hours=1)  # Evento para 1 hora después
-        info_evento = {
-            'servicio_solicitado': 'Evento de prueba desde API',
-            'fecha_sugerida': fecha_hora.strftime('%Y-%m-%d'),
-            'hora_sugerida': fecha_hora.strftime('%H:%M'),
-            'nombre_cliente': 'Test Calendar API',
-            'telefono': '5214493432744'  # Tu número
-        }
-        
-        # Crear el evento en Google Calendar
-        evento_id = crear_evento_calendar(service, info_evento, config)
-        
-        if evento_id:
-            return f"""
-            <h2>✅ Evento de prueba creado correctamente</h2>
-            <p>Se ha agendado un evento de prueba en tu Google Calendar.</p>
-            <p>ID del evento: {evento_id}</p>
-            <p>Fecha y hora: {fecha_hora.strftime('%Y-%m-%d %H:%M')}</p>
-            <p><a href="/autorizar-manual">Volver a autorización</a></p>
-            """
-        else:
-            return """
-            <h2>❌ Error al crear el evento de prueba</h2>
-            <p>No se pudo crear el evento en Google Calendar.</p>
-            <p><a href="/autorizar-manual">Volver a autorización</a></p>
-            """
-            
-    except Exception as e:
-        return f"""
-        <h2>❌ Error inesperado</h2>
-        <p>Ocurrió un error: {str(e)}</p>
-        <pre>{traceback.format_exc()}</pre>
-        <p><a href="/autorizar-manual">Volver a autorización</a></p>
-        """
 
 def obtener_chat_meta(numero, config=None):
         if config is None:
