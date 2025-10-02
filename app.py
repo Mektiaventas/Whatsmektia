@@ -5012,57 +5012,39 @@ def toggle_ai(numero, config=None):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-        config = obtener_configuracion_por_host()
-        conn = get_db_connection(config)
-        # ... código existente ...
-        try:
-            numero = request.form['numero']
-            texto = request.form['texto'].strip()
-            
-            # Validar que el mensaje no esté vacío
-            if not texto:
-                flash('❌ El mensaje no puede estar vacío', 'error')
-                return redirect(url_for('ver_chat', numero=numero))
-            
-            app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
-            
-            # 1. ENVIAR MENSAJE POR WHATSAPP
-            enviar_mensaje(numero, texto)
-            
-            # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            timestamp_utc = datetime.utcnow()
-            # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
-            cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-                (numero, '[Mensaje manual desde web]', texto, timestamp_utc)  # ← Sin NULLs
-            )
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
-            try:
-                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-            except Exception as e:
-                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
-            
-            # 4. MENSAJE DE CONFIRMACIÓN
-            flash('✅ Mensaje enviado correctamente', 'success')
-            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
-            
-        except KeyError:
-            flash('❌ Error: Número de teléfono no proporcionado', 'error')
-            app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
-        except Exception as e:
-            flash('❌ Error al enviar el mensaje', 'error')
-            app.logger.error(f"🔴 Error en enviar_manual: {e}")
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    try:
+        numero = request.form['numero']
+        texto = request.form['texto'].strip()
         
-        return redirect(url_for('ver_chat', numero=numero))
+        # Validar que el mensaje no esté vacío
+        if not texto:
+            flash('❌ El mensaje no puede estar vacío', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+        
+        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+        
+        # 1. ENVIAR MENSAJE POR WHATSAPP
+        enviar_mensaje(numero, texto)
+        
+        # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Usar timestamp con zona horaria de México
+        timestamp_local = datetime.now(tz_mx)  # Cambiar de utcnow() a now(tz_mx)
+        
+        cursor.execute(
+            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
+            (numero, '[Mensaje manual desde web]', texto, timestamp_local)
+        )
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # Resto del código...
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
