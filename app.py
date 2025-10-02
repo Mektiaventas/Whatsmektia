@@ -529,7 +529,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     if campo in df.columns:
                         producto[campo] = row[campo]
                     else:
-                        producto[campo] = 'nadita'  # Valor por defecto
+                        producto[campo] = ''  # Valor por defecto
                 
                 # Verificar si hay al menos un campo con datos
                 tiene_datos = any(str(value).strip() for value in producto.values())
@@ -542,19 +542,18 @@ def importar_productos_desde_excel(filepath, config=None):
                 # Reemplazar valores vacíos con "nadita" si hay al menos un dato
                 for campo in campos_esperados:
                     if not str(producto.get(campo, '')).strip():
-                        producto[campo] = "nadita"
+                        producto[campo] = f"nadita{idx}"  # Añadir índice para hacerlo único
                 
-                # Asegurarse de que servicio no esté vacío (requerido)
-                if not producto.get('servicio') or producto.get('servicio') == 'nadita':
-                    app.logger.warning(f"Fila {idx} omitida: sin nombre de servicio")
-                    filas_omitidas += 1
-                    continue
+                # IMPORTANTE: Ya no omitimos filas por "servicio" vacío, lo usamos con sufijo único
+                if not producto.get('servicio') or producto.get('servicio') == '':
+                    producto['servicio'] = f"nadita{idx}"
+                    app.logger.info(f"Fila {idx}: servicio vacío reemplazado con 'nadita{idx}'")
                 
                 # NUEVO: Truncar el servicio si es demasiado largo
                 servicio_original = producto.get('servicio', '')
                 if len(str(servicio_original)) > 95:  # Límite de seguridad (probablemente es VARCHAR(100))
                     # Si es demasiado largo, mover el texto al campo descripción
-                    if producto.get('descripcion') == 'nadita':
+                    if producto.get('descripcion') == f"nadita{idx}":
                         producto['descripcion'] = servicio_original
                     
                     # Truncar el servicio a 95 caracteres
@@ -565,7 +564,7 @@ def importar_productos_desde_excel(filepath, config=None):
                 for campo in ['precio', 'costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
-                        if valor != '' and valor != 'nadita':
+                        if valor != '' and not valor.startswith('nadita'):
                             # Convertir a string primero para manejar diferentes tipos
                             valor_str = str(valor)
                             # Limpiar cualquier carácter no numérico excepto el punto decimal
@@ -583,10 +582,10 @@ def importar_productos_desde_excel(filepath, config=None):
                         producto[campo] = '0.00'
                 
                 # Establecer valores por defecto para campos críticos
-                if producto.get('moneda') == 'nadita':
+                if producto.get('moneda', '').startswith('nadita'):
                     producto['moneda'] = 'MXN'
                 
-                if producto.get('status_ws') == 'nadita':
+                if producto.get('status_ws', '').startswith('nadita'):
                     producto['status_ws'] = 'activo'
                 
                 # Insertar en la base de datos
