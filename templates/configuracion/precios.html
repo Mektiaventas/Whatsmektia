@@ -22,38 +22,48 @@
     {% endfor %}
 </ul>
 
-<!-- NUEVO: Dashboard con botones principales -->
-<div class="dashboard-menu mb-6" id="main-dashboard">
-    <div class="grid grid-cols-5 gap-4">
-        <div class="dashboard-item" onclick="showSection('batch-upload')">
-            <div class="dashboard-icon">📊</div>
-            <h3>Carga batch</h3>
-            <p>Importar múltiples productos desde Excel</p>
-        </div>
+<!-- NUEVO: Menú de navegación persistente -->
+<div class="tab-navigation mb-6">
+    <div class="tab-buttons">
+        <button class="tab-button" id="btn-batch-upload" onclick="showSection('batch-upload')">
+            <div class="tab-icon">📊</div>
+            <div>
+                <span class="tab-title">Carga de Template</span>
+                <span class="tab-desc">Importar desde Excel</span>
+            </div>
+        </button>
 
-        <div class="dashboard-item" onclick="showSection('manual-upload')">
-            <div class="dashboard-icon">✏️</div>
-            <h3>Carga manual</h3>
-            <p>Agregar o editar productos uno a uno</p>
-        </div>
+        <button class="tab-button" id="btn-manual-upload" onclick="showSection('manual-upload')">
+            <div class="tab-icon">✏️</div>
+            <div>
+                <span class="tab-title">Carga manual</span>
+                <span class="tab-desc">Agregar uno a uno</span>
+            </div>
+        </button>
 
-        <div class="dashboard-item" onclick="showSection('pdf-upload')">
-            <div class="dashboard-icon">📄</div>
-            <h3>Carga desde PDF</h3>
-            <p>Extraer productos desde catálogos PDF</p>
-        </div>
+        <button class="tab-button" id="btn-pdf-upload" onclick="showSection('pdf-upload')">
+            <div class="tab-icon">📄</div>
+            <div>
+                <span class="tab-title">Carga con IA</span>
+                <span class="tab-desc">Extraer de catálogos</span>
+            </div>
+        </button>
 
-        <div class="dashboard-item" onclick="showSection('user-list')">
-            <div class="dashboard-icon">👥</div>
-            <h3>Lista de precios Usuario</h3>
-            <p>Ver productos como los ve el cliente</p>
-        </div>
+        <button class="tab-button" id="btn-user-list" onclick="showSection('user-list')">
+            <div class="tab-icon">👥</div>
+            <div>
+                <span class="tab-title">Lista Usuario</span>
+                <span class="tab-desc">Vista de cliente</span>
+            </div>
+        </button>
 
-        <div class="dashboard-item" onclick="showSection('admin-list')">
-            <div class="dashboard-icon">🔒</div>
-            <h3>Lista de precios Admin</h3>
-            <p>Ver todos los detalles de los productos</p>
-        </div>
+        <button class="tab-button" id="btn-admin-list" onclick="showSection('admin-list')">
+            <div class="tab-icon">🔒</div>
+            <div>
+                <span class="tab-title">Lista Admin</span>
+                <span class="tab-desc">Vista completa</span>
+            </div>
+        </button>
     </div>
 </div>
 
@@ -87,7 +97,7 @@
                     </form>
                 </div>
 
-                <div class="bg-blue-50 p-4 rounded-lg">
+                <div>
                     <h4 class="font-semibold mb-2">💡 ¿Cómo funciona?</h4>
                     <ul class="text-sm space-y-1">
                         <li>• Sube tu catálogo de productos en PDF/Excel</li>
@@ -139,7 +149,7 @@
                     </form>
                 </div>
 
-                <div class="bg-blue-50 p-4 rounded-lg">
+                <div>
                     <h4 class="font-semibold mb-2">💡 Estructura Requerida</h4>
                     <ul class="text-sm space-y-1">
                         <li>• sku</li>
@@ -274,7 +284,7 @@
                         <label for="moneda">Moneda *</label>
                         <select id="moneda" name="moneda" class="select" required>
                             {% for m in ['MXN','USD','EUR'] %}
-                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda==m %}selected{% endif %}>
+                            <option value="{{ m }}" {% if precio_edit and precio_edit.moneda= =m %}selected{% endif %}>
                                 {{ m }} - {{ 'Peso Mexicano' if m == 'MXN' else 'Dólar Americano' if m == 'USD' else 'Euro' }}
                             </option>
                             {% endfor %}
@@ -635,6 +645,7 @@
     }
 
 
+
     .text-green-600 {
         color: #059669;
     }
@@ -684,7 +695,7 @@
 </style>
 
 <script>
-    // Function to show a specific section and hide others
+    // Function to show a specific section and highlight its button
     function showSection(sectionId) {
         // Hide all sections
         const sections = document.querySelectorAll('.section');
@@ -692,30 +703,28 @@
             section.style.display = 'none';
         });
 
-        // Hide the dashboard
-        document.getElementById('main-dashboard').style.display = 'none';
+        // Remove active class from all buttons
+        const buttons = document.querySelectorAll('.tab-button');
+        buttons.forEach(button => {
+            button.classList.remove('active');
+        });
 
         // Show the requested section
         const targetSection = document.getElementById(sectionId);
         if (targetSection) {
             targetSection.style.display = 'block';
-            // Scroll to the section
-            targetSection.scrollIntoView({ behavior: 'smooth' });
+            // Scroll to the section (but not to the very top)
+            window.scrollTo({
+                top: document.querySelector('.tab-navigation').offsetTop + 60,
+                behavior: 'smooth'
+            });
         }
-    }
 
-    // Function to go back to the dashboard
-    function backToDashboard() {
-        // Hide all sections
-        const sections = document.querySelectorAll('.section');
-        sections.forEach(section => {
-            section.style.display = 'none';
-        });
-
-        // Show the dashboard
-        document.getElementById('main-dashboard').style.display = 'block';
-        // Scroll to top
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        // Highlight the active button
+        const activeButton = document.getElementById(`btn-${sectionId}`);
+        if (activeButton) {
+            activeButton.classList.add('active');
+        }
     }
 
     // Image input toggle function
@@ -737,19 +746,32 @@
 
     // On document ready
     document.addEventListener('DOMContentLoaded', function () {
-        console.log("DOM loaded - initializing dashboard");
+        console.log("DOM loaded - initializing tab navigation");
+
+        // Default to the first section if no section is specified
+        let initialSection = 'batch-upload';
 
         {% if precio_edit %}
         // If editing a product, go directly to manual upload
-        showSection('manual-upload');
+        initialSection = 'manual-upload';
         {% endif %}
 
         // Check for URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const section = urlParams.get('section');
         if (section) {
-            showSection(section);
+            initialSection = section;
+        }
+
+        // Show the initial section
+        showSection(initialSection);
+
+        // Make sure the imagen-url-container is hidden initially
+        const urlContainer = document.getElementById('imagen-url-container');
+        if (urlContainer) {
+            urlContainer.style.display = 'none';
         }
     });
 </script>
+{% endblock %}
 {% endblock %}
