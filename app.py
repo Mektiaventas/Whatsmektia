@@ -3452,7 +3452,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
             
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-        if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
+        if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
             resumen = resumen_rafa(numero, config)
             enviar_alerta_humana(numero, texto, resumen, config)
@@ -4601,10 +4601,6 @@ def webhook():
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
         
-        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
-        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
-        if es_mi_numero:
-            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
         
         # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
