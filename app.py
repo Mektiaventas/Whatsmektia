@@ -430,168 +430,67 @@ def importar_productos_desde_excel(filepath, config=None):
         # Determinar el tipo de archivo y leerlo
         extension = os.path.splitext(filepath)[1].lower()
         
-        # Intentar leer todas las hojas para buscar datos válidos
-        all_sheets_data = []
-        
         if extension in ['.xlsx', '.xls']:
-            # Primero leer el nombre de todas las hojas
-            excel_file = pd.ExcelFile(filepath)
-            sheet_names = excel_file.sheet_names
-            app.logger.info(f"Hojas encontradas en el archivo: {sheet_names}")
-            
-            # Examinar todas las hojas
-            for sheet_name in sheet_names:
-                try:
-                    # Intentar leer con y sin cabeceras
-                    try:
-                        # Primero intentar con cabeceras normales
-                        df = pd.read_excel(filepath, sheet_name=sheet_name)
-                        if not df.empty:
-                            app.logger.info(f"Datos encontrados en hoja '{sheet_name}' usando cabeceras estándar")
-                            all_sheets_data.append((sheet_name, df))
-                    except:
-                        pass
-                    
-                    # También intentar saltando algunas filas
-                    for skiprows in [1, 2, 3]:
-                        try:
-                            df = pd.read_excel(filepath, sheet_name=sheet_name, skiprows=skiprows)
-                            if not df.empty:
-                                app.logger.info(f"Datos encontrados en hoja '{sheet_name}' saltando {skiprows} filas")
-                                all_sheets_data.append((sheet_name, df))
-                        except:
-                            pass
-                except Exception as e:
-                    app.logger.warning(f"Error leyendo hoja '{sheet_name}': {str(e)}")
+            df = pd.read_excel(filepath)
         elif extension == '.csv':
-            try:
-                df = pd.read_csv(filepath)
-                if not df.empty:
-                    all_sheets_data.append(("CSV", df))
-            except:
-                # Intentar con diferentes encodings y delimitadores
-                for encoding in ['utf-8', 'latin1', 'iso-8859-1']:
-                    for sep in [',', ';', '\t']:
-                        try:
-                            df = pd.read_csv(filepath, encoding=encoding, sep=sep)
-                            if not df.empty:
-                                all_sheets_data.append(("CSV", df))
-                                break
-                        except:
-                            pass
-        
-        # Si no se encontró ningún dato válido
-        if not all_sheets_data:
-            app.logger.error("No se encontraron datos válidos en ninguna hoja del archivo")
+            df = pd.read_csv(filepath)
+        else:
+            app.logger.error(f"Formato de archivo no soportado: {extension}")
             return 0
         
-        # Trabajar con el primer conjunto de datos encontrado
-        sheet_name, df = all_sheets_data[0]
-        app.logger.info(f"Usando datos de la hoja '{sheet_name}'")
+        # Normalizar nombres de columnas (convertir a minúsculas)
+        df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
         
-        # Eliminar filas completamente vacías
-        df = df.dropna(how='all')
+        # Mostrar las columnas disponibles para diagnóstico
+        app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
         
-        # Mostrar todas las columnas para diagnóstico
-        app.logger.info(f"Columnas encontradas: {list(df.columns)}")
-        
-        # Eliminar columnas sin nombre o con nombres NaN
-        df = df.loc[:, ~df.columns.isna()]
-        
-        # Normalizar nombres de columnas (convertir a minúsculas y eliminar espacios)
-        df.columns = [str(col).lower().strip() if isinstance(col, str) else f"col_{i}" 
-                     for i, col in enumerate(df.columns)]
-        
-        # Intentar detectar automáticamente qué columnas contienen nombres de productos y precios
-        # basándose en análisis heurístico
-        posibles_columnas_producto = []
-        posibles_columnas_precio = []
-        
-        for col in df.columns:
-            # Verificar contenido de la columna para identificar producto/servicio
-            if col in ['producto', 'servicio', 'descripción', 'descripcion', 'nombre', 'artículo', 'articulo']:
-                posibles_columnas_producto.append(col)
-            elif any(s in col.lower() for s in ['producto', 'servicio', 'descripción', 'descripcion', 'nombre', 'artículo']):
-                posibles_columnas_producto.append(col)
-            
-            # Verificar contenido de la columna para identificar precios
-            if col in ['precio', 'costo', 'importe', 'valor', 'precio unitario']:
-                posibles_columnas_precio.append(col)
-            elif any(s in col.lower() for s in ['precio', 'costo', '$', 'monto', 'importe', 'valor']):
-                posibles_columnas_precio.append(col)
-        
-        app.logger.info(f"Posibles columnas para productos: {posibles_columnas_producto}")
-        app.logger.info(f"Posibles columnas para precios: {posibles_columnas_precio}")
-        
-        # Si no se detectaron columnas automáticamente, usar la primera columna como producto
-        # y la segunda columna que parezca numérica como precio
-        if not posibles_columnas_producto:
-            # Usar la primera columna que tenga la mayoría de sus valores como strings
-            for col in df.columns:
-                if df[col].dropna().astype(str).str.len().mean() > 3:  # Promedio de longitud > 3
-                    posibles_columnas_producto.append(col)
-                    break
-        
-        if not posibles_columnas_precio:
-            # Usar la primera columna que tenga la mayoría de sus valores como números
-            for col in df.columns:
-                if pd.to_numeric(df[col], errors='coerce').notna().mean() > 0.5:  # Más del 50% son números
-                    posibles_columnas_precio.append(col)
-                    break
-        
-        # Si aún no hay columnas, imposible continuar
-        if not posibles_columnas_producto or not posibles_columnas_precio:
-            app.logger.error("No se pudieron detectar columnas de producto y precio")
-            return 0
-        
-        # Usar la primera columna detectada para producto y precio
-        columna_producto = posibles_columnas_producto[0]
-        columna_precio = posibles_columnas_precio[0]
-        
-        app.logger.info(f"Usando columna '{columna_producto}' para productos")
-        app.logger.info(f"Usando columna '{columna_precio}' para precios")
-        
-        # Crear nuevo DataFrame con las columnas mapeadas
-        df_mapped = pd.DataFrame()
-        df_mapped['servicio'] = df[columna_producto]
-        df_mapped['precio'] = df[columna_precio]
-        
-        # Mapear otras columnas si existen
+        # Mapeo EXACTO para las columnas en tu archivo Excel
         column_mapping = {
-            'sku': ['sku', 'código', 'codigo', 'id', 'referencia'],
-            'categoria': ['categoria', 'categoría', 'family', 'familia'],
-            'subcategoria': ['subcategoria', 'subcategoría', 'subfamilia'],
-            'descripcion': ['descripcion', 'descripción', 'detalle', 'características'],
-            'costo': ['costo', 'coste', 'cost', 'precio_compra'],
-            'precio_mayoreo': ['precio_mayoreo', 'mayoreo', 'wholesale', 'precio mayor'],
-            'precio_menudeo': ['precio_menudeo', 'menudeo', 'retail', 'precio menor'],
-            'proveedor': ['proveedor', 'supplier', 'vendor']
+            'servicio': 'servicio',
+            'precio': 'precio',
+            'sku': 'sku',
+            'categoria': 'categoria',
+            'subcategoria': 'subcategoria',
+            'linea': 'linea',
+            'modelo': 'modelo',
+            'descripcion': 'descripcion',
+            'medidas': 'medidas',
+            'costo': 'costo',
+            'precio mayoreo': 'precio_mayoreo',
+            'precio menudeo': 'precio_menudeo',
+            'moneda': 'moneda',
+            'imagen': 'imagen',
+            'status ws': 'status_ws',
+            'catalogo': 'catalogo',
+            'cataogo 2': 'catalogo2',  # Corregir typo en el nombre de la columna
+            'cataogo 3': 'catalogo3',  # Corregir typo en el nombre de la columna
+            'proveedor': 'proveedor'
         }
         
-        for target_col, possible_cols in column_mapping.items():
-            for source_col in possible_cols:
-                if source_col in df.columns:
-                    df_mapped[target_col] = df[source_col]
-                    app.logger.info(f"Mapeando columna '{source_col}' a '{target_col}'")
-                    break
+        # Renombrar columnas según el mapeo exacto
+        for excel_col, db_col in column_mapping.items():
+            if excel_col in df.columns:
+                df = df.rename(columns={excel_col: db_col})
+                app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
         
-        # Mostrar las primeras filas para diagnóstico
-        app.logger.info(f"Primeras 2 filas después del mapeo:\n{df_mapped.head(2).to_dict('records')}")
+        # Verificar columnas mínimas requeridas después del mapeo
+        app.logger.info(f"Columnas después del mapeo: {list(df.columns)}")
+        if 'servicio' not in df.columns or 'precio' not in df.columns:
+            app.logger.error(f"El archivo no tiene las columnas requeridas después del mapeo: servicio, precio")
+            return 0
         
-        # Eliminar filas sin servicio y sin precio
-        df_mapped = df_mapped.dropna(subset=['servicio'])
+        # Debug: mostrar las primeras filas para verificar datos
+        app.logger.info(f"Primeras 2 filas de datos:\n{df.head(2).to_dict('records')}")
         
         # Verificar si hay filas en el DataFrame
-        if df_mapped.empty:
-            app.logger.error("El archivo no contiene datos válidos después del procesamiento")
+        if df.empty:
+            app.logger.error("El archivo no contiene datos (está vacío)")
             return 0
             
-        app.logger.info(f"Total de filas válidas encontradas: {len(df_mapped)}")
+        app.logger.info(f"Total de filas encontradas: {len(df)}")
         
-        # Resto del procesamiento sigue igual...
-        
-        # Limpiar datos: reemplazar NaN con cadenas vacías
-        df_mapped = df_mapped.fillna('')
+        # Reemplazar NaN con ''
+        df = df.fillna('')
         
         # Crear conexión a BD
         conn = get_db_connection(config)
@@ -621,28 +520,52 @@ def importar_productos_desde_excel(filepath, config=None):
         filas_omitidas = 0
         
         # Procesar cada fila
-        for idx, row in df_mapped.iterrows():
+        for idx, row in df.iterrows():
             filas_procesadas += 1
             try:
                 # Convertir fila a diccionario
                 producto = {}
                 for campo in campos_esperados:
-                    if campo in df_mapped.columns:
+                    if campo in df.columns:
                         producto[campo] = row[campo]
                     else:
-                        producto[campo] = ''  # Valor por defecto
+                        producto[campo] = 'nadita'  # Valor por defecto
                 
-                # Asegurarse de que servicio no esté vacío
-                if not producto.get('servicio'):
+                # Verificar si hay al menos un campo con datos
+                tiene_datos = any(str(value).strip() for value in producto.values())
+                
+                if not tiene_datos:
+                    app.logger.warning(f"Fila {idx} omitida: sin ningún dato")
+                    filas_omitidas += 1
+                    continue
+                
+                # Reemplazar valores vacíos con "nadita" si hay al menos un dato
+                for campo in campos_esperados:
+                    if not str(producto.get(campo, '')).strip():
+                        producto[campo] = "nadita"
+                
+                # Asegurarse de que servicio no esté vacío (requerido)
+                if not producto.get('servicio') or producto.get('servicio') == 'nadita':
                     app.logger.warning(f"Fila {idx} omitida: sin nombre de servicio")
                     filas_omitidas += 1
                     continue
+                
+                # NUEVO: Truncar el servicio si es demasiado largo
+                servicio_original = producto.get('servicio', '')
+                if len(str(servicio_original)) > 95:  # Límite de seguridad (probablemente es VARCHAR(100))
+                    # Si es demasiado largo, mover el texto al campo descripción
+                    if producto.get('descripcion') == 'nadita':
+                        producto['descripcion'] = servicio_original
+                    
+                    # Truncar el servicio a 95 caracteres
+                    producto['servicio'] = str(servicio_original)[:95]
+                    app.logger.info(f"Servicio truncado para fila {idx}: {producto['servicio']}...")
                 
                 # Validar y convertir campos numéricos (precios)
                 for campo in ['precio', 'costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
-                        if valor != '':
+                        if valor != '' and valor != 'nadita':
                             # Convertir a string primero para manejar diferentes tipos
                             valor_str = str(valor)
                             # Limpiar cualquier carácter no numérico excepto el punto decimal
@@ -660,10 +583,10 @@ def importar_productos_desde_excel(filepath, config=None):
                         producto[campo] = '0.00'
                 
                 # Establecer valores por defecto para campos críticos
-                if not producto.get('moneda'):
+                if producto.get('moneda') == 'nadita':
                     producto['moneda'] = 'MXN'
                 
-                if not producto.get('status_ws'):
+                if producto.get('status_ws') == 'nadita':
                     producto['status_ws'] = 'activo'
                 
                 # Insertar en la base de datos
@@ -689,7 +612,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('proveedor', '')
                 ]
                 
-                app.logger.info(f"Insertando producto: {producto.get('servicio')} - {producto.get('precio')}")
+                app.logger.info(f"Insertando producto: {producto.get('servicio')[:50]}... - {producto.get('precio')}")
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, servicio, categoria, subcategoria, linea, modelo,
@@ -710,7 +633,7 @@ def importar_productos_desde_excel(filepath, config=None):
                 """, values)
                 
                 productos_importados += 1
-                app.logger.info(f"✅ Producto importado: {producto.get('servicio')}")
+                app.logger.info(f"✅ Producto importado: {producto.get('servicio')[:50]}...")
                 
             except Exception as e:
                 app.logger.error(f"Error procesando fila {idx}: {str(e)}")
