@@ -1938,6 +1938,53 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     return True, None
 
+def detectar_y_procesar_cita(mensaje, numero, historial=None, config=None):
+    """
+    Detects appointment requests and processes them completely - from detection to Google Calendar to alerts
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    # 1. Extract appointment information
+    info_cita = extraer_info_cita_mejorado(mensaje, numero, historial, config)
+    
+    if not info_cita or not info_cita.get('servicio_solicitado'):
+        app.logger.info("❌ No appointment info detected")
+        return False, None
+        
+    app.logger.info(f"✅ Appointment detected: {json.dumps(info_cita)}")
+    
+    # 2. Validate appointment data
+    datos_completos, mensaje_error = validar_datos_cita_completos(info_cita, config)
+    if not datos_completos:
+        app.logger.info(f"⚠️ Incomplete appointment data: {mensaje_error}")
+        return True, f"Para agendar tu cita necesito más información: {mensaje_error}"
+    
+    # 3. Save to database
+    app.logger.info("💾 Saving appointment to database")
+    cita_id = guardar_cita(info_cita, config)
+    if not cita_id:
+        return True, "Hubo un problema al agendar tu cita. Por favor intenta de nuevo."
+    
+    # 4. Create Google Calendar event
+    app.logger.info("📅 Creating Google Calendar event")
+    service = autenticar_google_calendar(config)
+    evento_id = None
+    if service:
+        evento_id = crear_evento_calendar(service, info_cita, config)
+        if evento_id:
+            app.logger.info(f"✅ Google Calendar event created: {evento_id}")
+    
+    # 5. Send confirmation to client
+    app.logger.info("📤 Sending client confirmation")
+    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+    
+    # 6. Send alert to admin
+    app.logger.info("🚨 Sending admin alert")
+    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+    
+    return True, f"✅ Tu cita ha sido agendada correctamente (ID: {cita_id}). Te enviaremos una confirmación por mensaje."
+
 @app.route('/completar-autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
