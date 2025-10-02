@@ -4035,10 +4035,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     for alerta in alertas_sistema:
         if alerta in mensaje_usuario:
             return False
-    
-    # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
-    #if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
-     #   return False
+
     
     mensaje_lower = mensaje_usuario.lower()
     
@@ -4557,12 +4554,7 @@ def webhook():
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
-        
-        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
-        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
-        if es_mi_numero:
-            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
-        
+       
         # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
@@ -5304,7 +5296,7 @@ def verificar_pedido_completo(datos_obtenidos):
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes"""
     if not datos_obtenidos.get('platillos'):
-        return "¿Qué platillos te gustaría ordenar? Tenemos gorditas, tacos, quesadillas, sopes, etc."
+        return "¿Qué platillos te gustaría ordenar? Tenemos un menú delicioso, te lo camparto?."
     
     if not datos_obtenidos.get('cantidades') or len(datos_obtenidos['platillos']) != len(datos_obtenidos.get('cantidades', [])):
         platillos = datos_obtenidos['platillos']
@@ -5356,16 +5348,16 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         # Existing message creation code
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
         
-📋 *Resumen de tu pedido:*
-{resumen_platillos}
+        📋 *Resumen de tu pedido:*
+        {resumen_platillos}
 
-🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
-👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
+        🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
+        👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
 
-⏰ *Tiempo estimado:* 30-45 minutos
-💳 *Forma de pago:* Efectivo al entregar
+        ⏰ *Tiempo estimado:* 30-45 minutos
+        💳 *Forma de pago:* Efectivo al entregar
 
-¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
+        ¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
         
         # Limpiar estado
         actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
