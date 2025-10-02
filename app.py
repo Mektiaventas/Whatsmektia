@@ -1394,6 +1394,152 @@ def renombrar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'nombre': nuevo_nombre})
 
+def agendar_cita_google_calendar(datos_cita, config=None):
+    """Enhanced calendar appointment creation with better formatting"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Authenticate with Google Calendar
+        service = autenticar_google_calendar(config)
+        if not service:
+            app.logger.error("❌ No se pudo autenticar con Google Calendar")
+            return None, "Error de autenticación con Google Calendar"
+        
+        # Process date and time data
+        try:
+            # Handle relative dates like "tomorrow", "next Friday"
+            if isinstance(datos_cita.get('fecha'), str) and not re.match(r'\d{4}-\d{2}-\d{2}', datos_cita.get('fecha', '')):
+                fecha_procesada = procesar_fecha_relativa(datos_cita.get('fecha'))
+            else:
+                fecha_procesada = datos_cita.get('fecha')
+                
+            # Format time properly
+            hora_procesada = datos_cita.get('hora')
+            if hora_procesada and ":" not in hora_procesada:
+                hora_procesada = f"{hora_procesada}:00"
+                
+            # Create datetime objects
+            start_datetime = datetime.strptime(f"{fecha_procesada} {hora_procesada}", "%Y-%m-%d %H:%M")
+            end_datetime = start_datetime + timedelta(hours=1)  # Default 1 hour duration
+            
+            # Convert to RFC3339 format for Google Calendar
+            start_time = start_datetime.isoformat()
+            end_time = end_datetime.isoformat()
+            
+        except Exception as e:
+            app.logger.error(f"❌ Error procesando fecha/hora: {e}")
+            return None, f"Error en formato de fecha/hora: {str(e)}"
+        
+        # Create detailed event
+        event = {
+            'summary': f"Cita: {datos_cita.get('servicio')} - {datos_cita.get('nombre')}",
+            'location': config.get('direccion', 'Por confirmar'),
+            'description': f"""
+Cita agendada automáticamente por SmartWhats AI
+
+Servicio: {datos_cita.get('servicio')}
+Cliente: {datos_cita.get('nombre')}
+Teléfono: {datos_cita.get('telefono')}
+Notas adicionales: {datos_cita.get('notas', 'Ninguna')}
+
+Esta cita fue creada el {datetime.now().strftime('%d/%m/%Y %H:%M')}
+            """.strip(),
+            'start': {
+                'dateTime': start_time,
+                'timeZone': 'America/Mexico_City',
+            },
+            'end': {
+                'dateTime': end_time,
+                'timeZone': 'America/Mexico_City',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 30},
+                    {'method': 'email', 'minutes': 24 * 60},  # 1 day before
+                ],
+            },
+            'colorId': '1',  # Blue color
+        }
+        
+        # Get calendar ID (use primary if not specified)
+        calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+        
+        # Create the event
+        created_event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        
+        app.logger.info(f"✅ Evento creado: {created_event.get('htmlLink')}")
+        return created_event.get('id'), created_event.get('htmlLink')
+        
+    except HttpError as error:
+        app.logger.error(f'❌ Error al crear evento en Google Calendar: {error}')
+        return None, f"Error de Google Calendar: {str(error)}"
+    except Exception as e:
+        app.logger.error(f'❌ Error general agendando cita: {e}')
+        return None, f"Error agendando cita: {str(e)}"
+
+def enviar_alertas_cita(datos_cita, evento_id, evento_url, config=None):
+    """Send comprehensive appointment alerts to all required numbers"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Create the alert message
+        mensaje_alerta = f"""🚨 *NUEVA CITA AGENDADA* 🚨
+
+📆 *Detalles de la Cita:*
+• *Servicio:* {datos_cita.get('servicio')}
+• *Fecha:* {datos_cita.get('fecha')}
+• *Hora:* {datos_cita.get('hora')}
+
+👤 *Información del Cliente:*
+• *Nombre:* {datos_cita.get('nombre')}
+• *Teléfono:* {datos_cita.get('telefono')}
+
+🔗 *Link al Calendario:* {evento_url or 'No disponible'}
+🆔 *ID de Evento:* {evento_id or 'No disponible'}
+
+⏰ *Agendado el:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+_Responde a este número para contactar al cliente directamente._
+"""
+        
+        # Send to configured alert numbers
+        alert_numbers = [ALERT_NUMBER, '5214493432744']  # Add all required numbers
+        
+        for numero in alert_numbers:
+            try:
+                enviar_mensaje(numero, mensaje_alerta, config)
+                app.logger.info(f"✅ Alerta de cita enviada a {numero}")
+            except Exception as e:
+                app.logger.error(f"❌ Error enviando alerta a {numero}: {e}")
+        
+        # Send confirmation to the client
+        mensaje_cliente = f"""✅ *¡Cita Confirmada!*
+
+Tu cita ha sido agendada con éxito:
+
+📆 *Detalles:*
+• *Servicio:* {datos_cita.get('servicio')}
+• *Fecha:* {datos_cita.get('fecha')}
+• *Hora:* {datos_cita.get('hora')}
+• *Lugar:* {config.get('direccion', 'Por confirmar')}
+
+Nos pondremos en contacto contigo pronto para confirmar todos los detalles.
+
+Si necesitas hacer cambios, responde a este mensaje.
+"""
+        
+        enviar_mensaje(datos_cita.get('telefono'), mensaje_cliente, config)
+        app.logger.info(f"✅ Confirmación enviada al cliente {datos_cita.get('telefono')}")
+        
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error en sistema de alertas de cita: {e}")
+        return False
+
 @app.route('/kanban/columna/agregar', methods=['POST'])
 def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
@@ -3827,6 +3973,160 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
+
+def detectar_intencion_avanzada(mensaje, numero, historial=None, config=None):
+    """Advanced intent detection using context and conversation history"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    if historial is None:
+        historial = obtener_historial(numero, limite=5, config=config)
+    
+    # Build conversation context for AI analysis
+    contexto_conversacion = ""
+    for i, msg in enumerate(historial[-3:]):  # Last 3 messages
+        if msg['mensaje']:
+            contexto_conversacion += f"Usuario: {msg['mensaje']}\n"
+        if msg['respuesta']:
+            contexto_conversacion += f"Asistente: {msg['respuesta']}\n"
+    
+    # Add current message
+    contexto_conversacion += f"Usuario: {mensaje}\n"
+    
+    prompt = f"""
+    Analiza esta conversación y determina la intención principal del usuario.
+    
+    CONVERSACIÓN RECIENTE:
+    {contexto_conversacion}
+    
+    INTENCIONES POSIBLES:
+    1. AGENDAR_CITA - El usuario quiere hacer una cita o reunión
+    2. CONSULTAR_PRODUCTOS - El usuario pregunta por productos o servicios específicos
+    3. PREGUNTAR_INFORMACION - El usuario busca información general sobre la empresa
+    4. SOLICITAR_AYUDA - El usuario tiene un problema que resolver
+    5. OTRO - Otra intención no específica
+    
+    Responde en formato JSON:
+    {{
+        "intencion": "AGENDAR_CITA|CONSULTAR_PRODUCTOS|PREGUNTAR_INFORMACION|SOLICITAR_AYUDA|OTRO",
+        "confianza": 0.0-1.0,
+        "entidades": {{
+            "servicio": "nombre del servicio mencionado o null",
+            "fecha": "fecha mencionada o null",
+            "hora": "hora mencionada o null",
+            "nombre": "nombre del cliente mencionado o null"
+        }},
+        "explicacion": "Breve explicación de por qué se detectó esta intención"
+    }}
+    """
+    
+    try:
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 800
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        
+        data = response.json()
+        respuesta_ia = data['choices'][0]['message']['content'].strip()
+        
+        # Extract JSON from response
+        json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
+        if json_match:
+            analisis = json.loads(json_match.group())
+            app.logger.info(f"🧠 Advanced intent analysis: {json.dumps(analisis, indent=2)}")
+            return analisis
+        else:
+            return {"intencion": "OTRO", "confianza": 0.0, "entidades": {}, "explicacion": "No se pudo analizar la intención"}
+            
+    except Exception as e:
+        app.logger.error(f"Error en análisis avanzado de intención: {e}")
+        return {"intencion": "OTRO", "confianza": 0.0, "entidades": {}, "explicacion": f"Error: {str(e)}"}
+
+def buscar_productos_relevantes(consulta, limite=5, config=None):
+    """Intelligently find relevant products based on user query"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Extract key terms from the query
+        prompt = f"""
+        Extrae las palabras clave de búsqueda de productos/servicios de este mensaje:
+        "{consulta}"
+        
+        Devuelve solo 3-5 palabras clave separadas por comas, sin explicaciones adicionales.
+        """
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,
+            "max_tokens": 100
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=15)
+        keywords = response.json()['choices'][0]['message']['content'].strip().lower()
+        
+        app.logger.info(f"🔍 Keywords extracted: {keywords}")
+        
+        # Convert keywords to list
+        keyword_list = [k.strip() for k in keywords.split(',')]
+        
+        # Build a FULLTEXT or LIKE search condition
+        search_conditions = []
+        search_params = []
+        
+        for kw in keyword_list:
+            if kw:
+                search_conditions.append("(servicio LIKE %s OR categoria LIKE %s OR descripcion LIKE %s)")
+                search_params.extend([f"%{kw}%", f"%{kw}%", f"%{kw}%"])
+        
+        if not search_conditions:
+            cursor.execute("SELECT * FROM precios ORDER BY RAND() LIMIT %s", (limite,))
+        else:
+            sql = f"""
+                SELECT * FROM precios 
+                WHERE {' OR '.join(search_conditions)}
+                ORDER BY 
+                    CASE WHEN servicio LIKE %s THEN 1
+                         WHEN categoria LIKE %s THEN 2
+                         ELSE 3 END,
+                    precio DESC
+                LIMIT %s
+            """
+            # Add the primary keyword for ordering
+            primary_kw = f"%{keyword_list[0] if keyword_list else ''}%"
+            search_params.extend([primary_kw, primary_kw, limite])
+            
+            cursor.execute(sql, search_params)
+        
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"📊 Found {len(results)} relevant products/services")
+        return results
+        
+    except Exception as e:
+        app.logger.error(f"Error buscando productos relevantes: {e}")
+        return []
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
@@ -3910,6 +4210,66 @@ def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     except Exception as e:
         app.logger.error(f"Error detectando intención: {e}")
         return {"intencion": "OTRO", "confianza": 0.0, "detalles": {}}
+
+def manejar_cita_inteligente(numero, mensaje, intenciones, config=None):
+    """Smart appointment handling with conversational flow"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    # Get current conversation state
+    estado_actual = obtener_estado_conversacion(numero, config)
+    
+    # If already in appointment flow, continue from there
+    if estado_actual and estado_actual.get('contexto') == 'CITA_EN_PROCESO':
+        return continuar_cita_inteligente(numero, mensaje, estado_actual, config)
+    
+    # New appointment request - check if we have enough information to start
+    app.logger.info(f"🗓️ New appointment request detected from {numero}")
+    
+    # Extract initial information from intent analysis
+    entidades = intenciones.get('entidades', {})
+    servicio = entidades.get('servicio')
+    fecha = entidades.get('fecha')
+    hora = entidades.get('hora')
+    nombre = entidades.get('nombre')
+    
+    # Save initial state
+    datos_cita = {
+        'paso': 1,
+        'servicio': servicio,
+        'fecha': fecha, 
+        'hora': hora,
+        'nombre': nombre,
+        'telefono': numero
+    }
+    
+    actualizar_estado_conversacion(numero, "CITA_EN_PROCESO", "inicio", datos_cita, config)
+    
+    # Determine next question based on what we already know
+    if not servicio:
+        return "¡Claro! Me encantaría agendar una cita para ti. ¿Para qué servicio te gustaría agendar?"
+    elif not fecha:
+        return f"Perfecto, vamos a agendar una cita para {servicio}. ¿Qué día te gustaría la cita? Puedes decirme 'mañana', 'próximo lunes', o una fecha específica."
+    elif not hora:
+        return f"Excelente. Para tu cita de {servicio} el {fecha}, ¿a qué hora te gustaría?"
+    elif not nombre:
+        return f"Ya casi terminamos. Para tu cita de {servicio} el {fecha} a las {hora}, ¿podrías decirme tu nombre completo?"
+    else:
+        # We have all the information, confirm directly
+        confirmacion = f"""
+        📋 *Resumen de tu cita:*
+
+        • Servicio: {servicio}
+        • Fecha: {fecha}
+        • Hora: {hora}
+        • Nombre: {nombre}
+        • Teléfono: {numero}
+
+        ¿Todo correcto? Responde "sí" para confirmar o dime qué dato deseas modificar.
+        """
+        datos_cita['paso'] = 5  # Skip to confirmation step
+        actualizar_estado_conversacion(numero, "CITA_EN_PROCESO", "confirmar", datos_cita, config)
+        return confirmacion
 
 def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
     """
@@ -4487,7 +4847,29 @@ def webhook():
         # Parsear el mensaje entrante
         actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
-            texto = msg['text']['body'].strip()
+                    texto = msg['text']['body'].strip()
+        
+                    # Save the message immediately
+                    guardar_mensaje_inmediato(numero, texto, config)
+        
+                    # Use advanced intent detection
+                    intenciones = detectar_intencion_avanzada(texto, numero, config=config)
+        
+                    # Process based on intent
+                    if intenciones.get('intencion') == 'AGENDAR_CITA' and intenciones.get('confianza', 0) > 0.7:
+                        # Handle appointment scheduling
+                        respuesta = manejar_cita_inteligente(numero, texto, intenciones, config)
+                        enviar_mensaje(numero, respuesta, config)
+                        actualizar_respuesta(numero, texto, respuesta, config)
+                        return 'OK', 200
+            
+                    elif intenciones.get('intencion') == 'CONSULTAR_PRODUCTOS' and intenciones.get('confianza', 0) > 0.7:
+                        # Find and present relevant products
+                        productos = buscar_productos_relevantes(texto, config=config)
+                        respuesta = generar_respuesta_productos(texto, productos, config)
+                        enviar_mensaje(numero, respuesta, config)
+                        actualizar_respuesta(numero, texto, respuesta, config)
+                        return 'OK', 200
         elif 'image' in msg:
             es_imagen = True
             image_id = msg['image']['id']
