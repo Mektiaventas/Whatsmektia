@@ -471,13 +471,23 @@ def importar_productos_desde_excel(filepath, config=None):
         for excel_col, db_col in column_mapping.items():
             if excel_col in df.columns:
                 df = df.rename(columns={excel_col: db_col})
+                app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
         
-        # Verificar columnas mínimas requeridas
+        # Verificar columnas mínimas requeridas después del mapeo
+        app.logger.info(f"Columnas después del mapeo: {list(df.columns)}")
         if 'servicio' not in df.columns or 'precio' not in df.columns:
             app.logger.error(f"El archivo no tiene las columnas requeridas después del mapeo: servicio, precio")
             return 0
         
-        # Resto del código igual...
+        # Debug: mostrar las primeras filas para verificar datos
+        app.logger.info(f"Primeras 2 filas de datos:\n{df.head(2).to_dict('records')}")
+        
+        # Verificar si hay filas en el DataFrame
+        if df.empty:
+            app.logger.error("El archivo no contiene datos (está vacío)")
+            return 0
+            
+        app.logger.info(f"Total de filas encontradas: {len(df)}")
         
         # Limpiar datos: reemplazar NaN con cadenas vacías
         df = df.fillna('')
@@ -506,9 +516,12 @@ def importar_productos_desde_excel(filepath, config=None):
         
         # Inicializar contador de productos importados
         productos_importados = 0
+        filas_procesadas = 0
+        filas_omitidas = 0
         
         # Procesar cada fila
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            filas_procesadas += 1
             try:
                 # Convertir fila a diccionario
                 producto = {}
@@ -518,8 +531,13 @@ def importar_productos_desde_excel(filepath, config=None):
                     else:
                         producto[campo] = ''  # Valor por defecto
                 
+                # Debug: mostrar el producto que se intenta importar
+                app.logger.info(f"Procesando fila {idx}, servicio: '{producto.get('servicio')}', precio: '{producto.get('precio')}'")
+                
                 # Validar que el producto tenga al menos un nombre
                 if not producto.get('servicio'):
+                    app.logger.warning(f"Fila {idx} omitida: sin nombre de servicio")
+                    filas_omitidas += 1
                     continue
                 
                 # Validar y convertir campos numéricos (precios)
@@ -527,11 +545,20 @@ def importar_productos_desde_excel(filepath, config=None):
                     try:
                         valor = producto.get(campo, '')
                         if valor != '':
-                            valor_numerico = float(str(valor).replace(',', '.'))
-                            producto[campo] = f"{valor_numerico:.2f}"
+                            # Convertir a string primero para manejar diferentes tipos
+                            valor_str = str(valor)
+                            # Limpiar cualquier carácter no numérico excepto el punto decimal
+                            valor_limpio = re.sub(r'[^\d.]', '', valor_str)
+                            if valor_limpio:
+                                valor_numerico = float(valor_limpio)
+                                producto[campo] = f"{valor_numerico:.2f}"
+                                app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
+                            else:
+                                producto[campo] = '0.00'
                         else:
                             producto[campo] = '0.00'
-                    except (ValueError, TypeError):
+                    except (ValueError, TypeError) as e:
+                        app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
                         producto[campo] = '0.00'
                 
                 # Establecer valores por defecto para campos críticos
@@ -564,6 +591,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('proveedor', '')
                 ]
                 
+                app.logger.info(f"Ejecutando SQL para fila {idx}")
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, servicio, categoria, subcategoria, linea, modelo,
@@ -584,20 +612,22 @@ def importar_productos_desde_excel(filepath, config=None):
                 """, values)
                 
                 productos_importados += 1
+                app.logger.info(f"✅ Producto importado: {producto.get('servicio')}")
                 
             except Exception as e:
-                app.logger.error(f"Error procesando fila: {e}")
+                app.logger.error(f"Error procesando fila {idx}: {str(e)}")
+                app.logger.error(traceback.format_exc())
                 continue
         
         conn.commit()
         cursor.close()
         conn.close()
         
-        app.logger.info(f"📊 Total productos importados: {productos_importados}")
+        app.logger.info(f"📊 Resumen de importación: {productos_importados} productos importados, {filas_procesadas} filas procesadas, {filas_omitidas} filas omitidas")
         return productos_importados
         
     except Exception as e:
-        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
+        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {str(e)}")
         app.logger.error(traceback.format_exc())
         return 0
 
