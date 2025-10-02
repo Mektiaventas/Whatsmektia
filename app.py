@@ -3521,8 +3521,14 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         config = obtener_configuracion_por_host()
     
     try:
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        
+        # Log before update
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
         
         # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
         cursor.execute("""
@@ -3535,8 +3541,11 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
             LIMIT 1
         """, (respuesta, numero, mensaje))
         
-        # Si no actualizó ninguna fila (no se encontró el mensaje), insertar nuevo
-        if cursor.rowcount == 0:
+        # Log results of update
+        if cursor.rowcount > 0:
+            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
+        else:
+            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
                 VALUES (%s, %s, %s, NOW())
@@ -3546,10 +3555,14 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         cursor.close()
         conn.close()
         
+        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
+        return True
+        
     except Exception as e:
-        app.logger.error(f"❌ Error actualizando respuesta: {e}")
+        app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
         # Fallback a guardar conversación normal
         guardar_conversacion(numero, mensaje, respuesta, config)
+        return False
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -3682,6 +3695,78 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
 # ——— Envío WhatsApp y guardado de conversación ———
+def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=None):
+    """
+    Envía notificación al administrador cuando se detecta un pedido o cita
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar si es un pedido o una cita según el negocio
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        tipo_solicitud = "pedido" if es_porfirianna else "cita"
+        
+        # Crear tabla notificaciones_ia si no existe
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificaciones_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20),
+                tipo VARCHAR(20),
+                resumen TEXT,
+                estado VARCHAR(20) DEFAULT 'pendiente',
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        conn.commit()
+        
+        # Extraer información útil del análisis
+        if analisis_pedido:
+            datos = analisis_pedido.get('datos_obtenidos', {})
+            resumen = f"Detalles: "
+            if es_porfirianna:
+                platillos = ", ".join(datos.get('platillos', ['No especificado']))
+                resumen += f"Platillos: {platillos}"
+            else:
+                resumen += f"Servicio: {mensaje[:100]}"
+        else:
+            resumen = f"Mensaje original: {mensaje[:100]}"
+        
+        # Guardar en base de datos
+        cursor.execute('''
+            INSERT INTO notificaciones_ia (numero, tipo, resumen)
+            VALUES (%s, %s, %s)
+        ''', (numero, tipo_solicitud, resumen))
+        conn.commit()
+        notificacion_id = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        
+        # Construir mensaje de notificación para el administrador
+        mensaje_alerta = f"""🔔 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}*
+
+👤 *Cliente:* {numero}
+⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+💬 *Mensaje:* {mensaje[:150]}{'...' if len(mensaje) > 150 else ''}
+
+📝 *Resumen:* {resumen}
+
+🔄 *Estado:* Pendiente de atención
+🆔 *ID Notificación:* {notificacion_id}
+"""
+        
+        # Enviar notificación a los números de alerta
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        enviar_mensaje('5214493432744', mensaje_alerta, config)
+        
+        app.logger.info(f"✅ Notificación de {tipo_solicitud} enviada para {numero}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
+        return False
 # REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
@@ -4299,6 +4384,27 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
 
+@app.route('/notificaciones')
+def ver_notificaciones():
+    """Endpoint para ver notificaciones de pedidos y citas"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT n.*, 
+               COALESCE(c.alias, c.nombre, n.numero) as nombre_cliente
+        FROM notificaciones_ia n
+        LEFT JOIN contactos c ON n.numero = c.numero_telefono
+        ORDER BY n.timestamp DESC
+    ''')
+    
+    notificaciones = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return render_template('notificaciones.html', notificaciones=notificaciones)
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -4504,13 +4610,19 @@ def webhook():
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
             app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
+            # Enviar notificación al administrador
+            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
             # Manejar el pedido automáticamente
             respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
-
+        elif detectar_solicitud_cita_keywords(texto, config):
+            app.logger.info(f"📅 Solicitud de cita/pedido básica detectada para {numero}")
+            # Enviar notificación al administrador (sin análisis detallado)
+            enviar_notificacion_pedido_cita(numero, texto, None, config)
+            # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
@@ -4538,7 +4650,6 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
-# Add this function to save user message immediately
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
     if config is None:
@@ -4551,16 +4662,23 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
+        # Add detailed logging before saving the message
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto, imagen_url, es_imagen))
         
+        # Get the ID of the inserted message for tracking
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        msg_id = cursor.fetchone()[0]
+        
         conn.commit()
         cursor.close()
         conn.close()
         
-        app.logger.info(f"💾 Mensaje inmediato guardado para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
         return True
         
     except Exception as e:
