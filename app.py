@@ -2465,15 +2465,31 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
         """
         
-        # Enviar a ambos números
-        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-        enviar_mensaje('5214493432744', mensaje_alerta, config)
-        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
+        # Ensure alerts are sent to both numbers
+        # First number (from env var)
+        result1 = False
+        result2 = False
+        
+        if ALERT_NUMBER:
+            app.logger.info(f"📱 Sending alert to ALERT_NUMBER: {ALERT_NUMBER}")
+            result1 = enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+            app.logger.info(f"📤 Alert to {ALERT_NUMBER}: {'✅ Sent' if result1 else '❌ Failed'}")
+        else:
+            app.logger.warning("⚠️ ALERT_NUMBER environment variable not set!")
+        
+        # Second number (hardcoded backup)
+        hardcoded_number = '5214493432744'  # Your personal number
+        app.logger.info(f"📱 Sending alert to hardcoded number: {hardcoded_number}")
+        result2 = enviar_mensaje(hardcoded_number, mensaje_alerta, config)
+        app.logger.info(f"📤 Alert to {hardcoded_number}: {'✅ Sent' if result2 else '❌ Failed'}")
+        
+        app.logger.info(f"✅ Alert sent for {tipo_solicitud} ID: {cita_id}")
+        return result1 or result2
         
     except Exception as e:
-        app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
-
+        app.logger.error(f"❌ Error sending {tipo_solicitud} alert: {e}")
+        app.logger.error(traceback.format_exc())
+        return False
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -4699,6 +4715,65 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
 def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
+
+@app.route('/test-cita-completa')
+def test_cita_completa():
+    """Test the complete appointment flow"""
+    config = obtener_configuracion_por_host()
+    
+    # Create test appointment info
+    fecha_hora = datetime.now() + timedelta(hours=24)  # Tomorrow
+    info_cita = {
+        'servicio_solicitado': 'Test de cita completa',
+        'fecha_sugerida': fecha_hora.strftime('%Y-%m-%d'),
+        'hora_sugerida': fecha_hora.strftime('%H:%M'),
+        'nombre_cliente': 'Cliente de Prueba',
+        'telefono': '5214493432744',  # Your number for testing
+        'estado': 'pendiente'
+    }
+    
+    # Process the appointment
+    cita_id = guardar_cita(info_cita, config)
+    
+    # Create Google Calendar event
+    service = autenticar_google_calendar(config)
+    evento_id = None
+    calendario_ok = False
+    
+    if service:
+        evento_id = crear_evento_calendar(service, info_cita, config)
+        calendario_ok = bool(evento_id)
+    
+    # Send alerts - With debugging logs
+    app.logger.info(f"🚨 Sending alert to administrators...")
+    try:
+        # Test alert to both numbers with verification
+        alert_sent1 = enviar_mensaje(ALERT_NUMBER, f"🚨 TEST ALERT: New appointment #{cita_id}", config) if ALERT_NUMBER else False
+        alert_sent2 = enviar_mensaje('5214493432744', f"🚨 TEST ALERT: New appointment #{cita_id}", config)
+        
+        # Send the full alert message
+        alerta_admin = enviar_alerta_cita_administrador(info_cita, cita_id, config)
+        
+        app.logger.info(f"✅ Alert status - ALERT_NUMBER: {alert_sent1}, Hardcoded number: {alert_sent2}")
+    except Exception as e:
+        app.logger.error(f"🔴 Error in test alerts: {e}")
+        app.logger.error(traceback.format_exc())
+        alerta_admin = False
+    
+    return jsonify({
+        'success': True,
+        'cita_id': cita_id,
+        'google_calendar': {
+            'success': calendario_ok,
+            'event_id': evento_id
+        },
+        'alerts': {
+            'admin': alerta_admin,
+            'alert_number': ALERT_NUMBER,
+            'alert_number_sent': bool(alert_sent1) if 'alert_sent1' in locals() else False,
+            'secondary_number_sent': bool(alert_sent2) if 'alert_sent2' in locals() else False
+        }
+    })
 
 @app.route('/test-contacto')
 def test_contacto(numero = '5214493432744'):
