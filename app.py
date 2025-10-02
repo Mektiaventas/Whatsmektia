@@ -987,7 +987,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         if es_porfirianna:
             prompt = f"""Extrae los productos del siguiente texto como JSON:
 {texto_limitado[:15000]}
-Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA/BEBIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
+Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
 Solo extrae hasta 20 productos principales."""
         else:
             prompt = f"""Extrae los servicios del siguiente texto como JSON:
