@@ -4831,7 +4831,7 @@ def webhook():
     
         # Check if it's a duplicate that was processed recently (last 10 minutes)
         if (not es_audio and not es_imagen and message_hash in processed_messages and 
-            current_time - processed_messages[message_hash] < 600):  # 10 minutes = 600 seconds
+            current_time - processed_messages[message_hash] < 2):  # 10 minutes = 600 seconds
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
             
