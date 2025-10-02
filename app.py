@@ -438,11 +438,39 @@ def importar_productos_desde_excel(filepath, config=None):
             app.logger.error(f"Formato de archivo no soportado: {extension}")
             return 0
         
-        # Verificar columnas mínimas requeridas
-        columnas_requeridas = ['servicio', 'precio']
-        if not all(col in df.columns for col in columnas_requeridas):
-            app.logger.error(f"El archivo no tiene las columnas requeridas: {columnas_requeridas}")
+        # Mapeo de nombres de columnas comunes a los nombres esperados
+        columnas_mapping = {
+            # Mapeo para 'servicio'
+            'servicio': ['servicio', 'producto', 'articulo', 'nombre', 'descripcion', 'item', 'nombre producto', 
+                         'producto nombre', 'descripción', 'artículo', 'nombre artículo', 'name', 'product'],
+            # Mapeo para 'precio'
+            'precio': ['precio', 'costo', 'precio unitario', 'precio venta', 'price', 'cost', 'unit price', 'sale price']
+        }
+        
+        # Normalizar nombres de columnas (convertir a minúsculas)
+        df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
+        
+        # Mostrar las columnas disponibles para diagnóstico
+        app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
+        
+        # Mapear columnas del archivo a las columnas requeridas
+        columnas_mapeadas = {}
+        for col_requerida, posibles_nombres in columnas_mapping.items():
+            for posible_nombre in posibles_nombres:
+                if posible_nombre in df.columns:
+                    columnas_mapeadas[col_requerida] = posible_nombre
+                    break
+        
+        # Verificar si se encontraron las columnas requeridas
+        columnas_faltantes = [col for col in ['servicio', 'precio'] if col not in columnas_mapeadas]
+        if columnas_faltantes:
+            app.logger.error(f"No se encontraron columnas equivalentes para: {columnas_faltantes}")
             return 0
+        
+        # Renombrar columnas según el mapeo
+        df = df.rename(columns={v: k for k, v in columnas_mapeadas.items()})
+        
+        # Resto del código igual...
         
         # Limpiar datos: reemplazar NaN con cadenas vacías
         df = df.fillna('')
