@@ -4573,7 +4573,15 @@ def webhook():
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
-
+        if 'laporfirianna' not in config.get('dominio', ''):  # Only for Mektia (non-restaurant)
+            es_cita, respuesta_cita = detectar_y_procesar_cita(texto, numero, historial, config)
+            if es_cita:
+                app.logger.info(f"📅 Appointment processed for {numero}")
+                # Send response and save conversation
+                if respuesta_cita:
+                    enviar_mensaje(numero, respuesta_cita, config)
+                    guardar_conversacion(numero, texto, respuesta_cita, config)
+                return 'OK', 200
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
