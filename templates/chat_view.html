@@ -4,6 +4,22 @@
     <meta charset="UTF-8">
     <title>Chat con {{ chat[2] or chat[1] }}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+    <style>
+        /* Estilos para mensajes nuevos */
+        @keyframes highlightMessage {
+            0% {
+                background-color: rgba(0, 123, 255, 0.2);
+            }
+
+            100% {
+                background-color: transparent;
+            }
+        }
+
+        .new-message {
+            animation: highlightMessage 1.5s ease-out forwards;
+        }
+    </style>
 </head>
 <body>
     <div class="sidebar">
@@ -16,20 +32,96 @@
             <textarea name="nota" placeholder="Añadir nota..." maxlength="600">{{ chat[4] }}</textarea>
             <button type="submit">Guardar Nota</button>
         </form>
-        <div class="mensajes">
+        <div class="mensajes" id="mensajes-container">
             {% for msg in mensajes %}
-            <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}">{{ msg[2] }}</div>
+            <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}" data-msg-id="{{ msg[0] }}">{{ msg[2] }}</div>
             {% endfor %}
         </div>
+
+        <!-- Añadir campo para enviar mensaje manual -->
+        <div class="mensaje-manual">
+            <form method="POST" action="/send-manual" class="form-mensaje">
+                <input type="hidden" name="numero" value="{{ chat[1] }}">
+                <input type="text" name="texto" placeholder="Escribe un mensaje..." class="input-mensaje" autocomplete="off" required>
+                <button type="submit" class="btn-enviar">Enviar</button>
+            </form>
+        </div>
     </div>
+
     <script>
-function toggleIA() {
-    fetch("/toggle_ia/{{ chat[1] }}", { method: "POST" })
-        .then(r => r.json())
-        .then(data => {
-            document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
+        // Configuración para auto-actualización
+        let chatAutoRefresh = true;
+        let refreshInterval = 500; // Medio segundo
+        let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
+        let telefono = "{{ chat[1] }}";
+
+        // Función para alternar IA
+        function toggleIA() {
+            fetch("/toggle_ai/" + telefono, { method: "POST" })
+                .then(r => r.json())
+                .then(data => {
+                    document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
+                });
+        }
+
+        // Función para actualizar mensajes
+        function actualizarMensajes() {
+            if (!chatAutoRefresh) return;
+
+            fetch(`/chat/${telefono}/messages?after=${lastMessageId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.messages && data.messages.length > 0) {
+                        const container = document.getElementById('mensajes-container');
+                        const wasAtBottom = isScrolledToBottom(container);
+
+                        // Añadir nuevos mensajes
+                        data.messages.forEach(msg => {
+                            const msgElement = document.createElement('div');
+                            msgElement.className = msg.direction === 'entrante' ? 'msg-in' : 'msg-out';
+                            msgElement.dataset.msgId = msg.id;
+                            msgElement.textContent = msg.content;
+                            msgElement.classList.add('new-message');
+                            container.appendChild(msgElement);
+
+                            // Actualizar último mensaje ID
+                            lastMessageId = Math.max(lastMessageId, msg.id);
+                        });
+
+                        // Scroll al final si ya estaba al final
+                        if (wasAtBottom) {
+                            scrollToBottom(container);
+                        }
+                    }
+                })
+                .catch(error => console.error('Error actualizando mensajes:', error));
+        }
+
+        // Verificar si está al final del scroll
+        function isScrolledToBottom(element) {
+            return element.scrollHeight - element.clientHeight <= element.scrollTop + 50;
+        }
+
+        // Scroll al final del contenedor
+        function scrollToBottom(element) {
+            element.scrollTop = element.scrollHeight;
+        }
+
+        // Iniciar actualización periódica
+        document.addEventListener('DOMContentLoaded', function() {
+            const container = document.getElementById('mensajes-container');
+
+            // Scroll inicial al último mensaje
+            scrollToBottom(container);
+
+            // Iniciar actualización cada medio segundo
+            setInterval(actualizarMensajes, refreshInterval);
+
+            // Pausar/reanudar cuando cambia visibilidad
+            document.addEventListener('visibilitychange', () => {
+                chatAutoRefresh = !document.hidden;
+            });
         });
-}
     </script>
 </body>
 </html>
