@@ -1992,7 +1992,7 @@ def crear_evento_calendar(service, cita_info, config=None):
 def validar_datos_cita_completos(info_cita, config=None):
     """
     Valida que la información de la cita/pedido tenga todos los datos necesarios
-    Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
+    Devuelve (True, None) si está completa, (False, lista_faltantes) si faltan datos
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -2000,23 +2000,29 @@ def validar_datos_cita_completos(info_cita, config=None):
     # Determinar el tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    datos_requeridos = []
+    datos_faltantes = []
     
     # Validar servicio solicitado (siempre requerido)
     if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if es_porfirianna:
-            datos_requeridos.append("qué platillo deseas ordenar")
-        else:
-            datos_requeridos.append("qué servicio necesitas")
+        datos_faltantes.append("servicio")
     
-    # Validar fecha (solo requerido para Mektia)
-    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_requeridos.append("fecha preferida")
+    # Para La Porfirianna, la hora es importante; para servicios digitales, necesitamos fecha y hora
+    if es_porfirianna:
+        if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
+            datos_faltantes.append("hora")
+    else:
+        if not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null':
+            datos_faltantes.append("fecha")
+        if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
+            datos_faltantes.append("hora")
     
-    # Validar nombre del cliente (siempre requerido)
+    # El nombre es opcional pero útil
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_requeridos.append("tu nombre")
+        # No lo añadimos a datos_faltantes porque es opcional
+        app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
     
+    if datos_faltantes:
+        return False, datos_faltantes
     return True, None
 
 @app.route('/completar-autorizacion')
@@ -2151,6 +2157,13 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         if msg['respuesta']:
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
+    # MEJORA: Detectar si este es un mensaje de confirmación/respuesta a una pregunta previa
+    mensaje_lower = mensaje.lower()
+    es_confirmacion = False
+    if mensaje_lower.startswith(('si', 'sí', 'claro', 'ok')) or 'a las' in mensaje_lower:
+        es_confirmacion = True
+        app.logger.info(f"✅ Detectado mensaje de confirmación: '{mensaje}'")
+    
     try:
         # Obtener productos/servicios de la BD para referencia
         precios = obtener_todos_los_precios(config)
@@ -2160,29 +2173,55 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         # Determinar tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        prompt_cita = f"""
-        Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
-        Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
-        
-        MENSAJE ACTUAL: "{mensaje}"
-        
-        HISTORIAL DE CONVERSACIÓN:
-        {contexto_historial}
-        
-        SERVICIOS/PRODUCTOS DISPONIBLES:
-        {servicios_texto}
-        
-        Devuelve un JSON con estos campos:
-        - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
-        - fecha_sugerida (string formato YYYY-MM-DD o null)
-        - hora_sugerida (string formato HH:MM o null)
-        - nombre_cliente (string o null)
-        - telefono (string: {numero})
-        - estado (siempre "pendiente")
-        - datos_completos (boolean: true si tiene todos los datos necesarios)
-        
-        Si el mensaje no contiene información de pedido/cita, devuelve servicio_solicitado: null.
-        """
+        # MEJORA: Ajustar prompt para mensajes de confirmación
+        if es_confirmacion:
+            prompt_cita = f"""
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Este parece ser un mensaje de CONFIRMACIÓN a una consulta previa sobre {es_porfirianna and 'un pedido' or 'una cita'}.
+            
+            HISTORIAL RECIENTE:
+            {contexto_historial}
+            
+            MENSAJE DE CONFIRMACIÓN: "{mensaje}"
+            
+            Basándote en el historial y la confirmación, extrae la información completa de {es_porfirianna and 'orden/pedido' or 'cita/servicio'}.
+            
+            SERVICIOS/PRODUCTOS DISPONIBLES:
+            {servicios_texto}
+            
+            Devuelve un JSON con estos campos:
+            - servicio_solicitado (string: nombre del servicio que desea, extrae del historial si es necesario)
+            - fecha_sugerida (string formato YYYY-MM-DD, usa la fecha de HOY si confirma "hoy")
+            - hora_sugerida (string formato HH:MM, extrae del mensaje o historial)
+            - nombre_cliente (string o null, intenta extraer del historial)
+            - telefono (string: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            """
+        else:
+            prompt_cita = f"""
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
+            
+            MENSAJE ACTUAL: "{mensaje}"
+            
+            HISTORIAL DE CONVERSACIÓN:
+            {contexto_historial}
+            
+            SERVICIOS/PRODUCTOS DISPONIBLES:
+            {servicios_texto}
+            
+            Devuelve un JSON con estos campos:
+            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
+            - fecha_sugerida (string formato YYYY-MM-DD o null)
+            - hora_sugerida (string formato HH:MM o null)
+            - nombre_cliente (string o null)
+            - telefono (string: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            
+            Si el mensaje no contiene información de pedido/cita, devuelve servicio_solicitado: null.
+            """
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -2207,6 +2246,13 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         if json_match:
             info_cita = json.loads(json_match.group())
             
+            # MEJORA: Procesar fechas relativas como "hoy" y "mañana"
+            if info_cita.get('fecha_sugerida'):
+                if info_cita['fecha_sugerida'].lower() in ['hoy', 'today']:
+                    info_cita['fecha_sugerida'] = datetime.now().strftime('%Y-%m-%d')
+                elif info_cita['fecha_sugerida'].lower() in ['mañana', 'tomorrow']:
+                    info_cita['fecha_sugerida'] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            
             # Buscar información adicional del servicio
             if info_cita.get('servicio_solicitado'):
                 servicio_nombre = info_cita['servicio_solicitado']
@@ -2221,13 +2267,16 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
                         }
                         break
             
+            app.logger.info(f"📅 Información de cita extraída: {json.dumps(info_cita)}")
             return info_cita
         else:
+            app.logger.warning(f"⚠️ No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
         app.logger.error(f"Error extrayendo info de cita: {e}")
-        return None    
+        return None
+
 @app.route('/debug-headers')
 def debug_headers():
     headers = {k: v for k, v in request.headers.items()}
@@ -2957,6 +3006,25 @@ Si el usuario proporciona estos detalles, confírmale que su cita será procesad
 """
 
     historial = obtener_historial(numero, config=config)
+    
+    # ANALIZAR MENSAJES PARA DETECTAR CITAS/PEDIDOS - NUEVA FUNCIONALIDAD
+    info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
+    if info_cita and info_cita.get('servicio_solicitado'):
+        app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
+        # Comprobar si hay datos suficientes para guardar la cita
+        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        if datos_completos:
+            # Guardar cita y enviar alertas
+            cita_id = guardar_cita(info_cita, config)
+            if cita_id:
+                app.logger.info(f"✅ Cita guardada con ID: {cita_id}")
+                # Enviar alertas
+                enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                # Devolver mensaje de confirmación al usuario
+                es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
+                return confirmacion
     
     # Define messages_chain correctly
     messages_chain = [{'role': 'system', 'content': system_prompt}]
@@ -4803,7 +4871,30 @@ def webhook():
             return 'OK', 200
         
         
-        # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
+                # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
+        # Primero, comprobar si es una cita/pedido usando el análisis mejorado
+        info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
+            
+        if info_cita and info_cita.get('servicio_solicitado'):
+            app.logger.info(f"✅ Información de cita/pedido detectada en webhook: {json.dumps(info_cita)}")
+                
+            # Comprobar si hay suficientes datos
+            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+            if datos_completos:
+                # Guardar la cita y enviar notificaciones
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    app.logger.info(f"✅ Cita/pedido guardado con ID: {cita_id}")
+                    # Enviar alertas y confirmación
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
+                    enviar_mensaje(numero, respuesta, config)
+                    guardar_conversacion(numero, texto, respuesta, config)
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    return 'OK', 200
+                
+        # Fallback a la detección básica para compatibilidad
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
             app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
@@ -4815,10 +4906,6 @@ def webhook():
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
-        elif detectar_solicitud_cita_keywords(texto, config):
-            app.logger.info(f"📅 Solicitud de cita/pedido básica detectada para {numero}")
-            # Enviar notificación al administrador (sin análisis detallado)
-            enviar_notificacion_pedido_cita(numero, texto, None, config)
             # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
