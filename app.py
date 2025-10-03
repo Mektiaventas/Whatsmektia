@@ -5099,6 +5099,79 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+@app.route('/test-calendar')
+def test_calendar():
+    """Prueba el agendamiento de citas en Google Calendar"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        # Crear información de cita de prueba
+        info_cita = {
+            'servicio_solicitado': 'Servicio de Prueba',
+            'fecha_sugerida': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
+            'hora_sugerida': '10:00',
+            'nombre_cliente': 'Cliente de Prueba',
+            'telefono': '5214495486142',
+            'detalles_servicio': {
+                'descripcion': 'Esta es una cita de prueba para verificar la integración con Google Calendar',
+                'categoria': 'Prueba',
+                'precio': '100.00',
+                'precio_menudeo': '100.00'
+            }
+        }
+        
+        # Intentar autenticar con Google Calendar
+        service = autenticar_google_calendar(config)
+        
+        if not service:
+            return """
+            <h1>❌ Error de Autenticación</h1>
+            <p>No se pudo autenticar con Google Calendar. Por favor verifica:</p>
+            <ul>
+                <li>Que hayas autorizado la aplicación con Google Calendar</li>
+                <li>Que el archivo token.json exista y sea válido</li>
+                <li>Que el archivo client_secret.json esté correctamente configurado</li>
+            </ul>
+            <p><a href="/autorizar_manual" class="btn btn-primary">Intentar Autorizar de Nuevo</a></p>
+            """
+        
+        # Intentar crear evento
+        evento_id = crear_evento_calendar(service, info_cita, config)
+        
+        if evento_id:
+            # Mostrar información del correo configurado
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+            result = cursor.fetchone()
+            calendar_email = result.get('calendar_email') if result else 'No configurado'
+            cursor.close()
+            conn.close()
+            
+            return f"""
+            <h1>✅ Evento Creado Exitosamente</h1>
+            <p>Se ha creado un evento de prueba en Google Calendar.</p>
+            <p><strong>ID del Evento:</strong> {evento_id}</p>
+            <p><strong>Servicio:</strong> {info_cita['servicio_solicitado']}</p>
+            <p><strong>Fecha:</strong> {info_cita['fecha_sugerida']} a las {info_cita['hora_sugerida']}</p>
+            <p><strong>Cliente:</strong> {info_cita['nombre_cliente']}</p>
+            <p><strong>Correo para notificaciones:</strong> {calendar_email}</p>
+            <p>Verifica tu calendario de Google para confirmar que el evento se haya creado correctamente.</p>
+            """
+        else:
+            return """
+            <h1>❌ Error al Crear el Evento</h1>
+            <p>La autenticación fue exitosa, pero no se pudo crear el evento en el calendario.</p>
+            <p>Revisa los logs del servidor para más información sobre el error.</p>
+            """
+            
+    except Exception as e:
+        return f"""
+        <h1>❌ Error durante la prueba</h1>
+        <p>Ocurrió un error al intentar probar la integración con Google Calendar:</p>
+        <pre>{str(e)}</pre>
+        """
+
 @app.route('/test-contacto')
 def test_contacto(numero = '5214493432744'):
     """Endpoint para probar la obtención de información de contacto"""
