@@ -1790,7 +1790,7 @@ def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
         return "¡Gracias por tu pedido! ¿Qué más deseas agregar?"
     
 def autenticar_google_calendar(config=None):
-    """Autentica con OAuth usando client_secret.json"""
+    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1798,62 +1798,31 @@ def autenticar_google_calendar(config=None):
     creds = None
     
     try:
-        app.logger.info("🔐 Intentando autenticar con OAuth...")
+        # Usar un nombre de token específico para cada tenant/dominio
+        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        app.logger.info(f"🔐 Intentando autenticar con OAuth para {config['dominio']} usando {token_filename}")
         
-        # 1. Verificar si ya tenemos token guardado
-        if os.path.exists('token.json'):
+        # 1. Verificar si ya tenemos token guardado para este tenant
+        if os.path.exists(token_filename):
             try:
-                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+                creds = Credentials.from_authorized_user_file(token_filename, SCOPES)
                 if creds and creds.valid:
-                    app.logger.info("✅ Token OAuth válido encontrado")
+                    app.logger.info(f"✅ Token OAuth válido encontrado para {config['dominio']}")
                     service = build('calendar', 'v3', credentials=creds)
                     return service
                 elif creds and creds.expired and creds.refresh_token:
-                    app.logger.info("🔄 Refrescando token expirado...")
+                    app.logger.info(f"🔄 Refrescando token expirado para {config['dominio']}...")
                     creds.refresh(Request())
-                    with open('token.json', 'w') as token:
+                    with open(token_filename, 'w') as token:
                         token.write(creds.to_json())
                     service = build('calendar', 'v3', credentials=creds)
                     return service
             except Exception as e:
-                app.logger.error(f"❌ Error con token existente: {e}")
+                app.logger.error(f"❌ Error con token existente para {config['dominio']}: {e}")
         
-        # 2. Si no hay token válido, hacer flujo OAuth
-        if not os.path.exists('client_secret.json'):
-            app.logger.error("❌ No se encuentra client_secret.json")
-            return None
-        
-        try:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'client_secret.json', SCOPES)
-            
-            # Para servidor, genera una URL para autorizar manualmente
-            auth_url, _ = flow.authorization_url(prompt='consent')
-            
-            app.logger.info(f"🌐 Por favor visita esta URL para autorizar: {auth_url}")
-            app.logger.info("📋 Después de autorizar, copia el código de autorización que te da Google")
-            
-            # En entorno de servidor, necesitamos manejar el código manualmente
-            code = input("Pega el código de autorización aquí: ") if app.debug else None
-            
-            if code:
-                flow.fetch_token(code=code)
-                creds = flow.credentials
-                
-                # Guardar las credenciales
-                with open('token.json', 'w') as token:
-                    token.write(creds.to_json())
-                
-                app.logger.info("✅ Autenticación OAuth exitosa")
-                service = build('calendar', 'v3', credentials=creds)
-                return service
-            else:
-                app.logger.error("❌ No se proporcionó código de autorización")
-                return None
-                
-        except Exception as e:
-            app.logger.error(f"❌ Error en autenticación OAuth: {e}")
-            return None
+        # 2. Si no hay token válido, necesitamos redirección OAuth
+        app.logger.info(f"⚠️ No hay token válido para {config['dominio']}, requiere autorización")
+        return None
             
     except Exception as e:
         app.logger.error(f'❌ Error inesperado: {e}')
@@ -1864,7 +1833,9 @@ def autenticar_google_calendar(config=None):
 def autorizar_manual():
     """Endpoint para autorizar manualmente con Google"""
     try:
+        config = obtener_configuracion_por_host()
         SCOPES = ['https://www.googleapis.com/auth/calendar']
+        tenant_id = config['dominio'].replace('.', '_')
         
         if not os.path.exists('client_secret.json'):
             return "❌ Error: No se encuentra client_secret.json"
@@ -1887,7 +1858,8 @@ def autorizar_manual():
         auth_url, _ = flow.authorization_url(
             prompt='consent', 
             access_type='offline',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            state=tenant_id  # Incluir el tenant en el estado
         )
         
         app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
@@ -2056,6 +2028,13 @@ def completar_autorizacion():
         state = request.args.get('state')
         scope = request.args.get('scope')
         
+        # Obtener la configuración actual
+        config = obtener_configuracion_por_host()
+        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        
+        app.logger.info(f"🔐 Completando autorización para {config['dominio']}")
+        app.logger.info(f"🔐 Guardando en: {token_filename}")
+        
         app.logger.info(f"🔐 Parámetros recibidos:")
         app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
         app.logger.info(f"  - State: {state}")
@@ -2103,10 +2082,12 @@ def completar_autorizacion():
         # Guardar token
         app.logger.info(f"💾 Guardando token en: {token_path}")
         
-        with open(token_path, 'w') as token:
+        # Modificar esta parte para usar el nombre de archivo específico
+        with open(token_filename, 'w') as token:
             token.write(creds.to_json())
         
-        app.logger.info("✅ Autorización completada correctamente")
+        app.logger.info(f"✅ Autorización completada para {config['dominio']}")
+        
         return """
         <html>
         <head>
