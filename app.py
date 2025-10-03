@@ -1913,13 +1913,13 @@ def crear_evento_calendar(service, cita_info, config=None):
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
         # Formatear fecha y hora
-        if not es_porfirianna:
+        if not es_porfirianna and cita_info.get('fecha_sugerida') and cita_info.get('hora_sugerida'):
             start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
             end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
                                           "%Y-%m-%d %H:%M") + timedelta(hours=1)
             end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
         else:
-            # Para La Porfirianna, usar la hora actual + 1 hora
+            # Para La Porfirianna o si no hay fecha/hora específica
             now = datetime.now()
             start_time = now.isoformat()
             end_time = (now + timedelta(hours=1)).isoformat()
@@ -1930,19 +1930,36 @@ def crear_evento_calendar(service, cita_info, config=None):
         categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
         precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
         
+        # Título del evento más descriptivo
+        event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {cita_info.get('servicio_solicitado', 'Servicio')} - {cita_info.get('nombre_cliente', 'Cliente')}"
+        
+        # Descripción más detallada del evento
+        event_description = f"""
+📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
+
+🔸 {'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
+🔸 Categoría: {categoria_servicio}
+🔸 Precio: ${precio_servicio} {cita_info.get('moneda', 'MXN')}
+🔸 Descripción: {descripcion_servicio}
+
+👤 CLIENTE:
+🔹 Nombre: {cita_info.get('nombre_cliente', 'No especificado')}
+🔹 Teléfono: {cita_info.get('telefono', 'No especificado')}
+🔹 WhatsApp: https://wa.me/{cita_info.get('telefono', '').replace('+', '')}
+
+⏰ FECHA/HORA:
+🕒 Fecha: {cita_info.get('fecha_sugerida', 'No especificada')}
+🕒 Hora: {cita_info.get('hora_sugerida', 'No especificada')}
+🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
+        """.strip()
+        
         # Crear el evento con información ampliada
         event = {
-            'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']} - {cita_info.get('servicio_solicitado', 'Servicio')}",
-            'description': f"""
-{'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
-Categoría: {categoria_servicio}
-Precio: ${precio_servicio} {cita_info.get('moneda', 'MXN')}
-Descripción: {descripcion_servicio}
-
-Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
-Teléfono: {cita_info.get('telefono', 'No especificado')}
-Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
-            """.strip(),
+            'summary': event_title,
+            'location': config.get('direccion', ''),
+            'description': event_description,
             'start': {
                 'dateTime': start_time,
                 'timeZone': 'America/Mexico_City',
@@ -1958,6 +1975,7 @@ Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde 
                     {'method': 'email', 'minutes': 24 * 60},  # 1 día antes
                 ],
             },
+            'colorId': '4' if es_porfirianna else '1',  # Rojo para Porfirianna, Azul para otros
         }
         
         calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
@@ -1966,8 +1984,9 @@ Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde 
         app.logger.info(f'Evento creado: {event.get("htmlLink")}')
         return event.get('id')  # Retorna el ID del evento
         
-    except HttpError as error:
-        app.logger.error(f'Error al crear evento: {error}')
+    except Exception as e:
+        app.logger.error(f'Error al crear evento: {e}')
+        app.logger.error(traceback.format_exc())
         return None
     
 def validar_datos_cita_completos(info_cita, config=None):
@@ -2394,7 +2413,7 @@ def crear_tabla_citas(config=None):
     conn.close()
 
 def guardar_cita(info_cita, config=None):
-    """Guarda la cita en la base de datos y agenda en Google Calendar"""
+    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2402,6 +2421,25 @@ def guardar_cita(info_cita, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
+        # Crear tabla notificaciones_ia si no existe con la estructura requerida
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificaciones_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20),
+                tipo VARCHAR(20),
+                resumen TEXT,
+                estado VARCHAR(20) DEFAULT 'pendiente',
+                mensaje text,
+                evaluacion_ia json,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                calendar_event_id VARCHAR(255),
+                INDEX idx_numero (numero),
+                INDEX idx_timestamp (timestamp)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        conn.commit()
+        
+        # Guardar en tabla citas
         cursor.execute('''
             INSERT INTO citas (
                 numero_cliente, servicio_solicitado, fecha_propuesta,
@@ -2419,29 +2457,67 @@ def guardar_cita(info_cita, config=None):
         
         conn.commit()
         cita_id = cursor.lastrowid
-        cursor.close()
-        conn.close()
         
         # Agendar en Google Calendar
         service = autenticar_google_calendar(config)
+        evento_id = None
         if service:
             evento_id = crear_evento_calendar(service, info_cita, config)
             if evento_id:
                 # Guardar el ID del evento en la base de datos
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
                 cursor.execute('''
                     UPDATE citas SET evento_calendar_id = %s WHERE id = %s
                 ''', (evento_id, cita_id))
                 conn.commit()
-                cursor.close()
-                conn.close()
                 app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+        
+        # Guardar en notificaciones_ia
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        tipo_solicitud = "pedido" if es_porfirianna else "cita"
+        
+        # Crear resumen para la notificación
+        detalles_servicio = info_cita.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', '')
+        
+        resumen = f"{tipo_solicitud.capitalize()}: {info_cita.get('servicio_solicitado')} - "
+        resumen += f"Cliente: {info_cita.get('nombre_cliente')} - "
+        resumen += f"Fecha: {info_cita.get('fecha_sugerida')} {info_cita.get('hora_sugerida')}"
+        
+        # Construir evaluación IA en formato JSON
+        evaluacion_ia = {
+            'servicio_solicitado': info_cita.get('servicio_solicitado'),
+            'detalles_servicio': detalles_servicio,
+            'fecha_sugerida': info_cita.get('fecha_sugerida'),
+            'hora_sugerida': info_cita.get('hora_sugerida'),
+            'nombre_cliente': info_cita.get('nombre_cliente'),
+            'cita_id': cita_id,
+            'calendar_event_id': evento_id
+        }
+        
+        # Guardar en notificaciones_ia
+        cursor.execute('''
+            INSERT INTO notificaciones_ia (
+                numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            info_cita.get('telefono'),
+            tipo_solicitud,
+            resumen,
+            'pendiente',
+            json.dumps(info_cita),  # Guardar toda la info de la cita como mensaje
+            json.dumps(evaluacion_ia),
+            evento_id
+        ))
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
         
         return cita_id
         
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
+        app.logger.error(traceback.format_exc())
         return None
     
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
@@ -4494,20 +4570,37 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
 
 @app.route('/notificaciones')
 def ver_notificaciones():
-    """Endpoint para ver notificaciones de pedidos y citas"""
+    """Endpoint para ver notificaciones de pedidos y citas con información ampliada"""
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
     cursor.execute('''
-        SELECT n.*, 
-               COALESCE(c.alias, c.nombre, n.numero) as nombre_cliente
+        SELECT n.*,
+               COALESCE(c.alias, c.nombre, n.numero) as nombre_cliente,
+               c.imagen_url
         FROM notificaciones_ia n
         LEFT JOIN contactos c ON n.numero = c.numero_telefono
         ORDER BY n.timestamp DESC
+        LIMIT 50
     ''')
     
     notificaciones = cursor.fetchall()
+    
+    # Procesar el JSON de evaluacion_ia para la vista
+    for notif in notificaciones:
+        try:
+            if notif.get('evaluacion_ia'):
+                notif['evaluacion_data'] = json.loads(notif['evaluacion_ia'])
+            else:
+                notif['evaluacion_data'] = {}
+        except:
+            notif['evaluacion_data'] = {}
+            
+        # Formatear fecha/hora para mejor legibilidad
+        if notif.get('timestamp'):
+            notif['timestamp_formateado'] = notif['timestamp'].strftime('%d/%m/%Y %H:%M')
+    
     cursor.close()
     conn.close()
     
