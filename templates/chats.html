@@ -279,7 +279,7 @@
 
 <!-- Botón móvil para mostrar/ocultar lista de chats -->
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
-<script src="{{ url_for('static', filename='js/chat-updater.js') }}"></script>
+
 <style>
     /* Los estilos existentes quedan intactos... */
 
@@ -725,40 +725,7 @@
         animation: highlightChat 2s ease-in-out;
     }
 </style>
-<style>
-    @keyframes highlightChat {
-        0% {
-            background-color: inherit;
-        }
 
-        30% {
-            background-color: #2a4a8a;
-        }
-
-        100% {
-            background-color: inherit;
-        }
-    }
-
-    .chat-item.new-message {
-        animation: highlightChat 2s ease-in-out;
-    }
-
-    .card-unread {
-        position: absolute;
-        top: 10px;
-        right: 12px;
-        background: #00E091;
-        color: #fff;
-        border-radius: 10px;
-        padding: 0px 6px;
-        font-size: 0.8em;
-        font-weight: 600;
-        min-width: 18px;
-        text-align: center;
-        box-shadow: 0 0 5px rgba(0, 224, 145, 0.3);
-    }
-</style>
 <script>
 // Auto-refresh functionality for chat list
 let chatAutoRefresh = true;
