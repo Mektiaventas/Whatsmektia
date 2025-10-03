@@ -198,7 +198,8 @@ def guardar_configuracion_negocio():
         'direccion': request.form.get('direccion'),
         'telefono': request.form.get('telefono'),
         'correo': request.form.get('correo'),
-        'que_hace': request.form.get('que_hace')
+        'que_hace': request.form.get('que_hace'),
+        'calendar_email': request.form.get('calendar_email')  # Nuevo campo para correo de notificaciones
     }
     
     # Manejar la subida del logo
@@ -223,18 +224,18 @@ def guardar_configuracion_negocio():
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
-    # Verificar si la columna app_logo existe
+    # Verificar si existe la columna calendar_email
     try:
-        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'app_logo'")
-        app_logo_existe = cursor.fetchone() is not None
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
+        calendar_email_existe = cursor.fetchone() is not None
         
         # Crear la columna si no existe
-        if not app_logo_existe:
-            cursor.execute("ALTER TABLE configuracion ADD COLUMN app_logo VARCHAR(255)")
+        if not calendar_email_existe:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)")
         
         conn.commit()
     except Exception as e:
-        app.logger.error(f"Error verificando/creando columna: {e}")
+        app.logger.error(f"Error verificando/creando columna calendar_email: {e}")
     
     # Verificar si existe una configuración
     cursor.execute("SELECT COUNT(*) FROM configuracion")
@@ -1978,6 +1979,23 @@ def crear_evento_calendar(service, cita_info, config=None):
             'colorId': '4' if es_porfirianna else '1',  # Rojo para Porfirianna, Azul para otros
         }
         
+        # Obtener el correo para notificaciones de Calendar
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        calendar_email = None
+        if result and result.get('calendar_email'):
+            calendar_email = result['calendar_email']
+            
+        # Agregar el correo como asistente si está configurado
+        if calendar_email:
+            event['attendees'] = [{'email': calendar_email}]
+            app.logger.info(f"✉️ Notificación de Calendar configurada para: {calendar_email}")
+        
         calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
         event = service.events().insert(calendarId=calendar_id, body=event).execute()
         
@@ -2399,8 +2417,10 @@ def load_config(config=None):
             palabras_prohibidas TEXT,
             max_mensajes INT DEFAULT 10,
             tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),  
-            nombre_empresa VARCHAR(100)  
+            logo_url VARCHAR(255),
+            nombre_empresa VARCHAR(100),
+            app_logo VARCHAR(255),
+            calendar_email VARCHAR(255)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -2420,8 +2440,10 @@ def load_config(config=None):
         'telefono': row['telefono'],
         'correo': row['correo'],
         'que_hace': row['que_hace'],
-        'logo_url': row.get('logo_url', ''),  
-        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats') 
+        'logo_url': row.get('logo_url', ''),
+        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
+        'app_logo': row.get('app_logo', ''),
+        'calendar_email': row.get('calendar_email', '')  # Cargando el nuevo campo
     }
     personalizacion = {
         'tono': row['tono'],
@@ -2507,18 +2529,36 @@ def guardar_cita(info_cita, config=None):
         conn.commit()
         cita_id = cursor.lastrowid
         
-        # Agendar en Google Calendar
-        service = autenticar_google_calendar(config)
+        # Determinar si la cita es para un día futuro (al menos 1 día después)
         evento_id = None
-        if service:
-            evento_id = crear_evento_calendar(service, info_cita, config)
-            if evento_id:
-                # Guardar el ID del evento en la base de datos
-                cursor.execute('''
-                    UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                ''', (evento_id, cita_id))
-                conn.commit()
-                app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+        debe_agendar = False
+        
+        if info_cita.get('fecha_sugerida'):
+            try:
+                fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
+                fecha_actual = datetime.now().date()
+                
+                # Solo agendar si la fecha es al menos un día después
+                if (fecha_cita - fecha_actual).days >= 1:
+                    debe_agendar = True
+                    app.logger.info(f"✅ Cita para fecha futura ({fecha_cita}), se agendará en Calendar")
+                else:
+                    app.logger.info(f"ℹ️ Cita para hoy o pasada ({fecha_cita}), no se agendará en Calendar")
+            except Exception as e:
+                app.logger.error(f"Error procesando fecha: {e}")
+        
+        # Agendar en Google Calendar solo si es para un día futuro
+        if debe_agendar:
+            service = autenticar_google_calendar(config)
+            if service:
+                evento_id = crear_evento_calendar(service, info_cita, config)
+                if evento_id:
+                    # Guardar el ID del evento en la base de datos
+                    cursor.execute('''
+                        UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                    ''', (evento_id, cita_id))
+                    conn.commit()
+                    app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
         
         # Guardar en notificaciones_ia
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
