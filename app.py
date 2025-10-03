@@ -1829,6 +1829,32 @@ def autenticar_google_calendar(config=None):
         app.logger.error(traceback.format_exc())
         return None
 
+@app.route('/chat/<telefono>/messages')
+def get_chat_messages(telefono):
+    """Obtener mensajes de un chat específico después de cierto ID"""
+    after_id = request.args.get('after', 0, type=int)
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Consultar solo mensajes más recientes que el ID proporcionado
+    cursor.execute("""
+        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
+        FROM mensajes 
+        WHERE telefono = %s AND id > %s
+        ORDER BY fecha ASC
+    """, (telefono, after_id))
+    
+    messages = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'messages': messages,
+        'timestamp': int(time.time() * 1000)
+    })
+
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
     """Endpoint específico para autorizar La Porfirianna con Google"""
