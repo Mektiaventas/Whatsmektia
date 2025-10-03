@@ -24,12 +24,19 @@
 
 <!-- Contenido de la subpestaña -->
 {% if active == 'negocio' %}
+<!-- En la sección de integración con Google Calendar -->
 <div class="form-group">
     <label>Integración con Google Calendar</label>
     <div>
+        {% if 'laporfirianna' in request.host %}
+        <a href="{{ url_for('autorizar_porfirianna') }}" class="btn btn-primary">
+            Autorizar con Google Calendar
+        </a>
+        {% else %}
         <a href="{{ url_for('autorizar_manual') }}" class="btn btn-primary">
             Autorizar con Google Calendar
         </a>
+        {% endif %}
         <small class="form-text text-muted">
             Permite agendar citas automáticamente en tu calendario
         </small>

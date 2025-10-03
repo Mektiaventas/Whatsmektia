@@ -1829,6 +1829,49 @@ def autenticar_google_calendar(config=None):
         app.logger.error(traceback.format_exc())
         return None
 
+@app.route('/autorizar-porfirianna')
+def autorizar_porfirianna():
+    """Endpoint específico para autorizar La Porfirianna con Google"""
+    try:
+        # Usar explícitamente la configuración de La Porfirianna
+        config = NUMEROS_CONFIG['524812372326']
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        tenant_id = config['dominio'].replace('.', '_')
+        
+        if not os.path.exists('client_secret.json'):
+            return "❌ Error: No se encuentra client_secret.json"
+        
+        # Usar explícitamente el dominio de La Porfirianna para el redirect
+        redirect_uri = 'https://www.laporfirianna.mektia.com/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección específica para La Porfirianna: {redirect_uri}")
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri=redirect_uri
+        )
+        
+        # Generar URL de autorización
+        auth_url, _ = flow.authorization_url(
+            prompt='consent', 
+            access_type='offline',
+            include_granted_scopes='true',
+            state=tenant_id  # Incluir el tenant en el estado
+        )
+        
+        app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
+        
+        return f'''
+        <h1>✅ Autorización Google Calendar para La Porfirianna</h1>
+        <p>Por favor visita esta URL para autorizar:</p>
+        <a href="{auth_url}" target="_blank" class="btn btn-primary">{auth_url}</a>
+        <p>Después de autorizar, serás redirigido automáticamente.</p>
+        '''
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error en autorización La Porfirianna: {str(e)}")
+        return f"❌ Error: {str(e)}"
+
 @app.route('/autorizar-manual')
 def autorizar_manual():
     """Endpoint para autorizar manualmente con Google"""
