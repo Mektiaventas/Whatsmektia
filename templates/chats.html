@@ -756,7 +756,8 @@
                 }
 
                 lastUpdateTimestamp = data.timestamp;
-                actualizarListaChatsIncremental(data.chats);
+                // Usar la función mejorada en lugar de actualizarListaChatsIncremental
+                actualizarElementosChat(data.chats);
             })
             .catch(error => {
                 console.error("❌ Error updating chat list:", error);
@@ -1208,5 +1209,36 @@
             actualizarKanban();
         }
     });
+    function actualizarElementosChat(chats) {
+        const chatContainer = document.querySelector('.chat-items');
+        if (!chatContainer) return;
+
+        // Actualizar chats existentes y añadir nuevos
+        chats.forEach(chat => {
+            let existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
+
+            if (existingChat) {
+                // Actualizar mensaje y tiempo
+                const msgEl = existingChat.querySelector('.card-msg');
+                if (msgEl && chat.ultimo_mensaje) {
+                    const newText = chat.tipo_mensaje === 'imagen' ?
+                        '📷 Imagen' :
+                        `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
+
+                    if (msgEl.textContent.trim() !== newText) {
+                        msgEl.textContent = newText;
+                        existingChat.classList.add('new-message');
+                        setTimeout(() => existingChat.classList.remove('new-message'), 2000);
+                    }
+                }
+
+                // Actualizar hora
+                const timeEl = existingChat.querySelector('.card-time');
+                if (timeEl && chat.ultima_fecha) {
+                    timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            }
+        });
+    }
 </script>
 {% endblock %}
