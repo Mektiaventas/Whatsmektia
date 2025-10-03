@@ -1207,22 +1207,26 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Update refresh interval to something more reasonable
+    // Actualizar este bloque en el script existente
     document.addEventListener('DOMContentLoaded', function () {
-        // Set a reasonable refresh interval (2 seconds)
-        refreshInterval = 2000;
+        // Establecer intervalo de actualización a medio segundo (500ms)
+        refreshInterval = 500; // medio segundo
 
-        // Start the refresh cycle
+        // Iniciar el ciclo de actualización
         if (document.querySelector('.chat-items')) {
-            console.log("🚀 Starting chat auto-refresh");
+            console.log("🚀 Iniciando actualización de chats (500ms)");
 
-            // First immediate call to verify
+            // Primera llamada inmediata para verificar
             actualizarListaChats();
 
-            // Then set up the regular interval
+            // Establecer intervalo regular de actualización
             setInterval(actualizarListaChats, refreshInterval);
         }
-    });
+
+        // Resto del código DOMContentLoaded se mantiene...
+        document.querySelectorAll('.audio-player audio').forEach(audio => {
+            // ...código existente...
+        });
 
 </script>
 {% endblock %}
