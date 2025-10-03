@@ -863,43 +863,61 @@
 
     // Función para activar edición de alias
     function activarEdicionAlias(parent) {
-        parent.querySelector('.alias-view').style.display = 'none';
-        parent.querySelector('.alias-edit').style.display = 'flex';
-        const input = parent.querySelector('input[type=text]');
+        console.log("Activando edición para:", parent);
+
+        // Buscar elementos correctamente
+        const viewElement = parent.querySelector('.alias-view');
+        const editElement = parent.querySelector('.alias-edit');
+
+        if (!viewElement || !editElement) {
+            console.error("No se encontraron elementos necesarios:", viewElement, editElement);
+            return;
+        }
+
+        // Mostrar campo de edición
+        viewElement.style.display = 'none';
+        editElement.style.display = 'flex';
+
+        const input = editElement.querySelector('input[type=text]');
+        if (!input) {
+            console.error("No se encontró el input de texto");
+            return;
+        }
+
         input.focus();
         input.select();
 
         function terminarEdicion() {
             fetch(`/contactos/${input.dataset.num}/alias`, {
                 method: 'POST',
-                body: new URLSearchParams({alias: input.value}),
-                headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+                body: new URLSearchParams({ alias: input.value }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
             }).then(() => {
-                parent.querySelector('.alias-edit').style.display = 'none';
-                parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-                parent.querySelector('.alias-view').style.display = '';
+                editElement.style.display = 'none';
+                viewElement.textContent = input.value || input.dataset.num;
+                viewElement.style.display = '';
 
-                // Actualizar en lista también
-                document.querySelectorAll('.chat-name').forEach(function(chatName) {
-                    if (chatName.dataset.num === input.dataset.num) {
-                        chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-                    }
-                });
+                console.log("Alias actualizado:", input.value);
+            }).catch(error => {
+                console.error("Error actualizando alias:", error);
+                editElement.style.display = 'none';
+                viewElement.style.display = '';
             });
         }
 
         input.onblur = terminarEdicion;
-        input.onkeydown = function(e) {
+        input.onkeydown = function (e) {
             if (e.key === 'Enter') {
                 e.preventDefault();
                 terminarEdicion();
             }
             if (e.key === 'Escape') {
-                parent.querySelector('.alias-edit').style.display = 'none';
-                parent.querySelector('.alias-view').style.display = '';
+                editElement.style.display = 'none';
+                viewElement.style.display = '';
             }
         };
     }
+
 
     // Controlador de audio
     function toggleAudio(audioId, button) {
