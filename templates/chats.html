@@ -727,20 +727,19 @@
 </style>
 
 <script>
-// Auto-refresh functionality for chat list
-let chatAutoRefresh = true;
-let refreshInterval = 500; // Half a second
-let selectedChatId = "{{ selected }}";
-let lastUpdateTimestamp = new Date().getTime();
+    // Auto-refresh functionality for chat list
+    let chatAutoRefresh = true;
+    let refreshInterval = 500; // Exactamente medio segundo
+    let selectedChatId = "{{ selected }}";
+    let lastUpdateTimestamp = new Date().getTime();
 
-function startChatRefresh() {
-  console.log("🔄 Starting chat list auto-refresh");
-  setInterval(actualizarListaChats, refreshInterval);
-}
+    function startChatRefresh() {
+        console.log("🔄 Starting chat list auto-refresh (500ms)");
+        setInterval(actualizarListaChats, refreshInterval);
+    }
 
     function actualizarListaChats() {
         if (!chatAutoRefresh) {
-            console.log("⏸️ Auto-refresh paused");
             return;
         }
 
@@ -752,291 +751,311 @@ function startChatRefresh() {
                 return response.json();
             })
             .then(data => {
-                console.log(`📊 Got ${data.chats?.length || 0} chats from server`);
-
                 if (data.timestamp <= lastUpdateTimestamp) {
-                    console.log("⏭️ No new data since last update");
                     return; // No new data
                 }
 
                 lastUpdateTimestamp = data.timestamp;
                 actualizarListaChatsIncremental(data.chats);
-                console.log("✅ Chat list updated:", new Date().toLocaleTimeString());
             })
             .catch(error => {
                 console.error("❌ Error updating chat list:", error);
             });
     }
 
-    // Modificar la función actualizarListaChats para preservar la posición del scroll
-function actualizarChatExistente(elemento, chat) {
-  // Update chat preview (last message)
-  const previewElement = elemento.querySelector('.chat-preview');
-  if (previewElement && chat.ultimo_mensaje) {
-    const nuevoTexto = chat.tipo_mensaje === 'imagen' ?
-      '📷 Imagen' :
-      `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
+    // Función para actualizar un chat existente
+    function actualizarChatExistente(elemento, chat) {
+        // Update chat preview (last message)
+        const previewElement = elemento.querySelector('.chat-preview');
+        if (previewElement && chat.ultimo_mensaje) {
+            const nuevoTexto = chat.tipo_mensaje === 'imagen' ?
+                '📷 Imagen' :
+                `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
 
-    if (previewElement.textContent.trim() !== nuevoTexto.trim()) {
-      previewElement.textContent = nuevoTexto;
-      elemento.classList.add('new-message'); // Add highlight class
-      setTimeout(() => {
-        elemento.classList.remove('new-message');
-      }, 2500);
+            if (previewElement.textContent.trim() !== nuevoTexto.trim()) {
+                previewElement.textContent = nuevoTexto;
+                elemento.classList.add('new-message'); // Add highlight class
+                setTimeout(() => {
+                    elemento.classList.remove('new-message');
+                }, 2500);
+            }
+        }
+
+        // Update time
+        const timeElement = elemento.querySelector('.chat-time');
+        if (timeElement && chat.ultima_fecha) {
+            const fecha = new Date(chat.ultima_fecha);
+            timeElement.textContent = fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        }
+
+        // Update date
+        const dateElement = elemento.querySelector('.chat-date');
+        if (dateElement && chat.ultima_fecha) {
+            const fecha = new Date(chat.ultima_fecha);
+            dateElement.textContent = fecha.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
+        }
     }
-  }
 
-  // Update time
-  const timeElement = elemento.querySelector('.chat-time');
-  if (timeElement && chat.ultima_fecha) {
-    const fecha = new Date(chat.ultima_fecha);
-    timeElement.textContent = fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  }
+    function crearNuevoChatHTML(chat) {
+        const isSelected = chat.numero === selectedChatId;
+        const avatarUrl = chat.imagen_url || '/static/icons/default-avatar.png';
+        const nombreMostrado = chat.nombre_mostrado || chat.numero;
+        const ultimoMensaje = chat.tipo_mensaje === 'imagen' ?
+            '📷 Imagen' :
+            (chat.ultimo_mensaje ?
+            `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
+            'Sin mensajes');
 
-  // Update date
-  const dateElement = elemento.querySelector('.chat-date');
-  if (dateElement && chat.ultima_fecha) {
-    const fecha = new Date(chat.ultima_fecha);
-    dateElement.textContent = fecha.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-  }
-}
-
-function crearNuevoChatHTML(chat) {
-  const isSelected = chat.numero === selectedChatId;
-  const avatarUrl = chat.imagen_url || '/static/icons/default-avatar.png';
-  const nombreMostrado = chat.nombre_mostrado || chat.numero;
-  const ultimoMensaje = chat.tipo_mensaje === 'imagen' ?
-    '📷 Imagen' :
-    (chat.ultimo_mensaje ?
-      `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
-      'Sin mensajes');
-
-  return `
-<a href="/chats/${chat.numero}" class="chat-item ${isSelected ? 'selected' : ''}">
-    <div class="chat-avatar">
-        <img src="${avatarUrl}"
-             alt="Avatar"
-             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';"
-             width="40" height="40">
-    </div>
-    <div class="chat-info">
-        <div class="chat-name" style="display:flex;align-items:center;" data-num="${chat.numero}">
-            <span class="alias-view">
-                ${nombreMostrado}
-            </span>
-            <span class="alias-edit" style="display:none;">
-                <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
-            </span>
-            <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre" style="border:none;background:none;cursor:pointer;">
-                ✏️
-            </button>
+        return `
+    <a href="/chats/${chat.numero}" class="chat-item ${isSelected ? 'selected' : ''}" data-chat-num="${chat.numero}">
+        <div class="chat-content">
+            <div class="card-title-row">
+                <div class="card-avatar-section">
+                    <img src="${avatarUrl}"
+                        class="card-avatar" alt="Avatar"
+                        onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                <span class="alias-view" data-num="${chat.numero}">
+                    ${nombreMostrado}
+                </span>
+                <span class="alias-edit" style="display:none;">
+                    <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+                </span>
+                <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
+                    ✏️
+                </button>
+            </div>
+            <div class="card-meta-row">
+                <span class="card-num">${chat.numero}</span>
+                <span class="card-time">
+                    ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) : ''}
+                </span>
+            </div>
+            <div class="card-msg">
+                ${ultimoMensaje}
+            </div>
         </div>
-        ${(chat.alias || chat.nombre) ?
-        `<div class="chat-num" style="font-size:11px;color:#888;">
-            ${chat.numero}
-        </div>` : ''}
-        <div class="chat-preview">
-            ${ultimoMensaje}
-        </div>
-    </div>
-    <div class="chat-meta">
-        ${chat.ultima_fecha ?
-        `<div class="chat-date">${new Date(chat.ultima_fecha).toLocaleDateString([], {day: '2-digit', month: '2-digit'})}</div>
-        <div class="chat-time">${new Date(chat.ultima_fecha).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}</div>` : ''}
-    </div>
-</a>
-  `;
-}
-
-// Add highlight animation style
-const style = document.createElement('style');
-style.textContent = `
-  @keyframes highlightChat {
-    0% { background-color: inherit; }
-    30% { background-color: #e7f3ff; }
-    100% { background-color: inherit; }
-  }
-
-  .chat-item.new-message {
-    animation: highlightChat 2s ease-in-out;
-  }
-`;
-document.head.appendChild(style);
-
-// Pause refresh when tab is not visible to save resources
-document.addEventListener('visibilitychange', function() {
-  chatAutoRefresh = !document.hidden;
-});
-
-// Start the refresh cycle when page loads
-document.addEventListener('DOMContentLoaded', function() {
-  if (document.querySelector('.chat-items')) {
-    startChatRefresh();
-  }
-});
-  // Función para scroll al final de los mensajes
-  function scrollToBottom() {
-    const msgsContainer = document.getElementById('msgs');
-    if (msgsContainer) {
-      msgsContainer.scrollTop = msgsContainer.scrollHeight;
-    }
-  }
-
-  // Función para activar edición de alias
-  function activarEdicionAlias(parent) {
-    parent.querySelector('.alias-view').style.display = 'none';
-    parent.querySelector('.alias-edit').style.display = 'flex';
-    const input = parent.querySelector('input[type=text]');
-    input.focus();
-    input.select();
-
-    function terminarEdicion() {
-      fetch(`/contactos/${input.dataset.num}/alias`, {
-        method: 'POST',
-        body: new URLSearchParams({alias: input.value}),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'}
-      }).then(() => {
-        parent.querySelector('.alias-edit').style.display = 'none';
-        parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-        parent.querySelector('.alias-view').style.display = '';
-
-        // Actualizar en lista también
-        document.querySelectorAll('.chat-name').forEach(function(chatName) {
-          if (chatName.dataset.num === input.dataset.num) {
-            chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
-          }
-        });
-      });
+    </a>
+        `;
     }
 
-    input.onblur = terminarEdicion;
-    input.onkeydown = function(e) {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        terminarEdicion();
-      }
-      if (e.key === 'Escape') {
-        parent.querySelector('.alias-edit').style.display = 'none';
-        parent.querySelector('.alias-view').style.display = '';
-      }
-    };
-  }
+    // Add highlight animation style
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes highlightChat {
+            0% { background-color: inherit; }
+            30% { background-color: #e7f3ff; }
+            100% { background-color: inherit; }
+        }
 
-  // Controlador de audio
-  function toggleAudio(audioId, button) {
-    const audioPlayer = document.getElementById(audioId);
-    const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
-    const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
+        .chat-item.new-message {
+            animation: highlightChat 2s ease-in-out;
+        }
+    `;
+    document.head.appendChild(style);
 
-    if (audioPlayer.paused) {
-      audioPlayer.play().then(() => {
-        button.textContent = '⏸️';
-        audioPlayer.ontimeupdate = function() {
-          if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
-            const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
-            progressBar.style.width = progress + '%';
+    // Pause refresh when tab is not visible to save resources
+    document.addEventListener('visibilitychange', function() {
+        chatAutoRefresh = !document.hidden;
+    });
+
+    // Función para activar edición de alias
+    function activarEdicionAlias(parent) {
+        parent.querySelector('.alias-view').style.display = 'none';
+        parent.querySelector('.alias-edit').style.display = 'flex';
+        const input = parent.querySelector('input[type=text]');
+        input.focus();
+        input.select();
+
+        function terminarEdicion() {
+            fetch(`/contactos/${input.dataset.num}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({alias: input.value}),
+                headers: {'Content-Type': 'application/x-www-form-urlencoded'}
+            }).then(() => {
+                parent.querySelector('.alias-edit').style.display = 'none';
+                parent.querySelector('.alias-view').textContent = input.value || input.dataset.num;
+                parent.querySelector('.alias-view').style.display = '';
+
+                // Actualizar en lista también
+                document.querySelectorAll('.chat-name').forEach(function(chatName) {
+                    if (chatName.dataset.num === input.dataset.num) {
+                        chatName.querySelector('.alias-view').textContent = input.value || input.dataset.num;
+                    }
+                });
+            });
+        }
+
+        input.onblur = terminarEdicion;
+        input.onkeydown = function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                terminarEdicion();
+            }
+            if (e.key === 'Escape') {
+                parent.querySelector('.alias-edit').style.display = 'none';
+                parent.querySelector('.alias-view').style.display = '';
+            }
+        };
+    }
+
+    // Controlador de audio
+    function toggleAudio(audioId, button) {
+        const audioPlayer = document.getElementById(audioId);
+        const progressBar = button.closest('.audio-player').querySelector('.audio-progress-bar');
+        const durationSpan = button.closest('.audio-player').querySelector('.audio-duration');
+
+        if (audioPlayer.paused) {
+            audioPlayer.play().then(() => {
+                button.textContent = '⏸️';
+                audioPlayer.ontimeupdate = function() {
+                    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+                        const progress = (audioPlayer.currentTime / audioPlayer.duration) * 100;
+                        progressBar.style.width = progress + '%';
+                        const minutes = Math.floor(audioPlayer.currentTime / 60);
+                        const seconds = Math.floor(audioPlayer.currentTime % 60);
+                        durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                    }
+                };
+            }).catch(error => console.error('Error al reproducir audio:', error));
+        } else {
+            audioPlayer.pause();
+            button.textContent = '▶️';
+        }
+    }
+
+    // Función para buscar en el audio
+    function seekAudio(audioId, progressBar, event) {
+        const audioPlayer = document.getElementById(audioId);
+        const progressBarInner = progressBar.querySelector('.audio-progress-bar');
+        const rect = progressBar.getBoundingClientRect();
+        const clickX = event.clientX - rect.left;
+        const width = rect.width;
+
+        if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
+            const clickTime = (clickX / width) * audioPlayer.duration;
+            audioPlayer.currentTime = clickTime;
+            progressBarInner.style.width = (clickX / width) * 100 + '%';
             const minutes = Math.floor(audioPlayer.currentTime / 60);
             const seconds = Math.floor(audioPlayer.currentTime % 60);
+            const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
             durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-          }
-        };
-      }).catch(error => console.error('Error al reproducir audio:', error));
-    } else {
-      audioPlayer.pause();
-      button.textContent = '▶️';
-    }
-  }
-
-  // Función para buscar en el audio
-  function seekAudio(audioId, progressBar, event) {
-    const audioPlayer = document.getElementById(audioId);
-    const progressBarInner = progressBar.querySelector('.audio-progress-bar');
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const width = rect.width;
-
-    if (audioPlayer.duration && isFinite(audioPlayer.duration)) {
-      const clickTime = (clickX / width) * audioPlayer.duration;
-      audioPlayer.currentTime = clickTime;
-      progressBarInner.style.width = (clickX / width) * 100 + '%';
-      const minutes = Math.floor(audioPlayer.currentTime / 60);
-      const seconds = Math.floor(audioPlayer.currentTime % 60);
-      const durationSpan = progressBar.closest('.audio-player').querySelector('.audio-duration');
-      durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-    }
-  }
-
-  // Inicializar todos los audios al cargar la página
-  document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.audio-player audio').forEach(audio => {
-      audio.addEventListener('loadedmetadata', function() {
-        const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
-        if (this.duration && isFinite(this.duration)) {
-          const minutes = Math.floor(this.duration / 60);
-          const seconds = Math.floor(this.duration % 60);
-          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
         }
-      });
-      if (audio.readyState < 1) audio.load();
-      audio.addEventListener('canplay', function() {
-        const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
-        if (this.duration && isFinite(this.duration)) {
-          const minutes = Math.floor(this.duration / 60);
-          const seconds = Math.floor(this.duration % 60);
-          durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+
+    // Función para scroll al final de los mensajes
+    function scrollToBottom() {
+        const msgsContainer = document.getElementById('msgs');
+        if (msgsContainer) {
+            msgsContainer.scrollTop = msgsContainer.scrollHeight;
         }
-      });
-      audio.addEventListener('ended', function() {
-        const button = this.closest('.audio-player').querySelector('.audio-play-btn');
-        if (button) button.textContent = '▶️';
-        const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
-        if (progressBar) progressBar.style.width = '0%';
-      });
-    });
+    }
 
-    document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
-      btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const parent = btn.closest('.chat-title, .chat-name');
-        activarEdicionAlias(parent);
-      });
-    });
+    // Toggle lista de chats en móvil
+    function toggleChatList() {
+        const chatList = document.querySelector('.chat-list-v2');
+        chatList.classList.toggle('mobile-visible');
+    }
 
-    scrollToBottom();
+    function actualizarListaChatsIncremental(chats) {
+        const chatContainer = document.querySelector('.chat-items');
+        if (!chatContainer) return;
 
-    const observer = new MutationObserver(function(mutations) {
-      mutations.forEach(function(mutation) {
-        const isAudioChange = mutation.target.closest('.audio-player') ||
-                             mutation.target.classList.contains('audio-progress-bar');
-        if (mutation.addedNodes.length > 0 && !isAudioChange) {
-          let shouldScroll = true;
-          mutation.addedNodes.forEach(node => {
-            if (node.classList && (node.classList.contains('audio-player') || node.closest('.audio-player'))) {
-              shouldScroll = false;
+        // Process each chat from the API
+        chats.forEach(chat => {
+            // Check if this chat item already exists
+            const existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
+
+            if (existingChat) {
+                // Update existing chat item
+                const msgEl = existingChat.querySelector('.card-msg');
+                if (msgEl && chat.ultimo_mensaje) {
+                    const currentText = msgEl.textContent.trim();
+                    const newText = chat.tipo_mensaje === 'imagen' ?
+                        '📷 Imagen' :
+                        `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
+
+                    if (currentText !== newText) {
+                        msgEl.textContent = newText;
+                        existingChat.classList.add('new-message');
+                        setTimeout(() => {
+                            existingChat.classList.remove('new-message');
+                        }, 2000);
+                    }
+                }
+
+                // Update time
+                const timeEl = existingChat.querySelector('.card-time');
+                if (timeEl && chat.ultima_fecha) {
+                    const date = new Date(chat.ultima_fecha);
+                    timeEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            } else {
+                // This is a completely new chat, we need to add it to the list
+                const newChatElement = document.createElement('div');
+
+                // Create chat HTML without Jinja filters (they won't work in JS)
+                newChatElement.innerHTML = `
+                <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                    <div class="card-content">
+                        <div class="card-title-row">
+                            <div class="card-avatar-section">
+                                <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}"
+                                     class="card-avatar" alt="Avatar"
+                                     onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            </div>
+                            <span class="alias-view" data-num="${chat.numero}">
+                                ${chat.nombre_mostrado || chat.numero}
+                            </span>
+                            <span class="alias-edit" style="display:none;">
+                                <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+                            </span>
+                            <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
+                                ✏️
+                            </button>
+                        </div>
+                        <div class="card-meta-row">
+                            <span class="card-num">${chat.numero}</span>
+                            <span class="card-time">
+                                ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                            </span>
+                        </div>
+                        <div class="card-msg">
+                            ${chat.tipo_mensaje === 'imagen' ?
+                        '📷 Imagen' :
+                        (chat.ultimo_mensaje ?
+                            `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
+                            'Sin mensajes')}
+                        </div>
+                    </div>
+                </a>
+            `;
+
+                // Add new chat to the container (at the top)
+                chatContainer.insertBefore(newChatElement.firstElementChild, chatContainer.firstChild);
+                newChatElement.firstElementChild.classList.add('new-message');
+
+                // Set up event listeners for the new chat item
+                const editButton = newChatElement.firstElementChild.querySelector('.edit-alias-btn');
+                if (editButton) {
+                    editButton.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const parent = this.closest('.card-title-row');
+                        activarEdicionAlias(parent);
+                    });
+                }
+
+                setTimeout(() => {
+                    newChatElement.firstElementChild.classList.remove('new-message');
+                }, 2000);
             }
-          });
-          if (shouldScroll) setTimeout(scrollToBottom, 100);
-        }
-      });
-    });
-    const msgsContainer = document.getElementById('msgs');
-    if (msgsContainer) observer.observe(msgsContainer, { childList: true, subtree: true });
-  });
-
-  // Toggle lista de chats en móvil
-  function toggleChatList() {
-    const chatList = document.querySelector('.chat-list-v2');
-      chatList.classList.toggle('mobile-visible');
-
-    }
-    if (window.location.pathname === '/kanban') {
-        actualizarKanban();
+        });
     }
 
-    // Función para el selector de emojis
-    document.addEventListener('DOMContentLoaded', function () {
-        // Lista de emojis comunes
+    // Un solo evento DOMContentLoaded que inicializa todo
+    document.addEventListener('DOMContentLoaded', function() {
+        // Inicializar selector de emojis
         const commonEmojis = [
             '😀', '😃', '😄', '😁', '😆', '😅', '🤣', '😂', '🙂', '😊',
             '😇', '🥰', '😍', '🤩', '😘', '😗', '☺️', '😚', '😙',
@@ -1107,126 +1126,87 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
         }
-    });
 
-    function actualizarListaChatsIncremental(chats) {
-        const chatContainer = document.querySelector('.chat-items');
-        if (!chatContainer) return;
-
-        console.log(`🔄 Processing ${chats.length} chats for updates`);
-
-        // Process each chat from the API
-        chats.forEach(chat => {
-            // Check if this chat item already exists
-            const existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
-
-            if (existingChat) {
-                // Update existing chat item
-                const msgEl = existingChat.querySelector('.card-msg');
-                if (msgEl && chat.ultimo_mensaje) {
-                    const currentText = msgEl.textContent.trim();
-                    const newText = chat.tipo_mensaje === 'imagen' ?
-                        '📷 Imagen' :
-                        `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
-
-                    if (currentText !== newText) {
-                        msgEl.textContent = newText;
-                        existingChat.classList.add('new-message');
-                        setTimeout(() => {
-                            existingChat.classList.remove('new-message');
-                        }, 2000);
-                    }
+        // Inicializar audios
+        document.querySelectorAll('.audio-player audio').forEach(audio => {
+            audio.addEventListener('loadedmetadata', function() {
+                const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+                if (this.duration && isFinite(this.duration)) {
+                    const minutes = Math.floor(this.duration / 60);
+                    const seconds = Math.floor(this.duration % 60);
+                    durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                 }
+            });
 
-                // Update time
-                const timeEl = existingChat.querySelector('.card-time');
-                if (timeEl && chat.ultima_fecha) {
-                    const date = new Date(chat.ultima_fecha);
-                    timeEl.textContent = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            if (audio.readyState < 1) audio.load();
+
+            audio.addEventListener('canplay', function() {
+                const durationSpan = this.closest('.audio-player').querySelector('.audio-duration');
+                if (this.duration && isFinite(this.duration)) {
+                    const minutes = Math.floor(this.duration / 60);
+                    const seconds = Math.floor(this.duration % 60);
+                    durationSpan.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
                 }
-            } else {
-                // This is a completely new chat, we need to add it to the list
-                const newChatElement = document.createElement('div');
+            });
 
-                // Create chat HTML without Jinja filters (they won't work in JS)
-                newChatElement.innerHTML = `
-                <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
-                    <div class="card-content">
-                        <div class="card-title-row">
-                            <div class="card-avatar-section">
-                                <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" 
-                                     class="card-avatar" alt="Avatar"
-                                     onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                            </div>
-                            <span class="alias-view" data-num="${chat.numero}">
-                                ${chat.nombre_mostrado || chat.numero}
-                            </span>
-                            <span class="alias-edit" style="display:none;">
-                                <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
-                            </span>
-                            <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
-                                ✏️
-                            </button>
-                        </div>
-                        <div class="card-meta-row">
-                            <span class="card-num">${chat.numero}</span>
-                            <span class="card-time">
-                                ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                            </span>
-                        </div>
-                        <div class="card-msg">
-                            ${chat.tipo_mensaje === 'imagen' ?
-                        '📷 Imagen' :
-                        (chat.ultimo_mensaje ?
-                            `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
-                            'Sin mensajes')}
-                        </div>
-                    </div>
-                </a>
-            `;
-
-                // Add new chat to the container (at the top)
-                chatContainer.insertBefore(newChatElement.firstElementChild, chatContainer.firstChild);
-                newChatElement.firstElementChild.classList.add('new-message');
-
-                // Set up event listeners for the new chat item
-                const editButton = newChatElement.firstElementChild.querySelector('.edit-alias-btn');
-                if (editButton) {
-                    editButton.addEventListener('click', function (e) {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const parent = this.closest('.card-title-row');
-                        activarEdicionAlias(parent);
-                    });
-                }
-
-                setTimeout(() => {
-                    newChatElement.firstElementChild.classList.remove('new-message');
-                }, 2000);
-            }
+            audio.addEventListener('ended', function() {
+                const button = this.closest('.audio-player').querySelector('.audio-play-btn');
+                if (button) button.textContent = '▶️';
+                const progressBar = this.closest('.audio-player').querySelector('.audio-progress-bar');
+                if (progressBar) progressBar.style.width = '0%';
+            });
         });
-    }
 
-    // Actualizar este bloque en el script existente
-    document.addEventListener('DOMContentLoaded', function () {
-        // Establecer intervalo de actualización a medio segundo (500ms)
-        refreshInterval = 500; // medio segundo
+        // Configurar botones de edición de alias
+        document.querySelectorAll('.edit-alias-btn').forEach(function(btn) {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const parent = btn.closest('.chat-title, .chat-name');
+                activarEdicionAlias(parent);
+            });
+        });
 
-        // Iniciar el ciclo de actualización
+        scrollToBottom();
+
+        // Configurar observador de mutación
+        const observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(mutation) {
+                const isAudioChange = mutation.target.closest('.audio-player') ||
+                                    mutation.target.classList.contains('audio-progress-bar');
+                if (mutation.addedNodes.length > 0 && !isAudioChange) {
+                    let shouldScroll = true;
+                    mutation.addedNodes.forEach(node => {
+                        if (node.classList && (node.classList.contains('audio-player') || node.closest('.audio-player'))) {
+                            shouldScroll = false;
+                        }
+                    });
+                    if (shouldScroll) setTimeout(scrollToBottom, 100);
+                }
+            });
+        });
+
+        const msgsContainer = document.getElementById('msgs');
+        if (msgsContainer) observer.observe(msgsContainer, { childList: true, subtree: true });
+
+        // Iniciar actualización cada 500ms (medio segundo)
         if (document.querySelector('.chat-items')) {
-            console.log("🚀 Iniciando actualización de chats (500ms)");
+            // Asegurarse de que el intervalo está en 500ms
+            refreshInterval = 500;
 
-            // Primera llamada inmediata para verificar
+            console.log("🚀 Iniciando actualización de chats cada 500ms");
+
+            // Primera actualización inmediata
             actualizarListaChats();
 
-            // Establecer intervalo regular de actualización
-            setInterval(actualizarListaChats, refreshInterval);
+            // Iniciar ciclo de actualización cada 500ms
+            startChatRefresh();
         }
 
-        // Resto del código DOMContentLoaded se mantiene...
-        document.querySelectorAll('.audio-player audio').forEach(audio => {
-            // ...código existente...
-        });
-
+        // Inicializar kanban si estamos en esa página
+        if (window.location.pathname === '/kanban') {
+            actualizarKanban();
+        }
+    });
 </script>
 {% endblock %}
