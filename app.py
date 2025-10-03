@@ -188,6 +188,9 @@ def obtener_archivo_whatsapp(media_id, config=None):
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
     config = obtener_configuracion_por_host()
+    # Agregar logging para ver qué datos se reciben
+    app.logger.info(f"📧 Formulario recibido: {request.form}")
+    app.logger.info(f"📧 Calendar email recibido: {request.form.get('calendar_email')}")
     
     # Recopilar todos los datos del formulario
     datos = {
@@ -1980,6 +1983,7 @@ def crear_evento_calendar(service, cita_info, config=None):
         }
         
         # Obtener el correo para notificaciones de Calendar
+        app.logger.info(f"📧 Intentando obtener calendar_email de la base de datos")
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
@@ -5372,7 +5376,36 @@ def ver_chat(numero):
         return render_template('error.html', 
                              error_message="Error al cargar el chat", 
                              error_details=str(e)), 500
-                  
+       
+@app.route('/debug-calendar-email')
+def debug_calendar_email():
+    """Endpoint para verificar si el correo de Calendar está guardado"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Verificar si la columna existe
+    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
+    column_exists = cursor.fetchone() is not None
+    
+    # Obtener el valor actual
+    calendar_email = None
+    if column_exists:
+        cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+        result = cursor.fetchone()
+        if result:
+            calendar_email = result['calendar_email']
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'columna_existe': column_exists,
+        'calendar_email': calendar_email,
+        'host': request.host,
+        'config': config['dominio']
+    })    
+
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
