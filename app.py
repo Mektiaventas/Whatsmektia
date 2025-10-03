@@ -1904,7 +1904,7 @@ def autorizar_manual():
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
-    """Crea un evento en Google Calendar para la cita"""
+    """Crea un evento en Google Calendar para la cita con más detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1912,7 +1912,7 @@ def crear_evento_calendar(service, cita_info, config=None):
         # Determinar el tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # Formatear fecha y hora (solo para Mektia)
+        # Formatear fecha y hora
         if not es_porfirianna:
             start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
             end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
@@ -1924,11 +1924,21 @@ def crear_evento_calendar(service, cita_info, config=None):
             start_time = now.isoformat()
             end_time = (now + timedelta(hours=1)).isoformat()
         
-        # Crear el evento
+        # Obtener detalles adicionales del servicio
+        detalles_servicio = cita_info.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+        
+        # Crear el evento con información ampliada
         event = {
-            'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']}",
+            'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']} - {cita_info.get('servicio_solicitado', 'Servicio')}",
             'description': f"""
 {'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
+Categoría: {categoria_servicio}
+Precio: ${precio_servicio} {cita_info.get('moneda', 'MXN')}
+Descripción: {descripcion_servicio}
+
 Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
 Teléfono: {cita_info.get('telefono', 'No especificado')}
 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
@@ -2107,7 +2117,7 @@ def convertir_audio(audio_path):
         return None
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
-    """Versión mejorada que usa el historial de conversación para extraer información"""
+    """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2123,26 +2133,36 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
     try:
-        # 🔥 MEJORAR EL PROMPT PARA LA PORFIRIANNA
+        # Obtener productos/servicios de la BD para referencia
+        precios = obtener_todos_los_precios(config)
+        servicios_nombres = [p['servicio'] for p in precios if p.get('servicio')]
+        servicios_texto = ", ".join(servicios_nombres[:20])  # Limitar para evitar tokens excesivos
+        
+        # Determinar tipo de negocio
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        
         prompt_cita = f"""
-        Eres un asistente para La Porfirianna (restaurante de comida). 
-        Extrae la información del PEDIDO solicitado basándote en este mensaje.
+        Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+        Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
         
         MENSAJE ACTUAL: "{mensaje}"
         
         HISTORIAL DE CONVERSACIÓN:
         {contexto_historial}
         
-        Devuélvelo en formato JSON con estos campos:
-        - servicio_solicitado (string: ej. "chilaquiles", "tacos", "caviar", etc.)
-        - fecha_sugerida (null - no aplica para pedidos de comida)
-        - hora_sugerida (null - no aplica para pedidos de comida)  
+        SERVICIOS/PRODUCTOS DISPONIBLES:
+        {servicios_texto}
+        
+        Devuelve un JSON con estos campos:
+        - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
+        - fecha_sugerida (string formato YYYY-MM-DD o null)
+        - hora_sugerida (string formato HH:MM o null)
         - nombre_cliente (string o null)
         - telefono (string: {numero})
         - estado (siempre "pendiente")
-        - datos_completos (boolean: true si tiene servicio y nombre)
+        - datos_completos (boolean: true si tiene todos los datos necesarios)
         
-        Si el mensaje es un saludo o no contiene información de pedido, devuelve servicio_solicitado: null.
+        Si el mensaje no contiene información de pedido/cita, devuelve servicio_solicitado: null.
         """
         
         headers = {
@@ -2167,14 +2187,28 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
             info_cita = json.loads(json_match.group())
+            
+            # Buscar información adicional del servicio
+            if info_cita.get('servicio_solicitado'):
+                servicio_nombre = info_cita['servicio_solicitado']
+                # Buscar detalles adicionales del servicio en la tabla precios
+                for producto in precios:
+                    if producto.get('servicio') and servicio_nombre.lower() in producto['servicio'].lower():
+                        info_cita['detalles_servicio'] = {
+                            'descripcion': producto.get('descripcion', ''),
+                            'categoria': producto.get('categoria', ''),
+                            'precio': str(producto.get('precio', '0')),
+                            'precio_menudeo': str(producto.get('precio_menudeo', '0')) if producto.get('precio_menudeo') else None
+                        }
+                        break
+            
             return info_cita
         else:
             return None
             
     except Exception as e:
-        app.logger.error(f"Error extrayendo info de pedido: {e}")
-        return None
-    
+        app.logger.error(f"Error extrayendo info de cita: {e}")
+        return None    
 @app.route('/debug-headers')
 def debug_headers():
     headers = {k: v for k, v in request.headers.items()}
@@ -2446,7 +2480,7 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
 
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
-    """Envía alerta al administrador sobre nueva cita"""
+    """Envía alerta al administrador sobre nueva cita con más detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2455,6 +2489,12 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     tipo_solicitud = "pedido" if es_porfirianna else "cita"
     
     try:
+        # Obtener detalles adicionales del servicio si existen
+        detalles_servicio = info_cita.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+        
         mensaje_alerta = f"""
         🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
 
@@ -2462,6 +2502,11 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         *Teléfono:* {info_cita.get('telefono')}
 
         *{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *Categoría:* {categoria_servicio}
+        *Precio:* ${precio_servicio} {info_cita.get('moneda', 'MXN')}
+        
+        *Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
+
         *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
         *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
 
@@ -2477,7 +2522,6 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
@@ -2782,7 +2826,6 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-# ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -2795,45 +2838,64 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    
+    # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
-    lista_precios = "\n".join(
-        f"- {p['servicio']}: {p['precio']} {p['moneda']}"
-        for p in precios
-    )
+    
+    # Format products for the system prompt
+    productos_formateados = []
+    for p in precios[:20]:  # Limit to 20 products to avoid token limits
+        info = f"- {p['servicio']}"
+        if p.get('descripcion'):
+            info += f": {p['descripcion'][:100]}"
+        if p.get('categoria'):
+            info += f" (Categoría: {p['categoria']})"
+        if p.get('precio_menudeo'):
+            info += f" - ${p['precio_menudeo']} {p['moneda']}"
+        elif p.get('precio'):
+            info += f" - ${p['precio']} {p['moneda']}"
+        productos_formateados.append(info)
+    
+    productos_texto = "\n".join(productos_formateados)
+    if len(precios) > 20:
+        productos_texto += f"\n... y {len(precios) - 20} productos/servicios más."
 
-    # En la función responder_con_ia, modifica el system_prompt:
+    # Enhanced system prompt with product information
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
 
-Servicios y precios:
-{lista_precios}
+PRODUCTOS Y SERVICIOS DISPONIBLES:
+{productos_texto}
 
-Habla de manera natural y libre, siempre basándote en la información de arriba.
-Si el usuario pregunta por algo que no está en la lista de precios o descripción,
-responde amablemente que no tienes esa información.
+Habla de manera natural y amigable, basándote siempre en la información proporcionada.
+Si el usuario pregunta por un producto o servicio específico, bríndale todos los detalles que conoces.
+Si el usuario pregunta por algo que no está en la lista, responde amablemente que no tienes esa información.
+
+Si el usuario muestra interés en agendar una cita o solicitar un servicio, pregúntale:
+1. Qué servicio específico le interesa
+2. Para qué fecha y hora le gustaría agendar
+3. Su nombre completo para registrar la cita
+
+Si el usuario proporciona estos detalles, confírmale que su cita será procesada.
 """
-
 
     historial = obtener_historial(numero, config=config)
     
-    # 🔥 CORRECCIÓN: Definir messages_chain correctamente
+    # Define messages_chain correctly
     messages_chain = [{'role': 'system', 'content': system_prompt}]
     
-    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
+    # Filter out messages with NULL or empty content
     for entry in historial:
-        # Solo agregar mensajes de usuario con contenido válido
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
         
-        # Solo agregar respuestas de IA con contenido válido
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
     
-    # Agregar el mensaje actual (si es válido)
+    # Add the current message (if valid)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
-            # ✅ Asegúrate de que imagen_base64 ya incluye el prefijo
             messages_chain.append({
                 'role': 'user',
                 'content': [
@@ -2841,20 +2903,18 @@ responde amablemente que no tienes esa información.
                     {
                         "type": "image_url", 
                         "image_url": {
-                            "url": imagen_base64,  # Ya debería incluir "data:image/jpeg;base64,"
+                            "url": imagen_base64,
                             "detail": "auto"
                         }
                     }
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Para audio: incluir la transcripción
             messages_chain.append({
                 'role': 'user',
                 'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
             })
         else:
-            # Para texto normal
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
@@ -2862,7 +2922,6 @@ responde amablemente que no tienes esa información.
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
         if es_imagen:
-            # Usar OpenAI para imágenes
             headers = {
                 "Authorization": f"Bearer {OPENAI_API_KEY}",
                 "Content-Type": "application/json"
@@ -2870,7 +2929,7 @@ responde amablemente que no tienes esa información.
             
             payload = {
                 "model": "gpt-4o",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
+                "messages": messages_chain,
                 "temperature": 0.7,
                 "max_tokens": 1000,
             }
@@ -2881,12 +2940,10 @@ responde amablemente que no tienes esa información.
             
             data = response.json()
             respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
             respuesta = aplicar_restricciones(respuesta, numero, config)
             return respuesta
         
         else:
-            # Usar DeepSeek para texto (o audio transcrito)
             headers = {
                 "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
                 "Content-Type": "application/json"
@@ -2894,7 +2951,7 @@ responde amablemente que no tienes esa información.
             
             payload = {
                 "model": "deepseek-chat",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
+                "messages": messages_chain,
                 "temperature": 0.7,
                 "max_tokens": 2000
             }
@@ -2904,7 +2961,6 @@ responde amablemente que no tienes esa información.
             
             data = response.json()
             respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
             respuesta = aplicar_restricciones(respuesta, numero, config)
             return respuesta
     
