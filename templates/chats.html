@@ -1211,13 +1211,19 @@
     });
     function actualizarElementosChat(chats) {
         const chatContainer = document.querySelector('.chat-items');
-        if (!chatContainer) return;
+        if (!chatContainer) {
+            console.log("❌ No se encontró el contenedor de chats (.chat-items)");
+            return;
+        }
+
+        console.log(`🔄 Actualizando ${chats.length} chats`);
 
         // Actualizar chats existentes y añadir nuevos
         chats.forEach(chat => {
             let existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
 
             if (existingChat) {
+                console.log(`🔄 Actualizando chat existente: ${chat.numero}`);
                 // Actualizar mensaje y tiempo
                 const msgEl = existingChat.querySelector('.card-msg');
                 if (msgEl && chat.ultimo_mensaje) {
@@ -1226,17 +1232,16 @@
                         `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
 
                     if (msgEl.textContent.trim() !== newText) {
+                        console.log(`✅ Mensaje actualizado para ${chat.numero}: "${newText}"`);
                         msgEl.textContent = newText;
                         existingChat.classList.add('new-message');
                         setTimeout(() => existingChat.classList.remove('new-message'), 2000);
                     }
+                } else {
+                    console.log(`❌ No se encontró elemento .card-msg para ${chat.numero}`);
                 }
-
-                // Actualizar hora
-                const timeEl = existingChat.querySelector('.card-time');
-                if (timeEl && chat.ultima_fecha) {
-                    timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                }
+            } else {
+                console.log(`❓ Chat no encontrado: ${chat.numero}`);
             }
         });
     }
