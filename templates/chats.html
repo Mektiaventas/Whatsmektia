@@ -667,8 +667,9 @@
         color: #888;
     }
 
+    /* Actualizar este estilo para los mensajes de chat */
     .card-msg {
-        color: white;
+        color: #333; /* Cambiar de white a un color oscuro visible */
         font-size: 13px;
         white-space: nowrap;
         overflow: hidden;
@@ -1223,7 +1224,6 @@
             let existingChat = document.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
 
             if (existingChat) {
-                console.log(`🔄 Actualizando chat existente: ${chat.numero}`);
                 // Actualizar mensaje y tiempo
                 const msgEl = existingChat.querySelector('.card-msg');
                 if (msgEl && chat.ultimo_mensaje) {
@@ -1231,17 +1231,82 @@
                         '📷 Imagen' :
                         `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
 
-                    if (msgEl.textContent.trim() !== newText) {
-                        console.log(`✅ Mensaje actualizado para ${chat.numero}: "${newText}"`);
-                        msgEl.textContent = newText;
-                        existingChat.classList.add('new-message');
-                        setTimeout(() => existingChat.classList.remove('new-message'), 2000);
-                    }
-                } else {
-                    console.log(`❌ No se encontró elemento .card-msg para ${chat.numero}`);
+                    // Forzar actualización del texto y hacerlo visible
+                    msgEl.textContent = newText;
+                    msgEl.style.color = '#333'; // Cambiar color para asegurar visibilidad
+
+                    // Resaltar visualmente el chat actualizado
+                    existingChat.classList.add('new-message');
+                    setTimeout(() => existingChat.classList.remove('new-message'), 2000);
+
+                    console.log(`✅ Mensaje actualizado para ${chat.numero}`);
                 }
-            } else {
-                console.log(`❓ Chat no encontrado: ${chat.numero}`);
+
+                // Actualizar hora
+                const timeEl = existingChat.querySelector('.card-time');
+                if (timeEl && chat.ultima_fecha) {
+                    timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            } else if (chat.ultimo_mensaje) {
+                // Crear nuevo elemento para chat que no existía antes
+                const newChatHTML = `
+            <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" 
+                                class="card-avatar" alt="Avatar"
+                                onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                        </div>
+                        <span class="alias-view" data-num="${chat.numero}">
+                            ${chat.nombre_mostrado || chat.numero}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
+                        </span>
+                        <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
+                            ✏️
+                        </button>
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-num">${chat.numero}</span>
+                        <span class="card-time">
+                            ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
+                        </span>
+                    </div>
+                    <div class="card-msg" style="color: #333">
+                        ${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' :
+                        (chat.ultimo_mensaje ?
+                            `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}` :
+                            'Sin mensajes')}
+                    </div>
+                </div>
+            </a>`;
+
+                const tempDiv = document.createElement('div');
+                tempDiv.innerHTML = newChatHTML;
+                const newChatElement = tempDiv.firstChild;
+
+                // Insertar al principio de la lista
+                chatContainer.insertBefore(newChatElement, chatContainer.firstChild);
+                newChatElement.classList.add('new-message');
+
+                // Configurar evento para el botón de edición
+                const editButton = newChatElement.querySelector('.edit-alias-btn');
+                if (editButton) {
+                    editButton.addEventListener('click', function (e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const parent = this.closest('.card-title-row');
+                        activarEdicionAlias(parent);
+                    });
+                }
+
+                console.log(`✅ Nuevo chat añadido: ${chat.numero}`);
+
+                setTimeout(() => {
+                    newChatElement.classList.remove('new-message');
+                }, 2000);
             }
         });
     }
