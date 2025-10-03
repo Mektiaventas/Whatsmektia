@@ -27,20 +27,11 @@
 <div class="form-group">
     <label>Integración con Google Calendar</label>
     <div>
-        <a href="{{ url_for('autorizar_google') }}" class="btn btn-primary">
+        <a href="{{ url_for('autorizar-manual') }}" class="btn btn-primary">
             Autorizar con Google Calendar
         </a>
         <small class="form-text text-muted">
             Permite agendar citas automáticamente en tu calendario
-        </small>
-    </div>
-    <!-- Campo de correo para notificaciones de Calendar -->
-    <div style="margin-top: 15px;">
-        <label>Correo para notificaciones de Calendar</label>
-        <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
-               placeholder="ejemplo@gmail.com">
-        <small class="form-text text-muted">
-            Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
         </small>
     </div>
 </div>
@@ -54,6 +45,16 @@
 </div>
 
 <form class="config-form" method="POST" enctype="multipart/form-data">
+    <!-- AÑADE EL CAMPO AQUÍ AL INICIO DEL FORMULARIO -->
+    <div class="form-card">
+        <label>Correo para notificaciones de Calendar</label>
+        <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
+               placeholder="ejemplo@gmail.com">
+        <small class="form-text text-muted">
+            Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
+        </small>
+    </div>
+
     <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
