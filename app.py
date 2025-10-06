@@ -83,7 +83,7 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
-        'dominio': 'mektia.com'
+        'dominio': 'smartwhats.mektia.com'
     },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
@@ -94,7 +94,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-    '524812372326': {  # Número del nuevo tenant
+    '524567890123': {  # Número del nuevo tenant
         'phone_number_id': os.getenv("NUEVO_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("NUEVO_WHATSAPP_TOKEN"),
         'db_host': os.getenv("NUEVO_DB_HOST"),
@@ -2382,7 +2382,7 @@ def debug_dominio():
     
     <h2>Probar ambos dominios:</h2>
     <ul>
-        <li><a href="https://mektia.com/debug-dominio">mektia.com</a></li>
+        <li><a href="https://smartwhats.mektia.com/debug-dominio">smartwhats.mektia.com</a></li>
         <li><a href="https://laporfirianna.mektia.com/debug-dominio">laporfirianna.mektia.com</a></li>
     </ul>
     """
@@ -3791,7 +3791,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
             if audio_url_local:
                 # URL pública del audio (ajusta según tu configuración)
-                audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+                audio_url_publica = f"https://{config.get('dominio', 'smartwhats.mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
                 
                 if enviar_mensaje_voz(numero, audio_url_publica, config):
                     app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
@@ -4658,7 +4658,7 @@ def webhook_verification():
     
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
-    elif 'tusubdominio' in host:  # Agregar esta condición
+    elif 'ofitodo' in host:  # Agregar esta condición
         verify_token = os.getenv("NUEVO_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
