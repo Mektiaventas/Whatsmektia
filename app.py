@@ -4017,22 +4017,23 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero, config = None):
+def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     conn = get_db_connection(config)
     try:
-        # Intentar con el endpoint específico para contactos
-        phone_number_id = "799540293238176"
+        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
+        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
+        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
         
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
             'user_numbers': f'[{numero}]',
-            'access_token': 'whatsapp_token'
+            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -4049,6 +4050,8 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
     except Exception as e:
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
+    finally:
+        conn.close()
 # ——— Envío WhatsApp y guardado de conversación ———
 def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=None):
     """
