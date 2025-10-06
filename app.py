@@ -94,7 +94,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-    'TU_NUEVO_NUMERO': {  # Número del nuevo tenant
+    '524812372326': {  # Número del nuevo tenant
         'phone_number_id': os.getenv("NUEVO_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("NUEVO_WHATSAPP_TOKEN"),
         'db_host': os.getenv("NUEVO_DB_HOST"),
