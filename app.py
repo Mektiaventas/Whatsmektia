@@ -93,6 +93,15 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
+    },
+    'TU_NUEVO_NUMERO': {  # Número del nuevo tenant
+        'phone_number_id': os.getenv("NUEVO_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("NUEVO_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("NUEVO_DB_HOST"),
+        'db_user': os.getenv("NUEVO_DB_USER"),
+        'db_password': os.getenv("NUEVO_DB_PASSWORD"),
+        'db_name': os.getenv("NUEVO_DB_NAME"),
+        'dominio': 'ofitodo.mektia.com'
     }
 }
 
@@ -4649,6 +4658,8 @@ def webhook_verification():
     
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
+    elif 'tusubdominio' in host:  # Agregar esta condición
+        verify_token = os.getenv("NUEVO_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
     
@@ -5287,6 +5298,11 @@ def obtener_configuracion_por_host():
         if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
             app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
+            
+        # DETECCIÓN NUEVO SUBDOMINIO
+        if 'tusubdominio' in host:
+            app.logger.info("✅ Configuración detectada: Tu Nuevo Subdominio")
+            return NUMEROS_CONFIG['TU_NUEVO_NUMERO']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
