@@ -95,12 +95,12 @@ NUMEROS_CONFIG = {
         'dominio': 'laporfirianna.mektia.com'
     },
     '524567890123': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("OFITODO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("OFITODO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("OFITODO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("OFITODO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("OFITODO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("OFITODO_DB_NAME"),                  # ← Cambiado
+        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("FITO_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
         'dominio': 'ofitodo.mektia.com'
     }
 }
