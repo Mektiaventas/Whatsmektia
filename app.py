@@ -94,7 +94,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-    '524567890123': {  # Número del nuevo tenant
+        '524567890123': {  # Número del nuevo tenant
         'phone_number_id': os.getenv("NUEVO_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("NUEVO_WHATSAPP_TOKEN"),
         'db_host': os.getenv("NUEVO_DB_HOST"),
@@ -3565,7 +3565,7 @@ def procesar_codigo():
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
             SCOPES,
-            redirect_uri='https://www.mektia.com/completar-autorizacion'
+            redirect_uri=f'https://{request.host}/completar-autorizacion'
         )
         
         # Intercambiar código por token
