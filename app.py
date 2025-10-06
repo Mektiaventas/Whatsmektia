@@ -94,13 +94,13 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-        '524567890123': {  # Número del nuevo tenant
-        'phone_number_id': os.getenv("NUEVO_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("NUEVO_WHATSAPP_TOKEN"),
-        'db_host': os.getenv("NUEVO_DB_HOST"),
-        'db_user': os.getenv("NUEVO_DB_USER"),
-        'db_password': os.getenv("NUEVO_DB_PASSWORD"),
-        'db_name': os.getenv("NUEVO_DB_NAME"),
+    '524567890123': {  # Número del nuevo tenant
+        'phone_number_id': os.getenv("OFITODO_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("OFITODO_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("OFITODO_DB_HOST"),
+        'db_user': os.getenv("OFITODO_DB_USER"),
+        'db_password': os.getenv("OFITODO_DB_PASSWORD"),
+        'db_name': os.getenv("OFITODO_DB_NAME"),
         'dominio': 'ofitodo.mektia.com'
     }
 }
