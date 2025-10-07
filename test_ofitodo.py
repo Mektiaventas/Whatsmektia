@@ -7,17 +7,17 @@ load_dotenv()
 
 def test_connection():
     print("🔍 Probando conexión a OFITODO...")
-    print(f"Host: {os.getenv('MEKTIA_DB_HOST')}")
-    print(f"User: {os.getenv('MEKTIA_DB_USER')}")
-    print(f"DB: {os.getenv('MEKTIA_DB_NAME')}")
-    print(f"Password length: {len(os.getenv('MEKTIA_DB_PASSWORD', ''))}")
+    print(f"Host: {os.getenv('FITO_DB_HOST')}")
+    print(f"User: {os.getenv('FITO_DB_USER')}")
+    print(f"DB: {os.getenv('FITO_DB_NAME')}")
+    print(f"Password length: {len(os.getenv('FITO_DB_PASSWORD', ''))}")
     
     try:
         conn = mysql.connector.connect(
-            host=os.getenv("MEKTIA_DB_HOST"),
-            user=os.getenv("MEKTIA_DB_USER"),
-            password=os.getenv("MEKTIA_DB_PASSWORD"),
-            database=os.getenv("MEKTIA_DB_NAME")
+            host=os.getenv("FITO_DB_HOST"),
+            user=os.getenv("FITO_DB_USER"),
+            password=os.getenv("FITO_DB_PASSWORD"),
+            database=os.getenv("FITO_DB_NAME")
         )
         print("✅ Conexión EXITOSA")
         
