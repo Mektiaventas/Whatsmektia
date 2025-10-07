@@ -36,18 +36,7 @@ processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
-# Por estas líneas:
-# Intentar cargar desde múltiples ubicaciones posibles
-dotenv_paths = [
-    "/etc/systemd/system/whatsmektia.env",  # Archivo de systemd
-    ".env",                                 # Archivo local
-]
-
-for path in dotenv_paths:
-    if os.path.exists(path):
-        load_dotenv(path)
-        app.logger.info(f"✅ Variables de entorno cargadas desde: {path}")
-        break
+load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
