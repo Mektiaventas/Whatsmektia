@@ -36,7 +36,18 @@ processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
-load_dotenv()  # Cargar desde archivo específico
+# Por estas líneas:
+# Intentar cargar desde múltiples ubicaciones posibles
+dotenv_paths = [
+    "/etc/systemd/system/whatsmektia.env",  # Archivo de systemd
+    ".env",                                 # Archivo local
+]
+
+for path in dotenv_paths:
+    if os.path.exists(path):
+        load_dotenv(path)
+        app.logger.info(f"✅ Variables de entorno cargadas desde: {path}")
+        break
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB
@@ -94,7 +105,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-    '524567890123': {  # Número de Ofitodo - CORREGIDO
+    '524812372326': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
