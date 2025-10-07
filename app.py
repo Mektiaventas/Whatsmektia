@@ -94,7 +94,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
-    '524812372326': {  # Número de Ofitodo - CORREGIDO
+    '524567890123': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
