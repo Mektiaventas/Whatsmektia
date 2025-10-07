@@ -1,9 +1,9 @@
-﻿# test_ofitodo_only.py
-import mysql.connector
+﻿import mysql.connector
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Cargar específicamente el archivo de systemd
+load_dotenv("/etc/systemd/system/whatsmektia.env")
 
 def test_connection():
     print("🔍 Probando conexión a OFITODO...")
