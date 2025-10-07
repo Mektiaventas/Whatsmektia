@@ -5303,9 +5303,9 @@ def obtener_configuracion_por_host():
             return NUMEROS_CONFIG['524812372326']
             
         # DETECCIÓN NUEVO SUBDOMINIO
-        if 'tusubdominio' in host:
+        if 'ofitodo' in host:
             app.logger.info("✅ Configuración detectada: Tu Nuevo Subdominio")
-            return NUMEROS_CONFIG['TU_NUEVO_NUMERO']
+            return NUMEROS_CONFIG['524567890123']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
