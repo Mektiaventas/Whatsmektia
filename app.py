@@ -30,6 +30,9 @@ from openai import OpenAI
 import PyPDF2
 import fitz 
 from werkzeug.utils import secure_filename
+import bcrypt
+from functools import wraps
+from flask import session, g
 
 
 processed_messages = {}
@@ -134,6 +137,89 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt'})
+
+# --- Conexión a la BD de clientes (auth) ---
+def get_clientes_conn():
+    return mysql.connector.connect(
+        host=os.getenv("CLIENTES_DB_HOST"),
+        user=os.getenv("CLIENTES_DB_USER"),
+        password=os.getenv("CLIENTES_DB_PASSWORD"),
+        database=os.getenv("CLIENTES_DB_NAME")
+    )
+
+def obtener_cliente_por_user(username):
+    conn = get_clientes_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
+        FROM cliente
+        WHERE `user` = %s
+        LIMIT 1
+    """, (username,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    return row
+
+def verificar_password(password_plano, password_hash):
+    try:
+        return bcrypt.checkpw(password_plano.encode(), password_hash.encode())
+    except Exception:
+        return False
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('auth_user'):
+            return redirect(url_for('login', next=request.path))
+        g.auth_user = session.get('auth_user')
+        return f(*args, **kwargs)
+    return wrapper
+
+# Rutas públicas que NO requieren login (añade más si hace falta)
+RUTAS_PUBLICAS = {
+    'login', 'logout', 'webhook', 'webhook_verification',
+    'static', 'debug_headers', 'debug_dominio', 'diagnostico'
+}
+
+@app.before_request
+def proteger_rutas():
+    # Permitir endpoints públicos
+    if request.endpoint in RUTAS_PUBLICAS:
+        return
+    # Permitir archivos estáticos
+    if request.endpoint and request.endpoint.startswith('static'):
+        return
+    # Ya autenticado
+    if session.get('auth_user'):
+        return
+    return redirect(url_for('login', next=request.path))
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        usuario = request.form.get('usuario', '').strip()
+        password = request.form.get('password', '')
+        cliente = obtener_cliente_por_user(usuario)
+        if cliente and verificar_password(password, cliente['password']):
+            # Guardar en sesión (solo lo mínimo)
+            session['auth_user'] = {
+                'id': cliente['id_cliente'],
+                'user': cliente['user'],
+                'entorno': cliente['entorno'],
+                'schema': cliente['shema'],
+                'servicio': cliente['servicio'],
+            }
+            flash('✅ Inicio de sesión correcto', 'success')
+            destino = request.args.get('next') or url_for('home')
+            return redirect(destino)
+        flash('❌ Usuario o contraseña incorrectos', 'error')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    session.pop('auth_user', None)
+    flash('Sesión cerrada', 'info')
+    return redirect(url_for('login'))
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS

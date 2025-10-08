@@ -10,6 +10,12 @@
 
         <!-- Sidebar principal FIJO -->
         <aside class="sidebar">
+            {% if session.auth_user %}
+            <div class="user-box">
+                {{ session.auth_user.user }}
+                <a href="{{ url_for('logout') }}">Salir</a>
+            </div>
+            {% endif %}
             <!-- Add this before the sidebar logo -->
             <div style="display:none">Debug: {{ app_logo }}</div>
             <div class="sidebar-logo">

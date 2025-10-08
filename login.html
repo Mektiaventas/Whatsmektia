@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="utf-8">
+    <title>Login</title>
+    <style>
+        body {
+            font-family: Arial;
+            background: #f5f6f8;
+            display: flex;
+            height: 100vh;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .card {
+            background: #fff;
+            padding: 32px 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 18px #00000017;
+            width: 340px;
+        }
+
+        h1 {
+            font-size: 20px;
+            margin: 0 0 18px;
+            text-align: center;
+        }
+
+        label {
+            display: block;
+            margin: 12px 0 4px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: .5px;
+            color: #555;
+        }
+
+        input {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ccc;
+            border-radius: 6px;
+            font-size: 14px;
+        }
+
+        button {
+            margin-top: 18px;
+            width: 100%;
+            padding: 12px;
+            background: #2196f3;
+            border: none;
+            color: #fff;
+            font-weight: 600;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+            button:hover {
+                background: #1976d2;
+            }
+
+        .flash {
+            margin-top: 10px;
+            font-size: 13px;
+            color: #c00;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Acceder</h1>
+        <form method="POST">
+            <label>Usuario</label>
+            <input name="usuario" autocomplete="username" required>
+            <label>Contraseña</label>
+            <input name="password" type="password" autocomplete="current-password" required>
+            <button type="submit">Ingresar</button>
+        </form>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        {% for cat,msg in messages %}
+        <div class="flash">{{ msg }}</div>
+        {% endfor %}
+        {% endif %}
+        {% endwith %}
+    </div>
+</body>
+</html>
