@@ -1500,7 +1500,7 @@ def agregar_columna_kanban():
         new_id = cursor.lastrowid
 
         # Devolver el orden final de la nueva columna
-        cursor.execute("SELECT id, nombre, orden, color FROM kanban_columnas WHERE id=%s", (new_id,))
+        cursor.execute("SELECT id, nombre, orden FROM kanban_columnas WHERE id=%s", (new_id,))
         nueva = cursor.fetchone()
 
         return jsonify({
@@ -1508,7 +1508,6 @@ def agregar_columna_kanban():
             'id': nueva['id'],
             'nombre': nueva['nombre'],
             'orden': nueva['orden'],
-            'color': nueva['color']
         })
     except Exception as e:
         conn.rollback()
