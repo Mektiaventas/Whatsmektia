@@ -786,13 +786,17 @@
         }
 
         // Update time
-        const timeElement = elemento.querySelector('.chat-time');
-        if (timeElement && chat.ultima_fecha) {
-            const fecha = new Date(chat.ultima_fecha);
-            timeElement.textContent = fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const timeEl = existingChat.querySelector('.card-time');
+        if (timeEl && chat.ultima_fecha) {
+            fetch(`/format-time?timestamp=${encodeURIComponent(chat.ultima_fecha)}`)
+                .then(response => response.text())
+                .then(formattedTime => {
+                    timeEl.textContent = formattedTime;
+                })
+                .catch(error => {
+                    console.error("Error al formatear hora:", error);
+                });
         }
-
-   
 
     function crearNuevoChatHTML(chat) {
         const isSelected = chat.numero === selectedChatId;
