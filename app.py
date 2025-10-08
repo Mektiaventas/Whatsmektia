@@ -44,20 +44,13 @@ app.logger.setLevel(logging.INFO)
 
 @app.template_filter('format_time_24h')
 def format_time_24h(dt):
-    """Formatea la fecha en formato 24h: DD/MM HH:MM"""
     if not dt:
         return ""
-    
     try:
-        # Si ya es un datetime con timezone, convertir a hora local
-        if hasattr(dt, 'astimezone'):
-            # Verificar si ya está en la zona horaria correcta
-            if dt.tzinfo is not None:
-                dt = dt.astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir UTC y convertir
-                dt = pytz.utc.localize(dt).astimezone(tz_mx)
-        
+        if dt.tzinfo is None:
+            dt = tz_mx.localize(dt)
+        else:
+            dt = dt.astimezone(tz_mx)
         return dt.strftime('%d/%m %H:%M')
     except Exception as e:
         app.logger.error(f"Error formateando fecha {dt}: {e}")
@@ -2438,11 +2431,10 @@ def kanban_data(config=None):
         # Convertir timestamps
         for chat in chats:
             if chat.get('ultima_fecha'):
-                if chat['ultima_fecha'].tzinfo is not None:
-                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                if chat['ultima_fecha'].tzinfo is None:
+                    chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
                 else:
-                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
 
         cursor.close()
         conn.close()
@@ -5530,10 +5522,10 @@ def ver_chat(numero):
         # Convertir timestamps
         for msg in msgs:
             if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is not None:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
                 else:
-                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
 
         cursor.close()
         conn.close()
