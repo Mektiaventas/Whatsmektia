@@ -50,7 +50,7 @@
                         <span class="card-num">{{ chat.numero }}</span>
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha.strftime('%-d-%b ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {{ chat.ultima_fecha|format_time_24h }}
                             {% endif %}
                         </span>
                     </div>
@@ -267,7 +267,7 @@
                     <span class="stat-label">Última actividad:</span>
                     <span class="stat-value">
                         {% if mensajes and mensajes[-1].timestamp %}
-                        {{ mensajes[-1].timestamp.strftime('%d/%m/%Y %H:%M') }}
+                        {{ mensajes[-1].timestamp|format_time_24h }}
                         {% else %}
                         N/A
                         {% endif %}
