@@ -730,6 +730,12 @@
 </style>
 
 <script>
+    // Función para ajustar la hora sumando 6 horas (México UTC-6)
+    function ajustarHoraMexico(fechaUTC) {
+        const fecha = new Date(fechaUTC);
+        fecha.setHours(fecha.getHours() + 6); // Sumar 6 horas
+        return fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
     // Auto-refresh functionality for chat list
     let chatAutoRefresh = true;
     let refreshInterval = 500; // Exactamente medio segundo
@@ -1261,18 +1267,10 @@
                 }
 
                 // Actualizar hora
+                // Actualizar hora
                 const timeEl = existingChat.querySelector('.card-time');
                 if (timeEl && chat.ultima_fecha) {
-                    // Usar la fecha ya formateada que viene del servidor
-                    fetch(`/format-time?timestamp=${encodeURIComponent(chat.ultima_fecha)}`)
-                        .then(response => response.text())
-                        .then(formattedTime => {
-                            timeEl.textContent = formattedTime;
-                        })
-                        .catch(() => {
-                            // Fallback: Usar el método anterior como respaldo
-                            timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                        });
+                    timeEl.textContent = ajustarHoraMexico(chat.ultima_fecha);
                 }
             } else if (chat.ultimo_mensaje) {
                 // Crear nuevo elemento para chat que no existía antes
@@ -1298,8 +1296,8 @@
                     <div class="card-meta-row">
                         <span class="card-num">${chat.numero}</span>
                         <span class="card-time">
-                            ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
-                        </span>
+                                ${chat.ultima_fecha ? ajustarHoraMexico(chat.ultima_fecha) : ''}
+                            </span>
                     </div>
                     <div class="card-msg" style="color: #333">
                         ${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' :
