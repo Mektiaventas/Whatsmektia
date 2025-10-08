@@ -55,23 +55,21 @@
             z-index: -3;
         }
 
-        /* Sol */
         .sun {
             position: fixed;
             width: 420px;
             aspect-ratio: 1;
             border-radius: 50%;
             left: 50%;
-            transform: translateX(-50%);
             bottom: -140px;
-            background: radial-gradient(circle at 50% 35%, #ffe9c7 0%, #ffcd72 35%, #ff9a3c 60%, rgba(255,154,60,0) 70%);
+            transform: translateX(-50%);
+            background: radial-gradient(circle at 50% 35%,#ffe9c7 0%,#ffcd72 35%,#ff9a3c 60%,rgba(255,154,60,0) 70%);
             filter: blur(2px) drop-shadow(0 0 35px rgba(255,170,90,.55));
             animation: sunRise 22s ease-in-out infinite;
             opacity: .9;
             z-index: -2;
         }
 
-        /* Nubes ligeras */
         .cloud {
             position: fixed;
             top: 15%;
@@ -136,7 +134,6 @@
             }
         }
 
-        /* Tarjeta */
         .card {
             width: min(360px,88vw);
             padding: 42px 46px 40px;
@@ -321,7 +318,6 @@
             }
         }
 
-        /* Footer pequeño */
         .footer {
             margin-top: 28px;
             text-align: center;
@@ -331,14 +327,12 @@
             color: #ffffffd0;
         }
 
-        /* Accesibilidad: preferencia reduce motion */
-        @media (prefers-reduced-motion: reduce) {
+        @media (prefers-reduced-motion:reduce) {
             .bg, .sun, .cloud, .card:before, .card:after {
                 animation: none;
             }
         }
 
-        /* Responsivo */
         @media (max-width:560px) {
             .card {
                 padding: 38px 32px 34px;
@@ -396,7 +390,7 @@
         {% endif %}
         {% endwith %}
 
-        <div class="footer">&copy; {{ (now() if false else '') }} SmartWhats · {{ '2025' }}</div>
+        <div class="footer">&copy; SmartWhats · 2025</div>
     </div>
 </body>
 </html>
