@@ -11,9 +11,33 @@
         <!-- Sidebar principal FIJO -->
         <aside class="sidebar">
             {% if session.auth_user %}
-            <div class="user-box">
-                {{ session.auth_user.user }}
-                <a href="{{ url_for('logout') }}">Salir</a>
+            <div class="user-box" id="userBox">
+                <div class="user-avatar">
+                    {{ session.auth_user.user[:2]|upper }}
+                </div>
+                <div class="user-info">
+                    <span class="user-name" title="{{ session.auth_user.user }}">{{ session.auth_user.user }}</span>
+                    <span class="user-role">Sesión activa</span>
+                </div>
+                <a class="logout-btn" href="{{ url_for('logout') }}" title="Cerrar sesión">
+                    <!-- Icono logout (SVG) -->
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M15 3h-6a2 2 0 0 0-2 2v3" />
+                        <path d="M7 16v3a2 2 0 0 0 2 2h6" />
+                        <path d="M21 12H9" />
+                        <path d="M15 8l4 4-4 4" />
+                    </svg>
+                    Salir
+                </a>
+                <button class="user-menu-trigger" type="button" id="userMenuBtn" aria-label="Abrir menú de usuario">
+                    ⋮
+                </button>
+                <div class="user-box-actions" id="userMenu">
+                    <a href="{{ url_for('home') }}">🏠 Inicio</a>
+                    <a href="{{ url_for('ver_chats') }}">💬 Chats</a>
+                    <a href="{{ url_for('configuracion_tab', tab='negocio') }}">⚙️ Configuración</a>
+                    <a href="{{ url_for('logout') }}">🚪 Cerrar sesión</a>
+                </div>
             </div>
             {% endif %}
             <!-- Add this before the sidebar logo -->
@@ -48,31 +72,232 @@
         </main>
 
     </div>
-  <!-- Al final del body de base.html -->
-<script>
-// Función para manejar redimensionamiento responsive
-function makeResponsive() {
-    // Ajustar sidebar en móviles
-    if (window.innerWidth < 768) {
-        document.querySelector('.sidebar').style.width = '60px';
-        document.querySelector('.sidebar-title').style.display = 'none';
-        document.querySelectorAll('.sidebar-nav li a').forEach(a => {
-            a.style.padding = '8px';
-            a.style.textAlign = 'center';
-        });
-    } else {
-        document.querySelector('.sidebar').style.width = '240px';
-        document.querySelector('.sidebar-title').style.display = 'block';
-        document.querySelectorAll('.sidebar-nav li a').forEach(a => {
-            a.style.padding = '8px 12px';
-            a.style.textAlign = 'left';
-        });
-    }
-}
+    <!-- Al final del body de base.html -->
+    <script>
+        // Función para manejar redimensionamiento responsive
+        function makeResponsive() {
+            // Ajustar sidebar en móviles
+            if (window.innerWidth < 768) {
+                document.querySelector('.sidebar').style.width = '60px';
+                document.querySelector('.sidebar-title').style.display = 'none';
+                document.querySelectorAll('.sidebar-nav li a').forEach(a => {
+                    a.style.padding = '8px';
+                    a.style.textAlign = 'center';
+                });
+            } else {
+                document.querySelector('.sidebar').style.width = '240px';
+                document.querySelector('.sidebar-title').style.display = 'block';
+                document.querySelectorAll('.sidebar-nav li a').forEach(a => {
+                    a.style.padding = '8px 12px';
+                    a.style.textAlign = 'left';
+                });
+            }
+        }
 
-// Ejecutar al cargar y al redimensionar
-window.addEventListener('load', makeResponsive);
-window.addEventListener('resize', makeResponsive);
-</script>
+        // Ejecutar al cargar y al redimensionar
+        window.addEventListener('load', makeResponsive);
+        window.addEventListener('resize', makeResponsive);
+    </script>
+    <style>
+        /* === Mejora visual user-box / logout === */
+        .user-box {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: .65rem;
+            margin: 14px 12px 18px;
+            padding: 10px 14px 10px 12px;
+            background: linear-gradient(135deg,#27323b,#1d252b);
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 14px;
+            font-size: 13px;
+            color: #f2f6fa;
+            box-shadow: 0 4px 14px -6px rgba(0,0,0,.5),inset 0 0 0 1px rgba(255,255,255,.04);
+        }
+
+            .user-box::before {
+                content: "";
+                position: absolute;
+                inset: 0;
+                border-radius: inherit;
+                background: radial-gradient(circle at 18% 25%,rgba(255,255,255,.18),transparent 70%);
+                opacity: .55;
+                pointer-events: none;
+            }
+
+        .user-avatar {
+            width: 38px;
+            height: 38px;
+            border-radius: 12px;
+            background: linear-gradient(135deg,#ff8f48,#ff5e62);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            letter-spacing: .5px;
+            font-size: 15px;
+            color: #fff;
+            box-shadow: 0 2px 6px -2px rgba(0,0,0,.55);
+            position: relative;
+            overflow: hidden;
+        }
+
+            .user-avatar::after {
+                content: "";
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(160deg,rgba(255,255,255,.22),rgba(255,255,255,0) 60%);
+                mix-blend-mode: overlay;
+            }
+
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.15;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .user-name {
+            font-weight: 600;
+            font-size: 13px;
+            text-overflow: ellipsis;
+            overflow: hidden;
+            white-space: nowrap;
+        }
+
+        .user-role {
+            font-size: 11px;
+            opacity: .65;
+            letter-spacing: .5px;
+            text-transform: uppercase;
+        }
+
+        .logout-btn {
+            --c1: #ff4d4d;
+            --c2: #ff7a52;
+            border: none;
+            cursor: pointer;
+            background: linear-gradient(135deg,var(--c1),var(--c2));
+            color: #fff;
+            font-size: 11px;
+            padding: 7px 11px 6px;
+            border-radius: 9px;
+            font-weight: 600;
+            letter-spacing: .4px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            box-shadow: 0 3px 10px -4px rgba(255,90,70,.7);
+            transition: background .25s, transform .18s, box-shadow .25s;
+            text-decoration: none;
+            position: relative;
+        }
+
+            .logout-btn:hover {
+                filter: brightness(1.07);
+                transform: translateY(-2px);
+                box-shadow: 0 6px 16px -6px rgba(255,90,70,.8);
+            }
+
+            .logout-btn:active {
+                transform: translateY(0);
+                box-shadow: 0 3px 10px -4px rgba(255,90,70,.6);
+            }
+
+            .logout-btn svg {
+                width: 14px;
+                height: 14px;
+                stroke: currentColor;
+                stroke-width: 2;
+                fill: none;
+            }
+        /* Mini dropdown opcional */
+        .user-box-actions {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 6px;
+            background: #202a31;
+            border: 1px solid rgba(255,255,255,.08);
+            border-radius: 12px;
+            padding: 8px 10px;
+            width: 170px;
+            display: none;
+            flex-direction: column;
+            box-shadow: 0 10px 28px -10px rgba(0,0,0,.6);
+            z-index: 30;
+        }
+
+            .user-box-actions a {
+                color: #dde4ea;
+                text-decoration: none;
+                padding: 7px 10px;
+                font-size: 12px;
+                border-radius: 8px;
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                transition: background .2s,color .2s;
+            }
+
+                .user-box-actions a:hover {
+                    background: #2c3a44;
+                    color: #fff;
+                }
+
+        .user-menu-trigger {
+            background: none;
+            border: none;
+            color: #b8c2ca;
+            cursor: pointer;
+            padding: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            transition: background .2s,color .2s;
+        }
+
+            .user-menu-trigger:hover {
+                background: #27323b;
+                color: #fff;
+            }
+
+        .user-box.open .user-box-actions {
+            display: flex;
+            animation: fadeIn .18s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(-4px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @media (max-width:768px) {
+            .user-box {
+                margin: 10px 8px 14px;
+                padding: 10px 12px;
+            }
+
+            .user-avatar {
+                width: 34px;
+                height: 34px;
+                font-size: 14px;
+            }
+
+            .logout-btn {
+                padding: 6px 9px;
+                font-size: 10px;
+            }
+        }
+    </style>
 </body>
 </html>
