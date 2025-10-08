@@ -2647,19 +2647,20 @@ def guardar_cita(info_cita, config=None):
         }
         mensaje_notificacion = f"""🆕 *NUEVA CITA REGISTRADA* - ID: #{cita_id}
 
-👤 *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
-📞 *Teléfono:* {info_cita.get('telefono')}
-🛠️ *Servicio:* {info_cita.get('servicio_solicitado', 'No especificado')}
-📅 *Fecha:* {info_cita.get('fecha_sugerida', 'No especificada')}
-⏰ *Hora:* {info_cita.get('hora_sugerida', 'No especificada')}
+        👤 *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+        📞 *Teléfono:* {info_cita.get('telefono')}
+        🛠️ *Servicio:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        📅 *Fecha:* {info_cita.get('fecha_sugerida', 'No especificada')}
+        ⏰ *Hora:* {info_cita.get('hora_sugerida', 'No especificada')}
 
-⏰ *Registrada:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+        ⏰ *Registrada:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
-💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
-"""
+        💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
+        """
 
         # Enviar mensaje al número específico
         enviar_mensaje('5214493432744', mensaje_notificacion, config)
+        enviar_mensaje('5214491182201', mensaje_notificacion, config)
         app.logger.info(f"✅ Notificación de cita enviada a 5214493432744, ID: {cita_id}")
         
         
@@ -2678,7 +2679,6 @@ def guardar_cita(info_cita, config=None):
             evento_id
         ))
         conn.commit()
-        
         cursor.close()
         conn.close()
         
