@@ -4697,7 +4697,7 @@ def webhook_verification():
     
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
-    elif 'ofitodo' in host:  # Agregar esta condición
+    elif 'ofitodo' in host:  
         verify_token = os.getenv("FITO_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
@@ -5340,7 +5340,7 @@ def obtener_configuracion_por_host():
             
         # DETECCIÓN NUEVO SUBDOMINIO
         if 'ofitodo' in host:
-            app.logger.info("✅ Configuración detectada: Tu Nuevo Subdominio")
+            app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524495486324']
         
         # DEFAULT MEKTIA
