@@ -160,11 +160,8 @@ def obtener_cliente_por_user(username):
     cur.close(); conn.close()
     return row
 
-def verificar_password(password_plano, password_hash):
-    try:
-        return bcrypt.checkpw(password_plano.encode(), password_hash.encode())
-    except Exception:
-        return False
+def verificar_password(password_plano, password_guardado):
+    return password_plano == password_guardado
 
 def login_required(f):
     @wraps(f)
