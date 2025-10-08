@@ -4662,7 +4662,7 @@ def webhook_verification():
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
     elif 'ofitodo' in host:  # Agregar esta condición
-        verify_token = os.getenv("NUEVO_VERIFY_TOKEN")
+        verify_token = os.getenv("FITO_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
     
