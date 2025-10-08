@@ -4696,13 +4696,11 @@ def webhook_verification():
     host = request.headers.get('Host', '')
     
     if 'laporfirianna' in host:
-        return NUMEROS_CONFIG['524812372326']  # La Porfirianna
-    elif 'ofitodo' in host:
-            return NUMEROS_CONFIG['524495486324']  # Ofitodo  
-    elif 'smartwhats' in host:
-            return NUMEROS_CONFIG['524495486142']  # SmartWhats (Mektia)
+        verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
+    elif 'ofitodo' in host:  
+        verify_token = os.getenv("FITO_VERIFY_TOKEN")
     else:
-            return NUMEROS_CONFIG['524495486142']  # Default Mektia
+        verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
     
     if request.args.get('hub.verify_token') == verify_token:
         return request.args.get('hub.challenge')
@@ -5352,21 +5350,6 @@ def obtener_configuracion_por_host():
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
-
-@app.route('/format-time')
-def format_time_endpoint():
-    timestamp_str = request.args.get('timestamp')
-    try:
-        # Si termina con Z, es formato ISO UTC
-        if timestamp_str.endswith('Z'):
-            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
-        else:
-            timestamp = datetime.fromisoformat(timestamp_str)
-            
-        return format_time_24h(timestamp)
-    except Exception as e:
-        app.logger.error(f"Error en format_time_endpoint: {e}")
-        return timestamp_str
 
 @app.route('/diagnostico')
 def diagnostico():
