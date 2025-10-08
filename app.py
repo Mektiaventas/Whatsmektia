@@ -5355,9 +5355,15 @@ def obtener_configuracion_por_host():
 def format_time_endpoint():
     timestamp_str = request.args.get('timestamp')
     try:
-        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        # Si termina con Z, es formato ISO UTC
+        if timestamp_str.endswith('Z'):
+            timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        else:
+            timestamp = datetime.fromisoformat(timestamp_str)
+            
         return format_time_24h(timestamp)
     except Exception as e:
+        app.logger.error(f"Error en format_time_endpoint: {e}")
         return timestamp_str
 
 @app.route('/diagnostico')

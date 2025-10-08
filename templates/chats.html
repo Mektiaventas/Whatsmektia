@@ -792,13 +792,7 @@
             timeElement.textContent = fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         }
 
-        // Update date
-        const dateElement = elemento.querySelector('.chat-date');
-        if (dateElement && chat.ultima_fecha) {
-            const fecha = new Date(chat.ultima_fecha);
-            dateElement.textContent = fecha.toLocaleDateString([], { day: '2-digit', month: '2-digit' });
-        }
-    }
+   
 
     function crearNuevoChatHTML(chat) {
         const isSelected = chat.numero === selectedChatId;
