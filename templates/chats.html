@@ -267,7 +267,7 @@
                     <span class="stat-label">Última actividad:</span>
                     <span class="stat-value">
                         {% if mensajes and mensajes[-1].timestamp %}
-                        {{ mensajes[-1].timestamp|format_time_24h }}
+                        {{ mensajes[-1].timestamp.strftime('%H:%M') }}
                         {% else %}
                         N/A
                         {% endif %}
