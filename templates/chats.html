@@ -174,7 +174,8 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
             {% endif %}
 
@@ -187,7 +188,8 @@
                         {{ msg.respuesta }}
                     </div>
                 </div>
-                <div class="msg-meta">{{ msg.timestamp.strftime('%H:%M') }}</div>
+
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
             {% endif %}
 
