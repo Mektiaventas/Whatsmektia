@@ -803,6 +803,7 @@
                     console.error("Error al formatear hora:", error);
                 });
         }
+    }
 
     function crearNuevoChatHTML(chat) {
         const isSelected = chat.numero === selectedChatId;
@@ -970,12 +971,41 @@
     }
 
     // Función para scroll al final de los mensajes
-    function scrollToBottom() {
-        const msgsContainer = document.getElementById('msgs');
-        if (msgsContainer) {
+        function scrollToBottom() {
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
             msgsContainer.scrollTop = msgsContainer.scrollHeight;
         }
-    }
+
+        // Repeated scroll attempts to ensure final position after images/audio load
+        function ensureScrollBottom() {
+            // Run several times to catch late layout shifts
+            [0, 60, 120, 240, 400].forEach(delay => {
+                setTimeout(scrollToBottom, delay);
+            });
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            ensureScrollBottom();
+
+            // Re-scroll after each image finishes loading
+            document.querySelectorAll('#msgs img').forEach(img => {
+                if (img.complete) return; // already loaded
+                img.addEventListener('load', ensureScrollBottom);
+            });
+
+            // Fallback: after window load (fonts, etc.)
+            window.addEventListener('load', ensureScrollBottom);
+        });
+
+        // OPTIONAL: if you dynamically add messages elsewhere and want auto-bottom only
+        // when user is near bottom, you can wrap with a proximity check:
+        function scrollToBottomIfNear() {
+            const c = document.getElementById('msgs');
+            if (!c) return;
+            const nearBottom = (c.scrollHeight - c.clientHeight - c.scrollTop) < 150;
+            if (nearBottom) scrollToBottom();
+        }
 
     // Toggle lista de chats en móvil
     function toggleChatList() {
