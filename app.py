@@ -5351,6 +5351,15 @@ def obtener_configuracion_por_host():
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
         return NUMEROS_CONFIG['524495486142']
 
+@app.route('/format-time')
+def format_time_endpoint():
+    timestamp_str = request.args.get('timestamp')
+    try:
+        timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        return format_time_24h(timestamp)
+    except Exception as e:
+        return timestamp_str
+
 @app.route('/diagnostico')
 def diagnostico():
     """Endpoint completo de diagnóstico"""

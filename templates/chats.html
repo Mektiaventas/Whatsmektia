@@ -1265,7 +1265,16 @@
                 // Actualizar hora
                 const timeEl = existingChat.querySelector('.card-time');
                 if (timeEl && chat.ultima_fecha) {
-                    timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    // Usar la fecha ya formateada que viene del servidor
+                    fetch(`/format-time?timestamp=${encodeURIComponent(chat.ultima_fecha)}`)
+                        .then(response => response.text())
+                        .then(formattedTime => {
+                            timeEl.textContent = formattedTime;
+                        })
+                        .catch(() => {
+                            // Fallback: Usar el método anterior como respaldo
+                            timeEl.textContent = new Date(chat.ultima_fecha).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        });
                 }
             } else if (chat.ultimo_mensaje) {
                 // Crear nuevo elemento para chat que no existía antes
