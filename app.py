@@ -4696,11 +4696,13 @@ def webhook_verification():
     host = request.headers.get('Host', '')
     
     if 'laporfirianna' in host:
-        verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
-    elif 'ofitodo' in host:  
-        verify_token = os.getenv("FITO_VERIFY_TOKEN")
+        return NUMEROS_CONFIG['524812372326']  # La Porfirianna
+    elif 'ofitodo' in host:
+            return NUMEROS_CONFIG['524495486324']  # Ofitodo  
+    elif 'smartwhats' in host:
+            return NUMEROS_CONFIG['524495486142']  # SmartWhats (Mektia)
     else:
-        verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
+            return NUMEROS_CONFIG['524495486142']  # Default Mektia
     
     if request.args.get('hub.verify_token') == verify_token:
         return request.args.get('hub.challenge')
