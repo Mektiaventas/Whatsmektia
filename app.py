@@ -1455,23 +1455,68 @@ def renombrar_columna_kanban(columna_id):
 @app.route('/kanban/columna/agregar', methods=['POST'])
 def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
-    nombre = request.json.get('nombre', 'nueva columna').strip()
+    data = request.get_json(silent=True) or {}
+    nombre = (data.get('nombre') or 'Nueva columna').strip()
+    after_id = data.get('after_id')  # id de la columna a la derecha de la cual insertamos
+
     if not nombre:
         return jsonify({'error': 'El nombre es obligatorio'}), 400
 
     conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM kanban_columnas")
-    orden = cursor.fetchone()[0]
-    cursor.execute(
-        "INSERT INTO kanban_columnas (nombre, orden) VALUES (%s, %s)",
-        (nombre, orden)
-    )
-    conn.commit()
-    columna_id = cursor.lastrowid
-    cursor.close()
-    conn.close()
-    return jsonify({'success': True, 'id': columna_id, 'nombre': nombre, 'orden': orden})
+    cursor = conn.cursor(dictionary=True)
+
+    try:
+        if after_id:
+            # Obtener orden de la columna base
+            cursor.execute("SELECT orden FROM kanban_columnas WHERE id=%s", (after_id,))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'error': 'Columna after_id no existe'}), 404
+
+            after_orden = row['orden']
+
+            # Desplazar las columnas que están a la derecha
+            cursor.execute("""
+                UPDATE kanban_columnas
+                SET orden = orden + 1
+                WHERE orden > %s
+            """, (after_orden,))
+
+            # Insertar nueva columna con orden = after_orden + 1
+            cursor.execute("""
+                INSERT INTO kanban_columnas (nombre, orden)
+                VALUES (%s, %s)
+            """, (nombre, after_orden + 1))
+        else:
+            # Comportamiento anterior (al final)
+            cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
+            next_ord = cursor.fetchone()['next_ord']
+            cursor.execute("""
+                INSERT INTO kanban_columnas (nombre, orden)
+                VALUES (%s, %s)
+            """, (nombre, next_ord))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+
+        # Devolver el orden final de la nueva columna
+        cursor.execute("SELECT id, nombre, orden, color FROM kanban_columnas WHERE id=%s", (new_id,))
+        nueva = cursor.fetchone()
+
+        return jsonify({
+            'success': True,
+            'id': nueva['id'],
+            'nombre': nueva['nombre'],
+            'orden': nueva['orden'],
+            'color': nueva['color']
+        })
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Error agregando columna Kanban: {e}")
+        return jsonify({'error': 'Error interno'}), 500
+    finally:
+        cursor.close()
+        conn.close()
 
 @app.route('/kanban/columna/<int:columna_id>/eliminar', methods=['POST'])
 def eliminar_columna_kanban(columna_id):
