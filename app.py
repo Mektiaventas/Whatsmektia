@@ -2554,7 +2554,25 @@ def guardar_cita(info_cita, config=None):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        # NUEVO: Verificar si existe una cita similar en los últimos minutos
+        cursor.execute('''
+            SELECT id FROM citas
+            WHERE numero_cliente = %s 
+            AND servicio_solicitado = %s 
+            AND fecha_creacion > NOW() - INTERVAL 5 MINUTE
+        ''', (
+            info_cita.get('telefono'),
+            info_cita.get('servicio_solicitado')
+        ))
         
+        existing_cita = cursor.fetchone()
+        if existing_cita:
+            app.logger.info(f"⚠️ Cita similar ya existe (ID: {existing_cita[0]}), evitando duplicado")
+            cursor.close()
+            conn.close()
+            return existing_cita[0]  # Retorna el ID de la cita existente
+        
+
         # Crear tabla notificaciones_ia si no existe con la estructura requerida
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS notificaciones_ia (
