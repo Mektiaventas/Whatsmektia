@@ -4229,6 +4229,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     
     try:
         # Primero asegurar que el contacto existe con su información actualizada
+        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
         
         conn = get_db_connection(config)
