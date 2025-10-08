@@ -5,7 +5,6 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
 <style>
-    /* Tus estilos de animación existentes se mantienen igual */
     @keyframes fadeIn {
         from {
             opacity: 0;
@@ -20,20 +19,20 @@
 
     @keyframes highlightPulse {
         0% {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255,255,255,0.1);
         }
 
         50% {
-            background-color: rgba(255, 224, 130, 0.4);
+            background-color: rgba(255,224,130,0.4);
         }
 
         100% {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255,255,255,0.1);
         }
     }
 
     @keyframes gentleShake {
-        0%, 100% {
+        0%,100% {
             transform: translateX(0);
         }
 
@@ -47,28 +46,45 @@
     }
 
     .kanban-card.new-message {
-        animation: fadeIn 0.5s ease-out, highlightPulse 2s ease-in-out, gentleShake 0.5s ease-in-out;
+        animation: fadeIn .5s ease-out, highlightPulse 2s ease-in-out, gentleShake .5s ease-in-out;
     }
 
     .kanban-card {
-        transition: all 0.3s ease;
+        transition: all .3s ease;
     }
+
+    .add-chat-btn {
+        background: #2196f3;
+        border: none;
+        color: #fff;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+    }
+
+        .add-chat-btn:hover {
+            background: #1976d2;
+        }
 </style>
 
 <div id="kanban-board" class="kanban-board">
     {% for col in columnas %}
-    <div class="kanban-column" data-col-id="{{ col.id }}">
-        <div class="column-header">
+    <div class="kanban-column" data-col-id="{{ col.id }}" data-orden="{{ col.orden }}">
+        <div class="column-header" style="--col-color: {{ col.color or '#37474f' }}">
             <img src="{{ col.icono }}" class="col-icon" alt="">
             <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
-            <button class="add-chat-btn" title="Agregar aquí">+</button>
-            <button class="delete-col-btn" data-col-id="{{ col.id }}" title="Eliminar columna" style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">×</button>
+            <button class="add-chat-btn" data-after="{{ col.id }}" title="Agregar columna a la derecha">+</button>
+            <button class="delete-col-btn" data-col-id="{{ col.id }}" title="Eliminar columna"
+                    style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">
+                ×
+            </button>
         </div>
         <div class="column-list" data-col-id="{{ col.id }}">
             {% for chat in chats if chat.columna_id == col.id %}
-            <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration: none; color: inherit; display: block;">
-                <!-- Misma estructura pero reorganizada -->
-
+            <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
                         <div class="card-avatar-section">
@@ -84,11 +100,9 @@
                             {{ chat.nombre_mostrado }}
                         </span>
                         <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
                         </span>
-                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
-                            ✏️
-                        </button>
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
                     <div class="card-meta-row">
                         <span class="card-num">{{ chat.numero }}</span>
@@ -114,413 +128,318 @@
 <script>
     let editingColId = null;
     let editingColText = null;
-    document.addEventListener('DOMContentLoaded', function () {
-        // ...tu código existente...
+    let kanbanAutoRefresh = true;
+    let refreshInterval = 500;
 
-        // Evento para eliminar columna
+    document.addEventListener('DOMContentLoaded', () => {
+        bindColumnHeaderEvents();
+        bindAddColumnButtons(); // NUEVO: enlazar creación dinámica
+        bindDeleteButtons();
+        initRenameHandlers();
+        startAutoRefresh();
+        inicializarSortable();
+        document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
+    });
+
+    /* ----------- Creación de columna a la derecha ----------- */
+    function bindAddColumnButtons() {
+        document.querySelectorAll('.add-chat-btn').forEach(btn => {
+            btn.removeEventListener('click', addColumnClickHandler); // evitar duplicados
+            btn.addEventListener('click', addColumnClickHandler);
+        });
+    }
+    function addColumnClickHandler(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const baseCol = this.closest('.kanban-column');
+        if (!baseCol) return;
+        const afterId = parseInt(this.dataset.after, 10);
+        const nombre = prompt('Nombre de la nueva columna:', 'Nueva columna');
+        if (!nombre) return;
+
+        fetch('/kanban/columna/agregar', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre, after_id: afterId })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) {
+                    alert(data.error || 'Error al crear columna');
+                    return;
+                }
+                const nuevaCol = crearColumnaDOM(data);
+                insertarColumnaDespues(baseCol, nuevaCol);
+                // Re-enlazar eventos sobre la nueva columna
+                bindAddColumnButtons();
+                bindDeleteButtons();
+                initRenameHandlers();
+                inicializarSortable();
+            })
+            .catch(err => console.error('Error creando columna:', err));
+    }
+    function crearColumnaDOM(data) {
+        const div = document.createElement('div');
+        div.className = 'kanban-column';
+        div.dataset.colId = data.id;
+        div.dataset.orden = data.orden;
+        div.innerHTML = `
+        <div class="column-header" style="--col-color:${data.color || '#37474f'}">
+            <img src="" class="col-icon" alt="">
+            <h3 contenteditable="true" data-col-id="${data.id}" class="col-name">${data.nombre}</h3>
+            <button class="add-chat-btn" data-after="${data.id}" title="Agregar columna a la derecha">+</button>
+            <button class="delete-col-btn" data-col-id="${data.id}" title="Eliminar columna"
+                style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">×</button>
+        </div>
+        <div class="column-list" data-col-id="${data.id}"></div>
+    `;
+        return div;
+    }
+    function insertarColumnaDespues(baseCol, nuevaCol) {
+        if (baseCol.nextElementSibling) {
+            baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
+        } else {
+            baseCol.parentNode.appendChild(nuevaCol);
+        }
+    }
+
+    /* ----------- Eliminar columna ----------- */
+    function bindDeleteButtons() {
         document.querySelectorAll('.delete-col-btn').forEach(btn => {
-            btn.addEventListener('click', function (e) {
+            if (btn.dataset.bound === '1') return;
+            btn.dataset.bound = '1';
+            btn.addEventListener('click', e => {
                 e.preventDefault();
-                const colId = this.dataset.colId;
-                // Verifica cuántas columnas hay
+                const colId = btn.dataset.colId;
                 const totalCols = document.querySelectorAll('.kanban-column').length;
                 if (totalCols <= 1) {
                     alert('No se puede eliminar la última columna');
                     return;
                 }
-                if (!confirm('¿Seguro que deseas eliminar esta columna? Los chats se moverán a otra columna.')) return;
+                if (!confirm('¿Seguro que deseas eliminar esta columna? Los chats se moverán a otra.')) return;
                 fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
                     .then(res => res.json())
                     .then(data => {
                         if (data.success) {
-                            location.reload();
+                            const colEl = document.querySelector(`.kanban-column[data-col-id="${colId}"]`);
+                            if (colEl) colEl.remove();
                         } else {
-                            alert(data.error || 'No se pudo eliminar la columna');
+                            alert(data.error || 'No se pudo eliminar');
                         }
                     });
             });
         });
-    });
-    // Detecta cuando el usuario empieza a editar un título
-    document.addEventListener('focusin', function (e) {
-        if (e.target.classList.contains('col-name')) {
-            editingColId = e.target.dataset.colId;
-            editingColText = e.target.textContent;
-        }
-    });
+    }
 
-    // Detecta cuando termina de editar
-    document.addEventListener('focusout', function (e) {
-        if (e.target.classList.contains('col-name')) {
-            editingColId = null;
-            editingColText = null;
-        }
-    });
-    // Permitir editar el nombre de la columna Kanban y guardar en BD
-    document.querySelectorAll('.col-name[contenteditable="true"]').forEach(function (header) {
-        header.addEventListener('blur', function () {
-            const columnaId = header.dataset.colId;
-            const nuevoNombre = header.textContent.trim();
-            fetch(`/kanban/columna/${columnaId}/renombrar`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nombre: nuevoNombre })
-            })
-                .then(res => res.json())
-                .then(data => {
-                    if (!data.success) {
-                        alert('Error al guardar el nombre de la columna');
-                    }
-                });
-        });
-        // Opcional: guardar al presionar Enter
-        header.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                header.blur();
-            }
-        });
-    });
+    /* ----------- Renombrar columna ----------- */
+    function initRenameHandlers() {
+        document.querySelectorAll('.col-name[contenteditable="true"]').forEach(header => {
+            if (header.dataset.bound === '1') return;
+            header.dataset.bound = '1';
 
-    // CORRECCIÓN: Agregar columnas - funciona para todos los botones
-    document.addEventListener('DOMContentLoaded', function () {
-        // Agregar evento a TODOS los botones de agregar columna
-        document.querySelectorAll('.add-chat-btn').forEach(button => {
-            button.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-
-                const columna = this.closest('.kanban-column');
-                const columnaId = columna.dataset.colId;
-
-                fetch('/kanban/columna/agregar', {
+            header.addEventListener('focus', () => {
+                editingColId = header.dataset.colId;
+                editingColText = header.textContent;
+            });
+            header.addEventListener('blur', () => {
+                const columnaId = header.dataset.colId;
+                const nuevoNombre = header.textContent.trim();
+                fetch(`/kanban/columna/${columnaId}/renombrar`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        nombre: 'Nueva Columna',
-                        columna_referencia: columnaId // Opcional: para posicionamiento
-                    })
-                })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            location.reload();
-                        } else {
-                            alert(data.error || 'Error al agregar columna');
-                        }
-                    })
-                    .catch(error => {
-                        console.error('Error:', error);
-                        alert('Error de conexión');
-                    });
+                    body: JSON.stringify({ nombre: nuevoNombre })
+                }).then(res => res.json()).then(data => {
+                    if (!data.success) alert('Error al guardar nombre');
+                }).finally(() => {
+                    editingColId = null;
+                    editingColText = null;
+                });
+            });
+            header.addEventListener('keydown', e => {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    header.blur();
+                }
+            });
+        });
+    }
+
+    /* ----------- Auto-refresh Kanban (solo actualización incremental de chats y nombres) ----------- */
+    function startAutoRefresh() {
+        setInterval(actualizarKanban, refreshInterval);
+        setTimeout(actualizarKanban, 1000);
+    }
+    function actualizarKanban() {
+        if (!kanbanAutoRefresh) return;
+        const scrollPosition = window.scrollY;
+        fetch('/kanban/data')
+            .then(r => r.json())
+            .then(data => {
+                actualizarIncremental(data);
+                if (editingColId) {
+                    const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
+                    if (colHeader) {
+                        colHeader.focus();
+                        if (editingColText) colHeader.textContent = editingColText;
+                    }
+                }
+                setTimeout(() => window.scrollTo(0, scrollPosition), 10);
+            })
+            .catch(err => console.error('❌ Error actualizando Kanban:', err));
+    }
+    function actualizarIncremental(data) {
+        // Actualizar títulos existentes (si no se editan)
+        data.columnas.forEach(col => {
+            const el = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
+            if (el && editingColId !== col.id.toString() && el.textContent !== col.nombre) {
+                el.textContent = col.nombre;
+            }
+        });
+
+        // Map actual de chats
+        const chatsActuales = new Map();
+        document.querySelectorAll('.kanban-card').forEach(card => {
+            chatsActuales.set(card.dataset.chatNum, {
+                element: card,
+                columnaId: card.closest('.kanban-column').dataset.colId
             });
         });
 
-        // El resto de tu código JavaScript existente...
-        let kanbanAutoRefresh = true;
-        let refreshInterval = 500;
-        setInterval(actualizarKanban, 500); // cada medio segundo
+        data.chats.forEach(chat => {
+            const existente = chatsActuales.get(chat.numero);
+            if (existente) {
+                actualizarChatExistente(existente.element, chat);
+                if (existente.columnaId !== chat.columna_id.toString()) {
+                    moverChatAColumna(chat.numero, chat.columna_id);
+                }
+                chatsActuales.delete(chat.numero);
+            } else {
+                agregarNuevoChat(chat);
+            }
+        });
 
-        console.log('🔄 Iniciando auto-actualización del Kanban cada 5 segundos');
+        // Remover los que ya no existen
+        chatsActuales.forEach((info, numero) => eliminarChat(numero));
+    }
 
-        function actualizarKanban() {
-            if (!kanbanAutoRefresh) return;
-            const scrollPosition = window.scrollY;
+    function actualizarChatExistente(elemento, chat) {
+        const aliasView = elemento.querySelector('.alias-view');
+        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
 
-            fetch('/kanban/data')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Error en la respuesta del servidor');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    actualizarIncremental(data);
-
-                    // --- Restaurar edición si corresponde ---
-                    if (editingColId) {
-                        const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
-                        if (colHeader) {
-                            colHeader.setAttribute('contenteditable', 'true');
-                            colHeader.focus();
-                            // Restaurar texto temporal
-                            if (editingColText) colHeader.textContent = editingColText;
-                            // Mover el cursor al final
-                            const range = document.createRange();
-                            range.selectNodeContents(colHeader);
-                            range.collapse(false);
-                            const sel = window.getSelection();
-                            sel.removeAllRanges();
-                            sel.addRange(range);
-                        }
-                    }
-                    setTimeout(() => {
-                        window.scrollTo(0, scrollPosition);
-                    }, 10);
-                })
-                .catch(error => {
-                    console.error('❌ Error actualizando Kanban:', error);
-                });
-        } function actualizarKanban() {
-            if (!kanbanAutoRefresh) return;
-            const scrollPosition = window.scrollY;
-
-            fetch('/kanban/data')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Error en la respuesta del servidor');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    actualizarIncremental(data);
-                    console.log('✅ Kanban actualizado:', new Date().toLocaleTimeString());
-                    setTimeout(() => {
-                        window.scrollTo(0, scrollPosition);
-                    }, 10);
-                })
-                .catch(error => {
-                    console.error('❌ Error actualizando Kanban:', error);
-                });
+        const timeElement = elemento.querySelector('.card-time');
+        if (timeElement && chat.ultima_fecha) {
+            const fechaObj = new Date(chat.ultima_fecha);
+            const dia = fechaObj.getDate();
+            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
+            const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+            const fechaFormateada = `${dia}-${mes} ${hora}`;
+            if (timeElement.textContent !== fechaFormateada) timeElement.textContent = fechaFormateada;
         }
 
-        function actualizarIncremental(data) {
-            // Actualizar nombres de columnas si cambiaron
-            data.columnas.forEach(col => {
-                const colHeader = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
-                if (colHeader) {
-                    // Solo actualiza si NO está editando esta columna
-                    if (editingColId !== col.id.toString()) {
-                        if (colHeader.textContent !== col.nombre) {
-                            colHeader.textContent = col.nombre;
-                        }
-                    }
-                }
-            });
-            // Crear un mapa de los chats actuales para comparación rápida
-            const chatsActuales = new Map();
-            document.querySelectorAll('.kanban-card').forEach(card => {
-                chatsActuales.set(card.dataset.chatNum, {
-                    element: card,
-                    columnaId: card.closest('.kanban-column').dataset.colId
-                });
-            });
-
-            // Procesar cada chat de los datos recibidos
-            data.chats.forEach(chat => {
-                const chatExistente = chatsActuales.get(chat.numero);
-
-                if (chatExistente) {
-                    // El chat ya existe, actualizar si es necesario
-                    actualizarChatExistente(chatExistente.element, chat);
-
-                    // Mover a otra columna si es necesario
-                    if (chatExistente.columnaId !== chat.columna_id.toString()) {
-                        moverChatAColumna(chat.numero, chat.columna_id);
-                    }
-
-                    // Eliminar del mapa para marcar como procesado
-                    chatsActuales.delete(chat.numero);
-                } else {
-                    // Chat nuevo, agregarlo
-                    agregarNuevoChat(chat);
-                }
-            });
-
-            // Eliminar chats que ya no existen
-            chatsActuales.forEach((info, numero) => {
-                eliminarChat(numero);
-            });
-        }
-
-        function actualizarChatExistente(elemento, chat) {
-            // Actualizar avatar si cambió
-            const avatar = elemento.querySelector('.card-avatar');
-            const nuevoAvatar = chat.avatar || '/static/icons/default-avatar.png';
-            if (avatar.src !== nuevoAvatar) {
-                avatar.src = nuevoAvatar;
-            }
-
-            // Actualizar nombre mostrado
-            const aliasView = elemento.querySelector('.alias-view');
-            if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
-                aliasView.textContent = chat.nombre_mostrado;
-            }
-
-            // Actualizar número
-            const numElement = elemento.querySelector('.card-num');
-            if (numElement && numElement.textContent !== chat.numero) {
-                numElement.textContent = chat.numero;
-            }
-
-            // Actualizar tiempo
-            const timeElement = elemento.querySelector('.card-time');
-            if (timeElement && chat.ultima_fecha) {
-                const fechaObj = new Date(chat.ultima_fecha);
-                const dia = fechaObj.getDate();
-                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
-                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-                const fechaFormateada = `${dia}-${mes} ${hora}`;
-                if (timeElement.textContent !== fechaFormateada) {
-                    timeElement.textContent = fechaFormateada;
-                }
-            }
-
-            // Actualizar último mensaje
-            const msgElement = elemento.querySelector('.card-msg');
-            const nuevoMensaje = chat.ultimo_mensaje || '&nbsp;';
-            if (msgElement.textContent !== nuevoMensaje) {
-                msgElement.textContent = nuevoMensaje;
-
-                // Animar si hay nuevo mensaje
-                if (chat.ultimo_mensaje) {
-                    elemento.classList.add('new-message');
-                    setTimeout(() => {
-                        elemento.classList.remove('new-message');
-                    }, 2500);
-                }
-            }
-
-            // Actualizar contador de no leídos
-            const unreadElement = elemento.querySelector('.card-unread');
-            if (chat.sin_leer > 0) {
-                if (unreadElement) {
-                    unreadElement.textContent = chat.sin_leer;
-                } else {
-                    const newUnread = document.createElement('span');
-                    newUnread.className = 'card-unread';
-                    newUnread.textContent = chat.sin_leer;
-                    elemento.querySelector('.card-meta-row').appendChild(newUnread);
-                }
-            } else if (unreadElement) {
-                unreadElement.remove();
-            }
-
-            // Actualizar bandera
-            const flagElement = elemento.querySelector('.card-flag');
-            const nuevaBandera = getCountryFlag(chat.numero);
-            if (nuevaBandera) {
-                if (flagElement) {
-                    flagElement.src = nuevaBandera;
-                } else {
-                    const banderaImg = document.createElement('img');
-                    banderaImg.src = nuevaBandera;
-                    banderaImg.className = 'card-flag';
-                    banderaImg.alt = 'País';
-                    banderaImg.title = 'País';
-                    elemento.querySelector('.card-title-row').prepend(banderaImg);
-                }
-            } else if (flagElement) {
-                flagElement.remove();
+        const msgElement = elemento.querySelector('.card-msg');
+        const nuevoMensaje = chat.ultimo_mensaje || '';
+        if (msgElement && msgElement.textContent !== nuevoMensaje) {
+            msgElement.textContent = nuevoMensaje;
+            if (nuevoMensaje) {
+                elemento.classList.add('new-message');
+                setTimeout(() => elemento.classList.remove('new-message'), 2500);
             }
         }
 
-        function agregarNuevoChat(chat) {
-            const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
-            if (!columna) return;
+        const unread = elemento.querySelector('.card-unread');
+        if (chat.sin_leer > 0) {
+            if (unread) unread.textContent = chat.sin_leer;
+            else {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = chat.sin_leer;
+                elemento.querySelector('.card-meta-row').appendChild(span);
+            }
+        } else if (unread) unread.remove();
+    }
 
-            const bandera = getCountryFlag(chat.numero);
-            const nuevoChatHTML = `
-            <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration: none; color: inherit; display: block;">
+    function agregarNuevoChat(chat) {
+        const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
+        if (!columna) return;
+        const bandera = getCountryFlag(chat.numero);
+        const html = `
+    <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+            <div class="card-title-row">
                 <div class="card-avatar-section">
                     <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
                          class="card-avatar" alt="Avatar"
                          onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                 </div>
-                <div class="card-content">
-                    <div class="card-title-row">
-                        ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                        <span class="alias-view" data-num="${chat.numero}">
-                            ${chat.nombre_mostrado}
-                        </span>
-                        <span class="alias-edit" style="display:none;">
-                            <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" maxlength="100" style="width: 110px;">
-                        </span>
-                        <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">
-                            ✏️
-                        </button>
-                    </div>
-                    <div class="card-meta-row">
-                        <span class="card-num">${chat.numero}</span>
-                        <span class="card-time">
-                            ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' }) : ''}
-                        </span>
-                        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
-                    </div>
-                    <div class="card-msg">${chat.ultimo_mensaje || '&nbsp;'}</div>
-                </div>
-            </a>`;
+                ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
+                <span class="alias-view" data-num="${chat.numero}">${chat.nombre_mostrado}</span>
+                <span class="alias-edit" style="display:none;">
+                    <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" maxlength="100" style="width:110px;">
+                </span>
+                <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
+            </div>
+            <div class="card-meta-row">
+                <span class="card-num">${chat.numero}</span>
+                <span class="card-time">
+                    ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}
+                </span>
+                ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
+            </div>
+            <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
+        </div>
+    </a>`;
+        columna.insertAdjacentHTML('beforeend', html);
+        setTimeout(() => {
+            const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
+            if (el) el.classList.remove('new-message');
+        }, 2500);
+    }
 
-            columna.insertAdjacentHTML('beforeend', nuevoChatHTML);
+    function moverChatAColumna(numero, nuevaColumnaId) {
+        const chatEl = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+        const destino = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
+        if (chatEl && destino) destino.appendChild(chatEl);
+    }
+    function eliminarChat(numero) {
+        const el = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+        if (el) el.remove();
+    }
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    }
 
-            setTimeout(() => {
-                const nuevoElemento = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
-                if (nuevoElemento) {
-                    nuevoElemento.classList.remove('new-message');
+    /* ----------- Drag & Drop (ya existente) ----------- */
+    function inicializarSortable() {
+        document.querySelectorAll('.column-list').forEach(list => {
+            if (list.dataset.sortableInit === '1') return;
+            list.dataset.sortableInit = '1';
+            new Sortable(list, {
+                group: 'kanban',
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                onEnd: evt => {
+                    const numero = evt.item.dataset.chatNum;
+                    const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
+                    fetch('/kanban/mover', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ numero, columna_id: nuevaCol })
+                    });
                 }
-            }, 2500);
-        }
-
-        function moverChatAColumna(numero, nuevaColumnaId) {
-            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
-            const nuevaColumna = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
-
-            if (chatElement && nuevaColumna) {
-                nuevaColumna.appendChild(chatElement);
-            }
-        }
-
-        function eliminarChat(numero) {
-            const chatElement = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
-            if (chatElement) {
-                chatElement.remove();
-            }
-        }
-
-        function getCountryFlag(numero) {
-            if (!numero) return null;
-            const prefijos = {
-                '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
-                '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec'
-            };
-
-            const numStr = numero.toString().replace('+', '');
-            for (let i = 3; i > 0; i--) {
-                const prefijo = numStr.substring(0, i);
-                if (prefijos[prefijo]) {
-                    return `https://flagcdn.com/24x18/${prefijos[prefijo]}.png`;
-                }
-            }
-            return null;
-        }
-
-        function inicializarSortable() {
-            document.querySelectorAll('.column-list').forEach(list => {
-                new Sortable(list, {
-                    group: 'kanban',
-                    animation: 150,
-                    ghostClass: 'sortable-ghost',
-                    onEnd: evt => {
-                        const numero = evt.item.dataset.chatNum;
-                        const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
-                        fetch('/kanban/mover', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ numero, columna_id: nuevaCol })
-                        });
-                    }
-                });
             });
-        }
-
-        inicializarSortable();
-
-        document.addEventListener('visibilitychange', function () {
-            kanbanAutoRefresh = !document.hidden;
         });
+    }
 
-        setTimeout(actualizarKanban, 1000);
-    });
-   
+    /* ----------- Utilidades ----------- */
+    function bindColumnHeaderEvents() {
+        // (placeholder si más adelante deseas eventos específicos)
+    }
 </script>
 {% endblock %}

@@ -1457,7 +1457,7 @@ def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
     data = request.get_json(silent=True) or {}
     nombre = (data.get('nombre') or 'Nueva columna').strip()
-    after_id = data.get('after_id')  # id de la columna a la derecha de la cual insertamos
+    after_id = data.get('after_id')
 
     if not nombre:
         return jsonify({'error': 'El nombre es obligatorio'}), 400
@@ -1466,41 +1466,39 @@ def agregar_columna_kanban():
     cursor = conn.cursor(dictionary=True)
 
     try:
+        color_nueva = '#007bff'
         if after_id:
-            # Obtener orden de la columna base
-            cursor.execute("SELECT orden FROM kanban_columnas WHERE id=%s", (after_id,))
+            cursor.execute("SELECT orden, color FROM kanban_columnas WHERE id=%s", (after_id,))
             row = cursor.fetchone()
             if not row:
                 return jsonify({'error': 'Columna after_id no existe'}), 404
 
             after_orden = row['orden']
+            color_nueva = row.get('color') or color_nueva
 
-            # Desplazar las columnas que están a la derecha
+            # Desplazar columnas a la derecha
             cursor.execute("""
                 UPDATE kanban_columnas
                 SET orden = orden + 1
                 WHERE orden > %s
             """, (after_orden,))
 
-            # Insertar nueva columna con orden = after_orden + 1
             cursor.execute("""
-                INSERT INTO kanban_columnas (nombre, orden)
-                VALUES (%s, %s)
-            """, (nombre, after_orden + 1))
+                INSERT INTO kanban_columnas (nombre, orden, color)
+                VALUES (%s, %s, %s)
+            """, (nombre, after_orden + 1, color_nueva))
         else:
-            # Comportamiento anterior (al final)
             cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
             next_ord = cursor.fetchone()['next_ord']
             cursor.execute("""
-                INSERT INTO kanban_columnas (nombre, orden)
-                VALUES (%s, %s)
-            """, (nombre, next_ord))
+                INSERT INTO kanban_columnas (nombre, orden, color)
+                VALUES (%s, %s, %s)
+            """, (nombre, next_ord, color_nueva))
 
         conn.commit()
         new_id = cursor.lastrowid
 
-        # Devolver el orden final de la nueva columna
-        cursor.execute("SELECT id, nombre, orden FROM kanban_columnas WHERE id=%s", (new_id,))
+        cursor.execute("SELECT id, nombre, orden, color FROM kanban_columnas WHERE id=%s", (new_id,))
         nueva = cursor.fetchone()
 
         return jsonify({
@@ -1508,6 +1506,7 @@ def agregar_columna_kanban():
             'id': nueva['id'],
             'nombre': nueva['nombre'],
             'orden': nueva['orden'],
+            'color': nueva['color']
         })
     except Exception as e:
         conn.rollback()
