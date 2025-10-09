@@ -3257,19 +3257,19 @@ def save_config(cfg_all, config=None):
     # ——— CRUD y helpers para 'precios' ———
 def obtener_todos_los_precios(config):
     try:
-        db = conectar_db(config)
+        db = get_db_connection(config)
         cursor = db.cursor(dictionary=True)
-        
-        # CONSULTA ACTUALIZADA - Ordenar por otra columna existente
         cursor.execute("""
-            SELECT * FROM productos 
+            SELECT * FROM precios
             ORDER BY sku, categoria, modelo;
         """)
-        
         precios = cursor.fetchall()
         cursor.close()
         db.close()
         return precios
+    except Exception as e:
+        print(f"Error obteniendo precios: {str(e)}")
+        return []
         
     except Exception as e:
         print(f"Error obteniendo precios: {str(e)}")
