@@ -84,6 +84,15 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("MEKTIA_DB_NAME"),
         'dominio': 'smartwhats.mektia.com'
     },
+    '123': {  # Número de Unilova
+        'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("UNILOVA_DB_HOST"),
+        'db_user': os.getenv("UNILOVA_DB_USER"),
+        'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
+        'db_name': os.getenv("UNILOVA_DB_NAME"),
+        'dominio': 'unilova.mektia.com'
+    },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
@@ -5603,7 +5612,7 @@ def obtener_configuracion_por_host():
         
         if 'unilova' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
-            return NUMEROS_CONFIG['524812372326']
+            return NUMEROS_CONFIG['123']
         
         # DETECCIÓN PORFIRIANNA
         if 'laporfirianna' in host:
