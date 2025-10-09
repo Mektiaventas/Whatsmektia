@@ -42,7 +42,7 @@ guardado = True
 load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
-app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 50 MB
+app.config['MAX_CONTENT_LENGTH'] = 150 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
 
 @app.template_filter('format_time_24h')
