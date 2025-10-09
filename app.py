@@ -4950,15 +4950,26 @@ def webhook_verification():
     # Obtener el host desde los headers para determinar qué verify token usar
     host = request.headers.get('Host', '')
     
+    app.logger.info(f"🌐 [WEBHOOK_GET] Host: {host} | Params: {dict(request.args)}")
+    
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
+        app.logger.info(f"🔐 Usando token de La Porfirianna")
     elif 'ofitodo' in host:  
         verify_token = os.getenv("FITO_VERIFY_TOKEN")
+        app.logger.info(f"🔐 Usando token de Ofitodo")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
+        app.logger.info(f"🔐 Usando token de Mektia")
     
-    if request.args.get('hub.verify_token') == verify_token:
+    token_recibido = request.args.get('hub.verify_token')
+    app.logger.info(f"🔐 Token recibido: {token_recibido} | Esperado: {verify_token}")
+    
+    if token_recibido == verify_token:
+        app.logger.info("✅ Token de verificación VÁLIDO")
         return request.args.get('hub.challenge')
+    
+    app.logger.error("❌ Token de verificación INVÁLIDO")
     return 'Token inválido', 403
 
 # Modifica la función obtener_configuracion_por_phone_number_id
@@ -5574,7 +5585,7 @@ def obtener_configuracion_por_host():
         host = request.headers.get('Host', '').lower()
         
         # 🆕 DETECCIÓN UNILOVA - más específica
-        if 'unilova' in host:
+        if 'smartwhats' in host:
             app.logger.info("✅ Configuración detectada: Unilova")
             # Verificar si es una ruta de WhatsApp
             path = request.path.lower()
