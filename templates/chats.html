@@ -201,7 +201,11 @@
         <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
-                <button type="button" id="emoji-button" class="emoji-btn">😊</button>
+                <div id="emoji-picker" style="display:none;position:absolute;z-index:9999;background:#222;border-radius:8px;padding:8px;box-shadow:0 2px 8px #000;">
+                    <!-- Emojis will be inserted here by JS -->
+                    <button type="button" id="emoji-button" class="emoji-btn">😊</button>
+                </div>
+                
                 <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
