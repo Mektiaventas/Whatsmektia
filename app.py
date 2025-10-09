@@ -844,15 +844,18 @@ def importar_productos_desde_excel(filepath, config=None):
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
-                        # Extraer el primer número decimal del string (más robusto)
-                        match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
-                        if match:
-                            valor_numerico = float(match.group(1))
-                            producto[campo] = f"{valor_numerico:.2f}"
-                            app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
-                        else:
+                        if not valor_str:  # Si está vacío, pon 0.00
                             producto[campo] = '0.00'
-                            app.logger.info(f"Campo {campo} sin número válido: {valor} -> 0.00")
+                        else:
+                            # Extrae el primer número decimal del string
+                            match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
+                            if match:
+                                valor_numerico = float(match.group(1))
+                                producto[campo] = f"{valor_numerico:.2f}"
+                                app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
+                            else:
+                                producto[campo] = '0.00'
+                                app.logger.info(f"Campo {campo} sin número válido: {valor} -> 0.00")
                     except (ValueError, TypeError) as e:
                         app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
                         producto[campo] = '0.00'
