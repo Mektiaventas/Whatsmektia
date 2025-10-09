@@ -838,26 +838,7 @@ def importar_productos_desde_excel(filepath, config=None):
                 for campo in campos_esperados:
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = f"nadita{idx}"  # Añadir índice para hacerlo único
-                
-                
-                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
-                    try:
-                        valor = producto.get(campo, '')
-                        valor_str = str(valor).strip()
-                        # Extraer el primer número decimal del string (más robusto)
-                        match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
-                        if match:
-                            valor_numerico = float(match.group(1))
-                            producto[campo] = f"{valor_numerico:.2f}"
-                            app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
-                        else:
-                            producto[campo] = '0.00'
-                            app.logger.info(f"Campo {campo} sin número válido: {valor} -> 0.00")
-                    except (ValueError, TypeError) as e:
-                        app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
-                        producto[campo] = '0.00'
-                
-                
+
                 if producto.get('status_ws', '').startswith('nadita'):
                     producto['status_ws'] = 'activo'
                 
