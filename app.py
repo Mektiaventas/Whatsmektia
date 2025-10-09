@@ -1709,20 +1709,14 @@ def agregar_columna_kanban():
     try:
         default_icon = '/static/icons/default-avatar.png'
         color_nueva = '#007bff'
-
         if after_id:
             cursor.execute("SELECT orden, color FROM kanban_columnas WHERE id=%s", (after_id,))
             row = cursor.fetchone()
             if not row:
                 return jsonify({'error': 'Columna after_id no existe'}), 404
-
             after_orden = row['orden']
             color_nueva = row.get('color') or color_nueva
-
-            # Desplazar a la derecha
             cursor.execute("UPDATE kanban_columnas SET orden = orden + 1 WHERE orden > %s", (after_orden,))
-
-            # Nombre por defecto según orden
             nombre = f"Etapa {after_orden + 1}"
             cursor.execute("""
                 INSERT INTO kanban_columnas (nombre, orden, color, icono)
@@ -1741,15 +1735,7 @@ def agregar_columna_kanban():
         new_id = cursor.lastrowid
         cursor.execute("SELECT id, nombre, orden, color, icono FROM kanban_columnas WHERE id=%s", (new_id,))
         nueva = cursor.fetchone()
-
-        return jsonify({
-            'success': True,
-            'id': nueva['id'],
-            'nombre': nueva['nombre'],
-            'orden': nueva['orden'],
-            'color': nueva['color'],
-            'icono': nueva.get('icono')
-        })
+        return jsonify({'success': True, **nueva})
     except Exception as e:
         conn.rollback()
         app.logger.error(f"Error agregando columna Kanban: {e}")
