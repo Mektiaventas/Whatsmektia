@@ -178,6 +178,25 @@ RUTAS_PUBLICAS = {
     'static', 'debug_headers', 'debug_dominio', 'diagnostico'
 }
 
+# Put below sesiones_activas helpers
+def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
+    """Marks old sessions as inactive to avoid blocking new logins by stale entries."""
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        umbral = datetime.now() - timedelta(minutes=within_minutes)
+        cur.execute("""
+            UPDATE sesiones_activas
+               SET is_active = 0
+             WHERE user = %s
+               AND last_seen < %s
+        """, (username, umbral))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error desactivando sesiones antiguas: {e}")
+
 @app.before_request
 def proteger_rutas():
     # Permitir endpoints públicos
@@ -191,13 +210,25 @@ def proteger_rutas():
         return
     return redirect(url_for('login', next=request.path))
 
+# Replace your current /login handler with this version (same logic + session limit)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         usuario = request.form.get('usuario', '').strip()
         password = request.form.get('password', '')
         cliente = obtener_cliente_por_user(usuario)
+
         if cliente and verificar_password(password, cliente['password']):
+            # 1) Cleanup stale sessions to avoid false positives
+            desactivar_sesiones_antiguas(cliente['user'], SESSION_ACTIVE_WINDOW_MINUTES)
+
+            # 2) Enforce concurrent sessions limit
+            active_count = contar_sesiones_activas(cliente['user'], within_minutes=SESSION_ACTIVE_WINDOW_MINUTES)
+            if active_count >= MAX_CONCURRENT_SESSIONS:
+                flash(f"❌ Este usuario ya tiene {active_count} sesiones activas. Cierra una sesión para continuar.", 'error')
+                return render_template('login.html'), 429
+
+            # 3) Proceed with login
             session['auth_user'] = {
                 'id': cliente['id_cliente'],
                 'user': cliente['user'],
@@ -205,11 +236,11 @@ def login():
                 'schema': cliente['shema'],
                 'servicio': cliente['servicio'],
             }
-            # Registrar sesión activa
             registrar_sesion_activa(cliente['user'])
             flash('✅ Inicio de sesión correcto', 'success')
             destino = request.args.get('next') or url_for('home')
             return redirect(destino)
+
         flash('❌ Usuario o contraseña incorrectos', 'error')
     return render_template('login.html')
 
