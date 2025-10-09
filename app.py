@@ -1783,11 +1783,16 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Icono vacío'}), 400
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
-    conn.commit()
-    cursor.close(); conn.close()
-    return jsonify({'success': True, 'icono': icono})
-
+    try:
+        cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Error actualizando icono: {e}")
+        return jsonify({'error': 'Error actualizando icono'}), 500
+    finally:
+        cursor.close(); conn.close()
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:

@@ -137,9 +137,7 @@
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         {% endif %}
-                        <span class="alias-view" data-num="{{ chat.numero }}">
-                            {{ chat.nombre_mostrado }}
-                        </span>
+                        <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
                         <span class="alias-edit" style="display:none;">
                             <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
                         </span>
@@ -165,7 +163,6 @@
     {% endfor %}
 </div>
 
-<!-- Picker de iconos (emojis → SVG data URL) -->
 <div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
@@ -174,6 +171,7 @@
     let editingColText = null;
     let kanbanAutoRefresh = true;
     let refreshInterval = 500;
+    const renameTimers = new Map(); // debounce timers por columna
 
     document.addEventListener('DOMContentLoaded', () => {
         bindColumnHeaderEvents();
@@ -186,7 +184,6 @@
         document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
     });
 
-    /* ----------- Creación de columna sin prompt (usa defaults del servidor) ----------- */
     function bindAddColumnButtons() {
         document.querySelectorAll('.add-chat-btn').forEach(btn => {
             btn.removeEventListener('click', addColumnClickHandler);
@@ -201,21 +198,15 @@
         const afterId = parseInt(this.dataset.after, 10);
 
         fetch('/kanban/columna/agregar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ after_id: afterId }) // sin nombre → backend pone "Nueva columna"
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ after_id: afterId })
         })
             .then(r => r.json())
             .then(data => {
                 if (!data.success) { alert(data.error || 'Error al crear columna'); return; }
                 const nuevaCol = crearColumnaDOM(data);
                 insertarColumnaDespues(baseCol, nuevaCol);
-                // Re-enlazar eventos
-                bindAddColumnButtons();
-                bindDeleteButtons();
-                initRenameHandlers();
-                bindIconPicker();
-                inicializarSortable();
+                bindAddColumnButtons(); bindDeleteButtons(); initRenameHandlers(); bindIconPicker(); inicializarSortable();
             })
             .catch(err => console.error('Error creando columna:', err));
     }
@@ -239,14 +230,11 @@
         return div;
     }
     function insertarColumnaDespues(baseCol, nuevaCol) {
-        if (baseCol.nextElementSibling) {
-            baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
-        } else {
-            baseCol.parentNode.appendChild(nuevaCol);
-        }
+        if (baseCol.nextElementSibling) baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
+        else baseCol.parentNode.appendChild(nuevaCol);
     }
 
-    /* ----------- Icon picker ----------- */
+    /* Icon picker */
     function bindIconPicker() {
         const picker = document.getElementById('iconPicker');
         const emojis = ['🆕', '💬', '⏳', '✅', '📞', '🛠️', '📦', '🚀', '📝', '📅', '⭐', '📍', '🏷️', '🎯'];
@@ -269,10 +257,8 @@
                 const img = document.querySelector(picker.dataset.targetImgSelector);
                 if (img) img.src = dataUrl;
 
-                // Persistir icono
                 fetch(`/kanban/columna/${colId}/icono`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ icono: dataUrl })
                 }).catch(console.error);
 
@@ -303,11 +289,10 @@
         return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
     }
 
-    /* ----------- Eliminar columna ----------- */
+    /* Eliminar columna */
     function bindDeleteButtons() {
         document.querySelectorAll('.delete-col-btn').forEach(btn => {
-            if (btn.dataset.bound === '1') return;
-            btn.dataset.bound = '1';
+            if (btn.dataset.bound === '1') return; btn.dataset.bound = '1';
             btn.addEventListener('click', e => {
                 e.preventDefault();
                 const colId = btn.dataset.colId;
@@ -320,45 +305,62 @@
                         if (data.success) {
                             const colEl = document.querySelector(`.kanban-column[data-col-id="${colId}"]`);
                             if (colEl) colEl.remove();
-                        } else {
-                            alert(data.error || 'No se pudo eliminar');
-                        }
+                        } else { alert(data.error || 'No se pudo eliminar'); }
                     });
             });
         });
     }
 
-    /* ----------- Renombrar columna ----------- */
+    /* Renombrar columna: pausa refresh + guardado con debounce */
     function initRenameHandlers() {
         document.querySelectorAll('.col-name[contenteditable="true"]').forEach(header => {
-            if (header.dataset.bound === '1') return;
-            header.dataset.bound = '1';
+            if (header.dataset.bound === '1') return; header.dataset.bound = '1';
 
             header.addEventListener('focus', () => {
                 editingColId = header.dataset.colId;
                 editingColText = header.textContent;
+                kanbanAutoRefresh = false; // pausa mientras editas
             });
+
+            header.addEventListener('input', () => {
+                editingColText = header.textContent;
+                const id = header.dataset.colId;
+                if (renameTimers.has(id)) clearTimeout(renameTimers.get(id));
+                // guarda 600ms después de dejar de teclear
+                const t = setTimeout(() => saveColumnName(id, header.textContent.trim()), 600);
+                renameTimers.set(id, t);
+            });
+
             header.addEventListener('blur', () => {
-                const columnaId = header.dataset.colId;
-                const nuevoNombre = header.textContent.trim();
-                fetch(`/kanban/columna/${columnaId}/renombrar`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ nombre: nuevoNombre })
-                }).then(res => res.json()).then(data => {
-                    if (!data.success) alert('Error al guardar nombre');
-                }).finally(() => {
+                const id = header.dataset.colId;
+                const nombre = header.textContent.trim();
+                if (renameTimers.has(id)) {
+                    clearTimeout(renameTimers.get(id));
+                    renameTimers.delete(id);
+                }
+                saveColumnName(id, nombre).finally(() => {
+                    // reanuda refresh con un pequeño delay para evitar parpadeo
+                    setTimeout(() => { kanbanAutoRefresh = true; }, 300);
                     editingColId = null;
                     editingColText = null;
                 });
             });
+
             header.addEventListener('keydown', e => {
                 if (e.key === 'Enter') { e.preventDefault(); header.blur(); }
             });
         });
     }
+    function saveColumnName(columnaId, nombre) {
+        return fetch(`/kanban/columna/${columnaId}/renombrar`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre })
+        }).then(r => r.json()).then(data => {
+            if (!data.success) console.warn('No se pudo guardar el nombre');
+        }).catch(err => console.error('Error guardando nombre:', err));
+    }
 
-    /* ----------- Auto-refresh Kanban (incremental) ----------- */
+    /* Auto-refresh incremental (no toca título si está en edición) */
     function startAutoRefresh() {
         setInterval(actualizarKanban, refreshInterval);
         setTimeout(actualizarKanban, 1000);
@@ -372,9 +374,9 @@
                 actualizarIncremental(data);
                 if (editingColId) {
                     const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
-                    if (colHeader) {
+                    if (colHeader && editingColText) {
                         colHeader.focus();
-                        if (editingColText) colHeader.textContent = editingColText;
+                        colHeader.textContent = editingColText;
                     }
                 }
                 setTimeout(() => window.scrollTo(0, scrollPosition), 10);
@@ -382,10 +384,11 @@
             .catch(err => console.error('❌ Error actualizando Kanban:', err));
     }
     function actualizarIncremental(data) {
-        // Títulos e iconos
         data.columnas.forEach(col => {
             const nameEl = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
-            if (nameEl && editingColId !== col.id.toString() && nameEl.textContent !== col.nombre) {
+            // no sobreescribir si es el elemento activo o está en edición
+            if (nameEl && document.activeElement !== nameEl &&
+                editingColId !== col.id.toString() && nameEl.textContent !== col.nombre) {
                 nameEl.textContent = col.nombre;
             }
             const iconEl = document.querySelector(`.col-icon[data-col-id="${col.id}"]`);
@@ -394,7 +397,6 @@
             }
         });
 
-        // Map actual de chats
         const chatsActuales = new Map();
         document.querySelectorAll('.kanban-card').forEach(card => {
             chatsActuales.set(card.dataset.chatNum, {
@@ -416,7 +418,6 @@
             }
         });
 
-        // Remover los que ya no existen
         chatsActuales.forEach((info, numero) => eliminarChat(numero));
     }
 
@@ -513,7 +514,6 @@
         return null;
     }
 
-    /* ----------- Drag & Drop ----------- */
     function inicializarSortable() {
         document.querySelectorAll('.column-list').forEach(list => {
             if (list.dataset.sortableInit === '1') return;
@@ -526,8 +526,7 @@
                     const numero = evt.item.dataset.chatNum;
                     const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
                     fetch('/kanban/mover', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ numero, columna_id: nuevaCol })
                     });
                 }
@@ -535,7 +534,6 @@
         });
     }
 
-    /* ----------- Utilidades ----------- */
     function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
 </script>
 {% endblock %}
