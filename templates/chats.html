@@ -273,6 +273,40 @@
 
 
 <script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const emojiBtn = document.getElementById('emoji-button');
+        const emojiPicker = document.getElementById('emoji-picker');
+        const input = document.getElementById('mensaje-texto');
+        const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        // Populate emoji picker
+        emojiPicker.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn" style="font-size:22px;margin:2px;">${e}</button>`).join('');
+
+        // Show picker below the emoji button
+        emojiBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            const rect = emojiBtn.getBoundingClientRect();
+            emojiPicker.style.left = `${rect.left + window.scrollX}px`;
+            emojiPicker.style.top = `${rect.bottom + window.scrollY + 6}px`;
+            emojiPicker.style.display = 'block';
+        });
+
+        // Insert emoji into input
+        emojiPicker.addEventListener('click', function (e) {
+            if (e.target.classList.contains('emoji-pick-btn')) {
+                input.value += e.target.textContent;
+                emojiPicker.style.display = 'none';
+                input.focus();
+            }
+        });
+
+        // Hide picker when clicking outside
+        document.addEventListener('click', function (e) {
+            if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
+                emojiPicker.style.display = 'none';
+            }
+        });
+    });
 function ajustarHoraMexico(fechaUTC) {
     const fecha = new Date(fechaUTC);
     fecha.setHours(fecha.getHours() + 6);
