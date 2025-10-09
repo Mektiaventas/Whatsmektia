@@ -51,12 +51,8 @@
         .bg-overlay {
             position: fixed;
             inset: 0;
-            background: radial-gradient(circle at 70% 80%,rgba(255,255,255,0.08),transparent 60%), linear-gradient(to top,rgba(0,0,0,.55),rgba(0,0,0,.25),rgba(0,0,0,.1));
+            background: radial-gradient(circle at 70% 80%,rgba(255,255,255,0.08),transparent 60%),linear-gradient(to top,rgba(0,0,0,.55),rgba(0,0,0,.25),rgba(0,0,0,.1));
             z-index: -3;
-        }
-
-        .titulo {
-            color: blue;
         }
 
         .sun {
@@ -236,7 +232,7 @@
             font-size: 14px;
             color: #1d2333;
             outline: none;
-            transition: border .25s, background .25s, box-shadow .25s;
+            transition: border .25s,background .25s,box-shadow .25s;
         }
 
             input:focus {
@@ -264,7 +260,7 @@
             position: relative;
             overflow: hidden;
             box-shadow: 0 6px 18px -5px rgba(255,126,70,.55);
-            transition: transform .18s ease, box-shadow .25s ease, filter .25s;
+            transition: transform .18s ease,box-shadow .25s ease,filter .25s;
         }
 
             button:before {
@@ -359,7 +355,7 @@
     <div class="bg-overlay"></div>
     <div class="sun"></div>
     <div class="cloud c1"></div>
-    <div class="cloud c2"></div>
+    <div class="cloud c2"></div> 
     <div class="cloud c3"></div>
 
     <div class="card" role="form" aria-label="Formulario de acceso">
