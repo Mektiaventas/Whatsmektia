@@ -197,7 +197,7 @@ def login():
         usuario = request.form.get('usuario', '').strip()
         password = request.form.get('password', '')
         cliente = obtener_cliente_por_user(usuario)
-        if cliente && verificar_password(password, cliente['password']):
+        if cliente and verificar_password(password, cliente['password']):
             session['auth_user'] = {
                 'id': cliente['id_cliente'],
                 'user': cliente['user'],
