@@ -3254,26 +3254,25 @@ def save_config(cfg_all, config=None):
     conn.close()
     
     # ——— CRUD y helpers para 'precios' ———
-def obtener_todos_los_precios(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS precios (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            servicio VARCHAR(100) NOT NULL,
-            descripcion TEXT,
-            precio DECIMAL(10,2) NOT NULL,
-            moneda CHAR(3) NOT NULL,
-            UNIQUE(servicio)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    cursor.execute("SELECT * FROM precios ORDER BY servicio;")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return rows
+def obtener_todos_los_precios(config):
+    try:
+        db = conectar_db(config)
+        cursor = db.cursor(dictionary=True)
+        
+        # CONSULTA ACTUALIZADA - Ordenar por otra columna existente
+        cursor.execute("""
+            SELECT * FROM productos 
+            ORDER BY sku, categoria, modelo;
+        """)
+        
+        precios = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return precios
+        
+    except Exception as e:
+        print(f"Error obteniendo precios: {str(e)}")
+        return []
 
 def obtener_precio_por_id(pid, config=None):
     if config is None:
