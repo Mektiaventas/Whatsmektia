@@ -11,7 +11,6 @@
         <!-- Sidebar principal FIJO -->
         <aside class="sidebar">
 
-            {% endif %}
             <!-- Add this before the sidebar logo -->
             <div style="display:none">Debug: {{ app_logo }}</div>
             <div class="sidebar-logo">
@@ -36,36 +35,38 @@
                 <li><a href="{{ url_for('terms_of_service') }}">Términos de Servicio</a></li>
                 <li><a href="{{ url_for('data_deletion') }}">Eliminación de Datos</a></li>
             </ul>
+            {% if session.auth_user %}
+            <div class="user-box" id="userBox">
+                <div class="user-avatar">
+                    {{ session.auth_user.user[:2]|upper }}
+                </div>
+                <div class="user-info">
+                    <span class="user-name" title="{{ session.auth_user.user }}">{{ session.auth_user.user }}</span>
+                    <span class="user-role">Sesión activa</span>
+                </div>
+                <a class="logout-btn" href="{{ url_for('logout') }}" title="Cerrar sesión">
+                    <!-- Icono logout (SVG) -->
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M15 3h-6a2 2 0 0 0-2 2v3" />
+                        <path d="M7 16v3a2 2 0 0 0 2 2h6" />
+                        <path d="M21 12H9" />
+                        <path d="M15 8l4 4-4 4" />
+                    </svg>
+                    Salir
+                </a>
+                <button class="user-menu-trigger" type="button" id="userMenuBtn" aria-label="Abrir menú de usuario">
+                    ⋮
+                </button>
+                <div class="user-box-actions" id="userMenu">
+                    <a href="{{ url_for('home') }}">🏠 Inicio</a>
+                    <a href="{{ url_for('ver_chats') }}">💬 Chats</a>
+                    <a href="{{ url_for('configuracion_tab', tab='negocio') }}">⚙️ Configuración</a>
+                    <a href="{{ url_for('logout') }}">🚪 Cerrar sesión</a>
+                </div>
+            </div>
+            {% endif %}
         </aside>
-        {% if session.auth_user %}
-        <div class="user-box" id="userBox">
-            <div class="user-avatar">
-                {{ session.auth_user.user[:2]|upper }}
-            </div>
-            <div class="user-info">
-                <span class="user-name" title="{{ session.auth_user.user }}">{{ session.auth_user.user }}</span>
-                <span class="user-role">Sesión activa</span>
-            </div>
-            <a class="logout-btn" href="{{ url_for('logout') }}" title="Cerrar sesión">
-                <!-- Icono logout (SVG) -->
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M15 3h-6a2 2 0 0 0-2 2v3" />
-                    <path d="M7 16v3a2 2 0 0 0 2 2h6" />
-                    <path d="M21 12H9" />
-                    <path d="M15 8l4 4-4 4" />
-                </svg>
-                Salir
-            </a>
-            <button class="user-menu-trigger" type="button" id="userMenuBtn" aria-label="Abrir menú de usuario">
-                ⋮
-            </button>
-            <div class="user-box-actions" id="userMenu">
-                <a href="{{ url_for('home') }}">🏠 Inicio</a>
-                <a href="{{ url_for('ver_chats') }}">💬 Chats</a>
-                <a href="{{ url_for('configuracion_tab', tab='negocio') }}">⚙️ Configuración</a>
-                <a href="{{ url_for('logout') }}">🚪 Cerrar sesión</a>
-            </div>
-        </div>
+
         <!-- Contenido principal -->
         <main class="main-content">
             {% block content %}{% endblock %}
