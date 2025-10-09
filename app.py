@@ -5586,18 +5586,8 @@ def obtener_configuracion_por_host():
         
         # 🆕 DETECCIÓN UNILOVA - más específica
         if 'smartwhats' in host:
-            app.logger.info("✅ Configuración detectada: Unilova")
-            # Verificar si es una ruta de WhatsApp
-            path = request.path.lower()
-            rutas_whatsapp = ['/webhook', '/chats', '/kanban', '/configuracion', '/static', '/home', '/']
-            
-            if any(path.startswith(ruta) for ruta in rutas_whatsapp):
-                app.logger.info(f"🎯 Ruta de WhatsApp detectada: {path}")
-                return NUMEROS_CONFIG['524495486142']  # Usar configuración de WhatsApp
-            else:
-                app.logger.info(f"🔧 Ruta no manejada por WhatsApp: {path}")
-                # Para rutas no manejadas, igual usar WhatsApp como default
-                return NUMEROS_CONFIG['524495486142']
+            app.logger.info("✅ Configuración detectada: SMARTWhats")
+            return NUMEROS_CONFIG['524495486142']
         
         # DETECCIÓN PORFIRIANNA
         if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
