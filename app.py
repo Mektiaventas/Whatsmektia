@@ -903,7 +903,7 @@ def importar_productos_desde_excel(filepath, config=None):
                 """, values)
                 
                 productos_importados += 1
-                app.logger.info(f"✅ Producto importado: {producto.get('servicio')[:50]}...")
+                app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}...")
                 
             except Exception as e:
                 app.logger.error(f"Error procesando fila {idx}: {str(e)}")

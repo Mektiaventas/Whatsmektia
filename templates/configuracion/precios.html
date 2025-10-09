@@ -148,10 +148,12 @@
                     <h4 class="font-semibold mb-2">💡 Estructura Requerida</h4>
                     <ul class="text-sm space-y-1">
                         <li>• sku</li>
-                        <li>• servicio</li>
                         <li>• categoria</li>
+                        <li>• subcategoria</li>
+                        <li>• linea</li>
+                        <li>• modelo</li>
                         <li>• descripcion</li>
-                        <li>• precio</li>
+                        <li>• medidas</li>
                         <li>• costo</li>
                         <li>• precio_mayoreo</li>
                         <li>• precio_menudeo</li>
@@ -243,11 +245,11 @@
 
                 <div class="grid grid-cols-3 gap-4">
                     <div class="form-group">
-                        <label for="precio">Costo *</label>
+                        <label for="costo">Costo *</label>
                         <div class="relative">
                             <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
-                            <input type="number" step="0.01" min="0" id="precio" name="precio" class="input pl-8" required
-                                   value="{{ precio_edit.precio if precio_edit else '' }}"
+                            <input type="number" step="0.01" min="0" id="costo" name="costo" class="input pl-8" required
+                                   value="{{ precio_edit.costo if precio_edit else '' }}"
                                    placeholder="0.00">
                         </div>
                     </div>
@@ -375,7 +377,6 @@
                     <thead>
                         <tr>
                             <th>SKU</th>
-                            <th>Producto</th>
                             <th>Categoría</th>
                             <th>Subcategoría</th>
                             <th>Línea</th>
@@ -393,6 +394,7 @@
                     <tbody>
                         {% for precio in precios %}
                         <tr>
+                            <td>{{ precio.sku or '-' }}</td>
                             <td>{{ precio.categoria or '-' }}</td>
                             <td>{{ precio.subcategoria or '-' }}</td>
                             <td>{{ precio.linea or '-' }}</td>
@@ -452,7 +454,6 @@
                     <thead>
                         <tr>
                             <th>SKU</th>
-                            <th>Producto</th>
                             <th>Categoría</th>
                             <th>Subcategoría</th>
                             <th>Línea</th>
@@ -474,13 +475,14 @@
                     <tbody>
                         {% for precio in precios %}
                         <tr>
+                            <td>{{ precio.sku or '-' }}</td>
                             <td>{{ precio.categoria or '-' }}</td>
                             <td>{{ precio.subcategoria or '-' }}</td>
                             <td>{{ precio.linea or '-' }}</td>
                             <td>{{ precio.modelo or '-' }}</td>
                             <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
                             <td>{{ precio.medidas or '-' }}</td>
-                            <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else "{:,.2f}".format(precio.precio) }}</td>
+                            <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                             <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                             <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                             <td>
@@ -507,7 +509,7 @@
                                           method="post" class="inline-form">
                                         <button type="submit"
                                                 class="btn small danger"
-                                                onclick="return confirm('¿Eliminar {{ precio.servicio }}?');">
+                                                onclick="return confirm('¿Eliminar {{ precio.descripcion[:30] if precio.descripcion else precio.sku }}?');">
                                             Borrar
                                         </button>
                                     </form>
