@@ -837,7 +837,7 @@ def importar_productos_desde_excel(filepath, config=None):
                 # Reemplazar valores vacíos con "nadita" si hay al menos un dato
                 for campo in campos_esperados:
                     if not str(producto.get(campo, '')).strip():
-                        producto[campo] = f"null"  # Añadir índice para hacerlo único
+                        producto[campo] = f" "  # Añadir índice para hacerlo único
                 
                 
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
