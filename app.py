@@ -783,11 +783,6 @@ def importar_productos_desde_excel(filepath, config=None):
                 df = df.rename(columns={excel_col: db_col})
                 app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
         
-        # Verificar columnas mínimas requeridas después del mapeo
-        app.logger.info(f"Columnas después del mapeo: {list(df.columns)}")
-        if 'servicio' not in df.columns or 'precio' not in df.columns:
-            app.logger.error(f"El archivo no tiene las columnas requeridas después del mapeo: servicio, precio")
-            return 0
         
         # Debug: mostrar las primeras filas para verificar datos
         app.logger.info(f"Primeras 2 filas de datos:\n{df.head(2).to_dict('records')}")
@@ -805,17 +800,7 @@ def importar_productos_desde_excel(filepath, config=None):
         # Crear conexión a BD
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
-        # Verificar columna costo
-        try:
-            cursor.execute("SHOW COLUMNS FROM precios LIKE 'costo'")
-            columna_existe = cursor.fetchone()
-            
-            if not columna_existe:
-                cursor.execute("ALTER TABLE precios ADD COLUMN costo DECIMAL(10,2) DEFAULT 0.00 AFTER precio")
-                conn.commit()
-        except Exception as e:
-            app.logger.error(f"❌ Error verificando/creando columna 'costo': {e}")
+
         
         # Definir campos esperados
         campos_esperados = [
@@ -854,21 +839,6 @@ def importar_productos_desde_excel(filepath, config=None):
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = f"nadita{idx}"  # Añadir índice para hacerlo único
                 
-                # IMPORTANTE: Ya no omitimos filas por "servicio" vacío, lo usamos con sufijo único
-                if not producto.get('servicio') or producto.get('servicio') == '':
-                    producto['servicio'] = f"nadita{idx}"
-                    app.logger.info(f"Fila {idx}: servicio vacío reemplazado con 'nadita{idx}'")
-                
-                # NUEVO: Truncar el servicio si es demasiado largo
-                servicio_original = producto.get('servicio', '')
-                if len(str(servicio_original)) > 95:  # Límite de seguridad (probablemente es VARCHAR(100))
-                    # Si es demasiado largo, mover el texto al campo descripción
-                    if producto.get('descripcion') == f"nadita{idx}":
-                        producto['descripcion'] = servicio_original
-                    
-                    # Truncar el servicio a 95 caracteres
-                    producto['servicio'] = str(servicio_original)[:95]
-                    app.logger.info(f"Servicio truncado para fila {idx}: {producto['servicio']}...")
                 
                 # Validar y convertir campos numéricos (precios)
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
@@ -915,7 +885,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('proveedor', '')
                 ]
                 
-                app.logger.info(f"Insertando producto: {producto.get('servicio')[:50]}... - {producto.get('precio')}")
+                
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
