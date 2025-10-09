@@ -87,9 +87,9 @@ NUMEROS_CONFIG = {
     '123': {  # Número de Unilova
         'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
-        'db_host': os.getenv("UNILOVA_DB_HOST"),
-        'db_user': os.getenv("UNILOVA_DB_USER"),
-        'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
+        'db_host': os.getenv("MEKTIA_DB_HOST"),
+        'db_user': os.getenv("MEKTIA_DB_USER"),
+        'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("UNILOVA_DB_NAME"),
         'dominio': 'unilova.mektia.com'
     },
