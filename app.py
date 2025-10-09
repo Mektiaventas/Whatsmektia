@@ -844,7 +844,8 @@ def importar_productos_desde_excel(filepath, config=None):
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
-                        if valor != '' and not valor.startswith('nadita'):
+                        
+                        if valor != '' and not str(valor).startswith('nadita'):
                             # Convertir a string primero para manejar diferentes tipos
                             valor_str = str(valor)
                             # Limpiar cualquier carácter no numérico excepto el punto decimal
