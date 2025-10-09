@@ -385,7 +385,6 @@
                             <th>Imagen</th>
                             <th>Mayoreo</th>
                             <th>Menudeo</th>
-                            <th>Moneda</th>
                             <th>Status</th>
                             <th>Catálogo</th>
                             <th>Acciones</th>
@@ -394,8 +393,6 @@
                     <tbody>
                         {% for precio in precios %}
                         <tr>
-                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
-                            <td class="font-medium">{{ precio.servicio }}</td>
                             <td>{{ precio.categoria or '-' }}</td>
                             <td>{{ precio.subcategoria or '-' }}</td>
                             <td>{{ precio.linea or '-' }}</td>
@@ -415,7 +412,6 @@
                             </td>
                             <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                             <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                            <td>{{ precio.moneda }}</td>
                             <td>{{ precio.status_ws or '-' }}</td>
                             <td>{{ precio.catalogo or '-' }}</td>
                             <td>
@@ -467,7 +463,6 @@
                             <th>Mayoreo</th>
                             <th>Menudeo</th>
                             <th>Imagen</th>
-                            <th>Moneda</th>
                             <th>Status</th>
                             <th>Catálogo</th>
                             <th>Catálogo 2</th>
@@ -479,8 +474,6 @@
                     <tbody>
                         {% for precio in precios %}
                         <tr>
-                            <td><span class="bg-gray-100 px-2 py-1 rounded text-xs">{{ precio.sku or '-' }}</span></td>
-                            <td class="font-medium">{{ precio.servicio }}</td>
                             <td>{{ precio.categoria or '-' }}</td>
                             <td>{{ precio.subcategoria or '-' }}</td>
                             <td>{{ precio.linea or '-' }}</td>
@@ -501,7 +494,6 @@
                                 -
                                 {% endif %}
                             </td>
-                            <td>{{ precio.moneda }}</td>
                             <td>{{ precio.status_ws or '-' }}</td>
                             <td>{{ precio.catalogo or '-' }}</td>
                             <td>{{ precio.catalogo2 or '-' }}</td>
