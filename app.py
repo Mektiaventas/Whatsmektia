@@ -1702,17 +1702,14 @@ def renombrar_columna_kanban(columna_id):
 def agregar_columna_kanban():
     config = obtener_configuracion_por_host()
     data = request.get_json(silent=True) or {}
-    nombre = (data.get('nombre') or 'Nueva columna').strip()
     after_id = data.get('after_id')
-
-    if not nombre:
-        return jsonify({'error': 'El nombre es obligatorio'}), 400
 
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
-
     try:
+        default_icon = '/static/icons/default-avatar.png'
         color_nueva = '#007bff'
+
         if after_id:
             cursor.execute("SELECT orden, color FROM kanban_columnas WHERE id=%s", (after_id,))
             row = cursor.fetchone()
@@ -1722,29 +1719,27 @@ def agregar_columna_kanban():
             after_orden = row['orden']
             color_nueva = row.get('color') or color_nueva
 
-            # Desplazar columnas a la derecha
-            cursor.execute("""
-                UPDATE kanban_columnas
-                SET orden = orden + 1
-                WHERE orden > %s
-            """, (after_orden,))
+            # Desplazar a la derecha
+            cursor.execute("UPDATE kanban_columnas SET orden = orden + 1 WHERE orden > %s", (after_orden,))
 
+            # Nombre por defecto según orden
+            nombre = f"Etapa {after_orden + 1}"
             cursor.execute("""
-                INSERT INTO kanban_columnas (nombre, orden, color)
-                VALUES (%s, %s, %s)
-            """, (nombre, after_orden + 1, color_nueva))
+                INSERT INTO kanban_columnas (nombre, orden, color, icono)
+                VALUES (%s, %s, %s, %s)
+            """, (nombre, after_orden + 1, color_nueva, default_icon))
         else:
             cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
             next_ord = cursor.fetchone()['next_ord']
+            nombre = f"Etapa {next_ord}"
             cursor.execute("""
-                INSERT INTO kanban_columnas (nombre, orden, color)
-                VALUES (%s, %s, %s)
-            """, (nombre, next_ord, color_nueva))
+                INSERT INTO kanban_columnas (nombre, orden, color, icono)
+                VALUES (%s, %s, %s, %s)
+            """, (nombre, next_ord, color_nueva, default_icon))
 
         conn.commit()
         new_id = cursor.lastrowid
-
-        cursor.execute("SELECT id, nombre, orden, color FROM kanban_columnas WHERE id=%s", (new_id,))
+        cursor.execute("SELECT id, nombre, orden, color, icono FROM kanban_columnas WHERE id=%s", (new_id,))
         nueva = cursor.fetchone()
 
         return jsonify({
@@ -1752,15 +1747,15 @@ def agregar_columna_kanban():
             'id': nueva['id'],
             'nombre': nueva['nombre'],
             'orden': nueva['orden'],
-            'color': nueva['color']
+            'color': nueva['color'],
+            'icono': nueva.get('icono')
         })
     except Exception as e:
         conn.rollback()
         app.logger.error(f"Error agregando columna Kanban: {e}")
         return jsonify({'error': 'Error interno'}), 500
     finally:
-        cursor.close()
-        conn.close()
+        cursor.close(); conn.close()
 
 @app.route('/kanban/columna/<int:columna_id>/eliminar', methods=['POST'])
 def eliminar_columna_kanban(columna_id):
@@ -1793,26 +1788,45 @@ def eliminar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'columna_destino': columna_destino})
 
+@app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
+def actualizar_icono_columna(columna_id):
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    icono = (data.get('icono') or '').strip()
+    if not icono:
+        return jsonify({'error': 'Icono vacío'}), 400
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
+    conn.commit()
+    cursor.close(); conn.close()
+    return jsonify({'success': True, 'icono': icono})
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
         config = obtener_configuracion_por_host()
-    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
-        # Crear tabla kanban_columnas si no existe
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS kanban_columnas (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 nombre VARCHAR(100) NOT NULL,
                 orden INT NOT NULL DEFAULT 0,
-                color VARCHAR(20) DEFAULT '#007bff'
+                color VARCHAR(20) DEFAULT '#007bff',
+                icono VARCHAR(512) DEFAULT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        
-        # Crear tabla chat_meta si no existe
+        # Asegurar columna icono si tabla ya existía
+        try:
+            cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono VARCHAR(512) DEFAULT NULL")
+        except Exception as _:
+            pass
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS chat_meta (
                 numero VARCHAR(20) PRIMARY KEY,
@@ -1821,28 +1835,24 @@ def crear_tablas_kanban(config=None):
                 FOREIGN KEY (columna_id) REFERENCES kanban_columnas(id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        
-        # Insertar columnas por defecto si no existen
+
         cursor.execute("SELECT COUNT(*) FROM kanban_columnas")
         if cursor.fetchone()[0] == 0:
+            default_icon = '/static/icons/default-avatar.png'
             columnas_default = [
-                (1, 'Nuevos', 1, '#28a745'),
-                (2, 'En Conversación', 2, '#17a2b8'),
-                (3, 'Esperando Respuesta', 3, '#ffc107'),
-                (4, 'Resueltos', 4, '#6c757d')
+                (1, 'Nuevos', 1, '#28a745', default_icon),
+                (2, 'En Conversación', 2, '#17a2b8', default_icon),
+                (3, 'Esperando Respuesta', 3, '#ffc107', default_icon),
+                (4, 'Resueltos', 4, '#6c757d', default_icon)
             ]
-            
             cursor.executemany(
-                "INSERT INTO kanban_columnas (id, nombre, orden, color) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO kanban_columnas (id, nombre, orden, color, icono) VALUES (%s,%s,%s,%s,%s)",
                 columnas_default
             )
-        
+
         conn.commit()
-        cursor.close()
-        conn.close()
-        
+        cursor.close(); conn.close()
         app.logger.info(f"✅ Tablas Kanban creadas/verificadas en {config['db_name']}")
-        
     except Exception as e:
         app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
 
@@ -4005,6 +4015,7 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "informacion_util": f"Usuario {numero} necesita ayuda humana",
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
+
 def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     """
     Actualiza la información del contacto usando el nombre proporcionado desde el webhook

@@ -68,13 +68,54 @@
         .add-chat-btn:hover {
             background: #1976d2;
         }
+
+    /* Icono de columna y selector */
+    .col-icon {
+        width: 18px;
+        height: 18px;
+        margin-right: 6px;
+        cursor: pointer;
+        border-radius: 4px;
+        object-fit: contain;
+        background: #ffffff22;
+        padding: 2px;
+    }
+
+    .icon-picker {
+        position: absolute;
+        background: #1f2630;
+        border: 1px solid #2e3a46;
+        border-radius: 10px;
+        padding: 6px;
+        display: none;
+        z-index: 9999;
+        box-shadow: 0 10px 24px -12px rgba(0,0,0,.5);
+    }
+
+        .icon-picker button {
+            width: 32px;
+            height: 32px;
+            margin: 4px;
+            font-size: 18px;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            border-radius: 6px;
+        }
+
+            .icon-picker button:hover {
+                background: #2b3440;
+            }
 </style>
 
 <div id="kanban-board" class="kanban-board">
     {% for col in columnas %}
     <div class="kanban-column" data-col-id="{{ col.id }}" data-orden="{{ col.orden }}">
         <div class="column-header" style="--col-color: {{ col.color or '#37474f' }}">
-            <img src="{{ col.icono }}" class="col-icon" alt="">
+            <img src="{{ col.icono or '/static/icons/default-avatar.png' }}"
+                 class="col-icon" alt="icono" title="Cambiar icono"
+                 data-col-id="{{ col.id }}"
+                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
             <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
             <button class="add-chat-btn" data-after="{{ col.id }}" title="Agregar columna a la derecha">+</button>
             <button class="delete-col-btn" data-col-id="{{ col.id }}" title="Eliminar columna"
@@ -124,6 +165,9 @@
     {% endfor %}
 </div>
 
+<!-- Picker de iconos (emojis → SVG data URL) -->
+<div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
+
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
     let editingColId = null;
@@ -133,18 +177,19 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         bindColumnHeaderEvents();
-        bindAddColumnButtons(); // NUEVO: enlazar creación dinámica
+        bindAddColumnButtons();
         bindDeleteButtons();
         initRenameHandlers();
+        bindIconPicker();
         startAutoRefresh();
         inicializarSortable();
         document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
     });
 
-    /* ----------- Creación de columna a la derecha ----------- */
+    /* ----------- Creación de columna sin prompt (usa defaults del servidor) ----------- */
     function bindAddColumnButtons() {
         document.querySelectorAll('.add-chat-btn').forEach(btn => {
-            btn.removeEventListener('click', addColumnClickHandler); // evitar duplicados
+            btn.removeEventListener('click', addColumnClickHandler);
             btn.addEventListener('click', addColumnClickHandler);
         });
     }
@@ -154,26 +199,22 @@
         const baseCol = this.closest('.kanban-column');
         if (!baseCol) return;
         const afterId = parseInt(this.dataset.after, 10);
-        const nombre = prompt('Nombre de la nueva columna:', 'Nueva columna');
-        if (!nombre) return;
 
         fetch('/kanban/columna/agregar', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre, after_id: afterId })
+            body: JSON.stringify({ after_id: afterId }) // sin nombre → backend pone "Nueva columna"
         })
             .then(r => r.json())
             .then(data => {
-                if (!data.success) {
-                    alert(data.error || 'Error al crear columna');
-                    return;
-                }
+                if (!data.success) { alert(data.error || 'Error al crear columna'); return; }
                 const nuevaCol = crearColumnaDOM(data);
                 insertarColumnaDespues(baseCol, nuevaCol);
-                // Re-enlazar eventos sobre la nueva columna
+                // Re-enlazar eventos
                 bindAddColumnButtons();
                 bindDeleteButtons();
                 initRenameHandlers();
+                bindIconPicker();
                 inicializarSortable();
             })
             .catch(err => console.error('Error creando columna:', err));
@@ -183,16 +224,18 @@
         div.className = 'kanban-column';
         div.dataset.colId = data.id;
         div.dataset.orden = data.orden;
+        const iconSrc = data.icono || '/static/icons/default-avatar.png';
         div.innerHTML = `
         <div class="column-header" style="--col-color:${data.color || '#37474f'}">
-            <img src="" class="col-icon" alt="">
+            <img src="${iconSrc}" class="col-icon" alt="icono" title="Cambiar icono"
+                 data-col-id="${data.id}"
+                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
             <h3 contenteditable="true" data-col-id="${data.id}" class="col-name">${data.nombre}</h3>
             <button class="add-chat-btn" data-after="${data.id}" title="Agregar columna a la derecha">+</button>
             <button class="delete-col-btn" data-col-id="${data.id}" title="Eliminar columna"
                 style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">×</button>
         </div>
-        <div class="column-list" data-col-id="${data.id}"></div>
-    `;
+        <div class="column-list" data-col-id="${data.id}"></div>`;
         return div;
     }
     function insertarColumnaDespues(baseCol, nuevaCol) {
@@ -201,6 +244,63 @@
         } else {
             baseCol.parentNode.appendChild(nuevaCol);
         }
+    }
+
+    /* ----------- Icon picker ----------- */
+    function bindIconPicker() {
+        const picker = document.getElementById('iconPicker');
+        const emojis = ['🆕', '💬', '⏳', '✅', '📞', '🛠️', '📦', '🚀', '📝', '📅', '⭐', '📍', '🏷️', '🎯'];
+        picker.innerHTML = emojis.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
+
+        document.querySelectorAll('.col-icon').forEach(img => {
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showIconPickerAt(img, picker);
+                picker.dataset.targetColId = img.dataset.colId;
+                picker.dataset.targetImgSelector = `.col-icon[data-col-id="${img.dataset.colId}"]`;
+            });
+        });
+
+        picker.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const emoji = btn.dataset.emoji;
+                const dataUrl = emojiToSvgDataUrl(emoji);
+                const colId = picker.dataset.targetColId;
+                const img = document.querySelector(picker.dataset.targetImgSelector);
+                if (img) img.src = dataUrl;
+
+                // Persistir icono
+                fetch(`/kanban/columna/${colId}/icono`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ icono: dataUrl })
+                }).catch(console.error);
+
+                hideIconPicker(picker);
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!picker.contains(e.target)) hideIconPicker(picker);
+        });
+    }
+    function showIconPickerAt(anchorEl, picker) {
+        const r = anchorEl.getBoundingClientRect();
+        picker.style.left = `${r.left + window.scrollX}px`;
+        picker.style.top = `${r.bottom + window.scrollY + 6}px`;
+        picker.style.display = 'block';
+        picker.setAttribute('aria-hidden', 'false');
+    }
+    function hideIconPicker(picker) {
+        picker.style.display = 'none';
+        picker.setAttribute('aria-hidden', 'true');
+    }
+    function emojiToSvgDataUrl(emoji) {
+        const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36'>
+  <rect width='100%' height='100%' rx='6' ry='6' fill='#ffffff' fill-opacity='0.08'/>
+  <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='20'>${emoji}</text>
+</svg>`;
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
     }
 
     /* ----------- Eliminar columna ----------- */
@@ -212,10 +312,7 @@
                 e.preventDefault();
                 const colId = btn.dataset.colId;
                 const totalCols = document.querySelectorAll('.kanban-column').length;
-                if (totalCols <= 1) {
-                    alert('No se puede eliminar la última columna');
-                    return;
-                }
+                if (totalCols <= 1) { alert('No se puede eliminar la última columna'); return; }
                 if (!confirm('¿Seguro que deseas eliminar esta columna? Los chats se moverán a otra.')) return;
                 fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
                     .then(res => res.json())
@@ -256,15 +353,12 @@
                 });
             });
             header.addEventListener('keydown', e => {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    header.blur();
-                }
+                if (e.key === 'Enter') { e.preventDefault(); header.blur(); }
             });
         });
     }
 
-    /* ----------- Auto-refresh Kanban (solo actualización incremental de chats y nombres) ----------- */
+    /* ----------- Auto-refresh Kanban (incremental) ----------- */
     function startAutoRefresh() {
         setInterval(actualizarKanban, refreshInterval);
         setTimeout(actualizarKanban, 1000);
@@ -288,11 +382,15 @@
             .catch(err => console.error('❌ Error actualizando Kanban:', err));
     }
     function actualizarIncremental(data) {
-        // Actualizar títulos existentes (si no se editan)
+        // Títulos e iconos
         data.columnas.forEach(col => {
-            const el = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
-            if (el && editingColId !== col.id.toString() && el.textContent !== col.nombre) {
-                el.textContent = col.nombre;
+            const nameEl = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
+            if (nameEl && editingColId !== col.id.toString() && nameEl.textContent !== col.nombre) {
+                nameEl.textContent = col.nombre;
+            }
+            const iconEl = document.querySelector(`.col-icon[data-col-id="${col.id}"]`);
+            if (iconEl && col.icono && iconEl.src !== col.icono) {
+                iconEl.src = col.icono;
             }
         });
 
@@ -415,7 +513,7 @@
         return null;
     }
 
-    /* ----------- Drag & Drop (ya existente) ----------- */
+    /* ----------- Drag & Drop ----------- */
     function inicializarSortable() {
         document.querySelectorAll('.column-list').forEach(list => {
             if (list.dataset.sortableInit === '1') return;
@@ -438,8 +536,6 @@
     }
 
     /* ----------- Utilidades ----------- */
-    function bindColumnHeaderEvents() {
-        // (placeholder si más adelante deseas eventos específicos)
-    }
+    function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
 </script>
 {% endblock %}
