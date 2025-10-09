@@ -840,24 +840,19 @@ def importar_productos_desde_excel(filepath, config=None):
                         producto[campo] = f"nadita{idx}"  # Añadir índice para hacerlo único
                 
                 
-                # Validar y convertir campos numéricos (precios)
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
-                        
-                        if valor != '' and not str(valor).startswith('nadita'):
-                            # Convertir a string primero para manejar diferentes tipos
-                            valor_str = str(valor)
-                            # Limpiar cualquier carácter no numérico excepto el punto decimal
-                            valor_limpio = re.sub(r'[^\d.]', '', valor_str)
-                            if valor_limpio:
-                                valor_numerico = float(valor_limpio)
-                                producto[campo] = f"{valor_numerico:.2f}"
-                                app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
-                            else:
-                                producto[campo] = '0.00'
+                        valor_str = str(valor).strip()
+                        # Extraer el primer número decimal del string (más robusto)
+                        match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
+                        if match:
+                            valor_numerico = float(match.group(1))
+                            producto[campo] = f"{valor_numerico:.2f}"
+                            app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
                         else:
                             producto[campo] = '0.00'
+                            app.logger.info(f"Campo {campo} sin número válido: {valor} -> 0.00")
                     except (ValueError, TypeError) as e:
                         app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
                         producto[campo] = '0.00'
