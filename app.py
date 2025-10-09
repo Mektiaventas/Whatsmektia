@@ -1373,17 +1373,15 @@ def validar_y_limpiar_servicio(servicio):
         # Campos de texto con valores por defecto
         campos_texto = {
             'sku': '',
-            'servicio': '',
             'categoria': 'General',
             'subcategoria': '',
             'linea': '',
             'modelo': '',
             'descripcion': '',
             'medidas': '',
-            'moneda': 'MXN',
             'imagen': '',
             'status_ws': 'activo',
-            'catalogo': 'Mektia',
+            'catalogo': '',
             'catalogo2': '',
             'catalogo3': '',
             'proveedor': ''
@@ -1394,7 +1392,7 @@ def validar_y_limpiar_servicio(servicio):
             servicio_limpio[campo] = str(valor).strip() if valor else valor_default
         
         # Campos de precio - conversión robusta
-        campos_precio = ['precio', 'precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
+        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
         for campo in campos_precio:
             valor = servicio.get(campo, '0.00')
             precio_limpio = "0.00"
@@ -1461,18 +1459,15 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 # Preparar campos
                 campos = [
                     servicio.get('sku', '').strip(),
-                    servicio.get('servicio', '').strip(),
                     servicio.get('categoria', '').strip(),
                     servicio.get('subcategoria', '').strip(),
                     servicio.get('linea', '').strip(),
                     servicio.get('modelo', '').strip(),
                     servicio.get('descripcion', '').strip(),
                     servicio.get('medidas', '').strip(),
-                    servicio.get('precio', '0.00'),
                     servicio.get('costo', '0.00'),
                     servicio.get('precio_mayoreo', '0.00'),
                     servicio.get('precio_menudeo', '0.00'),
-                    servicio.get('moneda', 'MXN').strip(),
                     imagen_nombre,
                     servicio.get('status_ws', 'activo').strip(),
                     servicio.get('catalogo', '').strip(),
@@ -1491,21 +1486,19 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 
                 cursor.execute("""
                     INSERT INTO precios (
-                        sku, servicio, categoria, subcategoria, linea, modelo,
-                        descripcion, medidas, precio, costo, precio_mayoreo, precio_menudeo,
-                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        sku, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
-                        servicio=VALUES(servicio),
+       
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
                         descripcion=VALUES(descripcion),
-                        precio=VALUES(precio),
                         costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         imagen=VALUES(imagen),
-                        moneda=VALUES(moneda),
                         status_ws=VALUES(status_ws)
                 """, campos)
                 
