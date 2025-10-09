@@ -1794,58 +1794,30 @@ def actualizar_icono_columna(columna_id):
     finally:
         cursor.close(); conn.close()
 def crear_tablas_kanban(config=None):
-    """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
         config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS kanban_columnas (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 nombre VARCHAR(100) NOT NULL,
                 orden INT NOT NULL DEFAULT 0,
-                color VARCHAR(20) DEFAULT '#007bff',
-                icono VARCHAR(512) DEFAULT NULL
+                color VARCHAR(20) DEFAULT '#37474f',
+                icono TEXT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        # Asegurar columna icono si tabla ya existía
+        # Ensure column type is TEXT if it already exists
         try:
             cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
-            if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono VARCHAR(512) DEFAULT NULL")
+            cursor.execute("ALTER TABLE kanban_columnas MODIFY COLUMN icono TEXT NULL")
         except Exception as _:
             pass
-
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS chat_meta (
-                numero VARCHAR(20) PRIMARY KEY,
-                columna_id INT DEFAULT 1,
-                fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                FOREIGN KEY (columna_id) REFERENCES kanban_columnas(id)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        ''')
-
-        cursor.execute("SELECT COUNT(*) FROM kanban_columnas")
-        if cursor.fetchone()[0] == 0:
-            default_icon = '/static/icons/default-avatar.png'
-            columnas_default = [
-                (1, 'Nuevos', 1, '#28a745', default_icon),
-                (2, 'En Conversación', 2, '#17a2b8', default_icon),
-                (3, 'Esperando Respuesta', 3, '#ffc107', default_icon),
-                (4, 'Resueltos', 4, '#6c757d', default_icon)
-            ]
-            cursor.executemany(
-                "INSERT INTO kanban_columnas (id, nombre, orden, color, icono) VALUES (%s,%s,%s,%s,%s)",
-                columnas_default
-            )
-
         conn.commit()
         cursor.close(); conn.close()
-        app.logger.info(f"✅ Tablas Kanban creadas/verificadas en {config['db_name']}")
     except Exception as e:
-        app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
+        app.logger.error(f"❌ Error creando tablas Kanban: {e}")
 
 app.route('/inicializar-kanban', methods=['POST'])
 def inicializar_kanban_multitenant():
