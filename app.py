@@ -197,8 +197,7 @@ def login():
         usuario = request.form.get('usuario', '').strip()
         password = request.form.get('password', '')
         cliente = obtener_cliente_por_user(usuario)
-        if cliente and verificar_password(password, cliente['password']):
-            # Guardar en sesión (solo lo mínimo)
+        if cliente && verificar_password(password, cliente['password']):
             session['auth_user'] = {
                 'id': cliente['id_cliente'],
                 'user': cliente['user'],
@@ -206,6 +205,8 @@ def login():
                 'schema': cliente['shema'],
                 'servicio': cliente['servicio'],
             }
+            # Registrar sesión activa
+            registrar_sesion_activa(cliente['user'])
             flash('✅ Inicio de sesión correcto', 'success')
             destino = request.args.get('next') or url_for('home')
             return redirect(destino)
@@ -214,6 +215,12 @@ def login():
 
 @app.route('/logout')
 def logout():
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            cerrar_sesion_actual(au['user'])
+    except Exception as e:
+        app.logger.warning(f"No se pudo cerrar sesión activa: {e}")
     session.pop('auth_user', None)
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
@@ -269,6 +276,128 @@ def obtener_archivo_whatsapp(media_id, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
         return None, None, None
+
+# --- Sesiones activas (en BD de clientes) ---
+def _get_or_create_session_id():
+    sid = session.get('sid')
+    if not sid:
+        sid = os.urandom(16).hex()
+        session['sid'] = sid
+    return sid
+
+def _ensure_sesiones_table(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sesiones_activas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user VARCHAR(100) NOT NULL,
+            session_id VARCHAR(64) NOT NULL,
+            ip VARCHAR(45),
+            user_agent VARCHAR(255),
+            is_active TINYINT(1) DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_user_session (user, session_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """)
+    conn.commit()
+    cur.close()
+
+def registrar_sesion_activa(username):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = _get_or_create_session_id()
+        ip = request.remote_addr
+        ua = request.headers.get('User-Agent', '')[:255]
+        cur.execute("""
+            INSERT INTO sesiones_activas (user, session_id, ip, user_agent, is_active, last_seen)
+            VALUES (%s, %s, %s, %s, 1, NOW())
+            ON DUPLICATE KEY UPDATE
+                is_active = 1,
+                ip = VALUES(ip),
+                user_agent = VALUES(user_agent),
+                last_seen = NOW()
+        """, (username, sid, ip, ua))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error registrando sesión activa: {e}")
+
+def actualizar_sesion_activa(username):
+    try:
+        if not username:
+            return
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = _get_or_create_session_id()
+        ip = request.remote_addr
+        ua = request.headers.get('User-Agent', '')[:255]
+        cur.execute("""
+            UPDATE sesiones_activas
+               SET last_seen = NOW(), ip = %s, user_agent = %s
+             WHERE user = %s AND session_id = %s AND is_active = 1
+        """, (ip, ua, username, sid))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error actualizando sesión activa: {e}")
+
+def cerrar_sesion_actual(username):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = session.get('sid')
+        if sid:
+            cur.execute("""
+                UPDATE sesiones_activas
+                   SET is_active = 0, last_seen = NOW()
+                 WHERE user = %s AND session_id = %s
+            """, (username, sid))
+            conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error cerrando sesión actual: {e}")
+
+def contar_sesiones_activas(username, within_minutes=30):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        umbral = datetime.now() - timedelta(minutes=within_minutes)
+        cur.execute("""
+            SELECT COUNT(*)
+              FROM sesiones_activas
+             WHERE user = %s
+               AND is_active = 1
+               AND last_seen >= %s
+        """, (username, umbral))
+        count = cur.fetchone()[0]
+        cur.close(); conn.close()
+        return count
+    except Exception as e:
+        app.logger.error(f"Error contando sesiones activas: {e}")
+        return 0
+
+# Heartbeat de sesión en cada request autenticado
+@app.before_request
+def _heartbeat_sesion_activa():
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            actualizar_sesion_activa(au['user'])
+    except Exception as e:
+        app.logger.debug(f"Heartbeat sesión falló: {e}")
+
+# Endpoint rápido para ver conteo por username (protegido)
+@app.route('/admin/sesiones/<username>')
+@login_required
+def admin_sesiones_username(username):
+    count = contar_sesiones_activas(username, within_minutes=30)
+    return jsonify({'username': username, 'activos_ultimos_30_min': count})
 
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
