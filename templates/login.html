@@ -54,7 +54,9 @@
             background: radial-gradient(circle at 70% 80%,rgba(255,255,255,0.08),transparent 60%), linear-gradient(to top,rgba(0,0,0,.55),rgba(0,0,0,.25),rgba(0,0,0,.1));
             z-index: -3;
         }
-
+        .titulo{
+            color: blue;
+        }
         .sun {
             position: fixed;
             width: 420px;
@@ -360,7 +362,7 @@
 
     <div class="card" role="form" aria-label="Formulario de acceso">
         <div class="brand">
-            <span>SmartWhats</span> 
+            <span class="titulo">Mektia</span> 
             <small>Panel Seguro</small>
         </div>
         <h1>Acceder</h1>
@@ -371,8 +373,8 @@
                 <input id="usuario" name="usuario" autocomplete="username" required placeholder="Tu usuario">
             </div>
             <div class="form-group">
-                <label for="password">Contraseña</label>
-                <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="••••••••">
+                <label for="password">Contraseï¿½a</label>
+                <input id="password" name="password" type="password" autocomplete="current-password" required placeholder="ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½">
             </div>
             {% if request.args.get('next') %}
             <input type="hidden" name="next" value="{{ request.args.get('next') }}">
@@ -390,7 +392,7 @@
         {% endif %}
         {% endwith %}
 
-        <div class="footer">&copy; SmartWhats · 2025</div>
+        <div class="footer">&copy; Mektia ï¿½ 2025</div>
     </div>
 </body>
 </html>
