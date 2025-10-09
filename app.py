@@ -759,8 +759,6 @@ def importar_productos_desde_excel(filepath, config=None):
         
         # Mapeo EXACTO para las columnas en tu archivo Excel
         column_mapping = {
-            'servicio': 'servicio',
-            'precio': 'precio',
             'sku': 'sku',
             'categoria': 'categoria',
             'subcategoria': 'subcategoria',
@@ -771,12 +769,11 @@ def importar_productos_desde_excel(filepath, config=None):
             'costo': 'costo',
             'precio mayoreo': 'precio_mayoreo',
             'precio menudeo': 'precio_menudeo',
-            'moneda': 'moneda',
             'imagen': 'imagen',
             'status ws': 'status_ws',
             'catalogo': 'catalogo',
-            'cataogo 2': 'catalogo2',  # Corregir typo en el nombre de la columna
-            'cataogo 3': 'catalogo3',  # Corregir typo en el nombre de la columna
+            'catalogo 2': 'catalogo2',  
+            'catalogo 3': 'catalogo3',  
             'proveedor': 'proveedor'
         }
         
@@ -822,9 +819,9 @@ def importar_productos_desde_excel(filepath, config=None):
         
         # Definir campos esperados
         campos_esperados = [
-            'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
-            'descripcion', 'medidas', 'precio', 'costo', 'precio_mayoreo', 'precio_menudeo',
-            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+            'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+            'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
+           'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
         ]
         
         # Inicializar contador de productos importados
@@ -874,7 +871,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     app.logger.info(f"Servicio truncado para fila {idx}: {producto['servicio']}...")
                 
                 # Validar y convertir campos numéricos (precios)
-                for campo in ['precio', 'costo', 'precio_mayoreo', 'precio_menudeo']:
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
                         if valor != '' and not valor.startswith('nadita'):
@@ -894,9 +891,6 @@ def importar_productos_desde_excel(filepath, config=None):
                         app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
                         producto[campo] = '0.00'
                 
-                # Establecer valores por defecto para campos críticos
-                if producto.get('moneda', '').startswith('nadita'):
-                    producto['moneda'] = 'MXN'
                 
                 if producto.get('status_ws', '').startswith('nadita'):
                     producto['status_ws'] = 'activo'
@@ -904,18 +898,15 @@ def importar_productos_desde_excel(filepath, config=None):
                 # Insertar en la base de datos
                 values = [
                     producto.get('sku', ''),
-                    producto.get('servicio', ''),
                     producto.get('categoria', ''),
                     producto.get('subcategoria', ''),
                     producto.get('linea', ''),
                     producto.get('modelo', ''),
                     producto.get('descripcion', ''),
                     producto.get('medidas', ''),
-                    producto.get('precio', '0.00'),
                     producto.get('costo', '0.00'),
                     producto.get('precio_mayoreo', '0.00'),
                     producto.get('precio_menudeo', '0.00'),
-                    producto.get('moneda', 'MXN'),
                     producto.get('imagen', ''),
                     producto.get('status_ws', 'activo'),
                     producto.get('catalogo', ''),
@@ -927,20 +918,17 @@ def importar_productos_desde_excel(filepath, config=None):
                 app.logger.info(f"Insertando producto: {producto.get('servicio')[:50]}... - {producto.get('precio')}")
                 cursor.execute("""
                     INSERT INTO precios (
-                        sku, servicio, categoria, subcategoria, linea, modelo,
-                        descripcion, medidas, precio, costo, precio_mayoreo, precio_menudeo,
-                        moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                        sku, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
                     ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
-                        servicio=VALUES(servicio),
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
                         descripcion=VALUES(descripcion),
-                        precio=VALUES(precio),
                         costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
-                        moneda=VALUES(moneda),
                         status_ws=VALUES(status_ws)
                 """, values)
                 
