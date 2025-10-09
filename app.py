@@ -77,7 +77,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
+        'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
@@ -95,7 +95,7 @@ NUMEROS_CONFIG = {
     },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
+        'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
