@@ -491,9 +491,9 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img src="{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% else %}
-                                    <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% endif %}
                                     {% else %}
                                     -
