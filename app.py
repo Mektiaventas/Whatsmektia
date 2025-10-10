@@ -4487,23 +4487,20 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         respuesta = ""
         responder_con_voz = False
 
-         # --- NEW: If user sent an image, ask the vision model for an analysis first ---
+        # --- NEW: If user sent an image, analyze it but DO NOT send the analysis immediately.
+        # Instead include the analysis as context when asking the textual IA so it can answer the user's question.
+        analisis_imagen = None
         if es_imagen and imagen_base64:
             try:
                 app.logger.info(f"🖼️ Analizando imagen recibida para {numero} con IA vision...")
                 analisis_imagen = analizar_imagen_con_ia(imagen_base64, config)
                 if analisis_imagen:
-                    # Guardar la analítica como respuesta del bot asociada al mensaje entrante
-                    actualizar_respuesta(numero, texto, analisis_imagen, config)
-                    # Enviar la analítica al usuario antes de cualquier respuesta textual normal
-                    enviar_mensaje(numero, analisis_imagen, config)
-                    app.logger.info(f"✅ Análisis de imagen enviado a {numero}")
-                    # We continue: we still ask la IA textual si corresponde, but avoid duplicar the image text below.
+                    app.logger.info("✅ Análisis de imagen obtenido (se usará como contexto para la IA textual)")
                 else:
                     app.logger.info("ℹ️ No se generó análisis de la imagen (respuesta vacía).")
             except Exception as e:
                 app.logger.warning(f"⚠️ Falló análisis de imagen: {e}")
-
+                analisis_imagen = None
 
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
@@ -4513,10 +4510,41 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
 
-            # Obtener respuesta de IA
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            # Build the message we send to the textual IA: if we have image analysis, prepend it as context
+            texto_para_ia = texto
+            if analisis_imagen:
+                # Keep it explicit and short so the model uses it as context
+                texto_para_ia = f"[Contexto - Análisis de imagen]\n{analisis_imagen}\n\n[Pregunta del usuario]\n{texto}"
 
-        # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
+            # Obtener respuesta de IA (texto)
+            try:
+                respuesta_ia = responder_con_ia(texto_para_ia, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
+            except Exception as e:
+                app.logger.error(f"🔴 Error llamando responder_con_ia: {e}")
+                respuesta_ia = None
+
+            # If textual IA failed or returned generic error, fallback to sending image analysis (if available)
+            if not respuesta_ia or (isinstance(respuesta_ia, str) and respuesta_ia.strip().lower().startswith('lo siento')):
+                if analisis_imagen:
+                    # Send the analysis as the best-effort answer to the user's question
+                    enviar_mensaje(numero, analisis_imagen, config)
+                    actualizar_respuesta(numero, texto, analisis_imagen, config)
+                    app.logger.info(f"ℹ️ Fallback: enviado análisis de imagen a {numero} porque la IA textual falló")
+                    # Also proceed to try image sending flow below (if user explicitly asked for image)
+                    respuesta = analisis_imagen
+                else:
+                    # Pure failure: notify the user gracefully
+                    fallback_msg = "Lo siento, tuve un problema procesando tu imagen. ¿Puedes describir lo que necesitas o intentarlo de nuevo?"
+                    enviar_mensaje(numero, fallback_msg, config)
+                    actualizar_respuesta(numero, texto, fallback_msg, config)
+                    app.logger.info(f"🔴 Fallback genérico enviado a {numero}")
+                    respuesta = fallback_msg
+            else:
+                respuesta = respuesta_ia
+                # Save the textual IA response
+                actualizar_respuesta(numero, texto, respuesta, config)
+
+        # If user explicitly asked for an image (keywords) or IA returned an image markdown/link, try to send the product image
         try:
             precios = obtener_todos_los_precios(config)
             sku_encontrado = buscar_sku_en_texto(texto, precios)
@@ -4545,7 +4573,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             if md_match:
                 imagen_encontrada = md_match
 
-            # 4) If IA response contains "Imagen: filename" pattern
+            # 4) If response contains "Imagen: filename" pattern
             if not imagen_encontrada and isinstance(respuesta, str):
                 m = re.search(r'Imagen[:\s]*([^\s,;\)\]]+)', respuesta, re.IGNORECASE)
                 if m:
@@ -4553,8 +4581,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             if imagen_encontrada:
                 # Normalize: if it's a relative path like /uploads/productos/..., extract filename
-                if imagen_encontrada.startswith('/uploads/productos/'):
-                    imagen_encontrada = os.path.basename(imagen_encontrada)
+                imagen_encontrada = os.path.basename(imagen_encontrada.strip())
 
                 # Confirm file exists locally or it's an absolute URL
                 file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
@@ -4579,7 +4606,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         if not dominio.startswith('http'):
                             dominio = f"https://{dominio}"
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
-                        enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
+                        enviar_mensaje(numero, f"No pude enviar la imagen automáticamente. Puedes verla aquí: {image_url}", config)
                         guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
                 else:
                     # If imagen_encontrada is an absolute URL, try sending it
@@ -4587,12 +4614,10 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         sent = enviar_imagen(numero, imagen_encontrada, config)
                         if sent:
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
-                            # strip url from textual response
                             if isinstance(respuesta, str):
                                 respuesta = respuesta.replace(imagen_encontrada, '')
                         else:
                             enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
-                            # Record fallback message as bot text
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
                     else:
                         # Try to find by filename in imagenes_productos table
@@ -4699,6 +4724,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
+
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
