@@ -4628,7 +4628,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     if sent:
                         public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
                         # Save as a BOT response (no longer as a user message)
-                        guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
+                        guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada} ]")
                         app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
                         # Remove image reference from textual response to avoid sending path
                         if isinstance(respuesta, str):
