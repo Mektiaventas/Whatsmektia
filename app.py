@@ -190,6 +190,38 @@ RUTAS_PUBLICAS = {
     'static', 'debug_headers', 'debug_dominio', 'diagnostico'
 }
 
+def extraer_imagenes_embedded_excel(filepath, output_dir=None):
+    """
+    Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
+    Retorna una lista de dicts con información de las imágenes extraídas.
+    """
+    import openpyxl
+    import os
+
+    if output_dir is None:
+        output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+    os.makedirs(output_dir, exist_ok=True)
+
+    wb = openpyxl.load_workbook(filepath)
+    imagenes_extraidas = []
+
+    for sheet in wb.worksheets:
+        # openpyxl stores images in sheet._images
+        for idx, img in enumerate(getattr(sheet, '_images', [])):
+            # img.ref is the anchor (cell), img.image is the PIL Image object
+            img_obj = img.image
+            img_format = img_obj.format or 'PNG'
+            img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format.lower()}"
+            img_path = os.path.join(output_dir, img_filename)
+            img_obj.save(img_path)
+            imagenes_extraidas.append({
+                'filename': img_filename,
+                'path': img_path,
+                'sheet': sheet.title,
+                'anchor': getattr(img, 'anchor', None)
+            })
+    return imagenes_extraidas
+
 # Put below sesiones_activas helpers
 def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
     """Marks old sessions as inactive to avoid blocking new logins by stale entries."""
@@ -706,7 +738,9 @@ def importar_excel_directo():
             filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
-            
+            # After file.save(filepath)
+            imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+            app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
             app.logger.info(f"📄 Excel guardado: {filepath}")
             
             # Procesar el archivo Excel
