@@ -202,20 +202,15 @@ RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
     'static', 'debug_headers', 'debug_dominio', 'diagnostico'
 }
-
 @app.before_request
 def proteger_rutas():
     """
-    Protección global de rutas (función principal registrada temprano).
-    Permite acceso público a:
-      - endpoints listados en RUTAS_PUBLICAS
-      - rutas estáticas de Flask
-      - prefijos públicos (p. ej. /uploads/, /static/images/, /static/audio/)
-      - endpoints concretos que sirven archivos (serve_product_image, serve_uploaded_file, debug endpoints)
-    Si ninguna condición aplica y no hay sesión, redirige al login.
-    NOTA: Esta función reemplaza la versión simple que estaba bloqueando /uploads/*.
+    Protección global: permite endpoints públicos y prefijos públicos (p.ej. /uploads/)
+    Debe registrarse *antes* de otras funciones @app.before_request que puedan redirigir.
     """
-    # Permitir endpoints públicos por nombre
+    app.logger.debug(f"🔐 proteger_rutas check: path={request.path} endpoint={request.endpoint}")
+
+    # Endpoints explícitamente públicos por nombre
     if request.endpoint in RUTAS_PUBLICAS:
         return
 
@@ -225,22 +220,24 @@ def proteger_rutas():
 
     # Permitir accesos directos a rutas públicas por path (uploads y subpaths)
     public_path_prefixes = (
-        '/uploads/',              # cualquier URL que empiece con /uploads/
-        '/uploads',               # cubrir también '/uploads' sin slash final
-        '/static/images/',        # imágenes guardadas desde WhatsApp
-        '/static/audio/',         # audios generados
-        '/uploads/productos/',    # imágenes de productos
+        '/uploads/',
+        '/uploads',   # cubrir '/uploads' sin slash final
+        '/static/images/',
+        '/static/audio/',
     )
     if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
         return
 
-    # Permitir endpoints que sirven archivos sin autenticación
+    # Endpoints que sirven archivos/depuración (si los tienes)
     public_endpoints = {
         'serve_product_image',
         'serve_uploaded_file',
         'debug_image',
         'debug_image_full',
-        'proxy_audio'
+        'proxy_audio',
+        'debug_headers',
+        'debug_dominio',
+        'diagnostico'
     }
     if request.endpoint in public_endpoints:
         return
@@ -249,9 +246,9 @@ def proteger_rutas():
     if session.get('auth_user'):
         return
 
-    # Por defecto, redirigir al login
+    # Si llega aquí, no está autorizado -> redirigir al login
+    app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
     return redirect(url_for('login', next=request.path))
-
 def extraer_imagenes_embedded_excel(filepath, output_dir=None):
     """
     Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
@@ -361,18 +358,7 @@ def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_
     except Exception as e:
         app.logger.error(f"Error desactivando sesiones antiguas: {e}")
 
-@app.before_request
-def proteger_rutas():
-    # Permitir endpoints públicos
-    if request.endpoint in RUTAS_PUBLICAS:
-        return
-    # Permitir archivos estáticos
-    if request.endpoint and request.endpoint.startswith('static'):
-        return
-    # Ya autenticado
-    if session.get('auth_user'):
-        return
-    return redirect(url_for('login', next=request.path))
+
 
 # Replace your current /login handler with this version (same logic + session limit)
 @app.route('/login', methods=['GET', 'POST'])
@@ -6013,51 +5999,6 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
-@app.before_request
-def proteger_rutas():
-        """
-        Protección global de rutas: permite acceso público a:
-          - endpoints listados en RUTAS_PUBLICAS
-          - la ruta estática tradicional de Flask (static)
-          - accesos directos a archivos públicos (p. ej. /uploads/, /static/images/)
-          - endpoints concretos que sirven archivos (serve_product_image, serve_uploaded_file, ...)
-        Si ninguna de las condiciones aplica y no hay sesión, redirige al login.
-        """
-        # Permitir endpoints públicos por nombre
-        if request.endpoint in RUTAS_PUBLICAS:
-            return
-
-        # Permitir archivos estáticos gestionados por Flask
-        if request.endpoint and request.endpoint.startswith('static'):
-            return
-
-        # Permitir accesos directos a rutas públicas por path (uploads, static images, audio, etc.)
-        public_path_prefixes = (
-            '/uploads/',              # archivos subidos (ej. /uploads/...)
-            '/static/images/',        # imágenes guardadas desde WhatsApp
-            '/static/audio/',         # audios generados
-            '/uploads/productos/',    # imágenes de productos
-        )
-        if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
-            return
-
-        # Permitir endpoints que sirven archivos sin autenticación
-        public_endpoints = {
-            'serve_product_image',
-            'serve_uploaded_file',
-            'debug_image',
-            'debug_image_full',
-            'proxy_audio'
-        }
-        if request.endpoint in public_endpoints:
-            return
-
-        # Si ya está autenticado, permitir
-        if session.get('auth_user'):
-            return
-
-        # Por defecto, redirigir al login
-        return redirect(url_for('login', next=request.path))
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
