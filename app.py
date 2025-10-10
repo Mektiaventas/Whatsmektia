@@ -1102,6 +1102,37 @@ def importar_productos_desde_excel(filepath, config=None):
         app.logger.error(traceback.format_exc())
         return 0
 
+def obtener_imagenes_por_sku(sku, config=None):
+    """Obtiene todas las imágenes asociadas a un SKU específico"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT filename, path, sheet, row_num, col_num, created_at
+            FROM imagenes_productos
+            WHERE sku = %s
+            ORDER BY created_at DESC
+        """, (sku,))
+        
+        imagenes = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        return imagenes
+    except Exception as e:
+        app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
+        return []
+
+@app.route('/uploads/productos/<filename>')
+def serve_product_image(filename):
+    """Sirve imágenes de productos desde el directorio de uploads"""
+    productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+    return send_from_directory(productos_dir, filename)
+
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
     if not imagenes or not servicios or not servicios.get('servicios'):
