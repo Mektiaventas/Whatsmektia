@@ -303,22 +303,24 @@
         const input = document.getElementById('mensaje-texto');
         const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
-        // Rellena el picker
+        if (!emojiBtn || !emojiPickerList || !input) return; // Prevent errors if not present
+
+        // Fill the picker
         emojiPickerList.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn">${e}</button>`).join('');
 
-        // Mostrar el picker debajo del botón
+        // Show the picker below the button
         emojiBtn.addEventListener('click', function (e) {
             e.preventDefault();
-            // Posiciona el picker relativo al input-group
-            emojiPickerList.style.left = emojiBtn.offsetLeft + 'px';
-            emojiPickerList.style.top = (emojiBtn.offsetTop + emojiBtn.offsetHeight + 6) + 'px';
+            const rect = emojiBtn.getBoundingClientRect();
+            const parentRect = emojiBtn.parentElement.getBoundingClientRect();
+            emojiPickerList.style.left = (rect.left - parentRect.left) + 'px';
+            emojiPickerList.style.top = (rect.bottom - parentRect.top + 6) + 'px';
             emojiPickerList.style.display = 'block';
         });
 
-        // Insertar emoji en el input
+        // Insert emoji at cursor position
         emojiPickerList.addEventListener('click', function (e) {
             if (e.target.classList.contains('emoji-pick-btn')) {
-                // Insert at cursor position
                 const emoji = e.target.textContent;
                 const start = input.selectionStart;
                 const end = input.selectionEnd;
@@ -330,15 +332,7 @@
             }
         });
 
-        // Ocultar picker al hacer click fuera
-        document.addEventListener('click', function (e) {
-            if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
-                emojiPickerList.style.display = 'none';
-            }
-        });
-    });
-
-        // Ocultar picker al hacer click fuera
+        // Hide picker when clicking outside
         document.addEventListener('click', function (e) {
             if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
                 emojiPickerList.style.display = 'none';
