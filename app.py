@@ -3463,18 +3463,27 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # Format products for the system prompt
+    # Format products for the system prompt (robust against missing keys)
     productos_formateados = []
     for p in precios[:20]:  # Limit to 20 products to avoid token limits
-        info = f"- {p['servicio']}"
-        if p.get('descripcion'):
-            info += f": {p['descripcion'][:100]}"
+        try:
+            nombre = (p.get('servicio') or p.get('descripcion') or p.get('sku') or 'Sin nombre').strip()
+        except Exception:
+            nombre = 'Sin nombre'
+        info = f"- {nombre}"
+        descripcion_p = p.get('descripcion')
+        if descripcion_p:
+            info += f": {str(descripcion_p)[:100]}"
         if p.get('categoria'):
-            info += f" (Categoría: {p['categoria']})"
-        if p.get('precio_menudeo'):
-            info += f" - ${p['precio_menudeo']} {p['moneda']}"
-        elif p.get('precio'):
-            info += f" - ${p['precio']} {p['moneda']}"
+            info += f" (Categoría: {p.get('categoria')})"
+        # precios pueden venir en distintos nombres; usamos get con fallback
+        precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('precio_venta')
+        moneda = p.get('moneda') or 'MXN'
+        if precio_menudeo:
+            try:
+                info += f" - ${float(precio_menudeo):,.2f} {moneda}"
+            except Exception:
+                info += f" - {precio_menudeo} {moneda}"
         productos_formateados.append(info)
     
     productos_texto = "\n".join(productos_formateados)
