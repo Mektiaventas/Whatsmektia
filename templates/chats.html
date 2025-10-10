@@ -201,8 +201,12 @@
         <form method="POST" action="/send-manual" class="reply-form">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
-                
-                <button type="button" id="emoji-picker" class="emoji-btn">😊</button>
+
+                <button type="button" id="emoji-pick-btn" class="emoji-btn">😊</button>
+                <!-- Emoji Picker Container (hidden by default) -->
+                <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
+                    <!-- Los emojis se llenan por JS -->
+                </div>
                 <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
@@ -269,42 +273,58 @@
     .card-content {
         color: white;
     }
-    
+    .emoji-picker-list {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        min-width: 220px;
+        max-width: 320px;
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px;
+        display: none;
+    }
+
+    .emoji-pick-btn {
+        font-size: 22px;
+        margin: 2px;
+        background: none;
+        border: none;
+        cursor: pointer;
+    }
 </style>
 
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const emojiBtn = document.getElementById('emoji-button');
-        const emojiPicker = document.getElementById('emoji-picker');
+        const emojiBtn = document.querySelector('.emoji-btn');
+        const emojiPickerList = document.getElementById('emoji-picker-list');
         const input = document.getElementById('mensaje-texto');
         const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
-        // Populate emoji picker
-        emojiPicker.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn" style="font-size:22px;margin:2px;">${e}</button>`).join('');
+        // Rellena el picker
+        emojiPickerList.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn">${e}</button>`).join('');
 
-        // Show picker below the emoji button
+        // Mostrar el picker debajo del botón
         emojiBtn.addEventListener('click', function (e) {
             e.preventDefault();
             const rect = emojiBtn.getBoundingClientRect();
-            emojiPicker.style.left = `${rect.left + window.scrollX}px`;
-            emojiPicker.style.top = `${rect.bottom + window.scrollY + 6}px`;
-            emojiPicker.style.display = 'block';
+            emojiPickerList.style.left = `${rect.left + window.scrollX}px`;
+            emojiPickerList.style.top = `${rect.bottom + window.scrollY + 6}px`;
+            emojiPickerList.style.display = 'block';
         });
 
-        // Insert emoji into input
-        emojiPicker.addEventListener('click', function (e) {
+        // Insertar emoji en el input
+        emojiPickerList.addEventListener('click', function (e) {
             if (e.target.classList.contains('emoji-pick-btn')) {
                 input.value += e.target.textContent;
-                emojiPicker.style.display = 'none';
+                emojiPickerList.style.display = 'none';
                 input.focus();
             }
         });
 
-        // Hide picker when clicking outside
+        // Ocultar picker al hacer click fuera
         document.addEventListener('click', function (e) {
-            if (!emojiPicker.contains(e.target) && e.target !== emojiBtn) {
-                emojiPicker.style.display = 'none';
+            if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
+                emojiPickerList.style.display = 'none';
             }
         });
     });
