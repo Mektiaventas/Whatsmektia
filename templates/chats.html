@@ -308,13 +308,14 @@
         // Fill the picker
         emojiPickerList.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn">${e}</button>`).join('');
 
-        // Show the picker below the button
+        // Show the picker above the button
         emojiBtn.addEventListener('click', function (e) {
             e.preventDefault();
             const rect = emojiBtn.getBoundingClientRect();
             const parentRect = emojiBtn.parentElement.getBoundingClientRect();
+            // Calculate the position above the button
             emojiPickerList.style.left = (rect.left - parentRect.left) + 'px';
-            emojiPickerList.style.top = (rect.bottom - parentRect.top + 6) + 'px';
+            emojiPickerList.style.top = (rect.top - parentRect.top - emojiPickerList.offsetHeight - 8) + 'px';
             emojiPickerList.style.display = 'block';
         });
 
