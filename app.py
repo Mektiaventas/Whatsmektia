@@ -3040,7 +3040,7 @@ def get_country_flag(numero):
     return None
 
 # ——— Subpestañas válidas ———
-SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones']
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
@@ -3121,7 +3121,12 @@ def load_config(config=None):
             logo_url VARCHAR(255),
             nombre_empresa VARCHAR(100),
             app_logo VARCHAR(255),
-            calendar_email VARCHAR(255)
+            calendar_email VARCHAR(255),
+            -- Asesores de ventas
+            asesor1_nombre VARCHAR(100),
+            asesor1_telefono VARCHAR(50),
+            asesor2_nombre VARCHAR(100),
+            asesor2_telefono VARCHAR(50)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -3130,25 +3135,25 @@ def load_config(config=None):
     conn.close()
 
     if not row:
-        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}}
+        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}}
 
     negocio = {
-        'ia_nombre': row['ia_nombre'],
-        'negocio_nombre': row['negocio_nombre'],
-        'descripcion': row['descripcion'],
-        'url': row['url'],
-        'direccion': row['direccion'],
-        'telefono': row['telefono'],
-        'correo': row['correo'],
-        'que_hace': row['que_hace'],
+        'ia_nombre': row.get('ia_nombre'),
+        'negocio_nombre': row.get('negocio_nombre'),
+        'descripcion': row.get('descripcion'),
+        'url': row.get('url'),
+        'direccion': row.get('direccion'),
+        'telefono': row.get('telefono'),
+        'correo': row.get('correo'),
+        'que_hace': row.get('que_hace'),
         'logo_url': row.get('logo_url', ''),
         'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
         'app_logo': row.get('app_logo', ''),
-        'calendar_email': row.get('calendar_email', '')  # Cargando el nuevo campo
+        'calendar_email': row.get('calendar_email', '')
     }
     personalizacion = {
-        'tono': row['tono'],
-        'lenguaje': row['lenguaje'],
+        'tono': row.get('tono'),
+        'lenguaje': row.get('lenguaje'),
     }
     restricciones = {
         'restricciones': row.get('restricciones', ''),
@@ -3156,7 +3161,13 @@ def load_config(config=None):
         'max_mensajes': row.get('max_mensajes', 10),
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
-    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones}
+    asesores = {
+        'asesor1_nombre': row.get('asesor1_nombre', ''),
+        'asesor1_telefono': row.get('asesor1_telefono', ''),
+        'asesor2_nombre': row.get('asesor2_nombre', ''),
+        'asesor2_telefono': row.get('asesor2_telefono', '')
+    }
+    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones, 'asesores': asesores}
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -3555,22 +3566,24 @@ def save_config(cfg_all, config=None):
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
-    res = cfg_all.get('restricciones', {}) 
+    res = cfg_all.get('restricciones', {})
+    ases = cfg_all.get('asesores', {})
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    
+
     cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'logo_url'")
     tiene_logo = cursor.fetchone() is not None
-    
+
     if tiene_logo:
         cursor.execute('''
             INSERT INTO configuracion
                 (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
                  telefono, correo, que_hace, tono, lenguaje, restricciones, 
-                 palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa)
+                 palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa,
+                 asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono)
             VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON DUPLICATE KEY UPDATE
                 ia_nombre = VALUES(ia_nombre),
                 negocio_nombre = VALUES(negocio_nombre),
@@ -3587,7 +3600,11 @@ def save_config(cfg_all, config=None):
                 max_mensajes = VALUES(max_mensajes),
                 tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
                 logo_url = VALUES(logo_url),
-                nombre_empresa = VALUES(nombre_empresa);
+                nombre_empresa = VALUES(nombre_empresa),
+                asesor1_nombre = VALUES(asesor1_nombre),
+                asesor1_telefono = VALUES(asesor1_telefono),
+                asesor2_nombre = VALUES(asesor2_nombre),
+                asesor2_telefono = VALUES(asesor2_telefono);
         ''', (
             neg.get('ia_nombre'),
             neg.get('negocio_nombre'),
@@ -3604,10 +3621,14 @@ def save_config(cfg_all, config=None):
             res.get('max_mensajes', 10),
             res.get('tiempo_max_respuesta', 30),
             neg.get('logo_url', ''), 
-            neg.get('nombre_empresa', 'SmartWhats')  
+            neg.get('nombre_empresa', 'SmartWhats'),
+            ases.get('asesor1_nombre',''),
+            ases.get('asesor1_telefono',''),
+            ases.get('asesor2_nombre',''),
+            ases.get('asesor2_telefono','')
         ))
     else:
-        # Si no tiene las nuevas columnas, usar la consulta original
+        # Si no tiene las nuevas columnas, usar la consulta original (agrega asesor en la medida que exista)
         cursor.execute('''
             INSERT INTO configuracion
                 (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
@@ -3637,12 +3658,11 @@ def save_config(cfg_all, config=None):
             per.get('tono'),
             per.get('lenguaje')
         ))
-    
+
     conn.commit()
     cursor.close()
     conn.close()
-    
-    # ——— CRUD y helpers para 'precios' ———
+
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -6836,6 +6856,13 @@ def configuracion_tab(tab):
                 'palabras_prohibidas': request.form.get('palabras_prohibidas', ''),
                 'max_mensajes': int(request.form.get('max_mensajes', 10)),
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
+            }
+        elif tab == 'asesores':
+            cfg['asesores'] = {
+                'asesor1_nombre': request.form.get('asesor1_nombre', '').strip(),
+                'asesor1_telefono': request.form.get('asesor1_telefono', '').strip(),
+                'asesor2_nombre': request.form.get('asesor2_nombre', '').strip(),
+                'asesor2_telefono': request.form.get('asesor2_telefono', '').strip()
             }
         save_config(cfg, config)
         guardado = True
