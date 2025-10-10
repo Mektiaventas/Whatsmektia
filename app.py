@@ -820,7 +820,9 @@ def importar_productos_desde_excel(filepath, config=None):
         
         # Debug: mostrar las primeras filas para verificar datos
         app.logger.info(f"Primeras 2 filas de datos:\n{df.head(2).to_dict('records')}")
-        
+        imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+        imagenes_nombres = [img['filename'] for img in imagenes_embedded]
+
         # Verificar si hay filas en el DataFrame
         if df.empty:
             app.logger.error("El archivo no contiene datos (está vacío)")
@@ -855,6 +857,8 @@ def importar_productos_desde_excel(filepath, config=None):
                 # Convertir fila a diccionario
                 producto = {}
                 for campo in campos_esperados:
+                    if idx < len(imagenes_nombres):
+                        producto['imagen'] = imagenes_nombres[idx]
                     if campo in df.columns:
                         producto[campo] = row[campo]
                     else:
