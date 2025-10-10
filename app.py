@@ -3820,7 +3820,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
     imagen_ref puede ser:
       - URL absoluta (empieza con http)
       - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
-    Retorna True si la API respondió OK (200 o 201).
+    Retorna True si la API respondió OK.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -3835,6 +3835,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
             image_url = imagen_ref
         else:
             dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+            # fallback to host-based URL if dominio appears not to be a full domain
             if not dominio.startswith('http'):
                 image_url = f"https://{dominio}/uploads/productos/{imagen_ref}"
             else:
@@ -3855,16 +3856,8 @@ def enviar_imagen(numero, imagen_ref, config=None):
         }
 
         app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-
-        # Aceptar 200 o 201 como éxito y loggear cuerpo para diagnóstico
-        try:
-            resp_json = r.json()
-        except Exception:
-            resp_json = r.text
-
-        app.logger.info(f"🔍 enviar_imagen response status: {r.status_code} body: {str(resp_json)[:1000]}")
-        if r.status_code in (200, 201):
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code == 200:
             app.logger.info("✅ Imagen enviada correctamente")
             return True
         else:
@@ -3874,6 +3867,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
         return False
+
 
 def buscar_sku_en_texto(texto, precios):
     """
@@ -4482,10 +4476,9 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     imagen_encontrada = m.group(1).strip()
 
             if imagen_encontrada:
-                # Normalize filename/URL
-                imagen_encontrada = imagen_encontrada.strip()
-                # If it's a path like /uploads/productos/..., extract basename
-                imagen_encontrada = os.path.basename(imagen_encontrada)
+                # Normalize: if it's a relative path like /uploads/productos/..., extract filename
+                if imagen_encontrada.startswith('/uploads/productos/'):
+                    imagen_encontrada = os.path.basename(imagen_encontrada)
 
                 # Confirm file exists locally or it's an absolute URL
                 file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
@@ -4493,23 +4486,17 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
                 sent = False
                 if os.path.isfile(file_path_local) or os.path.isfile(file_path_root):
-                    # Send image by WhatsApp (Graph API image message with link)
+                    # send image by WhatsApp (Graph API image message with link)
                     sent = enviar_imagen(numero, imagen_encontrada, config)
                     if sent:
                         public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
                         # Save as a BOT response (no longer as a user message)
                         guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
                         app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
-                        # Remove filename tokens from textual respuesta to avoid noise
-                        if isinstance(respuesta, str) and imagen_encontrada:
+                        # Remove image reference from textual response to avoid sending path
+                        if isinstance(respuesta, str):
+                            respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)  # remove markdown
                             respuesta = re.sub(re.escape(imagen_encontrada), '', respuesta)
-                            respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)
-                            respuesta = respuesta.strip()
-                        # SEND textual reply (if any) and STOP further fallbacks to avoid duplicate/fail records
-                        if respuesta:
-                            enviar_mensaje(numero, respuesta, config)
-                            actualizar_respuesta(numero, texto, respuesta, config)
-                        return  # important: exit after success to avoid fallbacks
                     else:
                         # fallback: send text with public URL and record as BOT response
                         dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
@@ -4518,48 +4505,40 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
                         enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
                         guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
-                        return
-
                 else:
                     # If imagen_encontrada is an absolute URL, try sending it
                     if imagen_encontrada.lower().startswith('http'):
                         sent = enviar_imagen(numero, imagen_encontrada, config)
                         if sent:
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
-                            if respuesta:
-                                enviar_mensaje(numero, respuesta, config)
-                                actualizar_respuesta(numero, texto, respuesta, config)
-                            return
+                            # strip url from textual response
+                            if isinstance(respuesta, str):
+                                respuesta = respuesta.replace(imagen_encontrada, '')
                         else:
                             enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                            # Record fallback message as bot text
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
-                            return
                     else:
                         # Try to find by filename in imagenes_productos table
                         imgs = obtener_imagenes_por_sku(sku_encontrado, config) if sku_encontrado else []
                         if imgs:
                             first = imgs[0].get('filename')
                             if first:
-                                # normalize
-                                first = os.path.basename(first.strip())
                                 sent = enviar_imagen(numero, first, config)
                                 if sent:
                                     public_path = f"/uploads/productos/{first}"
                                     guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {first}]")
-                                    if respuesta:
-                                        enviar_mensaje(numero, respuesta, config)
-                                        actualizar_respuesta(numero, texto, respuesta, config)
-                                    return
-                        # No local image found; inform user (record as bot response) and STOP
-                        app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
-                        enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
-                        guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
-                        return
+                                    if isinstance(respuesta, str):
+                                        respuesta = respuesta.replace(imagen_encontrada, first)
+                        else:
+                            # No local image found; inform user (record as bot response)
+                            app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
+                            enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
+                            guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
             else:
                 app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
         except Exception as e:
             app.logger.warning(f"⚠️ Error intentando enviar imagen automática: {e}")
-
 
         # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
@@ -4644,7 +4623,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
-
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
