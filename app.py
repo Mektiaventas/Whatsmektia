@@ -4387,6 +4387,37 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
+def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen enviada]'):
+    """Guarda una entrada en conversaciones representando una respuesta del BOT que contiene una imagen.
+    - numero: número del chat
+    - imagen_url: URL pública (o ruta) de la imagen
+    - nota: texto que se guardará en campo 'respuesta' (por ejemplo '[Imagen enviada]')
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        # Asegurar contacto
+        actualizar_info_contacto(numero, config)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Insertar como respuesta del BOT: mensaje vacío, respuesta = nota, imagen_url y es_imagen = True
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, %s, NOW(), %s, %s)
+        """, (numero, '', nota, imagen_url, True))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"💾 [BOT] Imagen registrada en conversaciones: {imagen_url} (numero={numero})")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
+        return False
+
 # Replace the existing procesar_mensaje_normal function with this enhanced version
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
     """Procesa mensajes normales (no citas/intervenciones) — ahora envía imagen si el usuario la solicita y existe."""
@@ -4459,6 +4490,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     sent = enviar_imagen(numero, imagen_encontrada, config)
                     if sent:
                         public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
+                        guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
                         guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, public_path, True)
                         app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
                         # Remove image reference from textual response to avoid sending path
@@ -7002,7 +7034,9 @@ def kanban_mover():
         )
         conn.commit(); cursor.close(); conn.close()
         return '', 204
-        
+    
+   
+
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
         config = obtener_configuracion_por_host()
