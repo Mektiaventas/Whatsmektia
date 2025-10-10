@@ -5,6 +5,19 @@
     .form-text text-muted {
         color: white;
     }
+
+    .asesores-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 12px;
+    }
+
+    .asesor-card {
+        padding: 12px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fff;
+    }
 </style>
 <div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
@@ -178,38 +191,38 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
 
     <button type="submit" class="btn-primary">Guardar Restricciones</button>
 </form>
+
+{% endif %}
+{% elif active == 'asesores' %}
 <form class="config-form" method="POST">
-    <!-- ... campos existentes ... -->
-
     <div class="form-card">
-        <label>Nombre de la Empresa (para mostrar en la interfaz)</label>
-        <input type="text" name="nombre_empresa" value="{{ datos.nombre_empresa or 'SmartWhats' }}" required>
-        <small class="form-text text-muted">
-            Este nombre se mostrará en el sidebar y título de la página
-        </small>
+        <h3>Asesores de Ventas</h3>
+        <p>Agrega hasta dos asesores con nombre y teléfono. Estos datos se usarán para notificaciones y contactos internos.</p>
     </div>
 
-    <div class="form-card">
-        <label>URL del Logo</label>
-        <input type="url" name="logo_url" value="{{ datos.logo_url or '' }}" placeholder="https://ejemplo.com/logo.png">
-        <small class="form-text text-muted">
-            URL de la imagen del logo (recomendado: 200x50px, formato PNG o SVG)
-        </small>
-    </div>
+    <div class="asesores-grid">
+        <div class="asesor-card">
+            <label for="asesor1_nombre">Asesor 1 - Nombre</label>
+            <input type="text" id="asesor1_nombre" name="asesor1_nombre" class="input"
+                   value="{{ datos.asesor1_nombre or '' }}" placeholder="Ej: Juan Pérez">
+            <label for="asesor1_telefono" style="margin-top:8px;">Asesor 1 - Teléfono</label>
+            <input type="tel" id="asesor1_telefono" name="asesor1_telefono" class="input"
+                   value="{{ datos.asesor1_telefono or '' }}" placeholder="Ej: 521449XXXXXXX">
+        </div>
 
-    <div class="form-card">
-        <label>Vista previa del logo actual:</label>
-        <div style="margin: 10px 0; padding: 10px; background: white; border-radius: 5px; display: inline-block;">
-            {% if datos.logo_url %}
-            <img src="{{ datos.logo_url }}" alt="Logo actual" style="max-height: 50px; max-width: 200px;">
-            {% else %}
-            <p>Logo por defecto (SmartWhats)</p>
-            {% endif %}
+        <div class="asesor-card">
+            <label for="asesor2_nombre">Asesor 2 - Nombre</label>
+            <input type="text" id="asesor2_nombre" name="asesor2_nombre" class="input"
+                   value="{{ datos.asesor2_nombre or '' }}" placeholder="Ej: María López">
+            <label for="asesor2_telefono" style="margin-top:8px;">Asesor 2 - Teléfono</label>
+            <input type="tel" id="asesor2_telefono" name="asesor2_telefono" class="input"
+                   value="{{ datos.asesor2_telefono or '' }}" placeholder="Ej: 521449XXXXXXX">
         </div>
     </div>
 
-    <button type="submit" class="btn-primary">Guardar Negocio</button>
+    <div style="margin-top:12px;">
+        <button type="submit" class="btn-primary">Guardar Asesores</button>
+    </div>
 </form>
 {% endif %}
-
 {% endblock %}
