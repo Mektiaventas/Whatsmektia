@@ -200,7 +200,7 @@ def login_required(f):
 # Rutas públicas que NO requieren login (añade más si hace falta)
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
-    'static', 'debug_headers', 'debug_dominio', 'diagnostico','uploads'
+    'static', 'debug_headers', 'debug_dominio', 'diagnostico','uploads/productos'
 }
 
 def extraer_imagenes_embedded_excel(filepath, output_dir=None):
