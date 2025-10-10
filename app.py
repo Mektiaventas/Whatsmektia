@@ -739,8 +739,8 @@ def importar_excel_directo():
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
             # After file.save(filepath)
-            imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
-            app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
+            #imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+            #app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
             app.logger.info(f"📄 Excel guardado: {filepath}")
             
             # Procesar el archivo Excel
