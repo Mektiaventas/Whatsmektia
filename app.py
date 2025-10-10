@@ -3608,6 +3608,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Format products using the canonical DB fields (sku, categoria, subcategoria, linea, modelo, descripcion, medidas,
     # costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor)
     productos_formateados = []
+    dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:40]:  # limit to 40 to avoid huge prompts
         try:
             sku = (p.get('sku') or '').strip()
@@ -3621,8 +3622,37 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             proveedor = (p.get('proveedor') or '').strip()
             status = (p.get('status_ws') or 'activo').strip()
             catalogo = (p.get('catalogo') or '')
-            imagen = (p.get('imagen') or '')
+            imagen = (p.get('imagen') or '').strip()
             
+            # If DB field imagen is empty, try to find an image linked in imagenes_productos or filesystem
+            if not imagen and sku:
+                imagen_encontrada = obtener_imagen_principal_por_sku(sku, config)
+                if imagen_encontrada:
+                    imagen = imagen_encontrada
+                    # best-effort: persist association to precios.imagen (no hard-fail)
+                    try:
+                        conn_upd = get_db_connection(config)
+                        cur_upd = conn_upd.cursor()
+                        cur_upd.execute("UPDATE precios SET imagen=%s WHERE sku=%s", (imagen, sku))
+                        conn_upd.commit()
+                        cur_upd.close(); conn_upd.close()
+                        app.logger.info(f"🔧 Asociada imagen {imagen} al SKU {sku} en tabla precios")
+                    except Exception as e:
+                        app.logger.debug(f"⚠️ No se pudo actualizar precios.imagen para {sku}: {e}")
+
+            # Build public image URL when possible (prefer http if imagen already a URL)
+            imagen_url = ''
+            if imagen:
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    # ensure dominio_publico is a host (no http) -> prefix https://
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
+                    else:
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+
             # Prices: prefer precio_menudeo, fallback to precio_mayoreo or costo
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_mayoreo = p.get('precio_mayoreo') or None
@@ -3662,7 +3692,11 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
-            if imagen:
+            if imagen_url:
+                # include full clickable URL so user can click directly
+                parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                # fallback: if somehow imagen exists but we couldn't build URL, show filename
                 parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 # keep description short in the prompt
