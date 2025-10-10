@@ -200,7 +200,7 @@ def login_required(f):
 # Rutas públicas que NO requieren login (añade más si hace falta)
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
-    'static', 'debug_headers', 'debug_dominio', 'diagnostico','uploads/productos/excel_unzip_img_219_1760130819.png'
+    'static', 'debug_headers', 'debug_dominio', 'diagnostico'
 }
 
 def extraer_imagenes_embedded_excel(filepath, output_dir=None):
@@ -4490,32 +4490,34 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                     sent = enviar_imagen(numero, imagen_encontrada, config)
                     if sent:
                         public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
+                        # Save as a BOT response (no longer as a user message)
                         guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
-                        guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, public_path, True)
                         app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
                         # Remove image reference from textual response to avoid sending path
                         if isinstance(respuesta, str):
                             respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)  # remove markdown
                             respuesta = re.sub(re.escape(imagen_encontrada), '', respuesta)
                     else:
-                        # fallback: send text with public URL
+                        # fallback: send text with public URL and record as BOT response
                         dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
                         if not dominio.startswith('http'):
                             dominio = f"https://{dominio}"
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
                         enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
-                        guardar_conversacion(numero, texto, f"[Imagen (URL) enviada: {image_url}]", config, image_url, True)
+                        guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
                 else:
                     # If imagen_encontrada is an absolute URL, try sending it
                     if imagen_encontrada.lower().startswith('http'):
                         sent = enviar_imagen(numero, imagen_encontrada, config)
                         if sent:
-                            guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, imagen_encontrada, True)
+                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
                             # strip url from textual response
                             if isinstance(respuesta, str):
                                 respuesta = respuesta.replace(imagen_encontrada, '')
                         else:
                             enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                            # Record fallback message as bot text
+                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
                     else:
                         # Try to find by filename in imagenes_productos table
                         imgs = obtener_imagenes_por_sku(sku_encontrado, config) if sku_encontrado else []
@@ -4525,13 +4527,14 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                                 sent = enviar_imagen(numero, first, config)
                                 if sent:
                                     public_path = f"/uploads/productos/{first}"
-                                    guardar_conversacion(numero, texto, f"[Imagen enviada: {first}]", config, public_path, True)
+                                    guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {first}]")
                                     if isinstance(respuesta, str):
                                         respuesta = respuesta.replace(imagen_encontrada, first)
                         else:
-                            # No local image found; inform user
+                            # No local image found; inform user (record as bot response)
                             app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
-                            # leave respuesta untouched so IA text explains missing image
+                            enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
+                            guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
             else:
                 app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
         except Exception as e:
