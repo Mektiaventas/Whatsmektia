@@ -5964,6 +5964,52 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
+@app.before_request
+def proteger_rutas():
+    """
+    Protección global de rutas: permite acceso público a:
+      - endpoints listados en RUTAS_PUBLICAS
+      - la ruta estática tradicional de Flask (static)
+      - accesos directos a archivos públicos (p. ej. /uploads/, /static/images/)
+      - endpoints concretos que sirven archivos (serve_product_image, serve_uploaded_file, ...)
+    Si ninguna de las condiciones aplica y no hay sesión, redirige al login.
+    """
+    # Permitir endpoints públicos por nombre
+    if request.endpoint in RUTAS_PUBLICAS:
+        return
+
+    # Permitir archivos estáticos gestionados por Flask
+    if request.endpoint and request.endpoint.startswith('static'):
+        return
+
+    # Permitir accesos directos a rutas públicas por path (uploads, static images, audio, etc.)
+    public_path_prefixes = (
+        '/uploads/',              # archivos subidos (ej. /uploads/...)
+        '/static/images/',        # imágenes guardadas desde WhatsApp
+        '/static/audio/',         # audios generados
+        '/uploads/productos/',    # imágenes de productos
+    )
+    if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
+        return
+
+    # Permitir endpoints que sirven archivos sin autenticación
+    public_endpoints = {
+        'serve_product_image',
+        'serve_uploaded_file',
+        'debug_image',
+        'debug_image_full',
+        'proxy_audio'
+    }
+    if request.endpoint in public_endpoints:
+        return
+
+    # Si ya está autenticado, permitir
+    if session.get('auth_user'):
+        return
+
+    # Por defecto, redirigir al login
+    return redirect(url_for('login', next=request.path))
+
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
     if config is None:
