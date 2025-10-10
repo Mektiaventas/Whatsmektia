@@ -839,8 +839,45 @@ def importar_excel_directo():
         flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
         return redirect(url_for('configuracion_precios'))
 
+def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
+    """
+    Fallback: extrae imágenes desde el ZIP de un .xlsx leyendo xl/media/.
+    Retorna lista de dicts compatible con extraer_imagenes_embedded_excel.
+    """
+    import zipfile, shutil
+    os.makedirs(output_dir, exist_ok=True)
+    imagenes = []
+    try:
+        with zipfile.ZipFile(filepath, 'r') as z:
+            media_files = [f for f in z.namelist() if f.startswith('xl/media/')]
+            for idx, media_path in enumerate(media_files):
+                try:
+                    ext = os.path.splitext(media_path)[1].lstrip('.').lower() or 'bin'
+                    timestamp = int(time.time())
+                    filename = f"excel_unzip_img_{idx+1}_{timestamp}.{ext}"
+                    dest_path = os.path.join(output_dir, filename)
+                    with z.open(media_path) as src, open(dest_path, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    imagenes.append({
+                        'filename': filename,
+                        'path': dest_path,
+                        'sheet': None,
+                        'anchor': None,
+                        'row': None,
+                        'col': None
+                    })
+                    app.logger.info(f"✅ Imagen (zip) extraída: {filename} from {media_path}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo extraer {media_path} desde zip: {e}")
+    except zipfile.BadZipFile:
+        app.logger.warning("⚠️ Archivo no es un .xlsx válido o está corrupto; zip fallback falló")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error extrayendo imágenes desde zip: {e}")
+    return imagenes
+
+
 def importar_productos_desde_excel(filepath, config=None):
-    """Importa productos directamente desde un archivo Excel, ahora guarda metadatos de imágenes en la BD."""
+    """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -887,8 +924,19 @@ def importar_productos_desde_excel(filepath, config=None):
 
         app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
 
+        # 1) Intento principal con openpyxl
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
-        app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
+        app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
+
+        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media)
+        if not imagenes_embedded and extension == '.xlsx':
+            output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+            imagenes_zip = _extraer_imagenes_desde_zip_xlsx(filepath, output_dir)
+            if imagenes_zip:
+                imagenes_embedded = imagenes_zip
+                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media: {len(imagenes_embedded)}")
+            else:
+                app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
 
         # Preparar conexión (se usará tanto para registrar imágenes como para insertar productos)
         conn = get_db_connection(config)
@@ -944,6 +992,7 @@ def importar_productos_desde_excel(filepath, config=None):
         for img in imagenes_embedded:
             s = img.get('sheet')
             r = img.get('row')
+            # If sheet is None (zip fallback), we cannot map by row -> keep for fallback list
             if r is not None:
                 images_map[(s, r)] = img['filename']
 
@@ -951,7 +1000,7 @@ def importar_productos_desde_excel(filepath, config=None):
 
         # If no images had anchors, we'll fallback to index-based assignment
         fallback_by_index = []
-        if not images_map and imagenes_embedded:
+        if imagenes_embedded and not images_map:
             fallback_by_index = [img['filename'] for img in imagenes_embedded]
             app.logger.info(f"⚠️ No se detectaron anclas; usando fallback por orden con {len(fallback_by_index)} imágenes")
 
