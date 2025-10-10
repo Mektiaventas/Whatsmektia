@@ -193,10 +193,12 @@ RUTAS_PUBLICAS = {
 def extraer_imagenes_embedded_excel(filepath, output_dir=None):
     """
     Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
-    Retorna una lista de dicts con información de las imágenes extraídas.
+    Ahora intenta recuperar la fila/col (ancla) para poder asociar imagen->fila.
+    Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
     """
     import openpyxl
     import os
+    import time
 
     if output_dir is None:
         output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
@@ -206,20 +208,50 @@ def extraer_imagenes_embedded_excel(filepath, output_dir=None):
     imagenes_extraidas = []
 
     for sheet in wb.worksheets:
-        # openpyxl stores images in sheet._images
         for idx, img in enumerate(getattr(sheet, '_images', [])):
-            # img.ref is the anchor (cell), img.image is the PIL Image object
-            img_obj = img.image
-            img_format = img_obj.format or 'PNG'
-            img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format.lower()}"
-            img_path = os.path.join(output_dir, img_filename)
-            img_obj.save(img_path)
-            imagenes_extraidas.append({
-                'filename': img_filename,
-                'path': img_path,
-                'sheet': sheet.title,
-                'anchor': getattr(img, 'anchor', None)
-            })
+            try:
+                # img.image es un PIL Image
+                img_obj = img.image
+                img_format = (img_obj.format or 'PNG').lower()
+                img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
+                img_path = os.path.join(output_dir, img_filename)
+
+                # Guardar imagen en disco
+                img_obj.save(img_path)
+
+                # Intentar leer la ancla (fila/col) si existe
+                row = None
+                col = None
+                anchor = getattr(img, 'anchor', None)
+                try:
+                    # openpyxl puede exponer anchor._from (AnchorMarker) con row/col (0-based)
+                    marker = getattr(anchor, '_from', None) or getattr(anchor, 'from', None)
+                    if marker:
+                        row = getattr(marker, 'row', None)
+                        col = getattr(marker, 'col', None)
+                        # Convertir a 1-based Excel row para consistencia (si marker devuelve 0-based)
+                        if isinstance(row, int):
+                            row = int(row) + 1
+                        if isinstance(col, int):
+                            col = int(col) + 1
+                except Exception:
+                    # No crítico si falla; dejamos row/col = None
+                    row = None
+                    col = None
+
+                imagenes_extraidas.append({
+                    'filename': img_filename,
+                    'path': img_path,
+                    'sheet': sheet.title,
+                    'anchor': anchor,
+                    'row': row,
+                    'col': col
+                })
+                app.logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col})")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
+                continue
+
     return imagenes_extraidas
 
 # Put below sesiones_activas helpers
@@ -769,29 +801,31 @@ def importar_excel_directo():
         return redirect(url_for('configuracion_precios'))
 
 def importar_productos_desde_excel(filepath, config=None):
-    """Importa productos directamente desde un archivo Excel"""
+    """Importa productos directamente desde un archivo Excel, ahora asigna imágenes por columna o por ancla (fila)."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
-        # Determinar el tipo de archivo y leerlo
         extension = os.path.splitext(filepath)[1].lower()
-        
         if extension in ['.xlsx', '.xls']:
-            df = pd.read_excel(filepath)
+            # Leer con pandas la primera hoja por compatibilidad
+            df = pd.read_excel(filepath, sheet_name=0)
+            # También cargar workbook para obtener el nombre real de la hoja (y anchors)
+            wb = openpyxl.load_workbook(filepath, data_only=True)
+            sheet_name = wb.sheetnames[0]
         elif extension == '.csv':
             df = pd.read_csv(filepath)
+            sheet_name = None
+            wb = None
         else:
             app.logger.error(f"Formato de archivo no soportado: {extension}")
             return 0
-        
-        # Normalizar nombres de columnas (convertir a minúsculas)
+
+        # Normalizar nombres de columnas
         df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
-        
-        # Mostrar las columnas disponibles para diagnóstico
         app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
-        
-        # Mapeo EXACTO para las columnas en tu archivo Excel
+
+        # Mapeo de columnas esperado (sin cambios)
         column_mapping = {
             'sku': 'sku',
             'categoria': 'categoria',
@@ -806,105 +840,110 @@ def importar_productos_desde_excel(filepath, config=None):
             'imagen': 'imagen',
             'status ws': 'status_ws',
             'catalogo': 'catalogo',
-            'catalogo 2': 'catalogo2',  
-            'catalogo 3': 'catalogo3',  
+            'catalogo 2': 'catalogo2',
+            'catalogo 3': 'catalogo3',
             'proveedor': 'proveedor'
         }
-        
-        # Renombrar columnas según el mapeo exacto
+
         for excel_col, db_col in column_mapping.items():
             if excel_col in df.columns:
                 df = df.rename(columns={excel_col: db_col})
                 app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
-        
-        
-        # Debug: mostrar las primeras filas para verificar datos
-        app.logger.info(f"Primeras 2 filas de datos:\n{df.head(2).to_dict('records')}")
-        imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
-        imagenes_nombres = [img['filename'] for img in imagenes_embedded]
 
-        # Verificar si hay filas en el DataFrame
+        app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
+
+        # Extraer imágenes y construir mapa por (sheet, row)
+        imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+        images_map = {}  # key: (sheet, row) -> filename
+        for img in imagenes_embedded:
+            key = (img.get('sheet'), img.get('row'))
+            # Si no tiene fila, no lo añadimos al mapa por fila (queda sólo en disco)
+            if key[1] is not None:
+                images_map[key] = img['filename']
+
+        app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)} ; imágenes con ancla: {len([k for k in images_map])}")
+
         if df.empty:
             app.logger.error("El archivo no contiene datos (está vacío)")
             return 0
-            
+
         app.logger.info(f"Total de filas encontradas: {len(df)}")
-        
-        # Reemplazar NaN con ''
         df = df.fillna('')
-        
-        # Crear conexión a BD
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        
-        # Definir campos esperados
         campos_esperados = [
             'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
-           'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
         ]
-        
-        # Inicializar contador de productos importados
+
         productos_importados = 0
         filas_procesadas = 0
         filas_omitidas = 0
-        
-        # Procesar cada fila
+
+        # Suponemos que el header de Excel está en la fila 1 (Excel 1-based).
+        # Entonces la primera fila de datos es Excel row = 2.
+        header_row = 1
         for idx, row in df.iterrows():
             filas_procesadas += 1
             try:
-                # Convertir fila a diccionario
                 producto = {}
+                # Determinar la imagen priorizando:
+                # 1) columna 'imagen' en Excel
+                # 2) imagen embebida cuyo anchor.row == excel_row para la hoja principal
+                excel_row_number = header_row + 1 + idx  # idx es 0-based pandas
+                assigned_image = ''
+                if 'imagen' in df.columns and str(row.get('imagen', '')).strip():
+                    assigned_image = str(row.get('imagen')).strip()
+                else:
+                    # buscar por sheet+fila
+                    if sheet_name and images_map.get((sheet_name, excel_row_number)):
+                        assigned_image = images_map.get((sheet_name, excel_row_number))
+
+                # Llenar campos esperados sin sobrescribir imagen después
                 for campo in campos_esperados:
-                    if 'imagen' in df.columns and row['imagen']:
-                        producto['imagen'] = row['imagen']
-                    if idx < len(imagenes_nombres):
-                        producto['imagen'] = imagenes_nombres[idx]
+                    if campo == 'imagen':
+                        producto['imagen'] = assigned_image or ''
+                        continue
                     if campo in df.columns:
-                        producto[campo] = row[campo]
+                        producto[campo] = row.get(campo, '') if row.get(campo, '') is not None else ''
                     else:
-                        producto[campo] = ''  # Valor por defecto
-                
-                # Verificar si hay al menos un campo con datos
+                        producto[campo] = ''
+
+                # Verificar si hay al menos un campo con datos reales
                 tiene_datos = any(str(value).strip() for value in producto.values())
-                
                 if not tiene_datos:
                     app.logger.warning(f"Fila {idx} omitida: sin ningún dato")
                     filas_omitidas += 1
                     continue
-                
-                # Reemplazar valores vacíos con "nadita" si hay al menos un dato
+
+                # Rellenar vacíos con espacios para evitar NULL issues (tu lógica original)
                 for campo in campos_esperados:
                     if not str(producto.get(campo, '')).strip():
-                        producto[campo] = f" "  # Añadir índice para hacerlo único
-                
-                
+                        producto[campo] = " "
+
+                # Convertir precios
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
-                        if not valor_str:  # Si está vacío, pon 0.00
+                        if not valor_str:
                             producto[campo] = '0.00'
                         else:
-                            # Extrae el primer número decimal del string
                             match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
                             if match:
                                 valor_numerico = float(match.group(1))
                                 producto[campo] = f"{valor_numerico:.2f}"
-                                app.logger.info(f"Campo {campo} convertido: {valor} -> {producto[campo]}")
                             else:
                                 producto[campo] = '0.00'
-                                app.logger.info(f"Campo {campo} sin número válido: {valor} -> 0.00")
-                    except (ValueError, TypeError) as e:
-                        app.logger.warning(f"Error convirtiendo {campo}: {str(e)}, valor: '{valor}'")
+                    except Exception:
                         producto[campo] = '0.00'
-                
-                
+
                 if producto.get('status_ws', '').startswith('nadita'):
                     producto['status_ws'] = 'activo'
-                
-                # Insertar en la base de datos
+
                 values = [
                     producto.get('sku', ''),
                     producto.get('categoria', ''),
@@ -923,8 +962,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('catalogo3', ''),
                     producto.get('proveedor', '')
                 ]
-                
-                
+
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
@@ -938,30 +976,29 @@ def importar_productos_desde_excel(filepath, config=None):
                         costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
-                        status_ws=VALUES(status_ws)
+                        status_ws=VALUES(status_ws),
+                        imagen=VALUES(imagen)
                 """, values)
-                
+
                 productos_importados += 1
-                app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}...")
-                
+                app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}... imagen={producto.get('imagen')}")
             except Exception as e:
-                app.logger.error(f"Error procesando fila {idx}: {str(e)}")
+                app.logger.error(f"Error procesando fila {idx}: {e}")
                 app.logger.error(traceback.format_exc())
                 filas_omitidas += 1
                 continue
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"📊 Resumen de importación: {productos_importados} productos importados, {filas_procesadas} filas procesadas, {filas_omitidas} filas omitidas")
         return productos_importados
-        
+
     except Exception as e:
-        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {str(e)}")
+        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
         app.logger.error(traceback.format_exc())
         return 0
-
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
     if not imagenes or not servicios or not servicios.get('servicios'):
