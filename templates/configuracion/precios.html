@@ -276,7 +276,7 @@
                 </div>
 
                 <div class="grid grid-cols-2 gap-4">
-                    
+
 
                     <div class="form-group">
                         <label for="imagen">Imagen</label>
@@ -373,57 +373,59 @@
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>SKU</th>
-                            <th>Categoría</th>
-                            <th>Subcategoría</th>
-                            <th>Línea</th>
-                            <th>Modelo</th>
-                            <th>Descripción</th>
-                            <th>Medidas</th>
-                            <th>Imagen</th>
-                            <th>Mayoreo</th>
-                            <th>Menudeo</th>
-                            <th>Status</th>
-                            <th>Catálogo</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for precio in precios %}
-                        <tr>
-                            <td>{{ precio.sku or '-' }}</td>
-                            <td>{{ precio.categoria or '-' }}</td>
-                            <td>{{ precio.subcategoria or '-' }}</td>
-                            <td>{{ precio.linea or '-' }}</td>
-                            <td>{{ precio.modelo or '-' }}</td>
-                            <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
-                            <td>{{ precio.medidas or '-' }}</td>
-                            <td>
-                                {% if precio.imagen %}
-                                {% if precio.imagen.startswith('http') %}
-                                <img src="/uploads/productos/{{ precio.imagen }}" ...>
-                                {% else %}
-                                <img src="/uploads/productos/{{ precio.imagen }}" ...>
-                                {% endif %}
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
-                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                            <td>{{ precio.status_ws or '-' }}</td>
-                            <td>{{ precio.catalogo or '-' }}</td>
-                            <td>
-                                <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                                   class="btn small primary">Editar</a>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-scroll table-scroll-client">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Categoría</th>
+                                <th>Subcategoría</th>
+                                <th>Línea</th>
+                                <th>Modelo</th>
+                                <th>Descripción</th>
+                                <th>Medidas</th>
+                                <th>Imagen</th>
+                                <th>Mayoreo</th>
+                                <th>Menudeo</th>
+                                <th>Status</th>
+                                <th>Catálogo</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for precio in precios %}
+                            <tr>
+                                <td>{{ precio.sku or '-' }}</td>
+                                <td>{{ precio.categoria or '-' }}</td>
+                                <td>{{ precio.subcategoria or '-' }}</td>
+                                <td>{{ precio.linea or '-' }}</td>
+                                <td>{{ precio.modelo or '-' }}</td>
+                                <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                                <td>{{ precio.medidas or '-' }}</td>
+                                <td>
+                                    {% if precio.imagen %}
+                                    {% if precio.imagen.startswith('http') %}
+                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    {% else %}
+                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    {% endif %}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                                <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                                <td>{{ precio.status_ws or '-' }}</td>
+                                <td>{{ precio.catalogo or '-' }}</td>
+                                <td>
+                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                       class="btn small primary">Editar</a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
             {% else %}
             <div class="text-center py-8">
@@ -450,75 +452,77 @@
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
-                <table class="table">
-                    <thead>
-                        <tr>
-                            <th>SKU</th>
-                            <th>Categoría</th>
-                            <th>Subcategoría</th>
-                            <th>Línea</th>
-                            <th>Modelo</th>
-                            <th>Descripción</th>
-                            <th>Medidas</th>
-                            <th>Costo</th>
-                            <th>Mayoreo</th>
-                            <th>Menudeo</th>
-                            <th>Imagen</th>
-                            <th>Status</th>
-                            <th>Catálogo</th>
-                            <th>Catálogo 2</th>
-                            <th>Catálogo 3</th>
-                            <th>Proveedor</th>
-                            <th>Acciones</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for precio in precios %}
-                        <tr>
-                            <td>{{ precio.sku or '-' }}</td>
-                            <td>{{ precio.categoria or '-' }}</td>
-                            <td>{{ precio.subcategoria or '-' }}</td>
-                            <td>{{ precio.linea or '-' }}</td>
-                            <td>{{ precio.modelo or '-' }}</td>
-                            <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
-                            <td>{{ precio.medidas or '-' }}</td>
-                            <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
-                            <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                            <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                            <td>
-                                {% if precio.imagen %}
-                                {% if precio.imagen.startswith('http') %}
-                                <img src="{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
-                                {% else %}
-                                <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
-                                {% endif %}
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
-                            <td>{{ precio.status_ws or '-' }}</td>
-                            <td>{{ precio.catalogo or '-' }}</td>
-                            <td>{{ precio.catalogo2 or '-' }}</td>
-                            <td>{{ precio.catalogo3 or '-' }}</td>
-                            <td>{{ precio.proveedor or '-' }}</td>
-                            <td>
-                                <div class="flex space-x-2">
-                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                                       class="btn small primary">Editar</a>
-                                    <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
-                                          method="post" class="inline-form">
-                                        <button type="submit"
-                                                class="btn small danger"
-                                                onclick="return confirm('¿Eliminar {{ precio.descripcion[:30] if precio.descripcion else precio.sku }}?');">
-                                            Borrar
-                                        </button>
-                                    </form>
-                                </div>
-                            </td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+                <div class="table-scroll table-scroll-admin">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>SKU</th>
+                                <th>Categoría</th>
+                                <th>Subcategoría</th>
+                                <th>Línea</th>
+                                <th>Modelo</th>
+                                <th>Descripción</th>
+                                <th>Medidas</th>
+                                <th>Costo</th>
+                                <th>Mayoreo</th>
+                                <th>Menudeo</th>
+                                <th>Imagen</th>
+                                <th>Status</th>
+                                <th>Catálogo</th>
+                                <th>Catálogo 2</th>
+                                <th>Catálogo 3</th>
+                                <th>Proveedor</th>
+                                <th>Acciones</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for precio in precios %}
+                            <tr>
+                                <td>{{ precio.sku or '-' }}</td>
+                                <td>{{ precio.categoria or '-' }}</td>
+                                <td>{{ precio.subcategoria or '-' }}</td>
+                                <td>{{ precio.linea or '-' }}</td>
+                                <td>{{ precio.modelo or '-' }}</td>
+                                <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                                <td>{{ precio.medidas or '-' }}</td>
+                                <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
+                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                                <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                                <td>
+                                    {% if precio.imagen %}
+                                    {% if precio.imagen.startswith('http') %}
+                                    <img src="{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                                    {% else %}
+                                    <img src="/uploads/{{ precio.imagen }}" alt="Imagen" class="w-12 h-12 object-cover rounded">
+                                    {% endif %}
+                                    {% else %}
+                                    -
+                                    {% endif %}
+                                </td>
+                                <td>{{ precio.status_ws or '-' }}</td>
+                                <td>{{ precio.catalogo or '-' }}</td>
+                                <td>{{ precio.catalogo2 or '-' }}</td>
+                                <td>{{ precio.catalogo3 or '-' }}</td>
+                                <td>{{ precio.proveedor or '-' }}</td>
+                                <td>
+                                    <div class="flex space-x-2">
+                                        <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                           class="btn small primary">Editar</a>
+                                        <form action="{{ url_for('configuracion_precio_borrar', pid=precio.id) }}"
+                                              method="post" class="inline-form">
+                                            <button type="submit"
+                                                    class="btn small danger"
+                                                    onclick="return confirm('¿Eliminar {{ precio.descripcion[:30] if precio.descripcion else precio.sku }}?');">
+                                                Borrar
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
             {% else %}
             <div class="text-center py-8">
@@ -712,6 +716,40 @@
             background-color: white;
             color: black
         }
+
+    /* Scroll container for big tables: keeps page shorter while table scrolls internally */
+    .table-scroll {
+        max-height: 440px; /* Adjust default max height as needed */
+        overflow-y: auto;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        border-radius: 6px;
+        padding-right: 6px; /* avoid cutting last column behind scrollbar */
+    }
+
+    /* Slightly different heights for client vs admin views */
+    .table-scroll-client {
+        max-height: 360px;
+    }
+
+    .table-scroll-admin {
+        max-height: 520px;
+    }
+
+    /* Optional: style scrollbars for modern browsers */
+    .table-scroll::-webkit-scrollbar {
+        width: 10px;
+        height: 10px;
+    }
+
+    .table-scroll::-webkit-scrollbar-track {
+        background: transparent;
+    }
+
+    .table-scroll::-webkit-scrollbar-thumb {
+        background: rgba(0,0,0,0.12);
+        border-radius: 8px;
+    }
 </style>
 
 <script>
