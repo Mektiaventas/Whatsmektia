@@ -212,13 +212,12 @@ def proteger_rutas():
     if request.endpoint and request.endpoint.startswith('static'):
         return
 
-    # Permitir accesos directos a rutas públicas por path (uploads, static images, audio, etc.)
+    # Permitir accesos directos a rutas públicas por path (uploads y subpaths)
     public_path_prefixes = (
-        '/uploads/',              # archivos subidos (ej. /uploads/...)
-        '/uploads',               # también cubrir '/uploads' sin slash final
-        '/static/images/',        # imágenes guardadas desde WhatsApp
-        '/static/audio/',         # audios generados
-        '/uploads/productos/',    # imágenes de productos
+        '/uploads/',    # cualquier URL que empiece con /uploads/
+        '/uploads',     # cubrir también /uploads sin slash final
+        '/static/images/',
+        '/static/audio/',
     )
     if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
         return
