@@ -1531,7 +1531,7 @@ def analizar_imagen_con_ia(image_data_base64, config=None):
         ]
 
         resp = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=messages,
             max_tokens=800,
             temperature=0.0
