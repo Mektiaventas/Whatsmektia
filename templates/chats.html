@@ -290,12 +290,15 @@
         border: none;
         cursor: pointer;
     }
+    .input-group {
+        position: relative;
+    }
 </style>
 
 
 <script>
     document.addEventListener('DOMContentLoaded', function () {
-        const emojiBtn = document.querySelector('.emoji-btn');
+        const emojiBtn = document.getElementById('emoji-pick-btn');
         const emojiPickerList = document.getElementById('emoji-picker-list');
         const input = document.getElementById('mensaje-texto');
         const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
@@ -306,20 +309,34 @@
         // Mostrar el picker debajo del botón
         emojiBtn.addEventListener('click', function (e) {
             e.preventDefault();
-            const rect = emojiBtn.getBoundingClientRect();
-            emojiPickerList.style.left = `${rect.left + window.scrollX}px`;
-            emojiPickerList.style.top = `${rect.bottom + window.scrollY + 6}px`;
+            // Posiciona el picker relativo al input-group
+            emojiPickerList.style.left = emojiBtn.offsetLeft + 'px';
+            emojiPickerList.style.top = (emojiBtn.offsetTop + emojiBtn.offsetHeight + 6) + 'px';
             emojiPickerList.style.display = 'block';
         });
 
         // Insertar emoji en el input
         emojiPickerList.addEventListener('click', function (e) {
             if (e.target.classList.contains('emoji-pick-btn')) {
-                input.value += e.target.textContent;
+                // Insert at cursor position
+                const emoji = e.target.textContent;
+                const start = input.selectionStart;
+                const end = input.selectionEnd;
+                const text = input.value;
+                input.value = text.slice(0, start) + emoji + text.slice(end);
+                input.selectionStart = input.selectionEnd = start + emoji.length;
                 emojiPickerList.style.display = 'none';
                 input.focus();
             }
         });
+
+        // Ocultar picker al hacer click fuera
+        document.addEventListener('click', function (e) {
+            if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
+                emojiPickerList.style.display = 'none';
+            }
+        });
+    });
 
         // Ocultar picker al hacer click fuera
         document.addEventListener('click', function (e) {
