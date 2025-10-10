@@ -1270,7 +1270,7 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
         
         # Realizar la consulta
         response = client.chat.completions.create(
-            model="gpt-4-vision-preview",
+            model="gpt-4o",
             messages=messages,
             max_tokens=2000
         )
@@ -1300,6 +1300,107 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
         app.logger.error(traceback.format_exc())
         # Fallback a asociación simple
         return asociar_imagenes_productos(servicios, imagenes)
+
+# Nueva función: analiza una imagen (base64) junto con contexto y devuelve texto de respuesta
+def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None, config=None):
+    """
+    Analiza una imagen recibida por WhatsApp y genera una respuesta usando IA.
+    - numero: número del usuario que envió la imagen
+    - imagen_base64: data:image/...;base64,... (string) o None
+    - caption: texto que acompañó la imagen
+    - public_url: ruta pública donde se guardó la imagen (opcional)
+    - config: tenant config opcional
+    Retorna: texto de respuesta (string) o None si falla
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        # 1) Obtener catálogo resumido para contexto (limitado para no exceder tokens)
+        precios = obtener_todos_los_precios(config) or []
+        productos_lines = []
+        for p in precios[:30]:
+            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
+            sku = (p.get('sku') or '').strip()
+            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
+            imagen = p.get('imagen') or ''
+            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio} | Imagen:{imagen}")
+
+        productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos cargados."
+
+        # 2) Construir prompt claro para la IA multimodal
+        system_prompt = (
+            "Eres un asistente que identifica productos y contexto a partir de imágenes recibidas por WhatsApp. "
+            "Usa SOLO la información disponible en el catálogo y el historial para responder al cliente. "
+            "Si la imagen coincide con un producto del catálogo, responde con el nombre del producto, SKU, precio y una breve recomendación. "
+            "Si no puedes identificar, pregunta al usuario por más detalles (por ejemplo: '¿Qué SKU o nombre tiene este producto?'). "
+            "Mantén la respuesta breve y orientada al cliente."
+        )
+
+        user_content = [
+            {"type": "text", "text": f"Usuario: {numero}\nCaption: {caption or ''}\nCatalogo (resumido):\n{productos_texto}"},
+        ]
+
+        # 3) Adjuntar la imagen (si viene base64) para que el modelo la analice
+        if imagen_base64:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": imagen_base64}
+            })
+        elif public_url:
+            # fallback a la URL pública si no hay base64
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": public_url}
+            })
+
+        # 4) Llamada al cliente OpenAI (misma forma que ya usas en otras funciones)
+        client_local = OpenAI(api_key=OPENAI_API_KEY)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+
+        # Preferir modelo multimodal disponible en tu stack (ejemplo re-uso de gpt-4o en el repo)
+        response = client_local.chat.completions.create(
+            model="gpt-4o",  # ajusta si usas otro modelo
+            messages=messages,
+            max_tokens=800,
+            temperature=0.2
+        )
+
+        # Extraer texto resultante
+        text_response = ""
+        try:
+            text_response = response.choices[0].message.content
+            if isinstance(text_response, list):
+                # si viene como estructura multimodal, concatenar textos
+                parts = []
+                for item in text_response:
+                    if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
+                        parts.append(item.get('text'))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                text_response = "\n".join(parts)
+        except Exception:
+            # Fallback a raw string si la estructura es diferente
+            try:
+                text_response = str(response)
+            except:
+                text_response = None
+
+        if not text_response:
+            app.logger.info("ℹ️ IA no devolvió texto útil al analizar la imagen")
+            return None
+
+        # 5) Post-procesado: limpiar espacios excesivos
+        text_response = re.sub(r'\n\s+\n', '\n\n', text_response).strip()
+        return text_response
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en analizar_imagen_y_responder: {e}")
+        app.logger.error(traceback.format_exc())
+        return None
 
 def extraer_texto_archivo(filepath, extension):
     """Extrae texto de diferentes tipos de archivos"""
@@ -1499,62 +1600,6 @@ def extraer_texto_pdf(file_path):
         app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
         return None
 
-def analizar_imagen_con_ia(image_data_base64, config=None):
-    """
-    Analiza una imagen con la IA (GPT-4 Vision / gpt-4-vision-preview).
-    - image_data_base64: puede ser una data URL ("data:image/..;base64,...") o una URL pública accesible.
-    Retorna texto analítico (string) o None en fallo.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        # Use OpenAI client (re-create to avoid state issues)
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        prompt_text = (
-            "Analiza esta imagen y devuelve:\n"
-            "1) Un título corto (1 línea).\n"
-            "2) Una descripción breve (2-3 frases) indicando materiales, estado aparente, colores, "
-            "y cualquier detalle visible.\n"
-            "3) Etiquetas/keywords útiles (lista corta).\n"
-            "4) Texto legible que aparezca en la imagen (si hay) y posibles códigos/SKUs detectables.\n\n"
-            "Responde en español con formato claro y conciso."
-        )
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    { "type": "image_url", "image_url": { "url": image_data_base64 } }
-                ]
-            }
-        ]
-
-        resp = client.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
-            max_tokens=800,
-            temperature=0.0
-        )
-
-        # Response access may differ; keep robust
-        try:
-            content = resp.choices[0].message.content
-        except Exception:
-            # fallback for different client return shape
-            content = getattr(resp.choices[0].message, 'content', None) or str(resp)
-
-        if content:
-            return content.strip()
-        return None
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en analizar_imagen_con_ia: {e}")
-        try:
-            app.logger.debug(traceback.format_exc())
-        except:
-            pass
-        return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
     """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
@@ -4486,22 +4531,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             IA_ESTADOS[numero]['prefiere_voz'] = False
         respuesta = ""
         responder_con_voz = False
-
-        # --- NEW: If user sent an image, analyze it but DO NOT send the analysis immediately.
-        # Instead include the analysis as context when asking the textual IA so it can answer the user's question.
-        analisis_imagen = None
-        if es_imagen and imagen_base64:
-            try:
-                app.logger.info(f"🖼️ Analizando imagen recibida para {numero} con IA vision...")
-                analisis_imagen = analizar_imagen_con_ia(imagen_base64, config)
-                if analisis_imagen:
-                    app.logger.info("✅ Análisis de imagen obtenido (se usará como contexto para la IA textual)")
-                else:
-                    app.logger.info("ℹ️ No se generó análisis de la imagen (respuesta vacía).")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Falló análisis de imagen: {e}")
-                analisis_imagen = None
-
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
             if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
@@ -4510,41 +4539,10 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
 
-            # Build the message we send to the textual IA: if we have image analysis, prepend it as context
-            texto_para_ia = texto
-            if analisis_imagen:
-                # Keep it explicit and short so the model uses it as context
-                texto_para_ia = f"[Contexto - Análisis de imagen]\n{analisis_imagen}\n\n[Pregunta del usuario]\n{texto}"
+            # Obtener respuesta de IA
+            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
 
-            # Obtener respuesta de IA (texto)
-            try:
-                respuesta_ia = responder_con_ia(texto_para_ia, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-            except Exception as e:
-                app.logger.error(f"🔴 Error llamando responder_con_ia: {e}")
-                respuesta_ia = None
-
-            # If textual IA failed or returned generic error, fallback to sending image analysis (if available)
-            if not respuesta_ia or (isinstance(respuesta_ia, str) and respuesta_ia.strip().lower().startswith('lo siento')):
-                if analisis_imagen:
-                    # Send the analysis as the best-effort answer to the user's question
-                    enviar_mensaje(numero, analisis_imagen, config)
-                    actualizar_respuesta(numero, texto, analisis_imagen, config)
-                    app.logger.info(f"ℹ️ Fallback: enviado análisis de imagen a {numero} porque la IA textual falló")
-                    # Also proceed to try image sending flow below (if user explicitly asked for image)
-                    respuesta = analisis_imagen
-                else:
-                    # Pure failure: notify the user gracefully
-                    fallback_msg = "Lo siento, tuve un problema procesando tu imagen. ¿Puedes describir lo que necesitas o intentarlo de nuevo?"
-                    enviar_mensaje(numero, fallback_msg, config)
-                    actualizar_respuesta(numero, texto, fallback_msg, config)
-                    app.logger.info(f"🔴 Fallback genérico enviado a {numero}")
-                    respuesta = fallback_msg
-            else:
-                respuesta = respuesta_ia
-                # Save the textual IA response
-                actualizar_respuesta(numero, texto, respuesta, config)
-
-        # If user explicitly asked for an image (keywords) or IA returned an image markdown/link, try to send the product image
+        # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
         try:
             precios = obtener_todos_los_precios(config)
             sku_encontrado = buscar_sku_en_texto(texto, precios)
@@ -4573,7 +4571,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             if md_match:
                 imagen_encontrada = md_match
 
-            # 4) If response contains "Imagen: filename" pattern
+            # 4) If IA response contains "Imagen: filename" pattern
             if not imagen_encontrada and isinstance(respuesta, str):
                 m = re.search(r'Imagen[:\s]*([^\s,;\)\]]+)', respuesta, re.IGNORECASE)
                 if m:
@@ -4581,7 +4579,8 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             if imagen_encontrada:
                 # Normalize: if it's a relative path like /uploads/productos/..., extract filename
-                imagen_encontrada = os.path.basename(imagen_encontrada.strip())
+                if imagen_encontrada.startswith('/uploads/productos/'):
+                    imagen_encontrada = os.path.basename(imagen_encontrada)
 
                 # Confirm file exists locally or it's an absolute URL
                 file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
@@ -4606,7 +4605,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         if not dominio.startswith('http'):
                             dominio = f"https://{dominio}"
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
-                        enviar_mensaje(numero, f"No pude enviar la imagen automáticamente. Puedes verla aquí: {image_url}", config)
+                        enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
                         guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
                 else:
                     # If imagen_encontrada is an absolute URL, try sending it
@@ -4614,10 +4613,12 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         sent = enviar_imagen(numero, imagen_encontrada, config)
                         if sent:
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
+                            # strip url from textual response
                             if isinstance(respuesta, str):
                                 respuesta = respuesta.replace(imagen_encontrada, '')
                         else:
                             enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                            # Record fallback message as bot text
                             guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
                     else:
                         # Try to find by filename in imagenes_productos table
@@ -4724,7 +4725,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
-
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
@@ -5825,8 +5825,10 @@ def webhook():
             image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
+
             # Guardar mensaje entrante (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+
             # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
             try:
                 meta = obtener_chat_meta(numero, config)
@@ -5835,6 +5837,22 @@ def webhook():
                 actualizar_columna_chat(numero, 2, config)  # En Conversación
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (imagen): {e}")
+
+            # ===== NUEVO: Analizar imagen y responder automáticamente =====
+            try:
+                respuesta_imagen = analizar_imagen_y_responder(numero, imagen_base64, texto, public_url, config)
+                if respuesta_imagen:
+                    # Enviar respuesta textual al usuario
+                    enviar_mensaje(numero, respuesta_imagen, config)
+                    # Guardar la respuesta asociada a la imagen
+                    guardar_conversacion(numero, texto, respuesta_imagen, config, public_url, True)
+                    app.logger.info(f"✅ Respuesta automática (imagen) enviada a {numero}")
+                    return 'OK', 200
+                else:
+                    app.logger.info("ℹ️ No se generó respuesta automática tras analizar la imagen; el flujo continúa normalmente")
+            except Exception as e:
+                app.logger.error(f"🔴 Error al analizar/contestar imagen automáticamente: {e}")
+
         elif 'document' in msg:
             es_archivo = True
             texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
