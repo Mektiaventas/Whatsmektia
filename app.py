@@ -3779,6 +3779,81 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
+# New helpers: enviar_imagen and buscar_sku_en_texto
+def enviar_imagen(numero, imagen_ref, config=None):
+    """
+    Envía una imagen por WhatsApp usando la API de Graph.
+    imagen_ref puede ser:
+      - URL absoluta (empieza con http)
+      - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
+    Retorna True si la API respondió OK.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        if not imagen_ref:
+            app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
+            return False
+
+        # Determinar URL pública
+        if str(imagen_ref).lower().startswith('http'):
+            image_url = imagen_ref
+        else:
+            dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+            # fallback to host-based URL if dominio appears not to be a full domain
+            if not dominio.startswith('http'):
+                image_url = f"https://{dominio}/uploads/productos/{imagen_ref}"
+            else:
+                image_url = f"{dominio}/uploads/productos/{imagen_ref}"
+
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'image',
+            'image': {
+                'link': image_url
+            }
+        }
+
+        app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code == 200:
+            app.logger.info("✅ Imagen enviada correctamente")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando imagen ({r.status_code}): {r.text}")
+            return False
+
+    except Exception as e:
+        app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
+        return False
+
+
+def buscar_sku_en_texto(texto, precios):
+    """
+    Busca un SKU presente en 'precios' dentro de 'texto'.
+    Devuelve el primer SKU encontrado (exact match substring) o None.
+    """
+    if not texto or not precios:
+        return None
+    texto_lower = texto.lower()
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        # Check SKU and modelo presence (case-insensitive)
+        if sku and sku.lower() in texto_lower:
+            return sku
+        if modelo and modelo.lower() in texto_lower:
+            # prefer returning SKU if exists for that product
+            return sku or modelo
+    return None
+
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
@@ -4278,8 +4353,9 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
+# Replace the existing procesar_mensaje_normal function with this enhanced version
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
-    """Procesa mensajes normales (no citas/intervenciones)"""
+    """Procesa mensajes normales (no citas/intervenciones) — ahora envía imagen si el usuario la solicita y existe."""
     try:
         # IA normal
         if numero not in IA_ESTADOS:
@@ -4293,56 +4369,108 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
                 IA_ESTADOS[numero]['prefiere_voz'] = True
                 app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
-            
+
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
-            
+
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-            
+
+        # If user asked explicitly for an image (keywords) try to send the product image
+        try:
+            keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
+            if any(k in texto.lower() for k in keywords_imagen):
+                precios = obtener_todos_los_precios(config)
+                sku_encontrado = buscar_sku_en_texto(texto, precios)
+                imagen_encontrada = None
+                if sku_encontrado:
+                    # Buscar producto por SKU y obtener campo imagen
+                    for p in precios:
+                        if (p.get('sku') or '').strip().lower() == sku_encontrado.lower():
+                            imagen_encontrada = p.get('imagen')
+                            break
+                else:
+                    # si no hay SKU, intentar extraer "Imagen:" desde la respuesta de la IA (si la IA devolvió ruta)
+                    if isinstance(respuesta, str) and 'imagen:' in respuesta.lower():
+                        # sacar último token que parezca filename
+                        m = re.search(r'imagen:\s*([^\s,;]+)', respuesta, re.IGNORECASE)
+                        if m:
+                            imagen_encontrada = m.group(1).strip()
+
+                if imagen_encontrada:
+                    # confirmar existencia en uploads/productos o como URL
+                    # si es filename, verificar archivo
+                    imagen_a_enviar = imagen_encontrada
+                    file_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
+                    if os.path.isfile(file_path):
+                        # enviar la imagen por WhatsApp
+                        sent = enviar_imagen(numero, imagen_encontrada, config)
+                        if sent:
+                            # guardar la conversación indicando que se envió la imagen
+                            guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, f"/uploads/productos/{imagen_encontrada}", True)
+                            app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
+                            # No devolver aquí: dejamos que el flujo continúe y no dupliquemos envíos de texto
+                        else:
+                            # fallback: enviar texto con URL pública
+                            image_url = f"https://{config.get('dominio')}/uploads/productos/{imagen_encontrada}"
+                            enviar_mensaje(numero, f"No pude enviar la imagen automáticamente. Puedes verla aquí: {image_url}", config)
+                    else:
+                        # if imagen_encontrada seems to be URL, try sending it directly
+                        if imagen_encontrada.lower().startswith('http'):
+                            sent = enviar_imagen(numero, imagen_encontrada, config)
+                            if sent:
+                                guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, imagen_encontrada, True)
+                            else:
+                                enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                        else:
+                            # Not a file and not a URL — reply with text pointing to path
+                            enviar_mensaje(numero, f"No encontré la imagen físicamente: {imagen_encontrada}", config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error intentando enviar imagen automática: {e}")
+
         # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
             app.logger.info(f"📎 Procesando archivo enviado por {numero}")
-            
+
             # Obtener el archivo de WhatsApp
             media_id = msg['document']['id']
             filepath, filename, extension = obtener_archivo_whatsapp(media_id, config)
-            
+
             if filepath and extension:
                 # Extraer texto del archivo
                 texto_archivo = extraer_texto_archivo(filepath, extension)
-                
+
                 if texto_archivo:
                     # Determinar tipo de negocio
                     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
                     tipo_negocio = 'laporfirianna' if es_porfirianna else 'mektia'
-                    
+
                     # Analizar con IA
                     analisis = analizar_archivo_con_ia(texto_archivo, tipo_negocio, config)
-                    
+
                     # Construir respuesta
                     respuesta = f"""📎 **He analizado tu archivo** ({filename})
 
 {analisis}
 
 ¿Te gustaría que haga algo específico con esta información?"""
-                    
+
                 else:
                     respuesta = f"❌ No pude extraer texto del archivo {filename}. ¿Podrías describirme qué contiene?"
-                
+
                 # Limpiar archivo temporal
                 try:
                     os.remove(filepath)
                 except:
                     pass
-                
+
             else:
                 respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
-            
+
             # Enviar respuesta y actualizar conversación existente
             enviar_mensaje(numero, respuesta, config)
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
             return
-            
+
         # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
         if responder_con_voz and not es_imagen:
             # Intentar enviar respuesta de voz
@@ -4352,7 +4480,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             if audio_url_local:
                 # URL pública del audio (ajusta según tu configuración)
                 audio_url_publica = f"https://{config.get('dominio', 'smartwhats.mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
-                
+
                 if enviar_mensaje_voz(numero, audio_url_publica, config):
                     app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
                 else:
@@ -4365,23 +4493,24 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             # Respuesta normal de texto
             enviar_mensaje(numero, respuesta, config)
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
-            
+
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
             resumen = resumen_rafa(numero, config)
             enviar_alerta_humana(numero, texto, resumen, config)
-        
+
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
         if not meta:
             inicializar_chat_meta(numero, config)
-        
+
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
         actualizar_columna_chat(numero, nueva_columna, config)
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
+
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
