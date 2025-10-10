@@ -857,6 +857,8 @@ def importar_productos_desde_excel(filepath, config=None):
                 # Convertir fila a diccionario
                 producto = {}
                 for campo in campos_esperados:
+                    if 'imagen' in df.columns and row['imagen']:
+                        producto['imagen'] = row['imagen']
                     if idx < len(imagenes_nombres):
                         producto['imagen'] = imagenes_nombres[idx]
                     if campo in df.columns:
