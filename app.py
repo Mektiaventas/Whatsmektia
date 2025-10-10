@@ -809,8 +809,12 @@ def importar_excel_directo():
             filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
             filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
             file.save(filepath)
+            # After file.save(filepath)
+            imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+            app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
+            app.logger.info(f"📄 Excel guardado: {filepath}")
             
-            # Procesar el archivo Excel (esta función ahora guarda las imágenes)
+            # Procesar el archivo Excel
             productos_importados = importar_productos_desde_excel(filepath, config)
             
             # Eliminar el archivo temporal
@@ -820,7 +824,7 @@ def importar_excel_directo():
                 pass
                 
             if productos_importados > 0:
-                flash(f'✅ {productos_importados} productos importados exitosamente con sus imágenes', 'success')
+                flash(f'✅ {productos_importados} productos importados exitosamente', 'success')
             else:
                 flash('⚠️ No se pudieron importar productos. Revisa el formato del archivo.', 'warning')
                 
@@ -834,73 +838,6 @@ def importar_excel_directo():
         app.logger.error(traceback.format_exc())
         flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
         return redirect(url_for('configuracion_precios'))
-
-def guardar_metadatos_imagen(producto_sku, imagen_info, config=None):
-    """Guarda los metadatos de una imagen en la base de datos"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO imagenes_productos (
-                producto_sku, nombre_archivo, ruta_archivo, 
-                hoja_excel, fila_excel, columna_excel
-            ) VALUES (%s, %s, %s, %s, %s, %s)
-        ''', (
-            producto_sku,
-            imagen_info['filename'],
-            imagen_info['path'],
-            imagen_info.get('sheet', ''),
-            imagen_info.get('row'),
-            imagen_info.get('col')
-        ))
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"✅ Metadatos de imagen guardados para SKU: {producto_sku}")
-        return True
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error guardando metadatos de imagen: {e}")
-        return False
-
-def crear_tabla_imagenes_productos(config=None):
-    """Crea una tabla para almacenar metadatos de las imágenes de productos"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS imagenes_productos (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                producto_sku VARCHAR(100),
-                nombre_archivo VARCHAR(255),
-                ruta_archivo VARCHAR(500),
-                hoja_excel VARCHAR(100),
-                fila_excel INT,
-                columna_excel INT,
-                fecha_importacion DATETIME DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (producto_sku) REFERENCES precios(sku) ON DELETE CASCADE,
-                INDEX idx_sku (producto_sku),
-                INDEX idx_archivo (nombre_archivo)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-        ''')
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info("✅ Tabla imagenes_productos creada/verificada")
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error creando tabla imagenes_productos: {e}")
 
 def importar_productos_desde_excel(filepath, config=None):
     """Importa productos directamente desde un archivo Excel, ahora asigna imágenes por columna o por ancla (fila) con fallback por orden."""
@@ -950,44 +887,18 @@ def importar_productos_desde_excel(filepath, config=None):
 
         app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
 
-        # Extraer imágenes embebidas
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
-        
-        # Crear directorio para imágenes si no existe
-        img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-        os.makedirs(img_dir, exist_ok=True)
-        
-        # Mover imágenes al directorio de productos y crear mapa de imágenes
+        # Build map by (sheet, row)
         images_map = {}
         for img in imagenes_embedded:
-            try:
-                # Definir nuevo nombre de archivo
-                nuevo_filename = f"producto_{img['sheet']}_{img.get('row', '')}_{img['filename']}"
-                nuevo_path = os.path.join(img_dir, nuevo_filename)
-                
-                # Mover imagen al directorio de productos
-                import shutil
-                shutil.copy2(img['path'], nuevo_path)
-                
-                # Actualizar el path en el diccionario
-                img['path'] = nuevo_path
-                img['filename'] = nuevo_filename
-                
-                # Agregar al mapa usando (sheet, row) como clave
-                s = img.get('sheet')
-                r = img.get('row')
-                if r is not None:
-                    images_map[(s, r)] = nuevo_filename
-                    
-                app.logger.info(f"✅ Imagen movida a: {nuevo_filename}")
-                
-            except Exception as e:
-                app.logger.error(f"❌ Error moviendo imagen {img['filename']}: {e}")
-                continue
+            s = img.get('sheet')
+            r = img.get('row')
+            if r is not None:
+                images_map[(s, r)] = img['filename']
 
         app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)} ; imágenes con ancla: {len(images_map)}")
 
-        # Si no hay imágenes con anclas, usar asignación por índice
+        # If no images had anchors, we'll fallback to index-based assignment
         fallback_by_index = []
         if not images_map and imagenes_embedded:
             fallback_by_index = [img['filename'] for img in imagenes_embedded]
@@ -1111,7 +1022,6 @@ def importar_productos_desde_excel(filepath, config=None):
 
                 productos_importados += 1
                 app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}... imagen={producto.get('imagen')}")
-                
             except Exception as e:
                 app.logger.error(f"Error procesando fila {idx}: {e}")
                 app.logger.error(traceback.format_exc())
@@ -7114,5 +7024,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    crear_tabla_imagenes_productos()
     app.run(host='0.0.0.0', port=args.port)
