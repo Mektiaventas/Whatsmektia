@@ -3544,7 +3544,7 @@ def obtener_precio(servicio_nombre: str, config):
     conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT precio, moneda
+        SELECT precio_mayoreo, precio_menudeo
         FROM precios
         WHERE LOWER(servicio)=LOWER(%s)
         LIMIT 1;
@@ -3605,51 +3605,96 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # Format products for the system prompt (robust against missing keys)
+    # Format products using the canonical DB fields (sku, categoria, subcategoria, linea, modelo, descripcion, medidas,
+    # costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor)
     productos_formateados = []
-    for p in precios[:20]:  # Limit to 20 products to avoid token limits
+    for p in precios[:40]:  # limit to 40 to avoid huge prompts
         try:
-            nombre = (p.get('servicio') or p.get('descripcion') or p.get('sku') or 'Sin nombre').strip()
+            sku = (p.get('sku') or '').strip()
+            modelo = (p.get('modelo') or '').strip()
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = (p.get('categoria') or '').strip()
+            subcategoria = (p.get('subcategoria') or '').strip()
+            linea = (p.get('linea') or '').strip()
+            descripcion_p = (p.get('descripcion') or '').strip()
+            medidas = (p.get('medidas') or '').strip()
+            proveedor = (p.get('proveedor') or '').strip()
+            status = (p.get('status_ws') or 'activo').strip()
+            catalogo = (p.get('catalogo') or '')
+            imagen = (p.get('imagen') or '')
+            
+            # Prices: prefer precio_menudeo, fallback to precio_mayoreo or costo
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+            precio_mayoreo = p.get('precio_mayoreo') or None
+            costo = p.get('costo') or None
+
+            precio_str = ''
+            if precio_menudeo:
+                try:
+                    precio_str = f"${float(precio_menudeo):,.2f}"
+                except Exception:
+                    precio_str = str(precio_menudeo)
+            elif precio_mayoreo:
+                try:
+                    precio_str = f"mayoreo ${float(precio_mayoreo):,.2f}"
+                except Exception:
+                    precio_str = str(precio_mayoreo)
+            elif costo:
+                try:
+                    precio_str = f"costo ${float(costo):,.2f}"
+                except Exception:
+                    precio_str = str(costo)
+
+            parts = [f"{titulo}"]
+            if sku:
+                parts.append(f"(SKU: {sku})")
+            if categoria:
+                parts.append(f"Categoria: {categoria}")
+            if subcategoria:
+                parts.append(f"Subcategoria: {subcategoria}")
+            if linea:
+                parts.append(f"Linea: {linea}")
+            if precio_str:
+                parts.append(f"Precio: {precio_str}")
+            if medidas:
+                parts.append(f"Medidas: {medidas}")
+            if proveedor:
+                parts.append(f"Proveedor: {proveedor}")
+            if catalogo:
+                parts.append(f"Catalogo: {catalogo}")
+            if imagen:
+                parts.append(f"Imagen: {imagen}")
+            if descripcion_p:
+                # keep description short in the prompt
+                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+
+            producto_line = " | ".join(parts)
+            producto_line += f" | Status: {status}"
         except Exception:
-            nombre = 'Sin nombre'
-        info = f"- {nombre}"
-        descripcion_p = p.get('descripcion')
-        if descripcion_p:
-            info += f": {str(descripcion_p)[:100]}"
-        if p.get('categoria'):
-            info += f" (Categoría: {p.get('categoria')})"
-        # precios pueden venir en distintos nombres; usamos get con fallback
-        precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('precio_venta')
-        moneda = p.get('moneda') or 'MXN'
-        if precio_menudeo:
-            try:
-                info += f" - ${float(precio_menudeo):,.2f} {moneda}"
-            except Exception:
-                info += f" - {precio_menudeo} {moneda}"
-        productos_formateados.append(info)
+            producto_line = "Sin datos legibles de producto"
+        productos_formateados.append(f"- {producto_line}")
     
     productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 20:
-        productos_texto += f"\n... y {len(precios) - 20} productos/servicios más."
+    if len(precios) > 40:
+        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
-    # Enhanced system prompt with product information
+    # Enhanced system prompt with product information (uses canonical DB fields)
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
 
-PRODUCTOS Y SERVICIOS DISPONIBLES:
+Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+
 {productos_texto}
 
-Habla de manera natural y amigable, basándote siempre en la información proporcionada.
-Si el usuario pregunta por un producto o servicio específico, bríndale todos los detalles que conoces.
-Si el usuario pregunta por algo que no está en la lista, responde amablemente que no tienes esa información.
+Reglas:
+- Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
+- Siempre indica si la información no está disponible en la base de datos.
+- Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
+- No inventes descuentos, existencias ni detalles no presentes en los campos.
+- Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
 
-Si el usuario muestra interés en agendar una cita o solicitar un servicio, pregúntale:
-1. Qué servicio específico le interesa
-2. Para qué fecha y hora le gustaría agendar
-3. Su nombre completo para registrar la cita
-
-Si el usuario proporciona estos detalles, confírmale que su cita será procesada.
+Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
 """
 
     historial = obtener_historial(numero, config=config)
@@ -3673,18 +3718,13 @@ Si el usuario proporciona estos detalles, confírmale que su cita será procesad
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
     
-    # Define messages_chain correctly
+    # Build messages chain (system + history + current)
     messages_chain = [{'role': 'system', 'content': system_prompt}]
-    
-    # Filter out messages with NULL or empty content
     for entry in historial:
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-    
-    # Add the current message (if valid)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
             messages_chain.append({
@@ -3712,49 +3752,24 @@ Si el usuario proporciona estos detalles, confírmale que su cita será procesad
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
-        if es_imagen:
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages_chain,
-                "temperature": 0.7,
-                "max_tokens": 1000,
-            }
-            
-            app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
-            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
-        
-        else:
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages_chain,
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
-    
+        # Use DeepSeek for regular responses (existing behavior)
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages_chain,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        respuesta = data['choices'][0]['message']['content'].strip()
+        respuesta = aplicar_restricciones(respuesta, numero, config)
+        return respuesta
+
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 API error: {e}")
         if hasattr(e, 'response') and e.response:
