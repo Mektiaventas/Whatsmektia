@@ -6310,79 +6310,99 @@ def configuracion_precio_editar(pid):
 def configuracion_precio_guardar():
     config = obtener_configuracion_por_host()
     data = request.form.to_dict()
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    
-    # Process price fields - convert empty strings to None (NULL in database)
-    for field in ['precio', 'precio_mayoreo', 'precio_menudeo']:
-        if data.get(field) == '':
-            data[field] = None
-    
-    # Handle image upload
-    imagen_nombre = None
-    if 'imagen' in request.files and request.files['imagen'].filename:
-        # Handle file upload (priority over URL)
-        file = request.files['imagen']
-        # Create a secure filename with timestamp to avoid duplicates
-        filename = secure_filename(f"{int(time.time())}_{file.filename}")
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        file.save(filepath)
-        imagen_nombre = filename
-        # Update the data dictionary with the new image filename
-        data['imagen'] = imagen_nombre
-    elif data.get('imagen_url') and data.get('imagen_url').strip():
-        # Handle image URL
-        imagen_url = data.get('imagen_url').strip()
-        # Use the URL directly as the image source
-        imagen_nombre = imagen_url
-        data['imagen'] = imagen_url
-    
-    campos = [
-        'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
-        'descripcion', 'medidas', 'precio', 'precio_mayoreo', 'precio_menudeo',
-        'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
-    ]
-    valores = [data.get(campo) for campo in campos]
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
 
-    if data.get('id'):
-        # For update, only change image if a new one was uploaded
-        if not imagen_nombre:
-            # Remove imagen from the query if no new image was uploaded
-            update_fields = campos.copy()
-            update_values = valores.copy()
-            if 'imagen' in update_fields:
-                idx = update_fields.index('imagen')
-                update_fields.pop(idx)
-                update_values.pop(idx)
-            
-            # Build the update query without the image field
-            sql = f"""
-                UPDATE precios SET 
-                {', '.join([f"{field}=%s" for field in update_fields])}
-                WHERE id=%s
-            """
-            cursor.execute(sql, update_values + [data['id']])
+        # Process numeric price fields coming from form (empty -> None)
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo']:
+            if f in data and data.get(f, '').strip() == '':
+                data[f] = None
+
+        # Handle image upload (priority over URL)
+        imagen_nombre = None
+        if 'imagen' in request.files and request.files['imagen'].filename:
+            file = request.files['imagen']
+            filename = secure_filename(f"{int(time.time())}_{file.filename}")
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            file.save(filepath)
+            imagen_nombre = filename
+            data['imagen'] = imagen_nombre
+        elif data.get('imagen_url') and data.get('imagen_url').strip():
+            imagen_url = data.get('imagen_url').strip()
+            imagen_nombre = imagen_url
+            data['imagen'] = imagen_url
+
+        # Candidate fields in expected order (prefer form names)
+        candidate_fields = [
+            'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
+            'descripcion', 'medidas', 'costo', 'precio', 'precio_mayoreo', 'precio_menudeo',
+            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+        ]
+
+        # Get actual columns from DB and keep intersection (respect DB schema)
+        cursor.execute("SHOW COLUMNS FROM precios")
+        existing_cols = [row[0] for row in cursor.fetchall()]
+
+        # Fields we will actually use (preserve order)
+        fields_to_use = [f for f in candidate_fields if f in existing_cols]
+
+        if not fields_to_use:
+            app.logger.error("❌ Ninguna de las columnas del formulario existe en la tabla 'precios'")
+            flash('❌ Error interno: columnas no coinciden con la tabla de precios', 'error')
+            return redirect(url_for('configuracion_precios'))
+
+        # Build values array from data (use None when missing)
+        values = [data.get(f) for f in fields_to_use]
+
+        # If updating existing record
+        if data.get('id'):
+            pid = data.get('id')
+            # For update, exclude id and only update provided columns
+            set_parts = []
+            set_values = []
+            for i, f in enumerate(fields_to_use):
+                set_parts.append(f"{f}=%s")
+                set_values.append(values[i])
+            sql = f"UPDATE precios SET {', '.join(set_parts)} WHERE id=%s"
+            cursor.execute(sql, set_values + [pid])
+            conn.commit()
+            flash('✅ Producto actualizado correctamente', 'success')
+            app.logger.info(f"✅ Precio actualizado (id={pid}) campos: {fields_to_use}")
         else:
-            cursor.execute("""
-                UPDATE precios SET
-                    sku=%s, servicio=%s, categoria=%s, subcategoria=%s, linea=%s, modelo=%s,
-                    descripcion=%s, medidas=%s, precio=%s, precio_mayoreo=%s, precio_menudeo=%s,
-                    moneda=%s, imagen=%s, status_ws=%s, catalogo=%s, catalogo2=%s, catalogo3=%s, proveedor=%s
-                WHERE id=%s;
-            """, valores + [data['id']])
-    else:
-        cursor.execute("""
-            INSERT INTO precios (
-                sku, servicio, categoria, subcategoria, linea, modelo,
-                descripcion, medidas, precio, precio_mayoreo, precio_menudeo,
-                moneda, imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-            ) VALUES ({});
-        """.format(','.join(['%s']*18)), valores)
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-    return redirect(url_for('configuracion_precios'))
+            # Insert: build placeholder list
+            placeholders = ','.join(['%s'] * len(fields_to_use))
+            cols = ','.join(fields_to_use)
+            sql = f"INSERT INTO precios ({cols}) VALUES ({placeholders})"
+            cursor.execute(sql, values)
+            conn.commit()
+            flash('✅ Producto agregado correctamente', 'success')
+            app.logger.info(f"✅ Nuevo producto insertado campos: {fields_to_use}")
+
+        return redirect(url_for('configuracion_precios'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en configuracion_precio_guardar: {e}")
+        app.logger.error(traceback.format_exc())
+        flash(f'❌ Error guardando producto: {str(e)}', 'error')
+        try:
+            if conn:
+                conn.rollback()
+        except:
+            pass
+        return redirect(url_for('configuracion_precios'))
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except:
+            pass
+
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
         config = obtener_configuracion_por_host()
