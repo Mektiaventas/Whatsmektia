@@ -1499,6 +1499,63 @@ def extraer_texto_pdf(file_path):
         app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
         return None
 
+def analizar_imagen_con_ia(image_data_base64, config=None):
+    """
+    Analiza una imagen con la IA (GPT-4 Vision / gpt-4-vision-preview).
+    - image_data_base64: puede ser una data URL ("data:image/..;base64,...") o una URL pública accesible.
+    Retorna texto analítico (string) o None en fallo.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        # Use OpenAI client (re-create to avoid state issues)
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        prompt_text = (
+            "Analiza esta imagen y devuelve:\n"
+            "1) Un título corto (1 línea).\n"
+            "2) Una descripción breve (2-3 frases) indicando materiales, estado aparente, colores, "
+            "y cualquier detalle visible.\n"
+            "3) Etiquetas/keywords útiles (lista corta).\n"
+            "4) Texto legible que aparezca en la imagen (si hay) y posibles códigos/SKUs detectables.\n\n"
+            "Responde en español con formato claro y conciso."
+        )
+
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    { "type": "image_url", "image_url": { "url": image_data_base64 } }
+                ]
+            }
+        ]
+
+        resp = client.chat.completions.create(
+            model="gpt-4-vision-preview",
+            messages=messages,
+            max_tokens=800,
+            temperature=0.0
+        )
+
+        # Response access may differ; keep robust
+        try:
+            content = resp.choices[0].message.content
+        except Exception:
+            # fallback for different client return shape
+            content = getattr(resp.choices[0].message, 'content', None) or str(resp)
+
+        if content:
+            return content.strip()
+        return None
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en analizar_imagen_con_ia: {e}")
+        try:
+            app.logger.debug(traceback.format_exc())
+        except:
+            pass
+        return None
+
 def analizar_pdf_servicios(texto_pdf, config=None):
     """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
     if config is None:
@@ -4429,6 +4486,25 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             IA_ESTADOS[numero]['prefiere_voz'] = False
         respuesta = ""
         responder_con_voz = False
+
+         # --- NEW: If user sent an image, ask the vision model for an analysis first ---
+        if es_imagen and imagen_base64:
+            try:
+                app.logger.info(f"🖼️ Analizando imagen recibida para {numero} con IA vision...")
+                analisis_imagen = analizar_imagen_con_ia(imagen_base64, config)
+                if analisis_imagen:
+                    # Guardar la analítica como respuesta del bot asociada al mensaje entrante
+                    actualizar_respuesta(numero, texto, analisis_imagen, config)
+                    # Enviar la analítica al usuario antes de cualquier respuesta textual normal
+                    enviar_mensaje(numero, analisis_imagen, config)
+                    app.logger.info(f"✅ Análisis de imagen enviado a {numero}")
+                    # We continue: we still ask la IA textual si corresponde, but avoid duplicar the image text below.
+                else:
+                    app.logger.info("ℹ️ No se generó análisis de la imagen (respuesta vacía).")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Falló análisis de imagen: {e}")
+
+
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
             if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
