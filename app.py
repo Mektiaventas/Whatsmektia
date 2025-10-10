@@ -4375,55 +4375,99 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
 
-        # If user asked explicitly for an image (keywords) try to send the product image
+        # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
         try:
-            keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
-            if any(k in texto.lower() for k in keywords_imagen):
-                precios = obtener_todos_los_precios(config)
-                sku_encontrado = buscar_sku_en_texto(texto, precios)
-                imagen_encontrada = None
-                if sku_encontrado:
-                    # Buscar producto por SKU y obtener campo imagen
-                    for p in precios:
-                        if (p.get('sku') or '').strip().lower() == sku_encontrado.lower():
-                            imagen_encontrada = p.get('imagen')
-                            break
-                else:
-                    # si no hay SKU, intentar extraer "Imagen:" desde la respuesta de la IA (si la IA devolvió ruta)
-                    if isinstance(respuesta, str) and 'imagen:' in respuesta.lower():
-                        # sacar último token que parezca filename
-                        m = re.search(r'imagen:\s*([^\s,;]+)', respuesta, re.IGNORECASE)
-                        if m:
-                            imagen_encontrada = m.group(1).strip()
+            precios = obtener_todos_los_precios(config)
+            sku_encontrado = buscar_sku_en_texto(texto, precios)
+            imagen_encontrada = None
 
-                if imagen_encontrada:
-                    # confirmar existencia en uploads/productos o como URL
-                    # si es filename, verificar archivo
-                    imagen_a_enviar = imagen_encontrada
-                    file_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
-                    if os.path.isfile(file_path):
-                        # enviar la imagen por WhatsApp
+            # 1) Detect markdown image syntax in IA response: ![alt](file_or_url)
+            md_match = None
+            if isinstance(respuesta, str):
+                md = re.search(r'!\[.*?\]\(([^)]+)\)', respuesta)
+                if md:
+                    md_match = md.group(1).strip()
+                    app.logger.info(f"🔍 Markdown image detected in IA response: {md_match}")
+
+            # 2) If user asked (keywords), try to find SKU and image
+            keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
+            user_asked_image = any(k in texto.lower() for k in keywords_imagen)
+
+            if user_asked_image and sku_encontrado:
+                # Buscar producto por SKU y obtener campo imagen
+                for p in precios:
+                    if (p.get('sku') or '').strip().lower() == sku_encontrado.lower():
+                        imagen_encontrada = p.get('imagen')
+                        break
+
+            # 3) Prefer the markdown/image returned by IA (it may include filename or URL)
+            if md_match:
+                imagen_encontrada = md_match
+
+            # 4) If IA response contains "Imagen: filename" pattern
+            if not imagen_encontrada and isinstance(respuesta, str):
+                m = re.search(r'Imagen[:\s]*([^\s,;\)\]]+)', respuesta, re.IGNORECASE)
+                if m:
+                    imagen_encontrada = m.group(1).strip()
+
+            if imagen_encontrada:
+                # Normalize: if it's a relative path like /uploads/productos/..., extract filename
+                if imagen_encontrada.startswith('/uploads/productos/'):
+                    imagen_encontrada = os.path.basename(imagen_encontrada)
+
+                # Confirm file exists locally or it's an absolute URL
+                file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
+                file_path_root = os.path.join(UPLOAD_FOLDER, imagen_encontrada)
+
+                sent = False
+                if os.path.isfile(file_path_local) or os.path.isfile(file_path_root):
+                    # send image by WhatsApp (Graph API image message with link)
+                    sent = enviar_imagen(numero, imagen_encontrada, config)
+                    if sent:
+                        public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
+                        guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, public_path, True)
+                        app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
+                        # Remove image reference from textual response to avoid sending path
+                        if isinstance(respuesta, str):
+                            respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)  # remove markdown
+                            respuesta = re.sub(re.escape(imagen_encontrada), '', respuesta)
+                    else:
+                        # fallback: send text with public URL
+                        dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+                        if not dominio.startswith('http'):
+                            dominio = f"https://{dominio}"
+                        image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
+                        enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
+                        guardar_conversacion(numero, texto, f"[Imagen (URL) enviada: {image_url}]", config, image_url, True)
+                else:
+                    # If imagen_encontrada is an absolute URL, try sending it
+                    if imagen_encontrada.lower().startswith('http'):
                         sent = enviar_imagen(numero, imagen_encontrada, config)
                         if sent:
-                            # guardar la conversación indicando que se envió la imagen
-                            guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, f"/uploads/productos/{imagen_encontrada}", True)
-                            app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
-                            # No devolver aquí: dejamos que el flujo continúe y no dupliquemos envíos de texto
+                            guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, imagen_encontrada, True)
+                            # strip url from textual response
+                            if isinstance(respuesta, str):
+                                respuesta = respuesta.replace(imagen_encontrada, '')
                         else:
-                            # fallback: enviar texto con URL pública
-                            image_url = f"https://{config.get('dominio')}/uploads/productos/{imagen_encontrada}"
-                            enviar_mensaje(numero, f"No pude enviar la imagen automáticamente. Puedes verla aquí: {image_url}", config)
+                            enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
                     else:
-                        # if imagen_encontrada seems to be URL, try sending it directly
-                        if imagen_encontrada.lower().startswith('http'):
-                            sent = enviar_imagen(numero, imagen_encontrada, config)
-                            if sent:
-                                guardar_conversacion(numero, texto, f"[Imagen enviada: {imagen_encontrada}]", config, imagen_encontrada, True)
-                            else:
-                                enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                        # Try to find by filename in imagenes_productos table
+                        imgs = obtener_imagenes_por_sku(sku_encontrado, config) if sku_encontrado else []
+                        if imgs:
+                            first = imgs[0].get('filename')
+                            if first:
+                                sent = enviar_imagen(numero, first, config)
+                                if sent:
+                                    public_path = f"/uploads/productos/{first}"
+                                    guardar_conversacion(numero, texto, f"[Imagen enviada: {first}]", config, public_path, True)
+                                    if isinstance(respuesta, str):
+                                        respuesta = respuesta.replace(imagen_encontrada, first)
                         else:
-                            # Not a file and not a URL — reply with text pointing to path
-                            enviar_mensaje(numero, f"No encontré la imagen físicamente: {imagen_encontrada}", config)
+                            # No local image found; inform user
+                            app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
+                            # leave respuesta untouched so IA text explains missing image
+            else:
+                app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
         except Exception as e:
             app.logger.warning(f"⚠️ Error intentando enviar imagen automática: {e}")
 
