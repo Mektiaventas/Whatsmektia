@@ -33,7 +33,19 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
-from openpyxl.utils import coordinate_from_string, column_index_from_string
+try:
+    # preferred location
+    from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+except Exception:
+    # fallback for other openpyxl layouts: column_index_from_string may still be available
+    from openpyxl.utils import column_index_from_string
+    import re
+    def coordinate_from_string(coord):
+        """Simple fallback parser for coordinates like 'A1' -> ('A', 1)."""
+        m = re.match(r'^([A-Za-z]+)(\d+)$', str(coord).strip())
+        if not m:
+            raise ValueError(f"Invalid coordinate: {coord}")
+        return m.group(1), int(m.group(2))
 
 
 processed_messages = {}
