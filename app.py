@@ -952,14 +952,13 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
 
 
 def importar_productos_desde_excel(filepath, config=None):
-    """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
+    """Importa productos desde Excel; mejora mapeo de imágenes para evitar desfases."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
         extension = os.path.splitext(filepath)[1].lower()
         if extension in ['.xlsx', '.xls']:
-            # Leer con pandas (primera hoja) pero también cargar workbook para filas reales
             df = pd.read_excel(filepath, sheet_name=0, dtype=str)
             wb = openpyxl.load_workbook(filepath, data_only=True)
             sheet = wb[wb.sheetnames[0]]
@@ -1016,7 +1015,7 @@ def importar_productos_desde_excel(filepath, config=None):
             else:
                 app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
 
-        # Preparar conexión BD y tabla imagenes_productos
+        # Guardar metadatos imágenes (crea tabla si hace falta)
         conn = get_db_connection(config)
         cursor = conn.cursor()
         try:
@@ -1037,40 +1036,33 @@ def importar_productos_desde_excel(filepath, config=None):
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo asegurar tabla imagenes_productos: {e}")
 
-        # Insert metadata imágenes
-        try:
-            for img in imagenes_embedded:
-                try:
-                    cursor.execute("""
-                        INSERT INTO imagenes_productos (sku, filename, path, sheet, row_num, col_num)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                        ON DUPLICATE KEY UPDATE
-                            path=VALUES(path),
-                            sheet=VALUES(sheet),
-                            row_num=VALUES(row_num),
-                            col_num=VALUES(col_num),
-                            created_at = CURRENT_TIMESTAMP
-                    """, (None, img.get('filename'), img.get('path'), img.get('sheet'), img.get('row'), img.get('col')))
-                except Exception as e:
-                    app.logger.warning(f"⚠️ Error insertando metadato imagen {img.get('filename')}: {e}")
-            conn.commit()
-            app.logger.info(f"🗄️ Metadatos de {len(imagenes_embedded)} imágenes guardados/actualizados en BD")
-        except Exception as e:
-            app.logger.error(f"🔴 Error guardando metadatos de imágenes: {e}")
+        for img in imagenes_embedded:
+            try:
+                cursor.execute("""
+                    INSERT INTO imagenes_productos (sku, filename, path, sheet, row_num, col_num)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    ON DUPLICATE KEY UPDATE
+                        path=VALUES(path),
+                        sheet=VALUES(sheet),
+                        row_num=VALUES(row_num),
+                        col_num=VALUES(col_num),
+                        created_at = CURRENT_TIMESTAMP
+                """, (None, img.get('filename'), img.get('path'), img.get('sheet'), img.get('row'), img.get('col')))
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error insertando metadato imagen {img.get('filename')}: {e}")
+        conn.commit()
 
-        # Construir map por (sheet, row) usando anclas detectadas
-        images_map = {}
-        images_by_sheet = {}
+        # --- Construir estructuras para mapeo robusto ---
+        images_map = {}            # map (sheet, row) -> filename
+        images_by_sheet = {}       # sheet -> list(img dict)
         for img in imagenes_embedded:
             s = img.get('sheet')
             r = img.get('row')
             c = img.get('col')
             images_by_sheet.setdefault(s, []).append(img)
             if r is not None:
-                # Si ya hay imagen para la fila, convertir en lista (múltiples imágenes por fila)
-                key = (s, r)
+                key = (s, int(r))
                 if key in images_map:
-                    # convertir a lista si necesario
                     existing = images_map[key]
                     if isinstance(existing, list):
                         existing.append(img['filename'])
@@ -1079,106 +1071,150 @@ def importar_productos_desde_excel(filepath, config=None):
                 else:
                     images_map[key] = img['filename']
 
-        app.logger.info(f"🖼️ Imágenes con ancla detectadas: {len([k for k in images_map.keys()])}")
-
-        # Si no hay anchors, fallback_by_index contiene filenames en orden
         fallback_by_index = []
         if imagenes_embedded and not images_map:
             fallback_by_index = [img['filename'] for img in imagenes_embedded]
-            app.logger.info(f"⚠️ No se detectaron anclas; usando fallback por orden con {len(fallback_by_index)} imágenes")
+            app.logger.info(f"⚠️ No se detectaron anclas; fallback por orden con {len(fallback_by_index)} imágenes")
 
-        # Determinar header_row robustamente para mapear df rows -> hoja rows
-        header_row = None
-        header_candidates = []
-        expected_cols = set([k for k in column_mapping.values()])
-
+        # Determinar header_row y columnas index para sku/modelo (si sheet disponible)
+        header_row = 1
+        sku_col_idx = None
+        modelo_col_idx = None
         if sheet is not None:
-            # buscar en las primeras 15 filas la fila que contenga la mayoría de headers
+            expected_cols = set(column_mapping.values())
+            header_candidates = []
             for r in range(1, min(20, sheet.max_row) + 1):
                 row_vals = [str(cell.value).lower().strip() if cell.value is not None else '' for cell in sheet[r]]
                 matched = sum(1 for v in row_vals if v in expected_cols or v in column_mapping.keys())
                 header_candidates.append((r, matched, row_vals))
-            # elegir fila con mayor matched (>0)
             header_candidates.sort(key=lambda x: (-x[1], x[0]))
             if header_candidates and header_candidates[0][1] > 0:
                 header_row = header_candidates[0][0]
                 app.logger.info(f"🔎 Header row detectada en hoja '{sheet_name}': {header_row} (matches={header_candidates[0][1]})")
+                # localizar indice de columna por nombre (1-based)
+                header_cells = sheet[header_row]
+                for idx, cell in enumerate(header_cells, start=1):
+                    val = (str(cell.value).lower().strip() if cell.value is not None else '')
+                    if val in ('sku', 'codigo', 'codigo sku') and sku_col_idx is None:
+                        sku_col_idx = idx
+                    if val in ('modelo', 'servicio', 'nombre', 'producto') and modelo_col_idx is None:
+                        modelo_col_idx = idx
             else:
-                header_row = 1
                 app.logger.info(f"ℹ️ No se detectó header claro en '{sheet_name}', usando header_row=1")
+                header_row = 1
         else:
             header_row = 1
 
-        # Preparar filas de datos: construir lista de excel_row_numbers correspondientes a df rows
-        df = df.fillna('')  # evitar NaN
+        # Preparar lista de filas de datos en la hoja (excel row numbers)
+        df = df.fillna('')
         data_excel_rows = []
-        # iterar filas en hoja y construir lista de filas que contienen datos (no vacías) a partir de header_row+1
         if sheet is not None:
             for r in range(header_row + 1, sheet.max_row + 1):
-                # construir indicador si la fila tiene contenido útil
                 row_cells = sheet[r]
                 has_content = any((cell.value is not None and str(cell.value).strip() != '') for cell in row_cells)
                 if has_content:
                     data_excel_rows.append(r)
-            # si no detectamos filas (sheets vacías), fallback map por índice simple
             if not data_excel_rows:
-                # asumir filas consecutivas tras header
                 data_excel_rows = list(range(header_row + 1, header_row + 1 + len(df)))
         else:
-            # csv: simplemente map 1..n
             data_excel_rows = list(range(2, 2 + len(df)))
 
-        app.logger.info(f"📑 Data rows detected (count): {len(data_excel_rows)}; df rows: {len(df)}")
+        # Filas que contienen identificador (sku o modelo) - para alinear imágenes por índice de forma más fiable
+        rows_with_id = []
+        if sheet is not None:
+            for r in data_excel_rows:
+                sku_val = sheet.cell(row=r, column=sku_col_idx).value if sku_col_idx else None
+                modelo_val = sheet.cell(row=r, column=modelo_col_idx).value if modelo_col_idx else None
+                if (sku_val and str(sku_val).strip()) or (modelo_val and str(modelo_val).strip()):
+                    rows_with_id.append(r)
+            # Fallback: si no hay filas con id, usar todas las data_excel_rows
+            if not rows_with_id:
+                rows_with_id = list(data_excel_rows)
+        else:
+            # CSV fallback: align by index using 0-based df rows
+            rows_with_id = list(range(2, 2 + len(df)))
 
-        # Insert/update productos: mapear por fila excel usando data_excel_rows
+        app.logger.info(f"📑 Data rows: {len(data_excel_rows)}, rows with id: {len(rows_with_id)}, images with anchors: {len(images_map)}")
+
+        # Construir mapa final row_num -> filename con heurísticas:
+        row_to_image = {}
+
+        # 1) Asignar imágenes con ancla exacta (sheet,row)
+        for (s, r), fname in list(images_map.items()):
+            if s == sheet_name and r in data_excel_rows:
+                row_to_image[r] = fname
+
+        # 2) Asignar imágenes que tengan columna info: buscar en esa columna la fila de datos más cercana con contenido
+        for img in imagenes_embedded:
+            if img.get('col') and img.get('sheet') == sheet_name:
+                col = img.get('col')
+                if img.get('row') is None:
+                    # buscar fila data_excel_rows con contenido en esa columna nearest by index
+                    nearest = None
+                    min_dist = 1e9
+                    for r in data_excel_rows:
+                        val = sheet.cell(row=r, column=col).value
+                        if val and str(val).strip():
+                            dist = abs(r - (img.get('row') or data_excel_rows[0]))
+                            if dist < min_dist:
+                                min_dist = dist
+                                nearest = r
+                    if nearest and nearest not in row_to_image:
+                        row_to_image[nearest] = img['filename']
+
+        # 3) Si no hay anchors y cantidad de imágenes coincide con filas_with_id -> mapear por orden
+        if not row_to_image and fallback_by_index and len(fallback_by_index) == len(rows_with_id):
+            for i, r in enumerate(rows_with_id):
+                row_to_image[r] = fallback_by_index[i]
+            app.logger.info("🧭 Asignación por orden a filas con identificador (rows_with_id)")
+
+        # 4) Si aún vacío y fallback images exist, asignar por índice relativo al df (solo a filas con id si existen)
+        if not row_to_image and fallback_by_index:
+            for i, fname in enumerate(fallback_by_index):
+                if i < len(rows_with_id):
+                    row_to_image[rows_with_id[i]] = fname
+                elif i < len(data_excel_rows):
+                    row_to_image[data_excel_rows[i]] = fname
+
+        # 5) Proximity fallback: for any remaining images with explicit row, map to nearest data row
+        for img in imagenes_embedded:
+            if img.get('filename') in row_to_image.values():
+                continue
+            if img.get('row') and img.get('sheet') == sheet_name:
+                # nearest data row
+                nearest = None
+                min_dist = 1e9
+                for r in data_excel_rows:
+                    d = abs(r - img.get('row'))
+                    if d < min_dist:
+                        min_dist = d
+                        nearest = r
+                if nearest and nearest not in row_to_image:
+                    row_to_image[nearest] = img['filename']
+
+        app.logger.info(f"🔗 Mapeo final imágenes->filas (ejemplos): {list(row_to_image.items())[:10]}")
+
+        # Ahora iterar df y guardar productos, usando el mapping row_to_image
         productos_importados = 0
         filas_procesadas = 0
         filas_omitidas = 0
 
-        # Convertir df a records para iteración estable
         df_records = df.to_dict('records')
-
         for idx, row in enumerate(df_records):
             filas_procesadas += 1
             try:
-                producto = {}
-                # determinar excel_row_number para este df row; si falta, usar header_row+1+idx
-                try:
-                    excel_row_number = data_excel_rows[idx] if idx < len(data_excel_rows) else (header_row + 1 + idx)
-                except Exception:
-                    excel_row_number = header_row + 1 + idx
+                # determinar excel_row_number correspondiente
+                excel_row_number = data_excel_rows[idx] if idx < len(data_excel_rows) else (header_row + 1 + idx)
 
+                # asignar imagen desde columna mapeada
                 assigned_image = ''
-                # 1) prefer columna 'imagen' en el propio excel
                 if 'imagen' in df.columns and str(row.get('imagen', '')).strip():
                     assigned_image = str(row.get('imagen')).strip()
                 else:
-                    # 2) buscar imagen anclada a (sheet, excel_row_number)
-                    key = (sheet_name, excel_row_number)
-                    if key in images_map:
-                        val = images_map[key]
-                        if isinstance(val, list):
-                            assigned_image = val[0]  # elegir la primera si hay múltiples
-                        else:
-                            assigned_image = val
-                    else:
-                        # 3) si no hay anchors, fallback_by_index intentando alinear por índice relativo
-                        if fallback_by_index and idx < len(fallback_by_index):
-                            assigned_image = fallback_by_index[idx]
-                        else:
-                            # 4) attempt proximity: buscar imagen in same sheet with nearest row
-                            nearest = None
-                            nearest_dist = 999999
-                            for (s, r), fname in list(images_map.items()):
-                                if s == sheet_name and isinstance(r, int):
-                                    d = abs(r - excel_row_number)
-                                    if d < nearest_dist:
-                                        nearest_dist = d
-                                        nearest = fname
-                            if nearest and nearest_dist <= 2:  # umbral pequeño
-                                assigned_image = nearest
+                    # prefer explicit mapping
+                    assigned_image = row_to_image.get(excel_row_number, '') or ''
 
-                # Construir dict producto con campos esperados
+                producto = {}
                 campos_esperados = [
                     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
                     'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
