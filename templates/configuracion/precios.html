@@ -404,9 +404,9 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img  class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% else %}
-                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% endif %}
                                     {% else %}
                                     -
@@ -490,9 +490,9 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% else %}
-                                    <img src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% endif %}
                                     {% else %}
                                     -
@@ -547,6 +547,10 @@
 </div>
 
 <style>
+    .imagen_tabla {
+        width: 50px;
+        height: 50px;
+    }
     .alert {
         padding: 12px 16px;
         border-radius: 6px;
@@ -708,7 +712,7 @@
         .table th, .table td {
             padding: 12px 15px;
             text-align: left;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 3px solid black;
         }
 
         .table th {
