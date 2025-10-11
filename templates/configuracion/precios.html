@@ -538,7 +538,9 @@
     .imagen_tabla {
         width: 50px;
         height: 50px;
+        object-fit: cover;
     }
+
     .alert {
         padding: 12px 16px;
         border-radius: 6px;
@@ -564,7 +566,6 @@
             border: 1px solid #ffeaa7;
         }
 
-
     /* Dashboard menu styles */
     .dashboard-menu {
         margin: 20px 0;
@@ -576,7 +577,7 @@
         border-radius: 8px;
         padding: 20px;
         text-align: center;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         transition: all 0.3s ease;
         cursor: pointer;
     }
@@ -600,7 +601,7 @@
 
     .dashboard-item:hover {
         transform: translateY(-5px);
-        box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.1);
         border-color: #3182ce;
     }
 
@@ -636,7 +637,7 @@
         border-radius: 6px;
     }
 
-    /* Existing styles */
+    /* Existing button styles */
     .btn-success {
         background: #28a745;
         color: white;
@@ -658,8 +659,6 @@
         background: #eff6ff;
     }
 
-
-
     .text-green-600 {
         color: #059669;
     }
@@ -668,7 +667,6 @@
         color: #2563eb;
     }
 
-    /* Estilos para el formulario colapsable */
     .cursor-pointer {
         cursor: pointer;
     }
@@ -686,44 +684,47 @@
             color: black;
         }
 
-    /* Asegurar que la tabla ocupe todo el ancho */
+    /* Keep container responsive */
     .table-responsive {
         width: 100%;
-        overflow-x: auto;
+        overflow: hidden; /* hide outer overflow, inner .table-scroll handles scrolling */
     }
 
-    /* force columns to fit, allow wrapping and reduce padding */
+    /* Table layout: allow shrinking and wrapping */
     .table {
         width: 100%;
         border-collapse: collapse;
         border-bottom: 3px solid black;
-        table-layout: fixed; /* <-- key: make columns share available width */
+        table-layout: fixed; /* columns share available width */
         font-size: 13px;
     }
 
         .table th,
         .table td {
-            padding: 6px 8px; /* smaller padding */
+            padding: 6px 8px;
             text-align: left;
             border-bottom: 3px solid black;
             white-space: normal; /* allow wrapping */
-            overflow-wrap: anywhere; /* break long words / numbers */
+            overflow-wrap: anywhere; /* break long words/numbers */
             word-break: break-word;
         }
 
         .table th {
             background-color: white;
-            color: black
+            color: black;
         }
 
-    /* Scroll container for big tables: keeps page shorter while table scrolls internally */
+    /* Scroll container for big tables: keeps page shorter while table scrolls internally.
+       position: relative is required so position: sticky on thead th works inside this box. */
     .table-scroll {
-        max-height: 500px; /* Adjust default max height as needed */
-        overflow-y: auto;
-        overflow-x: hidden;
+        position: relative;
+        max-height: 500px; /* default */
+        overflow-y: auto; /* vertical scroll for rows */
+        overflow-x: auto; /* allow horizontal scroll if needed */
         -webkit-overflow-scrolling: touch;
         border-radius: 6px;
         padding-right: 6px; /* avoid cutting last column behind scrollbar */
+        background: transparent;
     }
 
     /* Slightly different heights for client vs admin views */
@@ -735,7 +736,21 @@
         max-height: 550px;
     }
 
-    /* Optional: style scrollbars for modern browsers */
+    /* Sticky header: keep thead visible while body scrolls */
+    .table thead th {
+        position: sticky;
+        top: 0;
+        z-index: 5; /* above table rows */
+        background: linear-gradient(#ffffff, #f8fafc); /* matches header background */
+        box-shadow: 0 2px 4px rgba(0,0,0,0.04);
+    }
+
+    /* Optional: give the header cells a bit more weight */
+    .table thead th {
+        font-weight: 600;
+    }
+
+    /* Optional scrollbar styling */
     .table-scroll::-webkit-scrollbar {
         width: 10px;
         height: 10px;
@@ -749,14 +764,6 @@
         background: yellow;
         border-radius: 8px;
     }
-    /* tuned heights for views (keep your existing sizes) */
-    .table-scroll-client {
-        max-height: 360px;
-    }
-
-    .table-scroll-admin {
-        max-height: 550px;
-    }
 
     /* prioritize wrapping for long columns (Descripción, Categoría, etc.) */
     .table th:nth-child(6), .table td:nth-child(6) {
@@ -769,7 +776,7 @@
         max-width: 120px;
     }
 
-    /* slightly smaller on narrower screens */
+    /* responsive tweaks */
     @media (max-width: 1200px) {
         .table th, .table td {
             padding: 5px 6px;
@@ -782,7 +789,6 @@
         }
     }
 </style>
-
 <script>
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
