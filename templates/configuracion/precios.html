@@ -372,7 +372,7 @@
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
-                <div class="table-scroll table-scroll-client">
+                <div>
                     <table class="table">
                         <thead>
                             <tr>
@@ -391,7 +391,7 @@
                                 <th>Acciones</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody class="table-scroll table-scroll-client">
                             {% for precio in precios %}
                             <tr>
                                 <td>{{ precio.sku or '-' }}</td>
@@ -446,27 +446,7 @@
 
     <div class="card">
         <div class="card-header bg-blue-100">
-            <thead>
-                <tr>
-                    <th>SKU</th>
-                    <th>Categoría</th>
-                    <th>Subcategoría</th>
-                    <th>Línea</th>
-                    <th>Modelo</th>
-                    <th>Descripción</th>
-                    <th>Medidas</th>
-                    <th>Costo</th>
-                    <th>Mayoreo</th>
-                    <th>Menudeo</th>
-                    <th>Imagen</th>
-                    <th>Status</th>
-                    <th>Catálogo</th>
-                    <th>Catálogo 2</th>
-                    <th>Catálogo 3</th>
-                    <th>Proveedor</th>
-                    <th>Acciones</th>
-                </tr>
-            </thead>
+            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</h3>
         </div>
         <div class="card-body">
             {% if precios %}
@@ -494,7 +474,7 @@
                                 <th>Acciones</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody class="cuerpo_tabla">
                             {% for precio in precios %}
                             <tr>
                                 <td>{{ precio.sku or '-' }}</td>
@@ -771,7 +751,7 @@
     }
 
     .table-scroll::-webkit-scrollbar-thumb {
-        background: rgba(0,0,0,0.12);
+        background: yellow;
         border-radius: 8px;
     }
 </style>
