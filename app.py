@@ -3915,9 +3915,9 @@ def save_config(cfg_all, config=None):
                     (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
                      telefono, correo, que_hace, tono, lenguaje, restricciones, 
                      palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa,
-                     asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono)
+                     asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono, calendar_email)
                 VALUES
-                    (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE
                     ia_nombre = VALUES(ia_nombre),
                     negocio_nombre = VALUES(negocio_nombre),
@@ -3939,6 +3939,7 @@ def save_config(cfg_all, config=None):
                     asesor1_telefono = VALUES(asesor1_telefono),
                     asesor2_nombre = VALUES(asesor2_nombre),
                     asesor2_telefono = VALUES(asesor2_telefono),
+                    calendar_email = VALUES(calendar_email);
             ''', (
                 neg.get('ia_nombre'),
                 neg.get('negocio_nombre'),
@@ -3960,6 +3961,7 @@ def save_config(cfg_all, config=None):
                 ases.get('asesor1_telefono',''),
                 ases.get('asesor2_nombre',''),
                 ases.get('asesor2_telefono',''),
+                neg.get('calendar_email','')
             ))
         else:
             # Fallback: update/insert only the common fields (backward-compatible)
@@ -3980,6 +3982,9 @@ def save_config(cfg_all, config=None):
                 'max_mensajes': res.get('max_mensajes', 10),
                 'tiempo_max_respuesta': res.get('tiempo_max_respuesta', 30),
             }
+            if 'calendar_email' in existing_cols:
+                fields['calendar_email'] = neg.get('calendar_email','')
+            # Prepare upsert statement using existing columns intersection
             cols = []
             vals = []
             for k, v in fields.items():
@@ -4127,6 +4132,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     return s
                 except Exception:
                     return str(val).strip()
+
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
             titulo = modelo or sku or 'Sin identificador'
