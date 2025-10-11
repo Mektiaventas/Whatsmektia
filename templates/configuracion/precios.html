@@ -380,9 +380,9 @@
                                 <th>Imagen</th>
                                 <th>Menudeo</th>
                                 <th>Mayoreo</th>
-                                <th>Status</th>
+                                <!--<th>Status</th>
                                 <th>Catálogo</th>
-                                <th>Acciones</th>
+                                <th>Acciones</th>-->
                             </tr>
                         </thead>
                         <tbody>
@@ -410,8 +410,8 @@
                                 </td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                                 <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
-                                <td>{{ precio.status_ws or '-' }}</td>
-                                <td>{{ precio.catalogo or '-' }}</td>
+                                <!--<td>{{ precio.status_ws or '-' }}</td>
+                                  <td>{{ precio.catalogo or '-' }}</td>-->
                                 <td>
                                     <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
                                        class="btn small primary">Editar</a>
@@ -456,11 +456,11 @@
                                 <th>Menudeo</th>
                                 <th>Mayoreo</th>
                                 <th>Imagen</th>
-                                <th>Status</th>
+                                <!--<th>Status</th>
                                 <th>Catálogo</th>
                                 <th>Catálogo 2</th>
                                 <th>Catálogo 3</th>
-                                <th>Proveedor</th>
+                                <th>Proveedor</th>-->
                                 <th>Acciones</th>
                             </tr>
                         </thead>
@@ -490,11 +490,11 @@
                                     -
                                     {% endif %}
                                 </td>
-                                <td>{{ precio.status_ws or '-' }}</td>
+                                <!--<td>{{ precio.status_ws or '-' }}</td>
                                 <td>{{ precio.catalogo or '-' }}</td>
                                 <td>{{ precio.catalogo2 or '-' }}</td>
                                 <td>{{ precio.catalogo3 or '-' }}</td>
-                                <td>{{ precio.proveedor or '-' }}</td>
+                                <td>{{ precio.proveedor or '-' }}</td>-->
                                 <td>
                                     <div class="flex space-x-2">
                                         <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
