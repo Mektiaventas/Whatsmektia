@@ -707,6 +707,7 @@
     .table {
         width: 100%;
         border-collapse: collapse;
+        border-bottom: 3px solid black;
     }
 
         .table th, .table td {
@@ -722,7 +723,7 @@
 
     /* Scroll container for big tables: keeps page shorter while table scrolls internally */
     .table-scroll {
-        max-height: 440px; /* Adjust default max height as needed */
+        max-height: 500px; /* Adjust default max height as needed */
         overflow-y: auto;
         overflow-x: auto;
         -webkit-overflow-scrolling: touch;
@@ -736,7 +737,7 @@
     }
 
     .table-scroll-admin {
-        max-height: 520px;
+        max-height: 550px;
     }
 
     /* Optional: style scrollbars for modern browsers */
@@ -746,7 +747,7 @@
     }
 
     .table-scroll::-webkit-scrollbar-track {
-        background: transparent;
+        background: white;
     }
 
     .table-scroll::-webkit-scrollbar-thumb {
