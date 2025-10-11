@@ -250,70 +250,98 @@ def proteger_rutas():
     # Si llega aquí, no está autorizado -> redirigir al login
     app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
     return redirect(url_for('login', next=request.path))
+
 def extraer_imagenes_embedded_excel(filepath, output_dir=None):
     """
     Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
     Intenta recuperar fila/col (ancla) de varias maneras para maximizar compatibilidad.
     Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
     """
-    
-
     if output_dir is None:
         output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
     os.makedirs(output_dir, exist_ok=True)
 
-    wb = openpyxl.load_workbook(filepath)
     imagenes_extraidas = []
+    try:
+        wb = openpyxl.load_workbook(filepath, data_only=True)
+    except Exception as e:
+        app.logger.warning(f"⚠️ openpyxl no pudo abrir {filepath}: {e}")
+        return imagenes_extraidas
 
     for sheet in wb.worksheets:
-        for idx, img in enumerate(getattr(sheet, '_images', [])):
+        imgs = getattr(sheet, '_images', []) or []
+        app.logger.info(f"🔍 Sheet '{sheet.title}' - imágenes detectadas por openpyxl: {len(imgs)}")
+        for idx, img in enumerate(imgs):
             try:
-                img_obj = img.image
-                img_format = (img_obj.format or 'PNG').lower()
-                img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
+                # openpyxl image object may be wrapped differently según versión
+                img_obj = getattr(img, 'image', img)
+                fmt = (getattr(img_obj, 'format', None) or 'PNG').lower()
+                img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{fmt}"
                 img_path = os.path.join(output_dir, img_filename)
 
-                # Guardar imagen en disco
+                # Guardar imagen en disco (PIL or image object)
                 try:
-                    img_obj.save(img_path)
+                    # Algunos objetos tienen .save, otros son PIL.Image
+                    if hasattr(img_obj, 'save'):
+                        img_obj.save(img_path)
+                    else:
+                        # intentar acceder a ._data o .ref
+                        data = None
+                        if hasattr(img_obj, 'ref'):
+                            data = img_obj.ref
+                        if data is None and hasattr(img_obj, 'tobytes'):
+                            with open(img_path, 'wb') as fh:
+                                fh.write(img_obj.tobytes())
+                        else:
+                            # fallback: intentar convertir a PIL si es posible
+                            try:
+                                pil = Image.fromarray(img_obj)
+                                pil.save(img_path)
+                            except Exception:
+                                app.logger.warning(f"⚠️ No se pudo guardar imagen desde objeto: {type(img_obj)}")
+                                continue
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
                     continue
 
-                # Intentar leer la ancla (fila/col) de varias formas
+                # Extraer ancla (fila/col) de distintas formas
                 row = None
                 col = None
                 anchor = getattr(img, 'anchor', None)
                 try:
+                    # Varias formas comunes de obtener la posición desde openpyxl:
+                    # - anchor._from.row / anchor._from.col
+                    # - anchor.from_.row / anchor.from_.col
+                    # - anchor.row / anchor.col (menos común)
                     marker = None
-                    # Common attribute names in different openpyxl versions
-                    for attr in ('_from', 'from', 'from_', 'anchor_from'):
+                    for attr in ('_from', 'from_', 'from', 'anchor_from'):
                         marker = getattr(anchor, attr, None)
                         if marker:
                             break
 
                     if marker:
-                        # marker usually tiene row, col (0-based)
+                        # marker suele tener .row y .col (0-based)
                         row_candidate = getattr(marker, 'row', None)
                         col_candidate = getattr(marker, 'col', None)
-                        # Algunas versiones devuelven atributos como tuples o listas
-                        if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
-                            # try tuple-like (col, row) or (row, col)
+
+                        # Si marker es tuple-like (openpyxl 2.x), intentar extraer ints
+                        if row_candidate is None and hasattr(marker, '__len__'):
                             try:
                                 maybe = list(marker)
-                                # buscar primer int
                                 ints = [m for m in maybe if isinstance(m, int)]
                                 if len(ints) >= 1:
                                     row_candidate = ints[0]
+                                if len(ints) >= 2:
+                                    col_candidate = ints[1]
                             except Exception:
                                 pass
 
                         if isinstance(row_candidate, int):
-                            row = int(row_candidate) + 1
+                            row = int(row_candidate) + 1  # convertir a 1-based
                         if isinstance(col_candidate, int):
                             col = int(col_candidate) + 1
 
-                    # Si anchor es string con coordenada (ej. "A2"), parsearla
+                    # Si anchor es string tipo "A2"
                     if row is None and isinstance(anchor, str):
                         try:
                             col_letter, row_num = coordinate_from_string(anchor)
@@ -321,6 +349,16 @@ def extraer_imagenes_embedded_excel(filepath, output_dir=None):
                             row = int(row_num)
                         except Exception:
                             pass
+
+                    # Algunos anchors exponen directamente .row/.col
+                    if row is None and hasattr(anchor, 'row'):
+                        try:
+                            r = getattr(anchor, 'row')
+                            if isinstance(r, int):
+                                row = r + 1 if r < 100000 else r
+                        except:
+                            pass
+
                 except Exception:
                     row = None
                     col = None
@@ -339,6 +377,7 @@ def extraer_imagenes_embedded_excel(filepath, output_dir=None):
                 continue
 
     return imagenes_extraidas
+
 
 # Put below sesiones_activas helpers
 def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
@@ -920,20 +959,26 @@ def importar_productos_desde_excel(filepath, config=None):
     try:
         extension = os.path.splitext(filepath)[1].lower()
         if extension in ['.xlsx', '.xls']:
-            df = pd.read_excel(filepath, sheet_name=0)
+            # Leer con pandas (primera hoja) pero también cargar workbook para filas reales
+            df = pd.read_excel(filepath, sheet_name=0, dtype=str)
             wb = openpyxl.load_workbook(filepath, data_only=True)
-            sheet_name = wb.sheetnames[0]
+            sheet = wb[wb.sheetnames[0]]
+            sheet_name = sheet.title
         elif extension == '.csv':
-            df = pd.read_csv(filepath)
-            sheet_name = None
+            df = pd.read_csv(filepath, dtype=str)
             wb = None
+            sheet = None
+            sheet_name = None
         else:
             app.logger.error(f"Formato de archivo no soportado: {extension}")
             return 0
 
+        # Normalizar columnas
         df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
         app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
+        app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
 
+        # Mapear columnas conocidos (mantener compatibilidad)
         column_mapping = {
             'sku': 'sku',
             'categoria': 'categoria',
@@ -958,13 +1003,10 @@ def importar_productos_desde_excel(filepath, config=None):
                 df = df.rename(columns={excel_col: db_col})
                 app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
 
-        app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
-
-        # 1) Intento principal con openpyxl
+        # Extraer imágenes embebidas y fallback zip
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
         app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
 
-        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media)
         if not imagenes_embedded and extension == '.xlsx':
             output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
             imagenes_zip = _extraer_imagenes_desde_zip_xlsx(filepath, output_dir)
@@ -974,11 +1016,9 @@ def importar_productos_desde_excel(filepath, config=None):
             else:
                 app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
 
-        # Preparar conexión (se usará tanto para registrar imágenes como para insertar productos)
+        # Preparar conexión BD y tabla imagenes_productos
         conn = get_db_connection(config)
         cursor = conn.cursor()
-
-        # Crear tabla para metadatos de imágenes si no existe
         try:
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS imagenes_productos (
@@ -997,14 +1037,9 @@ def importar_productos_desde_excel(filepath, config=None):
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo asegurar tabla imagenes_productos: {e}")
 
-        # Insertar/Actualizar metadatos de las imágenes extraídas en la BD
+        # Insert metadata imágenes
         try:
             for img in imagenes_embedded:
-                filename = img.get('filename')
-                path = img.get('path')
-                sheet = img.get('sheet')
-                row_num = img.get('row')
-                col_num = img.get('col')
                 try:
                     cursor.execute("""
                         INSERT INTO imagenes_productos (sku, filename, path, sheet, row_num, col_num)
@@ -1015,79 +1050,145 @@ def importar_productos_desde_excel(filepath, config=None):
                             row_num=VALUES(row_num),
                             col_num=VALUES(col_num),
                             created_at = CURRENT_TIMESTAMP
-                    """, (None, filename, path, sheet, row_num, col_num))
+                    """, (None, img.get('filename'), img.get('path'), img.get('sheet'), img.get('row'), img.get('col')))
                 except Exception as e:
-                    app.logger.warning(f"⚠️ Error insertando metadato imagen {filename}: {e}")
+                    app.logger.warning(f"⚠️ Error insertando metadato imagen {img.get('filename')}: {e}")
             conn.commit()
             app.logger.info(f"🗄️ Metadatos de {len(imagenes_embedded)} imágenes guardados/actualizados en BD")
         except Exception as e:
             app.logger.error(f"🔴 Error guardando metadatos de imágenes: {e}")
 
-        # Build map by (sheet, row) from extracted list (fallback local)
+        # Construir map por (sheet, row) usando anclas detectadas
         images_map = {}
+        images_by_sheet = {}
         for img in imagenes_embedded:
             s = img.get('sheet')
             r = img.get('row')
-            # If sheet is None (zip fallback), we cannot map by row -> keep for fallback list
+            c = img.get('col')
+            images_by_sheet.setdefault(s, []).append(img)
             if r is not None:
-                images_map[(s, r)] = img['filename']
+                # Si ya hay imagen para la fila, convertir en lista (múltiples imágenes por fila)
+                key = (s, r)
+                if key in images_map:
+                    # convertir a lista si necesario
+                    existing = images_map[key]
+                    if isinstance(existing, list):
+                        existing.append(img['filename'])
+                    else:
+                        images_map[key] = [existing, img['filename']]
+                else:
+                    images_map[key] = img['filename']
 
-        app.logger.info(f"🖼️ Imágenes con ancla detectadas: {len(images_map)}")
+        app.logger.info(f"🖼️ Imágenes con ancla detectadas: {len([k for k in images_map.keys()])}")
 
-        # If no images had anchors, we'll fallback to index-based assignment
+        # Si no hay anchors, fallback_by_index contiene filenames en orden
         fallback_by_index = []
         if imagenes_embedded and not images_map:
             fallback_by_index = [img['filename'] for img in imagenes_embedded]
             app.logger.info(f"⚠️ No se detectaron anclas; usando fallback por orden con {len(fallback_by_index)} imágenes")
 
-        if df.empty:
-            app.logger.error("El archivo no contiene datos (está vacío)")
-            cursor.close(); conn.close()
-            return 0
+        # Determinar header_row robustamente para mapear df rows -> hoja rows
+        header_row = None
+        header_candidates = []
+        expected_cols = set([k for k in column_mapping.values()])
 
-        app.logger.info(f"Total de filas encontradas: {len(df)}")
-        df = df.fillna('')
+        if sheet is not None:
+            # buscar en las primeras 15 filas la fila que contenga la mayoría de headers
+            for r in range(1, min(20, sheet.max_row) + 1):
+                row_vals = [str(cell.value).lower().strip() if cell.value is not None else '' for cell in sheet[r]]
+                matched = sum(1 for v in row_vals if v in expected_cols or v in column_mapping.keys())
+                header_candidates.append((r, matched, row_vals))
+            # elegir fila con mayor matched (>0)
+            header_candidates.sort(key=lambda x: (-x[1], x[0]))
+            if header_candidates and header_candidates[0][1] > 0:
+                header_row = header_candidates[0][0]
+                app.logger.info(f"🔎 Header row detectada en hoja '{sheet_name}': {header_row} (matches={header_candidates[0][1]})")
+            else:
+                header_row = 1
+                app.logger.info(f"ℹ️ No se detectó header claro en '{sheet_name}', usando header_row=1")
+        else:
+            header_row = 1
 
-        campos_esperados = [
-            'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
-            'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
-            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
-        ]
+        # Preparar filas de datos: construir lista de excel_row_numbers correspondientes a df rows
+        df = df.fillna('')  # evitar NaN
+        data_excel_rows = []
+        # iterar filas en hoja y construir lista de filas que contienen datos (no vacías) a partir de header_row+1
+        if sheet is not None:
+            for r in range(header_row + 1, sheet.max_row + 1):
+                # construir indicador si la fila tiene contenido útil
+                row_cells = sheet[r]
+                has_content = any((cell.value is not None and str(cell.value).strip() != '') for cell in row_cells)
+                if has_content:
+                    data_excel_rows.append(r)
+            # si no detectamos filas (sheets vacías), fallback map por índice simple
+            if not data_excel_rows:
+                # asumir filas consecutivas tras header
+                data_excel_rows = list(range(header_row + 1, header_row + 1 + len(df)))
+        else:
+            # csv: simplemente map 1..n
+            data_excel_rows = list(range(2, 2 + len(df)))
 
+        app.logger.info(f"📑 Data rows detected (count): {len(data_excel_rows)}; df rows: {len(df)}")
+
+        # Insert/update productos: mapear por fila excel usando data_excel_rows
         productos_importados = 0
         filas_procesadas = 0
         filas_omitidas = 0
 
-        header_row = 1
-        for idx, row in df.iterrows():
+        # Convertir df a records para iteración estable
+        df_records = df.to_dict('records')
+
+        for idx, row in enumerate(df_records):
             filas_procesadas += 1
             try:
                 producto = {}
-                excel_row_number = header_row + 1 + idx  # idx 0-based
-                assigned_image = ''
+                # determinar excel_row_number para este df row; si falta, usar header_row+1+idx
+                try:
+                    excel_row_number = data_excel_rows[idx] if idx < len(data_excel_rows) else (header_row + 1 + idx)
+                except Exception:
+                    excel_row_number = header_row + 1 + idx
 
-                # 1) prefer column value if present
+                assigned_image = ''
+                # 1) prefer columna 'imagen' en el propio excel
                 if 'imagen' in df.columns and str(row.get('imagen', '')).strip():
                     assigned_image = str(row.get('imagen')).strip()
                 else:
-                    # 2) try anchored image
-                    if sheet_name and images_map.get((sheet_name, excel_row_number)):
-                        assigned_image = images_map.get((sheet_name, excel_row_number))
+                    # 2) buscar imagen anclada a (sheet, excel_row_number)
+                    key = (sheet_name, excel_row_number)
+                    if key in images_map:
+                        val = images_map[key]
+                        if isinstance(val, list):
+                            assigned_image = val[0]  # elegir la primera si hay múltiples
+                        else:
+                            assigned_image = val
                     else:
-                        # 3) fallback by index order if available
+                        # 3) si no hay anchors, fallback_by_index intentando alinear por índice relativo
                         if fallback_by_index and idx < len(fallback_by_index):
                             assigned_image = fallback_by_index[idx]
                         else:
-                            assigned_image = ''
+                            # 4) attempt proximity: buscar imagen in same sheet with nearest row
+                            nearest = None
+                            nearest_dist = 999999
+                            for (s, r), fname in list(images_map.items()):
+                                if s == sheet_name and isinstance(r, int):
+                                    d = abs(r - excel_row_number)
+                                    if d < nearest_dist:
+                                        nearest_dist = d
+                                        nearest = fname
+                            if nearest and nearest_dist <= 2:  # umbral pequeño
+                                assigned_image = nearest
 
+                # Construir dict producto con campos esperados
+                campos_esperados = [
+                    'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+                    'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
+                    'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+                ]
                 for campo in campos_esperados:
                     if campo == 'imagen':
                         producto['imagen'] = assigned_image or ''
                         continue
-                    if campo in df.columns:
-                        producto[campo] = row.get(campo, '') if row.get(campo, '') is not None else ''
-                    else:
-                        producto[campo] = ''
+                    producto[campo] = row.get(campo, '') if campo in row else ''
 
                 tiene_datos = any(str(value).strip() for value in producto.values())
                 if not tiene_datos:
@@ -1095,18 +1196,15 @@ def importar_productos_desde_excel(filepath, config=None):
                     filas_omitidas += 1
                     continue
 
-                for campo in campos_esperados:
-                    if not str(producto.get(campo, '')).strip():
-                        producto[campo] = " "
-
+                # Normalizar precios
                 for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
                     try:
-                        valor = producto.get(campo, '')
+                        valor = producto.get(campo, '') or ''
                         valor_str = str(valor).strip()
                         if not valor_str:
                             producto[campo] = '0.00'
                         else:
-                            match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
+                            match = re.search(r'(\d+(?:[\.,]\d+)?)', valor_str.replace(',', '.'))
                             if match:
                                 valor_numerico = float(match.group(1))
                                 producto[campo] = f"{valor_numerico:.2f}"
@@ -1114,9 +1212,6 @@ def importar_productos_desde_excel(filepath, config=None):
                                 producto[campo] = '0.00'
                     except Exception:
                         producto[campo] = '0.00'
-
-                if producto.get('status_ws', '').startswith('nadita'):
-                    producto['status_ws'] = 'activo'
 
                 values = [
                     producto.get('sku', ''),
@@ -1154,7 +1249,7 @@ def importar_productos_desde_excel(filepath, config=None):
                         imagen=VALUES(imagen)
                 """, values)
 
-                # Si asignamos una imagen, actualizar también la fila de imagenes_productos.sku con el sku recién insertado
+                # Actualizar imagenes_productos.sku si asignamos imagen y tenemos sku
                 try:
                     if producto.get('imagen'):
                         sku_val = producto.get('sku', '').strip() or None
@@ -1168,7 +1263,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     app.logger.warning(f"⚠️ No se pudo actualizar SKU en imagenes_productos para {producto.get('imagen')}: {e}")
 
                 productos_importados += 1
-                app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}... imagen={producto.get('imagen')}")
+                app.logger.info(f"✅ Producto importado: {producto.get('sku') or producto.get('modelo') or 'SIN_SKU'} - imagen={producto.get('imagen')}")
             except Exception as e:
                 app.logger.error(f"Error procesando fila {idx}: {e}")
                 app.logger.error(traceback.format_exc())

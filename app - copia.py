@@ -14,7 +14,7 @@ import json
 import base64
 import argparse
 import mysql.connector
-from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify
+from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
 from dotenv import load_dotenv
 import pandas as pd
@@ -24,13 +24,30 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
-from flask import current_app as app
 from werkzeug.utils import secure_filename
 from PIL import Image
 from openai import OpenAI
 import PyPDF2
 import fitz 
 from werkzeug.utils import secure_filename
+import bcrypt
+from functools import wraps
+from flask import session, g
+try:
+    # preferred location
+    from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
+except Exception:
+    # fallback for other openpyxl layouts: column_index_from_string may still be available
+    from openpyxl.utils import column_index_from_string
+    import re
+    def coordinate_from_string(coord):
+        """Simple fallback parser for coordinates like 'A1' -> ('A', 1)."""
+        m = re.match(r'^([A-Za-z]+)(\d+)$', str(coord).strip())
+        if not m:
+            raise ValueError(f"Invalid coordinate: {coord}")
+        return m.group(1), int(m.group(2))
+
+
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -38,8 +55,22 @@ guardado = True
 load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
+app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
 
+@app.template_filter('format_time_24h')
+def format_time_24h(dt):
+    if not dt:
+        return ""
+    try:
+        if dt.tzinfo is None:
+            dt = tz_mx.localize(dt)
+        else:
+            dt = dt.astimezone(tz_mx)
+        return dt.strftime('%d/%m %H:%M')
+    except Exception as e:
+        app.logger.error(f"Error formateando fecha {dt}: {e}")
+        return ""
 # ——— Env vars ———
 
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
@@ -48,6 +79,9 @@ DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER")
 SECRET_KEY = os.getenv("SECRET_KEY", "cualquier-cosa")
+# After app.config[...] and logger setup
+MAX_CONCURRENT_SESSIONS = int(os.getenv("MAX_CONCURRENT_SESSIONS", "2"))
+SESSION_ACTIVE_WINDOW_MINUTES = int(os.getenv("SESSION_ACTIVE_WINDOW_MINUTES", "60"))
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
@@ -61,16 +95,34 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
-        'dominio': 'mektia.com'
+        'dominio': 'smartwhats.mektia.com'
     },
-    '524812372326': {  # Número de La Porfirianna
+    '123': {  # Número de Unilova
         'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("UNILOVA_DB_HOST"),
+        'db_user': os.getenv("UNILOVA_DB_USER"),
+        'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
+        'db_name': os.getenv("UNILOVA_DB_NAME"),
+        'dominio': 'unilova.mektia.com'
+    },
+    '524812372326': {  # Número de La Porfirianna
+        'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
+    },
+    '524495486324': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("FITO_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
+        'dominio': 'ofitodo.mektia.com'
     }
 }
 
@@ -109,7 +161,251 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt'})
+ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
+
+
+# --- Conexión a la BD de clientes (auth) ---
+def get_clientes_conn():
+    return mysql.connector.connect(
+        host=os.getenv("CLIENTES_DB_HOST"),
+        user=os.getenv("CLIENTES_DB_USER"),
+        password=os.getenv("CLIENTES_DB_PASSWORD"),
+        database=os.getenv("CLIENTES_DB_NAME")
+    )
+
+def obtener_cliente_por_user(username):
+    conn = get_clientes_conn()
+    cur = conn.cursor(dictionary=True)
+    cur.execute("""
+        SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
+        FROM cliente
+        WHERE `user` = %s
+        LIMIT 1
+    """, (username,))
+    row = cur.fetchone()
+    cur.close(); conn.close()
+    return row
+
+def verificar_password(password_plano, password_guardado):
+    return password_plano == password_guardado
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not session.get('auth_user'):
+            return redirect(url_for('login', next=request.path))
+        g.auth_user = session.get('auth_user')
+        return f(*args, **kwargs)
+    return wrapper
+
+# Rutas públicas que NO requieren login (añade más si hace falta)
+RUTAS_PUBLICAS = {
+    'login', 'logout', 'webhook', 'webhook_verification',
+    'static', 'debug_headers', 'debug_dominio', 'diagnostico'
+}
+@app.before_request
+def proteger_rutas():
+    """
+    Protección global: permite endpoints públicos y prefijos públicos (p.ej. /uploads/)
+    Debe registrarse *antes* de otras funciones @app.before_request que puedan redirigir.
+    """
+    app.logger.debug(f"🔐 proteger_rutas check: path={request.path} endpoint={request.endpoint}")
+
+    # Endpoints explícitamente públicos por nombre
+    if request.endpoint in RUTAS_PUBLICAS:
+        return
+
+    # Permitir archivos estáticos gestionados por Flask
+    if request.endpoint and request.endpoint.startswith('static'):
+        return
+
+    # Permitir accesos directos a rutas públicas por path (uploads y subpaths)
+    public_path_prefixes = (
+        '/uploads/',
+        '/uploads',   # cubrir '/uploads' sin slash final
+        '/static/images/',
+        '/static/audio/',
+    )
+    if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
+        return
+
+    # Endpoints que sirven archivos/depuración (si los tienes)
+    public_endpoints = {
+        'serve_product_image',
+        'serve_uploaded_file',
+        'debug_image',
+        'debug_image_full',
+        'proxy_audio',
+        'debug_headers',
+        'debug_dominio',
+        'diagnostico'
+    }
+    if request.endpoint in public_endpoints:
+        return
+
+    # Si ya está autenticado, permitir
+    if session.get('auth_user'):
+        return
+
+    # Si llega aquí, no está autorizado -> redirigir al login
+    app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
+    return redirect(url_for('login', next=request.path))
+def extraer_imagenes_embedded_excel(filepath, output_dir=None):
+    """
+    Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
+    Intenta recuperar fila/col (ancla) de varias maneras para maximizar compatibilidad.
+    Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
+    """
+    
+
+    if output_dir is None:
+        output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+    os.makedirs(output_dir, exist_ok=True)
+
+    wb = openpyxl.load_workbook(filepath)
+    imagenes_extraidas = []
+
+    for sheet in wb.worksheets:
+        for idx, img in enumerate(getattr(sheet, '_images', [])):
+            try:
+                img_obj = img.image
+                img_format = (img_obj.format or 'PNG').lower()
+                img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
+                img_path = os.path.join(output_dir, img_filename)
+
+                # Guardar imagen en disco
+                try:
+                    img_obj.save(img_path)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
+                    continue
+
+                # Intentar leer la ancla (fila/col) de varias formas
+                row = None
+                col = None
+                anchor = getattr(img, 'anchor', None)
+                try:
+                    marker = None
+                    # Common attribute names in different openpyxl versions
+                    for attr in ('_from', 'from', 'from_', 'anchor_from'):
+                        marker = getattr(anchor, attr, None)
+                        if marker:
+                            break
+
+                    if marker:
+                        # marker usually tiene row, col (0-based)
+                        row_candidate = getattr(marker, 'row', None)
+                        col_candidate = getattr(marker, 'col', None)
+                        # Algunas versiones devuelven atributos como tuples o listas
+                        if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
+                            # try tuple-like (col, row) or (row, col)
+                            try:
+                                maybe = list(marker)
+                                # buscar primer int
+                                ints = [m for m in maybe if isinstance(m, int)]
+                                if len(ints) >= 1:
+                                    row_candidate = ints[0]
+                            except Exception:
+                                pass
+
+                        if isinstance(row_candidate, int):
+                            row = int(row_candidate) + 1
+                        if isinstance(col_candidate, int):
+                            col = int(col_candidate) + 1
+
+                    # Si anchor es string con coordenada (ej. "A2"), parsearla
+                    if row is None and isinstance(anchor, str):
+                        try:
+                            col_letter, row_num = coordinate_from_string(anchor)
+                            col = column_index_from_string(col_letter)
+                            row = int(row_num)
+                        except Exception:
+                            pass
+                except Exception:
+                    row = None
+                    col = None
+
+                imagenes_extraidas.append({
+                    'filename': img_filename,
+                    'path': img_path,
+                    'sheet': sheet.title,
+                    'anchor': anchor,
+                    'row': row,
+                    'col': col
+                })
+                app.logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col})")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
+                continue
+
+    return imagenes_extraidas
+
+# Put below sesiones_activas helpers
+def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
+    """Marks old sessions as inactive to avoid blocking new logins by stale entries."""
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        umbral = datetime.now() - timedelta(minutes=within_minutes)
+        cur.execute("""
+            UPDATE sesiones_activas
+               SET is_active = 0
+             WHERE user = %s
+               AND last_seen < %s
+        """, (username, umbral))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error desactivando sesiones antiguas: {e}")
+
+
+
+# Replace your current /login handler with this version (same logic + session limit)
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        usuario = request.form.get('usuario', '').strip()
+        password = request.form.get('password', '')
+        cliente = obtener_cliente_por_user(usuario)
+
+        if cliente and verificar_password(password, cliente['password']):
+            # 1) Cleanup stale sessions to avoid false positives
+            desactivar_sesiones_antiguas(cliente['user'], SESSION_ACTIVE_WINDOW_MINUTES)
+
+            # 2) Enforce concurrent sessions limit
+            active_count = contar_sesiones_activas(cliente['user'], within_minutes=SESSION_ACTIVE_WINDOW_MINUTES)
+            if active_count >= MAX_CONCURRENT_SESSIONS:
+                flash(f"❌ Este usuario ya tiene {active_count} sesiones activas. Cierra una sesión para continuar.", 'error')
+                return render_template('login.html'), 429
+
+            # 3) Proceed with login
+            session['auth_user'] = {
+                'id': cliente['id_cliente'],
+                'user': cliente['user'],
+                'entorno': cliente['entorno'],
+                'schema': cliente['shema'],
+                'servicio': cliente['servicio'],
+            }
+            registrar_sesion_activa(cliente['user'])
+            flash('✅ Inicio de sesión correcto', 'success')
+            destino = request.args.get('next') or url_for('home')
+            return redirect(destino)
+
+        flash('❌ Usuario o contraseña incorrectos', 'error')
+    return render_template('login.html')
+
+@app.route('/logout')
+def logout():
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            cerrar_sesion_actual(au['user'])
+    except Exception as e:
+        app.logger.warning(f"No se pudo cerrar sesión activa: {e}")
+    session.pop('auth_user', None)
+    flash('Sesión cerrada', 'info')
+    return redirect(url_for('login'))
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
@@ -163,6 +459,262 @@ def obtener_archivo_whatsapp(media_id, config=None):
         app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
         return None, None, None
 
+# --- Sesiones activas (en BD de clientes) ---
+def _get_or_create_session_id():
+    sid = session.get('sid')
+    if not sid:
+        sid = os.urandom(16).hex()
+        session['sid'] = sid
+    return sid
+
+def _ensure_sesiones_table(conn):
+    cur = conn.cursor()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS sesiones_activas (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user VARCHAR(100) NOT NULL,
+            session_id VARCHAR(64) NOT NULL,
+            ip VARCHAR(45),
+            user_agent VARCHAR(255),
+            is_active TINYINT(1) DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY uq_user_session (user, session_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    """)
+    conn.commit()
+    cur.close()
+
+def registrar_sesion_activa(username):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = _get_or_create_session_id()
+        ip = request.remote_addr
+        ua = request.headers.get('User-Agent', '')[:255]
+        cur.execute("""
+            INSERT INTO sesiones_activas (user, session_id, ip, user_agent, is_active, last_seen)
+            VALUES (%s, %s, %s, %s, 1, NOW())
+            ON DUPLICATE KEY UPDATE
+                is_active = 1,
+                ip = VALUES(ip),
+                user_agent = VALUES(user_agent),
+                last_seen = NOW()
+        """, (username, sid, ip, ua))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error registrando sesión activa: {e}")
+
+def actualizar_sesion_activa(username):
+    try:
+        if not username:
+            return
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = _get_or_create_session_id()
+        ip = request.remote_addr
+        ua = request.headers.get('User-Agent', '')[:255]
+        cur.execute("""
+            UPDATE sesiones_activas
+               SET last_seen = NOW(), ip = %s, user_agent = %s
+             WHERE user = %s AND session_id = %s AND is_active = 1
+        """, (ip, ua, username, sid))
+        conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error actualizando sesión activa: {e}")
+
+def cerrar_sesion_actual(username):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        sid = session.get('sid')
+        if sid:
+            cur.execute("""
+                UPDATE sesiones_activas
+                   SET is_active = 0, last_seen = NOW()
+                 WHERE user = %s AND session_id = %s
+            """, (username, sid))
+            conn.commit()
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.error(f"Error cerrando sesión actual: {e}")
+
+def contar_sesiones_activas(username, within_minutes=30):
+    try:
+        conn = get_clientes_conn()
+        _ensure_sesiones_table(conn)
+        cur = conn.cursor()
+        umbral = datetime.now() - timedelta(minutes=within_minutes)
+        cur.execute("""
+            SELECT COUNT(*)
+              FROM sesiones_activas
+             WHERE user = %s
+               AND is_active = 1
+               AND last_seen >= %s
+        """, (username, umbral))
+        count = cur.fetchone()[0]
+        cur.close(); conn.close()
+        return count
+    except Exception as e:
+        app.logger.error(f"Error contando sesiones activas: {e}")
+        return 0
+
+# Heartbeat de sesión en cada request autenticado
+@app.before_request
+def _heartbeat_sesion_activa():
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            actualizar_sesion_activa(au['user'])
+    except Exception as e:
+        app.logger.debug(f"Heartbeat sesión falló: {e}")
+
+# Endpoint rápido para ver conteo por username (protegido)
+@app.route('/admin/sesiones/<username>')
+@login_required
+def admin_sesiones_username(username):
+    count = contar_sesiones_activas(username, within_minutes=30)
+    return jsonify({'username': username, 'activos_ultimos_30_min': count})
+
+@app.route('/configuracion/negocio', methods=['POST'])
+def guardar_configuracion_negocio():
+    config = obtener_configuracion_por_host()
+    # Agregar logging para ver qué datos se reciben
+    app.logger.info(f"📧 Formulario recibido: {request.form}")
+    app.logger.info(f"📧 Calendar email recibido: {request.form.get('calendar_email')}")
+    
+    # Recopilar todos los datos del formulario
+    datos = {
+        'ia_nombre': request.form.get('ia_nombre'),
+        'negocio_nombre': request.form.get('negocio_nombre'),
+        'descripcion': request.form.get('descripcion'),
+        'url': request.form.get('url'),
+        'direccion': request.form.get('direccion'),
+        'telefono': request.form.get('telefono'),
+        'correo': request.form.get('correo'),
+        'que_hace': request.form.get('que_hace'),
+        'calendar_email': request.form.get('calendar_email')  # Nuevo campo para correo de notificaciones
+    }
+    
+    # Manejar la subida del logo
+    if 'app_logo' in request.files and request.files['app_logo'].filename != '':
+        logo = request.files['app_logo']
+        filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
+        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
+        
+        # Asegúrate de que la carpeta existe
+        os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+        
+        # Guardar el archivo
+        logo.save(upload_path)
+        
+        # Guardar la ruta en la BD
+        datos['app_logo'] = f"/static/uploads/logos/{filename}"
+    elif request.form.get('app_logo_actual'):
+        # Mantener el logo existente
+        datos['app_logo'] = request.form.get('app_logo_actual')
+    
+    # Guardar en la base de datos
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    # Verificar si existe la columna calendar_email
+    try:
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
+        calendar_email_existe = cursor.fetchone() is not None
+        
+        # Crear la columna si no existe
+        if not calendar_email_existe:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)")
+        
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"Error verificando/creando columna calendar_email: {e}")
+    
+    # Verificar si existe una configuración
+    cursor.execute("SELECT COUNT(*) FROM configuracion")
+    count = cursor.fetchone()[0]
+    
+    if count > 0:
+        # Actualizar configuración existente
+        set_parts = []
+        values = []
+        
+        for key, value in datos.items():
+            if value is not None:  # Solo incluir campos con valores
+                set_parts.append(f"{key} = %s")
+                values.append(value)
+        
+        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+        try:
+            cursor.execute(sql, values)
+        except Exception as e:
+            app.logger.error(f"Error al actualizar configuración: {e}")
+            # Filtrar columnas que causan problemas
+            if "Unknown column" in str(e):
+                # Obtener las columnas existentes
+                cursor.execute("SHOW COLUMNS FROM configuracion")
+                columnas_existentes = [col[0] for col in cursor.fetchall()]
+                
+                # Filtrar y volver a intentar
+                set_parts = []
+                values = []
+                for key, value in datos.items():
+                    if key in columnas_existentes and value is not None:
+                        set_parts.append(f"{key} = %s")
+                        values.append(value)
+                
+                if set_parts:
+                    sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+                    cursor.execute(sql, values)
+    else:
+        # Insertar nueva configuración
+        fields = ', '.join(datos.keys())
+        placeholders = ', '.join(['%s'] * len(datos))
+        sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
+        cursor.execute(sql, [1] + list(datos.values()))
+    
+    conn.commit()
+    cursor.close()
+    conn.close()
+    
+    flash("✅ Configuración guardada correctamente", "success")
+    return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
+
+@app.context_processor
+def inject_app_config():
+    # Obtener de la BD
+    config = obtener_configuracion_por_host()
+    
+    # Conectar a la BD
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1")
+        cfg = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        if cfg:
+            # Usar ia_nombre como nombre de la aplicación
+            return {
+                'app_nombre': cfg.get('ia_nombre', 'SmartWhats'),
+                'app_logo': cfg.get('app_logo')
+            }
+    except Exception as e:
+        app.logger.error(f"Error obteniendo configuración: {e}")
+    
+    # Valores por defecto
+    return {
+        'app_nombre': 'SmartWhats',
+        'app_logo': None
+    }
+
 def determinar_extension(mime_type, filename):
     """Determina la extensión del archivo basado en MIME type y nombre"""
     mime_to_extension = {
@@ -182,6 +734,709 @@ def determinar_extension(mime_type, filename):
         extension = filename.split('.')[-1].lower()
     
     return extension or 'bin'
+
+def extraer_texto_e_imagenes_pdf(file_path):
+    """Extrae texto e imágenes de un archivo PDF"""
+    try:
+        texto = ""
+        imagenes = []
+        
+        # Abrir el PDF con PyMuPDF
+        doc = fitz.open(file_path)
+        
+        # Crear directorio para imágenes si no existe
+        img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+        os.makedirs(img_dir, exist_ok=True)
+        
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            
+            # Extraer texto
+            texto += page.get_text()
+            
+            # Extraer imágenes
+            image_list = page.get_images(full=True)
+            for img_idx, img_info in enumerate(image_list):
+                try:
+                    xref = img_info[0]
+                    
+                    # Verificar si la imagen es válida antes de procesarla
+                    try:
+                        base_img = doc.extract_image(xref)
+                        
+                        # Obtener la imagen en bytes
+                        imagen_bytes = base_img["image"]
+                        
+                        # Determinar formato de imagen
+                        extension = base_img["ext"]
+                        
+                        # Crear nombre único para la imagen
+                        img_filename = f"producto_{page_num+1}_{img_idx+1}_{int(time.time())}.{extension}"
+                        img_path = os.path.join(img_dir, img_filename)
+                        
+                        # Guardar la imagen
+                        with open(img_path, "wb") as img_file:
+                            img_file.write(imagen_bytes)
+                        
+                        # Intentar obtener el rectángulo de la imagen de manera segura
+                        try:
+                            rect = page.get_image_bbox(xref)
+                        except ValueError:
+                            # Si falla, usar un rectángulo vacío
+                            rect = fitz.Rect(0, 0, 0, 0)
+                        
+                        # Agregar a la lista de imágenes con metadatos útiles
+                        imagenes.append({
+                            'filename': img_filename,
+                            'path': img_path,
+                            'page': page_num,
+                            'size': len(imagen_bytes),
+                            'position': img_info[1:],  # Info de posición para asociar con texto
+                            'xref': xref,
+                            'rect': rect
+                        })
+                        
+                        app.logger.info(f"✅ Imagen extraída: {img_filename}")
+                        
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Error extrayendo imagen específica {xref}: {e}")
+                        continue
+                        
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error procesando imagen {img_idx} en página {page_num+1}: {e}")
+                    continue
+        
+        doc.close()
+        
+        app.logger.info(f"✅ Texto extraído: {len(texto)} caracteres")
+        app.logger.info(f"🖼️ Imágenes extraídas: {len(imagenes)}")
+        
+        return texto.strip(), imagenes
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo contenido PDF: {e}")
+        app.logger.error(traceback.format_exc())
+        
+        # Intenta al menos extraer el texto usando el método anterior
+        try:
+            texto = extraer_texto_pdf(file_path)
+            app.logger.info(f"✅ Se pudo extraer texto con método alternativo: {len(texto)} caracteres")
+            return texto, []  # Devolver texto pero sin imágenes
+        except:
+            return None, []
+
+@app.route('/configuracion/precios/importar-excel', methods=['POST'])
+def importar_excel_directo():
+    """Importa datos directamente desde Excel sin análisis de IA"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        if 'excel_file' not in request.files:
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        file = request.files['excel_file']
+        if file.filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_precios'))
+        
+        if file and allowed_file(file.filename):
+            # Guardar archivo temporalmente
+            filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
+            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            file.save(filepath)
+            # After file.save(filepath)
+            imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+            app.logger.info(f"🖼️ Imágenes embebidas extraídas: {len(imagenes_embedded)}")
+            app.logger.info(f"📄 Excel guardado: {filepath}")
+            
+            # Procesar el archivo Excel
+            productos_importados = importar_productos_desde_excel(filepath, config)
+            
+            # Eliminar el archivo temporal
+            try:
+                os.remove(filepath)
+            except:
+                pass
+                
+            if productos_importados > 0:
+                flash(f'✅ {productos_importados} productos importados exitosamente', 'success')
+            else:
+                flash('⚠️ No se pudieron importar productos. Revisa el formato del archivo.', 'warning')
+                
+        else:
+            flash('❌ Tipo de archivo no permitido. Solo se aceptan XLSX, XLS y CSV', 'error')
+        
+        return redirect(url_for('configuracion_precios'))
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error importando Excel: {e}")
+        app.logger.error(traceback.format_exc())
+        flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
+        return redirect(url_for('configuracion_precios'))
+
+def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
+    """
+    Fallback: extrae imágenes desde el ZIP de un .xlsx leyendo xl/media/.
+    Retorna lista de dicts compatible con extraer_imagenes_embedded_excel.
+    """
+    import zipfile, shutil
+    os.makedirs(output_dir, exist_ok=True)
+    imagenes = []
+    try:
+        with zipfile.ZipFile(filepath, 'r') as z:
+            media_files = [f for f in z.namelist() if f.startswith('xl/media/')]
+            for idx, media_path in enumerate(media_files):
+                try:
+                    ext = os.path.splitext(media_path)[1].lstrip('.').lower() or 'bin'
+                    timestamp = int(time.time())
+                    filename = f"excel_unzip_img_{idx+1}_{timestamp}.{ext}"
+                    dest_path = os.path.join(output_dir, filename)
+                    with z.open(media_path) as src, open(dest_path, 'wb') as dst:
+                        shutil.copyfileobj(src, dst)
+                    imagenes.append({
+                        'filename': filename,
+                        'path': dest_path,
+                        'sheet': None,
+                        'anchor': None,
+                        'row': None,
+                        'col': None
+                    })
+                    app.logger.info(f"✅ Imagen (zip) extraída: {filename} from {media_path}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo extraer {media_path} desde zip: {e}")
+    except zipfile.BadZipFile:
+        app.logger.warning("⚠️ Archivo no es un .xlsx válido o está corrupto; zip fallback falló")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error extrayendo imágenes desde zip: {e}")
+    return imagenes
+
+
+def importar_productos_desde_excel(filepath, config=None):
+    """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        extension = os.path.splitext(filepath)[1].lower()
+        if extension in ['.xlsx', '.xls']:
+            df = pd.read_excel(filepath, sheet_name=0)
+            wb = openpyxl.load_workbook(filepath, data_only=True)
+            sheet_name = wb.sheetnames[0]
+        elif extension == '.csv':
+            df = pd.read_csv(filepath)
+            sheet_name = None
+            wb = None
+        else:
+            app.logger.error(f"Formato de archivo no soportado: {extension}")
+            return 0
+
+        df.columns = [col.lower().strip() if isinstance(col, str) else col for col in df.columns]
+        app.logger.info(f"Columnas disponibles en el archivo: {list(df.columns)}")
+
+        column_mapping = {
+            'sku': 'sku',
+            'categoria': 'categoria',
+            'subcategoria': 'subcategoria',
+            'linea': 'linea',
+            'modelo': 'modelo',
+            'descripcion': 'descripcion',
+            'medidas': 'medidas',
+            'costo': 'costo',
+            'precio mayoreo': 'precio_mayoreo',
+            'precio menudeo': 'precio_menudeo',
+            'imagen': 'imagen',
+            'status ws': 'status_ws',
+            'catalogo': 'catalogo',
+            'catalogo 2': 'catalogo2',
+            'catalogo 3': 'catalogo3',
+            'proveedor': 'proveedor'
+        }
+
+        for excel_col, db_col in column_mapping.items():
+            if excel_col in df.columns:
+                df = df.rename(columns={excel_col: db_col})
+                app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
+
+        app.logger.info(f"Primeras 2 filas para verificar:\n{df.head(2).to_dict('records')}")
+
+        # 1) Intento principal con openpyxl
+        imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+        app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
+
+        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media)
+        if not imagenes_embedded and extension == '.xlsx':
+            output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+            imagenes_zip = _extraer_imagenes_desde_zip_xlsx(filepath, output_dir)
+            if imagenes_zip:
+                imagenes_embedded = imagenes_zip
+                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media: {len(imagenes_embedded)}")
+            else:
+                app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
+
+        # Preparar conexión (se usará tanto para registrar imágenes como para insertar productos)
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Crear tabla para metadatos de imágenes si no existe
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS imagenes_productos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    sku VARCHAR(100) DEFAULT NULL,
+                    filename VARCHAR(255) NOT NULL,
+                    path VARCHAR(512) NOT NULL,
+                    sheet VARCHAR(128),
+                    row_num INT DEFAULT NULL,
+                    col_num INT DEFAULT NULL,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_filename (filename)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar tabla imagenes_productos: {e}")
+
+        # Insertar/Actualizar metadatos de las imágenes extraídas en la BD
+        try:
+            for img in imagenes_embedded:
+                filename = img.get('filename')
+                path = img.get('path')
+                sheet = img.get('sheet')
+                row_num = img.get('row')
+                col_num = img.get('col')
+                try:
+                    cursor.execute("""
+                        INSERT INTO imagenes_productos (sku, filename, path, sheet, row_num, col_num)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE
+                            path=VALUES(path),
+                            sheet=VALUES(sheet),
+                            row_num=VALUES(row_num),
+                            col_num=VALUES(col_num),
+                            created_at = CURRENT_TIMESTAMP
+                    """, (None, filename, path, sheet, row_num, col_num))
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error insertando metadato imagen {filename}: {e}")
+            conn.commit()
+            app.logger.info(f"🗄️ Metadatos de {len(imagenes_embedded)} imágenes guardados/actualizados en BD")
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando metadatos de imágenes: {e}")
+
+        # Build map by (sheet, row) from extracted list (fallback local)
+        images_map = {}
+        for img in imagenes_embedded:
+            s = img.get('sheet')
+            r = img.get('row')
+            # If sheet is None (zip fallback), we cannot map by row -> keep for fallback list
+            if r is not None:
+                images_map[(s, r)] = img['filename']
+
+        app.logger.info(f"🖼️ Imágenes con ancla detectadas: {len(images_map)}")
+
+        # If no images had anchors, we'll fallback to index-based assignment
+        fallback_by_index = []
+        if imagenes_embedded and not images_map:
+            fallback_by_index = [img['filename'] for img in imagenes_embedded]
+            app.logger.info(f"⚠️ No se detectaron anclas; usando fallback por orden con {len(fallback_by_index)} imágenes")
+
+        if df.empty:
+            app.logger.error("El archivo no contiene datos (está vacío)")
+            cursor.close(); conn.close()
+            return 0
+
+        app.logger.info(f"Total de filas encontradas: {len(df)}")
+        df = df.fillna('')
+
+        campos_esperados = [
+            'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+            'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+        ]
+
+        productos_importados = 0
+        filas_procesadas = 0
+        filas_omitidas = 0
+
+        header_row = 1
+        for idx, row in df.iterrows():
+            filas_procesadas += 1
+            try:
+                producto = {}
+                excel_row_number = header_row + 1 + idx  # idx 0-based
+                assigned_image = ''
+
+                # 1) prefer column value if present
+                if 'imagen' in df.columns and str(row.get('imagen', '')).strip():
+                    assigned_image = str(row.get('imagen')).strip()
+                else:
+                    # 2) try anchored image
+                    if sheet_name and images_map.get((sheet_name, excel_row_number)):
+                        assigned_image = images_map.get((sheet_name, excel_row_number))
+                    else:
+                        # 3) fallback by index order if available
+                        if fallback_by_index and idx < len(fallback_by_index):
+                            assigned_image = fallback_by_index[idx]
+                        else:
+                            assigned_image = ''
+
+                for campo in campos_esperados:
+                    if campo == 'imagen':
+                        producto['imagen'] = assigned_image or ''
+                        continue
+                    if campo in df.columns:
+                        producto[campo] = row.get(campo, '') if row.get(campo, '') is not None else ''
+                    else:
+                        producto[campo] = ''
+
+                tiene_datos = any(str(value).strip() for value in producto.values())
+                if not tiene_datos:
+                    app.logger.warning(f"Fila {idx} omitida: sin ningún dato")
+                    filas_omitidas += 1
+                    continue
+
+                for campo in campos_esperados:
+                    if not str(producto.get(campo, '')).strip():
+                        producto[campo] = " "
+
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
+                    try:
+                        valor = producto.get(campo, '')
+                        valor_str = str(valor).strip()
+                        if not valor_str:
+                            producto[campo] = '0.00'
+                        else:
+                            match = re.search(r'(\d+(?:\.\d+)?)', valor_str)
+                            if match:
+                                valor_numerico = float(match.group(1))
+                                producto[campo] = f"{valor_numerico:.2f}"
+                            else:
+                                producto[campo] = '0.00'
+                    except Exception:
+                        producto[campo] = '0.00'
+
+                if producto.get('status_ws', '').startswith('nadita'):
+                    producto['status_ws'] = 'activo'
+
+                values = [
+                    producto.get('sku', ''),
+                    producto.get('categoria', ''),
+                    producto.get('subcategoria', ''),
+                    producto.get('linea', ''),
+                    producto.get('modelo', ''),
+                    producto.get('descripcion', ''),
+                    producto.get('medidas', ''),
+                    producto.get('costo', '0.00'),
+                    producto.get('precio_mayoreo', '0.00'),
+                    producto.get('precio_menudeo', '0.00'),
+                    producto.get('imagen', ''),
+                    producto.get('status_ws', 'activo'),
+                    producto.get('catalogo', ''),
+                    producto.get('catalogo2', ''),
+                    producto.get('catalogo3', ''),
+                    producto.get('proveedor', '')
+                ]
+
+                cursor.execute("""
+                    INSERT INTO precios (
+                        sku, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+                        categoria=VALUES(categoria),
+                        subcategoria=VALUES(subcategoria),
+                        descripcion=VALUES(descripcion),
+                        costo=VALUES(costo),
+                        precio_mayoreo=VALUES(precio_mayoreo),
+                        precio_menudeo=VALUES(precio_menudeo),
+                        status_ws=VALUES(status_ws),
+                        imagen=VALUES(imagen)
+                """, values)
+
+                # Si asignamos una imagen, actualizar también la fila de imagenes_productos.sku con el sku recién insertado
+                try:
+                    if producto.get('imagen'):
+                        sku_val = producto.get('sku', '').strip() or None
+                        if sku_val:
+                            cursor.execute("""
+                                UPDATE imagenes_productos
+                                   SET sku = %s
+                                 WHERE filename = %s
+                            """, (sku_val, producto.get('imagen')))
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo actualizar SKU en imagenes_productos para {producto.get('imagen')}: {e}")
+
+                productos_importados += 1
+                app.logger.info(f"✅ Producto importado: {producto.get('sku')[:50]}... imagen={producto.get('imagen')}")
+            except Exception as e:
+                app.logger.error(f"Error procesando fila {idx}: {e}")
+                app.logger.error(traceback.format_exc())
+                filas_omitidas += 1
+                continue
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"📊 Resumen de importación: {productos_importados} productos importados, {filas_procesadas} filas procesadas, {filas_omitidas} filas omitidas")
+        return productos_importados
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
+        app.logger.error(traceback.format_exc())
+        return 0
+
+def obtener_imagenes_por_sku(sku, config=None):
+    """Obtiene todas las imágenes asociadas a un SKU específico"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT filename, path, sheet, row_num, col_num, created_at
+            FROM imagenes_productos
+            WHERE sku = %s
+            ORDER BY created_at DESC
+        """, (sku,))
+        
+        imagenes = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        return imagenes
+    except Exception as e:
+        app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
+        return []
+
+@app.route('/uploads/productos/<filename>')
+def serve_product_image(filename):
+    """Sirve imágenes de productos desde el directorio de uploads"""
+    productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+    return send_from_directory(productos_dir, filename)
+
+def asociar_imagenes_productos(servicios, imagenes):
+    """Asocia imágenes extraídas con los productos correspondientes usando IA"""
+    if not imagenes or not servicios or not servicios.get('servicios'):
+        return servicios
+    
+    try:
+        app.logger.info(f"🔄 Asociando {len(imagenes)} imágenes con {len(servicios['servicios'])} productos")
+        
+        # Asignar imágenes a productos según su posición en la lista
+        # Esta es una asignación simple; podría mejorarse con análisis de contenido
+        for i, servicio in enumerate(servicios['servicios']):
+            # Asignar una imagen si está disponible (rotación cíclica si hay menos imágenes que productos)
+            if imagenes:
+                img_index = i % len(imagenes)
+                img_filename = imagenes[img_index]['filename']
+                servicio['imagen'] = img_filename
+                app.logger.info(f"✅ Producto '{servicio['servicio']}' asociado con imagen: {img_filename}")
+            else:
+                servicio['imagen'] = ''
+        
+        return servicios
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error asociando imágenes: {e}")
+        return servicios
+
+def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
+    """Versión avanzada: Usa OpenAI para asociar imágenes a productos basado en contexto"""
+    if not imagenes or not servicios or not servicios.get('servicios'):
+        return servicios
+    
+    try:
+        # Convertir algunas imágenes a base64 para análisis con OpenAI
+        imagenes_analisis = []
+        for idx, img in enumerate(imagenes[:min(5, len(imagenes))]):  # Analizar máximo 5 imágenes
+            try:
+                with open(img['path'], 'rb') as img_file:
+                    img_data = base64.b64encode(img_file.read()).decode('utf-8')
+                    imagenes_analisis.append({
+                        'index': idx,
+                        'filename': img['filename'],
+                        'base64': f"data:image/jpeg;base64,{img_data}"
+                    })
+            except Exception as e:
+                app.logger.error(f"Error codificando imagen {img['path']}: {e}")
+        
+        if not imagenes_analisis:
+            return servicios
+        
+        # Preparar prompt para OpenAI
+        productos_texto = "\n".join([
+            f"{i+1}. {p.get('servicio', 'Producto')}: {p.get('descripcion', 'Sin descripción')}"
+            for i, p in enumerate(servicios['servicios'][:20])  # Máximo 20 productos
+        ])
+        
+        prompt = f"""
+        Analiza estas imágenes de productos y asocia cada una con el producto correcto de la lista.
+        
+        PRODUCTOS DETECTADOS:
+        {productos_texto}
+        
+        Para cada imagen, responde con el formato JSON:
+        {{
+            "imagen_filename": "nombre_archivo.jpg",
+            "producto_index": 3,  # índice del producto en la lista (comenzando desde 1)
+            "confianza": 0.85,  # qué tan seguro estás (0-1)
+            "razon": "Breve explicación"
+        }}
+        
+        Responde SOLO con un array JSON de estas asociaciones.
+        """
+        
+        # Configurar payload para GPT-4V
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        messages = [{"role": "user", "content": []}]
+        
+        # Agregar texto del prompt
+        messages[0]["content"].append({"type": "text", "text": prompt})
+        
+        # Agregar imágenes
+        for img in imagenes_analisis:
+            messages[0]["content"].append({
+                "type": "image_url",
+                "image_url": {"url": img['base64']}
+            })
+        
+        # Realizar la consulta
+        response = client.chat.completions.create(
+            model="gpt-4o",
+            messages=messages,
+            max_tokens=2000
+        )
+        
+        # Procesar respuesta
+        text_response = response.choices[0].message.content
+        
+        # Extraer JSON
+        json_match = re.search(r'\[.*\]', text_response, re.DOTALL)
+        if json_match:
+            asociaciones = json.loads(json_match.group())
+            
+            # Asociar imágenes según análisis de AI
+            for asoc in asociaciones:
+                if asoc.get('confianza', 0) > 0.6:  # Solo asociaciones con confianza razonable
+                    img_filename = asoc.get('imagen_filename')
+                    producto_idx = asoc.get('producto_index')
+                    
+                    if producto_idx and 1 <= producto_idx <= len(servicios['servicios']):
+                        servicios['servicios'][producto_idx-1]['imagen'] = img_filename
+                        app.logger.info(f"✅ IA asoció '{img_filename}' con '{servicios['servicios'][producto_idx-1].get('servicio')}' (confianza: {asoc.get('confianza')})")
+        
+        return servicios
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en asociación IA: {e}")
+        app.logger.error(traceback.format_exc())
+        # Fallback a asociación simple
+        return asociar_imagenes_productos(servicios, imagenes)
+
+# Nueva función: analiza una imagen (base64) junto con contexto y devuelve texto de respuesta
+def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None, config=None):
+    """
+    Analiza una imagen recibida por WhatsApp y genera una respuesta usando IA.
+    - numero: número del usuario que envió la imagen
+    - imagen_base64: data:image/...;base64,... (string) o None
+    - caption: texto que acompañó la imagen
+    - public_url: ruta pública donde se guardó la imagen (opcional)
+    - config: tenant config opcional
+    Retorna: texto de respuesta (string) o None si falla
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        # 1) Obtener catálogo resumido para contexto (limitado para no exceder tokens)
+        precios = obtener_todos_los_precios(config) or []
+        productos_lines = []
+        for p in precios[:30]:
+            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
+            sku = (p.get('sku') or '').strip()
+            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
+            imagen = p.get('imagen') or ''
+            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio} | Imagen:{imagen}")
+
+        productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos cargados."
+
+        # 2) Construir prompt claro para la IA multimodal
+        system_prompt = (
+            "Eres un asistente que identifica productos y contexto a partir de imágenes recibidas por WhatsApp. "
+            "Usa SOLO la información disponible en el catálogo y el historial para responder al cliente. "
+            "Si la imagen coincide con un producto del catálogo, responde con el nombre del producto, SKU, precio y una breve recomendación. "
+            "Si no puedes identificar, pregunta al usuario por más detalles (por ejemplo: '¿Qué SKU o nombre tiene este producto?'). "
+            "Mantén la respuesta breve y orientada al cliente."
+        )
+
+        user_content = [
+            {"type": "text", "text": f"Usuario: {numero}\nCaption: {caption or ''}\nCatalogo (resumido):\n{productos_texto}"},
+        ]
+
+        # 3) Adjuntar la imagen (si viene base64) para que el modelo la analice
+        if imagen_base64:
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": imagen_base64}
+            })
+        elif public_url:
+            # fallback a la URL pública si no hay base64
+            user_content.append({
+                "type": "image_url",
+                "image_url": {"url": public_url}
+            })
+
+        # 4) Llamada al cliente OpenAI (misma forma que ya usas en otras funciones)
+        client_local = OpenAI(api_key=OPENAI_API_KEY)
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content}
+        ]
+
+        # Preferir modelo multimodal disponible en tu stack (ejemplo re-uso de gpt-4o en el repo)
+        response = client_local.chat.completions.create(
+            model="gpt-4o",  # ajusta si usas otro modelo
+            messages=messages,
+            max_tokens=800,
+            temperature=0.2
+        )
+
+        # Extraer texto resultante
+        text_response = ""
+        try:
+            text_response = response.choices[0].message.content
+            if isinstance(text_response, list):
+                # si viene como estructura multimodal, concatenar textos
+                parts = []
+                for item in text_response:
+                    if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
+                        parts.append(item.get('text'))
+                    elif isinstance(item, str):
+                        parts.append(item)
+                text_response = "\n".join(parts)
+        except Exception:
+            # Fallback a raw string si la estructura es diferente
+            try:
+                text_response = str(response)
+            except:
+                text_response = None
+
+        if not text_response:
+            app.logger.info("ℹ️ IA no devolvió texto útil al analizar la imagen")
+            return None
+
+        # 5) Post-procesado: limpiar espacios excesivos
+        text_response = re.sub(r'\n\s+\n', '\n\n', text_response).strip()
+        return text_response
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en analizar_imagen_y_responder: {e}")
+        app.logger.error(traceback.format_exc())
+        return None
 
 def extraer_texto_archivo(filepath, extension):
     """Extrae texto de diferentes tipos de archivos"""
@@ -281,7 +1536,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
             CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:8000]}  # Limitar tamaño para evitar tokens excesivos
+            {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
             
             Proporciona un análisis en este formato:
             
@@ -305,7 +1560,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
             CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:8000]}
+            {texto_archivo[:80000]}
             
             Proporciona un análisis en este formato:
             
@@ -336,7 +1591,7 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
             "max_tokens": 1500
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
         response.raise_for_status()
         
         data = response.json()
@@ -381,102 +1636,183 @@ def extraer_texto_pdf(file_path):
         app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
         return None
 
+
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios"""
+    """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
+        # Limitar el texto para evitar tokens excesivos
+        texto_limitado = texto_pdf[:40000]  # Mantenemos un límite razonable
+        
+        app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
+        
         # Determinar el tipo de negocio para el prompt
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
+        # PROMPT MÁS ESTRICTO Y OPTIMIZADO - con menos caracteres para evitar errores
         if es_porfirianna:
-            prompt = f"""
-            Eres un asistente especializado en analizar menús de restaurantes. 
-            Extrae TODOS los platillos, bebidas y productos del siguiente texto:
-            
-            TEXTO DEL MENÚ:
-            {texto_pdf[:6000]}
-            
-            Devuelve SOLO un JSON con esta estructura:
-            {{
-                "servicios": [
-                    {{
-                        "servicio": "Nombre del platillo/producto",
-                        "descripcion": "Descripción o ingredientes",
-                        "precio": "100.00",
-                        "moneda": "MXN",
-                        "categoria": "Entrada/Plato fuerte/Postre/Bebida"
-                    }}
-                ]
-            }}
-            
-            Reglas para restaurantes:
-            1. Extrae todos los platillos, bebidas y productos
-            2. Incluye descripciones de ingredientes si están disponibles
-            3. Categoriza: Entradas, Platos fuertes, Postres, Bebidas, etc.
-            4. Si no hay precio, usa "0.00"
-            5. Moneda MXN por defecto
-            """
+            prompt = f"""Extrae los productos del siguiente texto como JSON:
+{texto_limitado[:15000]}
+Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
+Solo extrae hasta 20 productos principales."""
         else:
-            prompt = f"""
-            Eres un asistente especializado en extraer servicios y precios de catálogos.
-            Analiza el siguiente texto y extrae TODOS los servicios:
-            
-            TEXTO DEL DOCUMENTO:
-            {texto_pdf[:6000]}
-            
-            Devuelve SOLO un JSON con esta estructura:
-            {{
-                "servicios": [
-                    {{
-                        "servicio": "Nombre del servicio",
-                        "descripcion": "Descripción breve",
-                        "precio": "100.00",
-                        "moneda": "MXN",
-                        "categoria": "Categoría del servicio"
-                    }}
-                ]
-            }}
-            
-            Reglas importantes:
-            1. Extrae TODOS los servicios que encuentres
-            2. Si no hay precio específico, usa "0.00"
-            3. La moneda por defecto es MXN
-            4. Agrupa servicios similares
-            5. Sé específico con los nombres
-            """
+            prompt = f"""Extrae los servicios del siguiente texto como JSON:
+{texto_limitado[:15000]}
+Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_SERVICIO","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"","precio_menudeo":"","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
+Solo extrae hasta 20 servicios principales."""
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
         }
         
+        # Payload simplificado para evitar errores
         payload = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 3000
+            "max_tokens": 4000
         }
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=60)
+        app.logger.info("🔄 Enviando PDF a IA para análisis...")
+        
+        # Añadir más logs para diagnóstico
+        app.logger.info(f"🔍 API URL: {DEEPSEEK_API_URL}")
+        app.logger.info(f"🔍 Headers: {json.dumps({k: '***' if k == 'Authorization' else v for k, v in headers.items()})}")
+        app.logger.info(f"🔍 Payload: {json.dumps(payload)[:500]}...")
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=180)
+        
+        # Log detallado de la respuesta para diagnóstico
+        app.logger.info(f"🔍 Response status: {response.status_code}")
+        
+        if response.status_code != 200:
+            app.logger.error(f"🔴 Error response from API: {response.text[:1000]}")
+            return None
+            
         response.raise_for_status()
         
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        # Extraer JSON de la respuesta
+        app.logger.info(f"✅ Respuesta IA recibida: {len(respuesta_ia)} caracteres")
+        
+        # INTENTAR MÚLTIPLES MÉTODOS DE EXTRACCIÓN JSON
+        servicios_extraidos = None
+        
+        # Método 1: Buscar JSON con regex
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
-            servicios_extraidos = json.loads(json_match.group())
-            app.logger.info(f"✅ Servicios extraídos del PDF: {len(servicios_extraidos.get('servicios', []))}")
-            return servicios_extraidos
-        else:
-            app.logger.error("🔴 No se pudo extraer JSON de la respuesta IA")
-            return None
+            try:
+                json_str = json_match.group()
+                servicios_extraidos = json.loads(json_str)
+                app.logger.info("✅ JSON extraído con regex")
+            except json.JSONDecodeError as e:
+                app.logger.warning(f"⚠️ JSON regex falló: {e}")
+        
+        # Método 2: Intentar parsear directamente
+        if not servicios_extraidos:
+            try:
+                servicios_extraidos = json.loads(respuesta_ia)
+                app.logger.info("✅ JSON parseado directamente")
+            except json.JSONDecodeError as e:
+                app.logger.warning(f"⚠️ JSON directo falló: {e}")
+        
+        # Validar estructura final
+        if servicios_extraidos and 'servicios' in servicios_extraidos:
+            if isinstance(servicios_extraidos['servicios'], list):
+                app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['servicios'])} servicios")
+                
+                # Limpiar y validar servicios
+                servicios_limpios = []
+                for servicio in servicios_extraidos['servicios']:
+                    servicio_limpio = validar_y_limpiar_servicio(servicio)
+                    if servicio_limpio:
+                        servicios_limpios.append(servicio_limpio)
+                
+                servicios_extraidos['servicios'] = servicios_limpios
+                app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
+                
+                return servicios_extraidos
+        
+        # Si llegamos aquí, todos los métodos fallaron
+        app.logger.error("❌ Todos los métodos de extracción JSON fallaron")
+        app.logger.error(f"📄 Respuesta IA problemática (primeros 1000 chars): {respuesta_ia[:1000]}...")
+        return None
             
+    except requests.exceptions.Timeout:
+        app.logger.error("🔴 Timeout analizando PDF con IA")
+        return None
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"🔴 Error de conexión con IA: {e}")
+        if hasattr(e, 'response') and e.response:
+            app.logger.error(f"🔴 Detalles de error: {e.response.text[:1000]}")
+        return None
     except Exception as e:
-        app.logger.error(f"🔴 Error analizando PDF con IA: {e}")
+        app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
+        app.logger.error(traceback.format_exc())
+        return None
+def validar_y_limpiar_servicio(servicio):
+    """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
+    try:
+        if not isinstance(servicio, dict):
+            app.logger.warning("⚠️ Servicio no es diccionario, omitiendo")
+            return None
+        
+        servicio_limpio = {}
+        
+        # Campos obligatorios mínimos
+        if not servicio.get('servicio'):
+            app.logger.warning("⚠️ Servicio sin nombre, omitiendo")
+            return None
+        
+        # Campos de texto con valores por defecto
+        campos_texto = {
+            'sku': '',
+            'categoria': 'General',
+            'subcategoria': '',
+            'linea': '',
+            'modelo': '',
+            'descripcion': '',
+            'medidas': '',
+            'imagen': '',
+            'status_ws': 'activo',
+            'catalogo': '',
+            'catalogo2': '',
+            'catalogo3': '',
+            'proveedor': ''
+        }
+        
+        for campo, valor_default in campos_texto.items():
+            valor = servicio.get(campo, valor_default)
+            servicio_limpio[campo] = str(valor).strip() if valor else valor_default
+        
+        # Campos de precio - conversión robusta
+        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
+        for campo in campos_precio:
+            valor = servicio.get(campo, '0.00')
+            precio_limpio = "0.00"
+            
+            try:
+                if valor:
+                    # Remover todo excepto números y punto
+                    valor_limpio = re.sub(r'[^\d.]', '', str(valor))
+                    if valor_limpio:
+                        # Convertir a float y formatear
+                        precio_float = float(valor_limpio)
+                        precio_limpio = f"{precio_float:.2f}"
+            except (ValueError, TypeError):
+                pass  # Mantener "0.00" en caso de error
+            
+            servicio_limpio[campo] = precio_limpio
+        
+        app.logger.info(f"✅ Servicio validado: {servicio_limpio['servicio']}")
+        return servicio_limpio
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error validando servicio: {e}")
         return None
 
 def guardar_servicios_desde_pdf(servicios, config=None):
@@ -485,58 +1821,106 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         config = obtener_configuracion_por_host()
     
     try:
+        if not servicios or not servicios.get('servicios'):
+            app.logger.error("❌ No hay servicios para guardar")
+            return 0
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
         servicios_guardados = 0
-        for servicio in servicios.get('servicios', []):
+        
+        # Verificar columna costo
+        try:
+            cursor.execute("SHOW COLUMNS FROM precios LIKE 'costo'")
+            columna_existe = cursor.fetchone()
+            
+            if not columna_existe:
+                app.logger.info("🔧 Columna 'costo' no existe, creándola...")
+                cursor.execute("ALTER TABLE precios ADD COLUMN costo DECIMAL(10,2) DEFAULT 0.00 AFTER precio")
+                conn.commit()
+        except Exception as e:
+            app.logger.error(f"❌ Error verificando/creando columna 'costo': {e}")
+        
+        for servicio in servicios['servicios']:
             try:
-                # Limpiar y validar datos
-                nombre_servicio = servicio.get('servicio', 'Servicio sin nombre').strip()
-                if not nombre_servicio or nombre_servicio == 'Servicio sin nombre':
-                    continue
-                    
-                descripcion = servicio.get('descripcion', '').strip()
-                precio = servicio.get('precio', '0.00')
-                moneda = servicio.get('moneda', 'MXN')
-                
-                # Convertir precio a decimal
-                try:
-                    precio_decimal = Decimal(str(precio).replace('$', '').replace(',', '').strip())
-                except:
-                    precio_decimal = Decimal('0.00')
+                # Handle image if present
+                imagen_nombre = servicio.get('imagen', '')
+                if imagen_nombre:
+                    # Check if image exists
+                    img_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_nombre)
+                    if os.path.exists(img_path):
+                        app.logger.info(f"✅ Imagen encontrada para {servicio.get('servicio')}: {imagen_nombre}")
+                    else:
+                        imagen_nombre = ''  # Reset if image doesn't exist
+                        app.logger.warning(f"⚠️ Imagen no encontrada: {img_path}")
+            
+                # Preparar campos
+                campos = [
+                    servicio.get('sku', '').strip(),
+                    servicio.get('categoria', '').strip(),
+                    servicio.get('subcategoria', '').strip(),
+                    servicio.get('linea', '').strip(),
+                    servicio.get('modelo', '').strip(),
+                    servicio.get('descripcion', '').strip(),
+                    servicio.get('medidas', '').strip(),
+                    servicio.get('costo', '0.00'),
+                    servicio.get('precio_mayoreo', '0.00'),
+                    servicio.get('precio_menudeo', '0.00'),
+                    imagen_nombre,
+                    servicio.get('status_ws', 'activo').strip(),
+                    servicio.get('catalogo', '').strip(),
+                    servicio.get('catalogo2', '').strip(),
+                    servicio.get('catalogo3', '').strip(),
+                    servicio.get('proveedor', '').strip(),
+                ]
+            
+                # Validar precios
+                for i in [8, 9, 10, 11]:  # índices de precios y costo
+                    try:
+                        precio_limpio = re.sub(r'[^\d.]', '', str(campos[i]))
+                        campos[i] = f"{float(precio_limpio):.2f}" if precio_limpio else "0.00"
+                    except (ValueError, TypeError):
+                        campos[i] = "0.00"
                 
                 cursor.execute("""
-                    INSERT INTO precios (servicio, descripcion, precio, moneda)
-                    VALUES (%s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE 
-                        descripcion = VALUES(descripcion),
-                        precio = VALUES(precio),
-                        moneda = VALUES(moneda)
-                """, (nombre_servicio, descripcion, precio_decimal, moneda))
+                    INSERT INTO precios (
+                        sku, categoria, subcategoria, linea, modelo,
+                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ON DUPLICATE KEY UPDATE
+       
+                        categoria=VALUES(categoria),
+                        subcategoria=VALUES(subcategoria),
+                        descripcion=VALUES(descripcion),
+                        costo=VALUES(costo),
+                        precio_mayoreo=VALUES(precio_mayoreo),
+                        precio_menudeo=VALUES(precio_menudeo),
+                        imagen=VALUES(imagen),
+                        status_ws=VALUES(status_ws)
+                """, campos)
                 
                 servicios_guardados += 1
-                app.logger.info(f"✅ Servicio guardado: {nombre_servicio} - ${precio_decimal}")
+                app.logger.info(f"✅ Servicio guardado: {servicio.get('servicio')}")
                 
             except Exception as e:
-                app.logger.error(f"🔴 Error guardando servicio {servicio.get('servicio')}: {e}")
+                app.logger.error(f"🔴 Error guardando servicio individual: {e}")
                 continue
         
         conn.commit()
         cursor.close()
         conn.close()
         
-        app.logger.info(f"✅ {servicios_guardados} servicios guardados en la base de datos")
+        app.logger.info(f"📊 Total servicios guardados: {servicios_guardados}")
         return servicios_guardados
         
     except Exception as e:
         app.logger.error(f"🔴 Error guardando servicios en BD: {e}")
         return 0
 
-# Ruta para subir PDF
 @app.route('/configuracion/precios/subir-pdf', methods=['POST'])
 def subir_pdf_servicios():
-    """Endpoint para subir PDF y extraer servicios automáticamente"""
+    """Endpoint para subir PDF y extraer servicios y sus imágenes automáticamente"""
     config = obtener_configuracion_por_host()
     
     try:
@@ -557,11 +1941,11 @@ def subir_pdf_servicios():
             
             app.logger.info(f"📄 PDF guardado: {filepath}")
             
-            # Extraer texto del PDF
-            texto_pdf = extraer_texto_pdf(filepath)
+            # Extraer texto e imágenes del PDF
+            texto_pdf, imagenes_pdf = extraer_texto_e_imagenes_pdf(filepath)
+            
             if not texto_pdf:
                 flash('❌ Error extrayendo texto del PDF. El archivo puede estar dañado o ser una imagen.', 'error')
-                # Limpiar archivo
                 try:
                     os.remove(filepath)
                 except:
@@ -586,6 +1970,9 @@ def subir_pdf_servicios():
                     pass
                 return redirect(url_for('configuracion_precios'))
             
+            # Asociar imágenes con productos
+            servicios = asociar_imagenes_productos(servicios, imagenes_pdf)
+            
             # Guardar en base de datos
             servicios_guardados = guardar_servicios_desde_pdf(servicios, config)
             
@@ -596,11 +1983,11 @@ def subir_pdf_servicios():
                 pass
             
             if servicios_guardados > 0:
-                flash(f'✅ {servicios_guardados} servicios extraídos y guardados exitosamente', 'success')
+                flash(f'✅ {servicios_guardados} servicios extraídos con imágenes y guardados exitosamente', 'success')
                 # Log detallado
                 app.logger.info(f"📊 Resumen de servicios extraídos:")
                 for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')}")
+                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')} - Imagen: {bool(servicio.get('imagen'))}")
                 if len(servicios.get('servicios', [])) > 10:
                     app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
             else:
@@ -613,6 +2000,7 @@ def subir_pdf_servicios():
         
     except Exception as e:
         app.logger.error(f"🔴 Error procesando PDF: {e}")
+        app.logger.error(traceback.format_exc())
         flash('❌ Error interno procesando el archivo', 'error')
         # Limpiar archivo en caso de error
         try:
@@ -621,7 +2009,6 @@ def subir_pdf_servicios():
         except:
             pass
         return redirect(url_for('configuracion_precios'))
-
 
 def get_db_connection(config=None):
     if config is None:
@@ -650,26 +2037,144 @@ def get_db_connection(config=None):
         app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
         raise
 
+@app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
+def renombrar_columna_kanban(columna_id):
+    config = obtener_configuracion_por_host()
+    nuevo_nombre = request.json.get('nombre', '').strip()
+    if not nuevo_nombre:
+        return jsonify({'error': 'Nombre vacío'}), 400
+
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE kanban_columnas SET nombre=%s WHERE id=%s",
+        (nuevo_nombre, columna_id)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({'success': True, 'nombre': nuevo_nombre})
+
+@app.route('/kanban/columna/agregar', methods=['POST'])
+def agregar_columna_kanban():
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    after_id = data.get('after_id')
+
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    try:
+        default_icon = '/static/icons/default-avatar.png'
+        color_nueva = '#007bff'
+        if after_id:
+            cursor.execute("SELECT orden, color FROM kanban_columnas WHERE id=%s", (after_id,))
+            row = cursor.fetchone()
+            if not row:
+                return jsonify({'error': 'Columna after_id no existe'}), 404
+            after_orden = row['orden']
+            color_nueva = row.get('color') or color_nueva
+            cursor.execute("UPDATE kanban_columnas SET orden = orden + 1 WHERE orden > %s", (after_orden,))
+            nombre = f"Etapa {after_orden + 1}"
+            cursor.execute("""
+                INSERT INTO kanban_columnas (nombre, orden, color, icono)
+                VALUES (%s, %s, %s, %s)
+            """, (nombre, after_orden + 1, color_nueva, default_icon))
+        else:
+            cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
+            next_ord = cursor.fetchone()['next_ord']
+            nombre = f"Etapa {next_ord}"
+            cursor.execute("""
+                INSERT INTO kanban_columnas (nombre, orden, color, icono)
+                VALUES (%s, %s, %s, %s)
+            """, (nombre, next_ord, color_nueva, default_icon))
+
+        conn.commit()
+        new_id = cursor.lastrowid
+        cursor.execute("SELECT id, nombre, orden, color, icono FROM kanban_columnas WHERE id=%s", (new_id,))
+        nueva = cursor.fetchone()
+        return jsonify({'success': True, **nueva})
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Error agregando columna Kanban: {e}")
+        return jsonify({'error': 'Error interno'}), 500
+    finally:
+        cursor.close(); conn.close()
+
+@app.route('/kanban/columna/<int:columna_id>/eliminar', methods=['POST'])
+def eliminar_columna_kanban(columna_id):
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+
+    # Obtener todas las columnas
+    cursor.execute("SELECT id FROM kanban_columnas ORDER BY orden")
+    columnas = cursor.fetchall()
+    if len(columnas) <= 1:
+        cursor.close()
+        conn.close()
+        return jsonify({'success': False, 'error': 'No se puede eliminar la última columna'}), 400
+
+    # Ver a cuál columna transferir (elige la primera distinta)
+    otras = [c['id'] for c in columnas if c['id'] != columna_id]
+    if not otras:
+        cursor.close()
+        conn.close()
+        return jsonify({'success': False, 'error': 'No hay otra columna a la cual transferir los chats'}), 400
+    columna_destino = otras[0]
+
+    # Transferir los chats
+    cursor.execute("UPDATE chat_meta SET columna_id=%s WHERE columna_id=%s", (columna_destino, columna_id))
+    # Eliminar la columna
+    cursor.execute("DELETE FROM kanban_columnas WHERE id=%s", (columna_id,))
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return jsonify({'success': True, 'columna_destino': columna_destino})
+
+@app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
+def actualizar_icono_columna(columna_id):
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    icono = (data.get('icono') or '').strip()
+    if not icono:
+        return jsonify({'error': 'Icono vacío'}), 400
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    try:
+        cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        conn.rollback()
+        app.logger.error(f"Error actualizando icono: {e}")
+        return jsonify({'error': 'Error actualizando icono'}), 500
+    finally:
+        cursor.close(); conn.close()
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
         config = obtener_configuracion_por_host()
-    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
-        # Crear tabla kanban_columnas si no existe
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS kanban_columnas (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 nombre VARCHAR(100) NOT NULL,
                 orden INT NOT NULL DEFAULT 0,
-                color VARCHAR(20) DEFAULT '#007bff'
+                color VARCHAR(20) DEFAULT '#007bff',
+                icono VARCHAR(512) DEFAULT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        
-        # Crear tabla chat_meta si no existe
+        # Asegurar columna icono si tabla ya existía
+        try:
+            cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono VARCHAR(512) DEFAULT NULL")
+        except Exception as _:
+            pass
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS chat_meta (
                 numero VARCHAR(20) PRIMARY KEY,
@@ -678,28 +2183,24 @@ def crear_tablas_kanban(config=None):
                 FOREIGN KEY (columna_id) REFERENCES kanban_columnas(id)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        
-        # Insertar columnas por defecto si no existen
+
         cursor.execute("SELECT COUNT(*) FROM kanban_columnas")
         if cursor.fetchone()[0] == 0:
+            default_icon = '/static/icons/default-avatar.png'
             columnas_default = [
-                (1, 'Nuevos', 1, '#28a745'),
-                (2, 'En Conversación', 2, '#17a2b8'),
-                (3, 'Esperando Respuesta', 3, '#ffc107'),
-                (4, 'Resueltos', 4, '#6c757d')
+                (1, 'Nuevos', 1, '#28a745', default_icon),
+                (2, 'En Conversación', 2, '#17a2b8', default_icon),
+                (3, 'Esperando Respuesta', 3, '#ffc107', default_icon),
+                (4, 'Resueltos', 4, '#6c757d', default_icon)
             ]
-            
             cursor.executemany(
-                "INSERT INTO kanban_columnas (id, nombre, orden, color) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO kanban_columnas (id, nombre, orden, color, icono) VALUES (%s,%s,%s,%s,%s)",
                 columnas_default
             )
-        
+
         conn.commit()
-        cursor.close()
-        conn.close()
-        
+        cursor.close(); conn.close()
         app.logger.info(f"✅ Tablas Kanban creadas/verificadas en {config['db_name']}")
-        
     except Exception as e:
         app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
 
@@ -938,7 +2439,7 @@ def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
         return "¡Gracias por tu pedido! ¿Qué más deseas agregar?"
     
 def autenticar_google_calendar(config=None):
-    """Autentica con OAuth usando client_secret.json"""
+    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -946,73 +2447,113 @@ def autenticar_google_calendar(config=None):
     creds = None
     
     try:
-        app.logger.info("🔐 Intentando autenticar con OAuth...")
+        # Usar un nombre de token específico para cada tenant/dominio
+        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        app.logger.info(f"🔐 Intentando autenticar con OAuth para {config['dominio']} usando {token_filename}")
         
-        # 1. Verificar si ya tenemos token guardado
-        if os.path.exists('token.json'):
+        # 1. Verificar si ya tenemos token guardado para este tenant
+        if os.path.exists(token_filename):
             try:
-                creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+                creds = Credentials.from_authorized_user_file(token_filename, SCOPES)
                 if creds and creds.valid:
-                    app.logger.info("✅ Token OAuth válido encontrado")
+                    app.logger.info(f"✅ Token OAuth válido encontrado para {config['dominio']}")
                     service = build('calendar', 'v3', credentials=creds)
                     return service
                 elif creds and creds.expired and creds.refresh_token:
-                    app.logger.info("🔄 Refrescando token expirado...")
+                    app.logger.info(f"🔄 Refrescando token expirado para {config['dominio']}...")
                     creds.refresh(Request())
-                    with open('token.json', 'w') as token:
+                    with open(token_filename, 'w') as token:
                         token.write(creds.to_json())
                     service = build('calendar', 'v3', credentials=creds)
                     return service
             except Exception as e:
-                app.logger.error(f"❌ Error con token existente: {e}")
+                app.logger.error(f"❌ Error con token existente para {config['dominio']}: {e}")
         
-        # 2. Si no hay token válido, hacer flujo OAuth
-        if not os.path.exists('client_secret.json'):
-            app.logger.error("❌ No se encuentra client_secret.json")
-            return None
-        
-        try:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'client_secret.json', SCOPES)
-            
-            # Para servidor, genera una URL para autorizar manualmente
-            auth_url, _ = flow.authorization_url(prompt='consent')
-            
-            app.logger.info(f"🌐 Por favor visita esta URL para autorizar: {auth_url}")
-            app.logger.info("📋 Después de autorizar, copia el código de autorización que te da Google")
-            
-            # En entorno de servidor, necesitamos manejar el código manualmente
-            code = input("Pega el código de autorización aquí: ") if app.debug else None
-            
-            if code:
-                flow.fetch_token(code=code)
-                creds = flow.credentials
-                
-                # Guardar las credenciales
-                with open('token.json', 'w') as token:
-                    token.write(creds.to_json())
-                
-                app.logger.info("✅ Autenticación OAuth exitosa")
-                service = build('calendar', 'v3', credentials=creds)
-                return service
-            else:
-                app.logger.error("❌ No se proporcionó código de autorización")
-                return None
-                
-        except Exception as e:
-            app.logger.error(f"❌ Error en autenticación OAuth: {e}")
-            return None
+        # 2. Si no hay token válido, necesitamos redirección OAuth
+        app.logger.info(f"⚠️ No hay token válido para {config['dominio']}, requiere autorización")
+        return None
             
     except Exception as e:
         app.logger.error(f'❌ Error inesperado: {e}')
         app.logger.error(traceback.format_exc())
         return None
 
+@app.route('/chat/<telefono>/messages')
+def get_chat_messages(telefono):
+    """Obtener mensajes de un chat específico después de cierto ID"""
+    after_id = request.args.get('after', 0, type=int)
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Consultar solo mensajes más recientes que el ID proporcionado
+    cursor.execute("""
+        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
+        FROM mensajes 
+        WHERE telefono = %s AND id > %s
+        ORDER BY fecha ASC
+    """, (telefono, after_id))
+    
+    messages = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'messages': messages,
+        'timestamp': int(time.time() * 1000)
+    })
+
+@app.route('/autorizar-porfirianna')
+def autorizar_porfirianna():
+    """Endpoint específico para autorizar La Porfirianna con Google"""
+    try:
+        # Usar explícitamente la configuración de La Porfirianna
+        config = NUMEROS_CONFIG['524812372326']
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        tenant_id = config['dominio'].replace('.', '_')
+        
+        if not os.path.exists('client_secret.json'):
+            return "❌ Error: No se encuentra client_secret.json"
+        
+        # Usar explícitamente el dominio de La Porfirianna para el redirect
+        redirect_uri = 'https://www.laporfirianna.mektia.com/completar-autorizacion'
+        app.logger.info(f"🔐 URI de redirección específica para La Porfirianna: {redirect_uri}")
+        
+        flow = InstalledAppFlow.from_client_secrets_file(
+            'client_secret.json', 
+            SCOPES,
+            redirect_uri=redirect_uri
+        )
+        
+        # Generar URL de autorización
+        auth_url, _ = flow.authorization_url(
+            prompt='consent', 
+            access_type='offline',
+            include_granted_scopes='true',
+            state=tenant_id  # Incluir el tenant en el estado
+        )
+        
+        app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
+        
+        return f'''
+        <h1>✅ Autorización Google Calendar para La Porfirianna</h1>
+        <p>Por favor visita esta URL para autorizar:</p>
+        <a href="{auth_url}" target="_blank" class="btn btn-primary">{auth_url}</a>
+        <p>Después de autorizar, serás redirigido automáticamente.</p>
+        '''
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error en autorización La Porfirianna: {str(e)}")
+        return f"❌ Error: {str(e)}"
+
 @app.route('/autorizar-manual')
 def autorizar_manual():
     """Endpoint para autorizar manualmente con Google"""
     try:
+        config = obtener_configuracion_por_host()
         SCOPES = ['https://www.googleapis.com/auth/calendar']
+        tenant_id = config['dominio'].replace('.', '_')
         
         if not os.path.exists('client_secret.json'):
             return "❌ Error: No se encuentra client_secret.json"
@@ -1035,7 +2576,8 @@ def autorizar_manual():
         auth_url, _ = flow.authorization_url(
             prompt='consent', 
             access_type='offline',
-            include_granted_scopes='true'
+            include_granted_scopes='true',
+            state=tenant_id  # Incluir el tenant en el estado
         )
         
         app.logger.info(f"🌐 URL de autorización generada: {auth_url}")
@@ -1056,7 +2598,7 @@ def autorizar_manual():
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
-    """Crea un evento en Google Calendar para la cita"""
+    """Crea un evento en Google Calendar para la cita con más detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1064,27 +2606,54 @@ def crear_evento_calendar(service, cita_info, config=None):
         # Determinar el tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # Formatear fecha y hora (solo para Mektia)
-        if not es_porfirianna:
+        # Formatear fecha y hora
+        if not es_porfirianna and cita_info.get('fecha_sugerida') and cita_info.get('hora_sugerida'):
             start_time = f"{cita_info['fecha_sugerida']}T{cita_info['hora_sugerida']}:00"
             end_time_dt = datetime.strptime(f"{cita_info['fecha_sugerida']} {cita_info['hora_sugerida']}", 
                                           "%Y-%m-%d %H:%M") + timedelta(hours=1)
             end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
         else:
-            # Para La Porfirianna, usar la hora actual + 1 hora
+            # Para La Porfirianna o si no hay fecha/hora específica
             now = datetime.now()
             start_time = now.isoformat()
             end_time = (now + timedelta(hours=1)).isoformat()
         
-        # Crear el evento
+        # Obtener detalles adicionales del servicio
+        detalles_servicio = cita_info.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+        
+        # Título del evento más descriptivo
+        event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {cita_info.get('servicio_solicitado', 'Servicio')} - {cita_info.get('nombre_cliente', 'Cliente')}"
+        
+        # Descripción más detallada del evento
+        event_description = f"""
+📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
+
+🔸 {'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
+🔸 Categoría: {categoria_servicio}
+🔸 Precio: ${precio_servicio} {cita_info.get('moneda', 'MXN')}
+🔸 Descripción: {descripcion_servicio}
+
+👤 CLIENTE:
+🔹 Nombre: {cita_info.get('nombre_cliente', 'No especificado')}
+🔹 Teléfono: {cita_info.get('telefono', 'No especificado')}
+🔹 WhatsApp: https://wa.me/{cita_info.get('telefono', '').replace('+', '')}
+
+⏰ FECHA/HORA:
+🕒 Fecha: {cita_info.get('fecha_sugerida', 'No especificada')}
+🕒 Hora: {cita_info.get('hora_sugerida', 'No especificada')}
+🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
+        """.strip()
+        
+        # Crear el evento con información ampliada
         event = {
-            'summary': f"{'Pedido' if es_porfirianna else 'Cita'} - {cita_info['nombre_cliente']}",
-            'description': f"""
-{'Platillo' if es_porfirianna else 'Servicio'}: {cita_info.get('servicio_solicitado', 'No especificado')}
-Cliente: {cita_info.get('nombre_cliente', 'No especificado')}
-Teléfono: {cita_info.get('telefono', 'No especificado')}
-Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
-            """.strip(),
+            'summary': event_title,
+            'location': config.get('direccion', ''),
+            'description': event_description,
             'start': {
                 'dateTime': start_time,
                 'timeZone': 'America/Mexico_City',
@@ -1100,7 +2669,26 @@ Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde 
                     {'method': 'email', 'minutes': 24 * 60},  # 1 día antes
                 ],
             },
+            'colorId': '4' if es_porfirianna else '1',  # Rojo para Porfirianna, Azul para otros
         }
+        
+        # Obtener el correo para notificaciones de Calendar
+        app.logger.info(f"📧 Intentando obtener calendar_email de la base de datos")
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        
+        calendar_email = None
+        if result and result.get('calendar_email'):
+            calendar_email = result['calendar_email']
+            
+        # Agregar el correo como asistente si está configurado
+        if calendar_email:
+            event['attendees'] = [{'email': calendar_email}]
+            app.logger.info(f"✉️ Notificación de Calendar configurada para: {calendar_email}")
         
         calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
         event = service.events().insert(calendarId=calendar_id, body=event).execute()
@@ -1108,14 +2696,15 @@ Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde 
         app.logger.info(f'Evento creado: {event.get("htmlLink")}')
         return event.get('id')  # Retorna el ID del evento
         
-    except HttpError as error:
-        app.logger.error(f'Error al crear evento: {error}')
+    except Exception as e:
+        app.logger.error(f'Error al crear evento: {e}')
+        app.logger.error(traceback.format_exc())
         return None
     
 def validar_datos_cita_completos(info_cita, config=None):
     """
     Valida que la información de la cita/pedido tenga todos los datos necesarios
-    Devuelve (True, None) si está completa, (False, mensaje_error) si faltan datos
+    Devuelve (True, None) si está completa, (False, lista_faltantes) si faltan datos
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1123,26 +2712,32 @@ def validar_datos_cita_completos(info_cita, config=None):
     # Determinar el tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
-    datos_requeridos = []
+    datos_faltantes = []
     
     # Validar servicio solicitado (siempre requerido)
     if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if es_porfirianna:
-            datos_requeridos.append("qué platillo deseas ordenar")
-        else:
-            datos_requeridos.append("qué servicio necesitas")
+        datos_faltantes.append("servicio")
     
-    # Validar fecha (solo requerido para Mektia)
-    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_requeridos.append("fecha preferida")
+    # Para La Porfirianna, la hora es importante; para servicios digitales, necesitamos fecha y hora
+    if es_porfirianna:
+        if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
+            datos_faltantes.append("hora")
+    else:
+        if not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null':
+            datos_faltantes.append("fecha")
+        if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
+            datos_faltantes.append("hora")
     
-    # Validar nombre del cliente (siempre requerido)
+    # El nombre es opcional pero útil
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_requeridos.append("tu nombre")
+        # No lo añadimos a datos_faltantes porque es opcional
+        app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
     
+    if datos_faltantes:
+        return False, datos_faltantes
     return True, None
 
-@app.route('/completar_autorizacion')
+@app.route('/completar-autorizacion')
 def completar_autorizacion():
     """Endpoint para completar la autorización con el código"""
     try:
@@ -1150,6 +2745,13 @@ def completar_autorizacion():
         code = request.args.get('code')
         state = request.args.get('state')
         scope = request.args.get('scope')
+        
+        # Obtener la configuración actual
+        config = obtener_configuracion_por_host()
+        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        
+        app.logger.info(f"🔐 Completando autorización para {config['dominio']}")
+        app.logger.info(f"🔐 Guardando en: {token_filename}")
         
         app.logger.info(f"🔐 Parámetros recibidos:")
         app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
@@ -1198,10 +2800,12 @@ def completar_autorizacion():
         # Guardar token
         app.logger.info(f"💾 Guardando token en: {token_path}")
         
-        with open(token_path, 'w') as token:
+        # Modificar esta parte para usar el nombre de archivo específico
+        with open(token_filename, 'w') as token:
             token.write(creds.to_json())
         
-        app.logger.info("✅ Autorización completada correctamente")
+        app.logger.info(f"✅ Autorización completada para {config['dominio']}")
+        
         return """
         <html>
         <head>
@@ -1259,7 +2863,7 @@ def convertir_audio(audio_path):
         return None
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
-    """Versión mejorada que usa el historial de conversación para extraer información"""
+    """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1274,28 +2878,71 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         if msg['respuesta']:
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
+    # MEJORA: Detectar si este es un mensaje de confirmación/respuesta a una pregunta previa
+    mensaje_lower = mensaje.lower()
+    es_confirmacion = False
+    if mensaje_lower.startswith(('si', 'sí', 'claro', 'ok')) or 'a las' in mensaje_lower:
+        es_confirmacion = True
+        app.logger.info(f"✅ Detectado mensaje de confirmación: '{mensaje}'")
+    
     try:
-        # 🔥 MEJORAR EL PROMPT PARA LA PORFIRIANNA
-        prompt_cita = f"""
-        Eres un asistente para La Porfirianna (restaurante de comida). 
-        Extrae la información del PEDIDO solicitado basándote en este mensaje.
+        # Obtener productos/servicios de la BD para referencia
+        precios = obtener_todos_los_precios(config)
+        servicios_nombres = [p['servicio'] for p in precios if p.get('servicio')]
+        servicios_texto = ", ".join(servicios_nombres[:20])  # Limitar para evitar tokens excesivos
         
-        MENSAJE ACTUAL: "{mensaje}"
+        # Determinar tipo de negocio
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        HISTORIAL DE CONVERSACIÓN:
-        {contexto_historial}
-        
-        Devuélvelo en formato JSON con estos campos:
-        - servicio_solicitado (string: ej. "chilaquiles", "tacos", "caviar", etc.)
-        - fecha_sugerida (null - no aplica para pedidos de comida)
-        - hora_sugerida (null - no aplica para pedidos de comida)  
-        - nombre_cliente (string o null)
-        - telefono (string: {numero})
-        - estado (siempre "pendiente")
-        - datos_completos (boolean: true si tiene servicio y nombre)
-        
-        Si el mensaje es un saludo o no contiene información de pedido, devuelve servicio_solicitado: null.
-        """
+        # MEJORA: Ajustar prompt para mensajes de confirmación
+        if es_confirmacion:
+            prompt_cita = f"""
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Este parece ser un mensaje de CONFIRMACIÓN a una consulta previa sobre {es_porfirianna and 'un pedido' or 'una cita'}.
+            
+            HISTORIAL RECIENTE:
+            {contexto_historial}
+            
+            MENSAJE DE CONFIRMACIÓN: "{mensaje}"
+            
+            Basándote en el historial y la confirmación, extrae la información completa de {es_porfirianna and 'orden/pedido' or 'cita/servicio'}.
+            
+            SERVICIOS/PRODUCTOS DISPONIBLES:
+            {servicios_texto}
+            
+            Devuelve un JSON con estos campos:
+            - servicio_solicitado (string: nombre del servicio que desea, extrae del historial si es necesario)
+            - fecha_sugerida (string formato YYYY-MM-DD, usa la fecha de HOY si confirma "hoy")
+            - hora_sugerida (string formato HH:MM, extrae del mensaje o historial)
+            - nombre_cliente (string o null, intenta extraer del historial)
+            - telefono (string: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            """
+        else:
+            prompt_cita = f"""
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
+            
+            MENSAJE ACTUAL: "{mensaje}"
+            
+            HISTORIAL DE CONVERSACIÓN:
+            {contexto_historial}
+            
+            SERVICIOS/PRODUCTOS DISPONIBLES:
+            {servicios_texto}
+            
+            Devuelve un JSON con estos campos:
+            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
+            - fecha_sugerida (string formato YYYY-MM-DD o null)
+            - hora_sugerida (string formato HH:MM o null)
+            - nombre_cliente (string o null)
+            - telefono (string: {numero})
+            - estado (siempre "pendiente")
+            - datos_completos (boolean: true si tiene todos los datos necesarios)
+            
+            Si el mensaje no contiene información de pedido/cita, devuelve servicio_solicitado: null.
+            """
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -1319,14 +2966,38 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
             info_cita = json.loads(json_match.group())
+            
+            # MEJORA: Procesar fechas relativas como "hoy" y "mañana"
+            if info_cita.get('fecha_sugerida'):
+                if info_cita['fecha_sugerida'].lower() in ['hoy', 'today']:
+                    info_cita['fecha_sugerida'] = datetime.now().strftime('%Y-%m-%d')
+                elif info_cita['fecha_sugerida'].lower() in ['mañana', 'tomorrow']:
+                    info_cita['fecha_sugerida'] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            
+            # Buscar información adicional del servicio
+            if info_cita.get('servicio_solicitado'):
+                servicio_nombre = info_cita['servicio_solicitado']
+                # Buscar detalles adicionales del servicio en la tabla precios
+                for producto in precios:
+                    if producto.get('servicio') and servicio_nombre.lower() in producto['servicio'].lower():
+                        info_cita['detalles_servicio'] = {
+                            'descripcion': producto.get('descripcion', ''),
+                            'categoria': producto.get('categoria', ''),
+                            'precio': str(producto.get('precio', '0')),
+                            'precio_menudeo': str(producto.get('precio_menudeo', '0')) if producto.get('precio_menudeo') else None
+                        }
+                        break
+            
+            app.logger.info(f"📅 Información de cita extraída: {json.dumps(info_cita)}")
             return info_cita
         else:
+            app.logger.warning(f"⚠️ No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
-        app.logger.error(f"Error extrayendo info de pedido: {e}")
+        app.logger.error(f"Error extrayendo info de cita: {e}")
         return None
-    
+
 @app.route('/debug-headers')
 def debug_headers():
     headers = {k: v for k, v in request.headers.items()}
@@ -1351,7 +3022,7 @@ def debug_dominio():
     
     <h2>Probar ambos dominios:</h2>
     <ul>
-        <li><a href="https://mektia.com/debug-dominio">mektia.com</a></li>
+        <li><a href="https://smartwhats.mektia.com/debug-dominio">smartwhats.mektia.com</a></li>
         <li><a href="https://laporfirianna.mektia.com/debug-dominio">laporfirianna.mektia.com</a></li>
     </ul>
     """
@@ -1370,7 +3041,7 @@ def get_country_flag(numero):
     return None
 
 # ——— Subpestañas válidas ———
-SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones']
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
@@ -1407,11 +3078,10 @@ def kanban_data(config=None):
         # Convertir timestamps
         for chat in chats:
             if chat.get('ultima_fecha'):
-                if chat['ultima_fecha'].tzinfo is not None:
-                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                if chat['ultima_fecha'].tzinfo is None:
+                    chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
                 else:
-                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
 
         cursor.close()
         conn.close()
@@ -1449,8 +3119,15 @@ def load_config(config=None):
             palabras_prohibidas TEXT,
             max_mensajes INT DEFAULT 10,
             tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),  
-            nombre_empresa VARCHAR(100)  
+            logo_url VARCHAR(255),
+            nombre_empresa VARCHAR(100),
+            app_logo VARCHAR(255),
+            calendar_email VARCHAR(255),
+            -- Asesores de ventas
+            asesor1_nombre VARCHAR(100),
+            asesor1_telefono VARCHAR(50),
+            asesor2_nombre VARCHAR(100),
+            asesor2_telefono VARCHAR(50)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -1459,23 +3136,25 @@ def load_config(config=None):
     conn.close()
 
     if not row:
-        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}}
+        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}}
 
     negocio = {
-        'ia_nombre': row['ia_nombre'],
-        'negocio_nombre': row['negocio_nombre'],
-        'descripcion': row['descripcion'],
-        'url': row['url'],
-        'direccion': row['direccion'],
-        'telefono': row['telefono'],
-        'correo': row['correo'],
-        'que_hace': row['que_hace'],
-        'logo_url': row.get('logo_url', ''),  
-        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats') 
+        'ia_nombre': row.get('ia_nombre'),
+        'negocio_nombre': row.get('negocio_nombre'),
+        'descripcion': row.get('descripcion'),
+        'url': row.get('url'),
+        'direccion': row.get('direccion'),
+        'telefono': row.get('telefono'),
+        'correo': row.get('correo'),
+        'que_hace': row.get('que_hace'),
+        'logo_url': row.get('logo_url', ''),
+        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
+        'app_logo': row.get('app_logo', ''),
+        'calendar_email': row.get('calendar_email', '')
     }
     personalizacion = {
-        'tono': row['tono'],
-        'lenguaje': row['lenguaje'],
+        'tono': row.get('tono'),
+        'lenguaje': row.get('lenguaje'),
     }
     restricciones = {
         'restricciones': row.get('restricciones', ''),
@@ -1483,7 +3162,13 @@ def load_config(config=None):
         'max_mensajes': row.get('max_mensajes', 10),
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
-    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones}
+    asesores = {
+        'asesor1_nombre': row.get('asesor1_nombre', ''),
+        'asesor1_telefono': row.get('asesor1_telefono', ''),
+        'asesor2_nombre': row.get('asesor2_nombre', ''),
+        'asesor2_telefono': row.get('asesor2_telefono', '')
+    }
+    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones, 'asesores': asesores}
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -1512,14 +3197,51 @@ def crear_tabla_citas(config=None):
     conn.close()
 
 def guardar_cita(info_cita, config=None):
-    """Guarda la cita en la base de datos y agenda en Google Calendar"""
+    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        # NUEVO: Verificar si existe una cita similar en los últimos minutos
+        cursor.execute('''
+            SELECT id FROM citas
+            WHERE numero_cliente = %s 
+            AND servicio_solicitado = %s 
+            AND fecha_creacion > NOW() - INTERVAL 5 MINUTE
+        ''', (
+            info_cita.get('telefono'),
+            info_cita.get('servicio_solicitado')
+        ))
         
+        existing_cita = cursor.fetchone()
+        if existing_cita:
+            app.logger.info(f"⚠️ Cita similar ya existe (ID: {existing_cita[0]}), evitando duplicado")
+            cursor.close()
+            conn.close()
+            return existing_cita[0]  # Retorna el ID de la cita existente
+        
+
+        # Crear tabla notificaciones_ia si no existe con la estructura requerida
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificaciones_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20),
+                tipo VARCHAR(20),
+                resumen TEXT,
+                estado VARCHAR(20) DEFAULT 'pendiente',
+                mensaje text,
+                evaluacion_ia json,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                calendar_event_id VARCHAR(255),
+                INDEX idx_numero (numero),
+                INDEX idx_timestamp (timestamp)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        conn.commit()
+        
+        # Guardar en tabla citas
         cursor.execute('''
             INSERT INTO citas (
                 numero_cliente, servicio_solicitado, fecha_propuesta,
@@ -1537,29 +3259,102 @@ def guardar_cita(info_cita, config=None):
         
         conn.commit()
         cita_id = cursor.lastrowid
+        
+        # Determinar si la cita es para un día futuro (al menos 1 día después)
+        evento_id = None
+        debe_agendar = False
+        
+        if info_cita.get('fecha_sugerida'):
+            try:
+                fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
+                fecha_actual = datetime.now().date()
+                
+                # Solo agendar si la fecha es al menos un día después
+                if (fecha_cita - fecha_actual).days >= 1:
+                    debe_agendar = True
+                    app.logger.info(f"✅ Cita para fecha futura ({fecha_cita}), se agendará en Calendar")
+                else:
+                    app.logger.info(f"ℹ️ Cita para hoy o pasada ({fecha_cita}), no se agendará en Calendar")
+            except Exception as e:
+                app.logger.error(f"Error procesando fecha: {e}")
+        
+        # Agendar en Google Calendar solo si es para un día futuro
+        if debe_agendar:
+            service = autenticar_google_calendar(config)
+            if service:
+                evento_id = crear_evento_calendar(service, info_cita, config)
+                if evento_id:
+                    # Guardar el ID del evento en la base de datos
+                    cursor.execute('''
+                        UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                    ''', (evento_id, cita_id))
+                    conn.commit()
+                    app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+        
+        # Guardar en notificaciones_ia
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        tipo_solicitud = "pedido" if es_porfirianna else "cita"
+        
+        # Crear resumen para la notificación
+        detalles_servicio = info_cita.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', '')
+        
+        resumen = f"{tipo_solicitud.capitalize()}: {info_cita.get('servicio_solicitado')} - "
+        resumen += f"Cliente: {info_cita.get('nombre_cliente')} - "
+        resumen += f"Fecha: {info_cita.get('fecha_sugerida')} {info_cita.get('hora_sugerida')}"
+        
+        # Construir evaluación IA en formato JSON
+        evaluacion_ia = {
+            'servicio_solicitado': info_cita.get('servicio_solicitado'),
+            'detalles_servicio': detalles_servicio,
+            'fecha_sugerida': info_cita.get('fecha_sugerida'),
+            'hora_sugerida': info_cita.get('hora_sugerida'),
+            'nombre_cliente': info_cita.get('nombre_cliente'),
+            'cita_id': cita_id,
+            'calendar_event_id': evento_id
+        }
+        mensaje_notificacion = f"""🆕 *NUEVA CITA REGISTRADA* - ID: #{cita_id}
+
+        👤 *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+        📞 *Teléfono:* {info_cita.get('telefono')}
+        🛠️ *Servicio:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        📅 *Fecha:* {info_cita.get('fecha_sugerida', 'No especificada')}
+        ⏰ *Hora:* {info_cita.get('hora_sugerida', 'No especificada')}
+
+        ⏰ *Registrada:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+        💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
+        """
+
+        # Enviar mensaje al número específico
+        enviar_mensaje('5214493432744', mensaje_notificacion, config)
+        enviar_mensaje('5214491182201', mensaje_notificacion, config)
+        app.logger.info(f"✅ Notificación de cita enviada a 5214493432744, ID: {cita_id}")
+        
+        
+        # Guardar en notificaciones_ia
+        cursor.execute('''
+            INSERT INTO notificaciones_ia (
+                numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+        ''', (
+            info_cita.get('telefono'),
+            tipo_solicitud,
+            resumen,
+            'pendiente',
+            json.dumps(info_cita),  # Guardar toda la info de la cita como mensaje
+            json.dumps(evaluacion_ia),
+            evento_id
+        ))
+        conn.commit()
         cursor.close()
         conn.close()
-        
-        # Agendar en Google Calendar
-        service = autenticar_google_calendar(config)
-        if service:
-            evento_id = crear_evento_calendar(service, info_cita, config)
-            if evento_id:
-                # Guardar el ID del evento en la base de datos
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
-                cursor.execute('''
-                    UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                ''', (evento_id, cita_id))
-                conn.commit()
-                cursor.close()
-                conn.close()
-                app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
         
         return cita_id
         
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
+        app.logger.error(traceback.format_exc())
         return None
     
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
@@ -1598,7 +3393,7 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
 
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
-    """Envía alerta al administrador sobre nueva cita"""
+    """Envía alerta al administrador sobre nueva cita con más detalles del servicio"""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -1607,6 +3402,12 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     tipo_solicitud = "pedido" if es_porfirianna else "cita"
     
     try:
+        # Obtener detalles adicionales del servicio si existen
+        detalles_servicio = info_cita.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+        
         mensaje_alerta = f"""
         🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
 
@@ -1614,6 +3415,11 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         *Teléfono:* {info_cita.get('telefono')}
 
         *{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *Categoría:* {categoria_servicio}
+        *Precio:* ${precio_servicio} {info_cita.get('moneda', 'MXN')}
+        
+        *Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
+
         *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
         *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
 
@@ -1630,7 +3436,6 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 
-
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
@@ -1638,6 +3443,10 @@ def serve_uploaded_file(filename):
 # Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Also create the logos subdirectory
+os.makedirs(os.path.join(UPLOAD_FOLDER, 'logos'), exist_ok=True)
 
 def extraer_servicio_del_mensaje(mensaje, config=None):
     """Extrae el servicio del mensaje usando keywords simples"""
@@ -1721,6 +3530,305 @@ def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
         datos_faltantes.append("tu nombre")
     
+@app.route('/configuracion/negocio/publicar-pdf', methods=['POST'])
+@login_required
+def publicar_pdf_configuracion():
+    """Recibe un PDF o imagen desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
+    config = obtener_configuracion_por_host()
+    try:
+        if 'public_pdf' not in request.files or request.files['public_pdf'].filename == '':
+            flash('❌ No se seleccionó ningún archivo', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        file = request.files['public_pdf']
+        original_name = file.filename or 'uploaded_file'
+        # Determinar extensión y si está permitida
+        ext = ''
+        if '.' in original_name:
+            ext = original_name.rsplit('.', 1)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            flash('❌ Tipo de archivo no permitido. Usa PDF, imágenes o documentos permitidos.', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        # Prefijos distintos para imagen/pdf (facilita depuración)
+        prefix = 'img' if ext in {'png','jpg','jpeg','gif','webp','svg'} else 'pdf'
+        filename = secure_filename(f"{prefix}_{int(time.time())}_{original_name}")
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        os.makedirs(docs_dir, exist_ok=True)
+        filepath = os.path.join(docs_dir, filename)
+        file.save(filepath)
+
+        descripcion = (request.form.get('public_pdf_descripcion') or '').strip()
+
+        # Guardar metadatos en tabla documents_publicos (crear si no existe)
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        try:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS documents_publicos (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    filename VARCHAR(255) NOT NULL,
+                    filepath VARCHAR(512) NOT NULL,
+                    descripcion TEXT,
+                    uploaded_by VARCHAR(100),
+
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE KEY uq_filename (filename)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """)
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar tabla documents_publicos: {e}")
+
+        try:
+            user = None
+            au = session.get('auth_user')
+            if au and isinstance(au, dict):
+                user = au.get('user') or str(au.get('id') or '')
+
+            cursor.execute("""
+                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
+            """, (filename, filepath, descripcion, user))
+            conn.commit()
+        except Exception as e:
+            app.logger.error(f"🔴 Error insertando metadatos archivo: {e}")
+            conn.rollback()
+            flash('❌ Error guardando metadatos en la base de datos', 'error')
+            try:
+                cursor.close(); conn.close()
+            except:
+                pass
+            # eliminar archivo guardado para evitar basura
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except:
+                pass
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        cursor.close(); conn.close()
+
+        flash('✅ Archivo publicado correctamente', 'success')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en publicar_pdf_configuracion: {e}")
+        app.logger.error(traceback.format_exc())
+        flash('❌ Error procesando el archivo', 'error')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+# --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
+def enviar_documento(numero, file_url, filename, config=None):
+    """
+    Envía un documento (PDF) por WhatsApp usando Graph API.
+    file_url debe ser una URL pública accesible (https://.../uploads/docs/filename).
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'document',
+            'document': {
+                'link': file_url,
+                'filename': filename
+            }
+        }
+        app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
+        if r.status_code in (200, 201, 202):
+            app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando documento ({r.status_code}): {r.text}")
+            return False
+    except Exception as e:
+        app.logger.error(f"🔴 Exception en enviar_documento: {e}")
+        return False
+
+def build_texto_catalogo(precios, limit=20):
+    """Construye un texto resumen del catálogo (hasta `limit` items)."""
+    if not precios:
+        return "No hay productos registrados en el catálogo."
+    lines = []
+    for p in precios[:limit]:
+        sku = (p.get('sku') or '').strip()
+        nombre = (p.get('servicio') or p.get('modelo') or '').strip()
+        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or ''
+        precio_str = ''
+        try:
+            if precio not in (None, ''):
+                precio_str = f" - ${float(precio):,.2f}"
+        except Exception:
+            precio_str = f" - {precio}"
+        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}")
+    texto = "📚 Catálogo (resumen):\n" + "\n".join(lines)
+    if len(precios) > limit:
+        texto += f"\n\n... y {len(precios)-limit} productos más. Pide 'catálogo completo' para recibir el PDF si está publicado."
+    return texto
+
+def seleccionar_mejor_doc(docs, query):
+    """
+    Selecciona el documento más relevante de la lista `docs` comparando `query`
+    contra los campos filename y descripcion. Retorna el row dict seleccionado
+    o None si no hay una coincidencia significativa.
+    """
+    try:
+        if not docs:
+            return None
+        if not query or not str(query).strip():
+            return docs[0]
+
+        q = str(query).lower()
+        q_tokens = set(re.findall(r'\w{3,}', q))
+
+        best = None
+        best_score = 0.0
+        now_ts = time.time()
+
+        for d in docs:
+            score = 0.0
+            desc = (d.get('descripcion') or '').lower()
+            fname = (d.get('filename') or '').lower()
+
+            # tokens overlap with description (más peso)
+            desc_tokens = set(re.findall(r'\w{3,}', desc))
+            common_desc = q_tokens & desc_tokens
+            score += len(common_desc) * 3.0
+
+            # tokens overlap with filename (menos peso)
+            fname_tokens = set(re.findall(r'\w{3,}', fname.replace('_', ' ')))
+            common_fname = q_tokens & fname_tokens
+            score += len(common_fname) * 1.5
+
+            # Si la query incluye palabras exactas de la descripción más puntuación
+            for t in q_tokens:
+                if t and t in desc:
+                    score += 0.5
+
+            # Ligero bonus por recencia (favor documentos más recientes)
+            try:
+                created = d.get('created_at')
+                if created:
+                    # normalized recency bonus (0..1)
+                    age_seconds = (now_ts - created.timestamp()) if hasattr(created, 'timestamp') else 0
+                    recency_bonus = max(0, 1 - (age_seconds / (60 * 60 * 24 * 30)))  # 30 días
+                    score += recency_bonus * 0.5
+            except Exception:
+                pass
+
+            if score > best_score:
+                best_score = score
+                best = d
+
+        # Umbral mínimo para considerar "relevante"
+        if best_score >= 1.0:
+            app.logger.info(f"📚 seleccionar_mejor_doc: mejor score={best_score} filename={best.get('filename') if best else None}")
+            return best
+
+        app.logger.info(f"📚 seleccionar_mejor_doc: ningún documento con score suficiente (best={best_score}), usar el más reciente")
+        return docs[0]
+    except Exception as e:
+        app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
+        return docs[0] if docs else None
+
+
+def enviar_catalogo(numero, original_text=None, config=None):
+    """
+    Intenta enviar el PDF público más relevante (documents_publicos),
+    si no existe envía un resumen textual del catálogo (primeros 20 productos).
+    Usa la descripción del PDF para decidir cuál enviar.
+    """
+    from flask import has_request_context, request
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
+        if cursor.fetchone():
+            cursor.execute("""
+                SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                FROM documents_publicos
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            docs = cursor.fetchall()
+        else:
+            docs = []
+        cursor.close(); conn.close()
+
+        usuario_texto = original_text or "[Solicitud de catálogo]"
+
+        if docs:
+            # Seleccionar el doc más relevante usando descripción/filename
+            mejor = seleccionar_mejor_doc(docs, usuario_texto)
+            if not mejor:
+                mejor = docs[0]
+
+            filename = mejor.get('filename')
+            descripcion = mejor.get('descripcion') or ''
+            # Construir base preferente desde request (host real) para evitar URLs sin esquema
+            base = None
+            try:
+                if has_request_context():
+                    base = request.url_root.rstrip('/')
+                else:
+                    dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+                    base = dominio if dominio.startswith('http') else f"https://{dominio}"
+            except Exception:
+                dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+                base = dominio if dominio.startswith('http') else f"https://{dominio}"
+
+            file_url = f"{base}/uploads/docs/{filename}"
+            app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
+
+            sent = enviar_documento(numero, file_url, filename, config)
+            respuesta_text = (f"Te envío el catálogo: {descripcion}" if descripcion else f"Te envío el catálogo: {filename}") if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
+
+            # Actualizar la fila de mensaje entrante con la respuesta para evitar duplicados
+            try:
+                actualizar_respuesta(numero, usuario_texto, respuesta_text, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
+                guardar_conversacion(numero, usuario_texto, respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
+
+            return sent
+        else:
+            # Fallback a texto resumen del catálogo
+            precios = obtener_todos_los_precios(config) or []
+            texto_catalogo = build_texto_catalogo(precios, limit=20)
+            enviar_mensaje(numero, texto_catalogo, config)
+            try:
+                actualizar_respuesta(numero, usuario_texto, texto_catalogo, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta falló en fallback textual: {e}")
+                guardar_conversacion(numero, usuario_texto, texto_catalogo, config)
+            return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
+        try:
+            precios = obtener_todos_los_precios(config) or []
+            texto_catalogo = build_texto_catalogo(precios, limit=10)
+            enviar_mensaje(numero, texto_catalogo, config)
+            try:
+                actualizar_respuesta(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            except:
+                guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            return True
+        except Exception as ex:
+            app.logger.error(f"🔴 Fallback también falló: {ex}")
+            return False
 
 @app.route('/autorizar-google')
 def autorizar_google():
@@ -1758,114 +3866,124 @@ def save_config(cfg_all, config=None):
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
-    res = cfg_all.get('restricciones', {}) 
+    res = cfg_all.get('restricciones', {})
+    ases = cfg_all.get('asesores', {})
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    
-    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'logo_url'")
-    tiene_logo = cursor.fetchone() is not None
-    
-    if tiene_logo:
-        cursor.execute('''
-            INSERT INTO configuracion
-                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                 telefono, correo, que_hace, tono, lenguaje, restricciones, 
-                 palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa)
-            VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                ia_nombre = VALUES(ia_nombre),
-                negocio_nombre = VALUES(negocio_nombre),
-                descripcion = VALUES(descripcion),
-                url = VALUES(url),
-                direccion = VALUES(direccion),
-                telefono = VALUES(telefono),
-                correo = VALUES(correo),
-                que_hace = VALUES(que_hace),
-                tono = VALUES(tono),
-                lenguaje = VALUES(lenguaje),
-                restricciones = VALUES(restricciones),
-                palabras_prohibidas = VALUES(palabras_prohibidas),
-                max_mensajes = VALUES(max_mensajes),
-                tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
-                logo_url = VALUES(logo_url),
-                nombre_empresa = VALUES(nombre_empresa);
-        ''', (
-            neg.get('ia_nombre'),
-            neg.get('negocio_nombre'),
-            neg.get('descripcion'),
-            neg.get('url'),
-            neg.get('direccion'),
-            neg.get('telefono'),
-            neg.get('correo'),
-            neg.get('que_hace'),
-            per.get('tono'),
-            per.get('lenguaje'),
-            res.get('restricciones'),
-            res.get('palabras_prohibidas'),
-            res.get('max_mensajes', 10),
-            res.get('tiempo_max_respuesta', 30),
-            neg.get('logo_url', ''), 
-            neg.get('nombre_empresa', 'SmartWhats')  
-        ))
-    else:
-        # Si no tiene las nuevas columnas, usar la consulta original
-        cursor.execute('''
-            INSERT INTO configuracion
-                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                 telefono, correo, que_hace, tono, lenguaje)
-            VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                ia_nombre = VALUES(ia_nombre),
-                negocio_nombre = VALUES(negocio_nombre),
-                descripcion = VALUES(descripcion),
-                url = VALUES(url),
-                direccion = VALUES(direccion),
-                telefono = VALUES(telefono),
-                correo = VALUES(correo),
-                que_hace = VALUES(que_hace),
-                tono = VALUES(tono),
-                lenguaje = VALUES(lenguaje);
-        ''', (
-            neg.get('ia_nombre'),
-            neg.get('negocio_nombre'),
-            neg.get('descripcion'),
-            neg.get('url'),
-            neg.get('direccion'),
-            neg.get('telefono'),
-            neg.get('correo'),
-            neg.get('que_hace'),
-            per.get('tono'),
-            per.get('lenguaje')
-        ))
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-    
-    # ——— CRUD y helpers para 'precios' ———
-def obtener_todos_los_precios(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS precios (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            servicio VARCHAR(100) NOT NULL,
-            descripcion TEXT,
-            precio DECIMAL(10,2) NOT NULL,
-            moneda CHAR(3) NOT NULL,
-            UNIQUE(servicio)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    cursor.execute("SELECT * FROM precios ORDER BY servicio;")
-    rows = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    return rows
+
+    # Asegurar columnas nuevas mínimas (no rompe si ya existen)
+    try:
+        cursor.execute("SHOW COLUMNS FROM configuracion")
+        existing_cols = {row[0] for row in cursor.fetchall()}
+    except Exception as e:
+        app.logger.warning(f"⚠️ Could not inspect configuracion table columns: {e}")
+        existing_cols = set()
+
+    alter_statements = []
+    if 'logo_url' not in existing_cols:
+        alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
+    if 'calendar_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
+    if 'asesor1_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
+    if 'asesor1_telefono' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor2_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
+    if 'asesor2_telefono' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+
+    if alter_statements:
+        try:
+            sql = f"ALTER TABLE configuracion {', '.join(alter_statements)}"
+            cursor.execute(sql)
+            conn.commit()
+            app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
+            # refresh existing_cols
+            cursor.execute("SHOW COLUMNS FROM configuracion")
+            existing_cols = {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
+
+    try:
+        # Mapear posibles campos a valores desde cfg_all
+        candidate_map = {
+            'ia_nombre': neg.get('ia_nombre'),
+            'negocio_nombre': neg.get('negocio_nombre'),
+            'descripcion': neg.get('descripcion'),
+            'url': neg.get('url'),
+            'direccion': neg.get('direccion'),
+            'telefono': neg.get('telefono'),
+            'correo': neg.get('correo'),
+            'que_hace': neg.get('que_hace'),
+            'tono': per.get('tono'),
+            'lenguaje': per.get('lenguaje'),
+            'restricciones': res.get('restricciones'),
+            'palabras_prohibidas': res.get('palabras_prohibidas'),
+            'max_mensajes': int(res.get('max_mensajes', 10)) if res.get('max_mensajes') is not None else 10,
+            'tiempo_max_respuesta': int(res.get('tiempo_max_respuesta', 30)) if res.get('tiempo_max_respuesta') is not None else 30,
+            'logo_url': neg.get('logo_url', None) or neg.get('app_logo', None),
+            'app_logo': neg.get('app_logo', None),
+            'app_nombre': neg.get('ia_nombre', None),
+            'nombre_empresa': neg.get('nombre_empresa', None),
+            'calendar_email': neg.get('calendar_email', None),
+            'asesor1_nombre': ases.get('asesor1_nombre', None),
+            'asesor1_telefono': ases.get('asesor1_telefono', None),
+            'asesor2_nombre': ases.get('asesor2_nombre', None),
+            'asesor2_telefono': ases.get('asesor2_telefono', None)
+        }
+
+        # Usar solo columnas que existen en la tabla
+        cols_to_write = [col for col in candidate_map.keys() if col in existing_cols]
+        if not cols_to_write:
+            app.logger.warning("⚠️ No hay columnas conocidas para escribir en configuracion; abortando save_config")
+            cursor.close()
+            conn.close()
+            return
+
+        # Construir listas de columnas/valores y el SQL dinámico
+        cols_sql = ', '.join(cols_to_write)
+        placeholders = ', '.join(['%s'] * len(cols_to_write))
+        values = [candidate_map[c] for c in cols_to_write]
+
+        update_parts = ', '.join([f"{c}=VALUES({c})" for c in cols_to_write])
+
+        sql = f"INSERT INTO configuracion (id, {cols_sql}) VALUES (1, {placeholders}) ON DUPLICATE KEY UPDATE {update_parts}"
+        cursor.execute(sql, values)
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("✅ Configuración guardada (save_config)")
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando configuración (save_config): {e}")
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
+        raise
+
+def obtener_todos_los_precios(config):
+    try:
+        db = get_db_connection(config)
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT * FROM precios
+            ORDER BY sku, categoria, modelo;
+        """)
+        precios = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return precios
+    except Exception as e:
+        print(f"Error obteniendo precios: {str(e)}")
+        return []
+        
+    except Exception as e:
+        print(f"Error obteniendo precios: {str(e)}")
+        return []
 
 def obtener_precio_por_id(pid, config=None):
     if config is None:
@@ -1885,7 +4003,7 @@ def obtener_precio(servicio_nombre: str, config):
     conn = get_db_connection(config)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT precio, moneda
+        SELECT precio_mayoreo, precio_menudeo
         FROM precios
         WHERE LOWER(servicio)=LOWER(%s)
         LIMIT 1;
@@ -1930,7 +4048,6 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-# ——— Función IA con contexto y precios ———
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1943,45 +4060,139 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    
+    # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
-    lista_precios = "\n".join(
-        f"- {p['servicio']}: {p['precio']} {p['moneda']}"
-        for p in precios
-    )
+    
+    # Format products using the canonical DB fields ...
+    productos_formateados = []
+    dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+    for p in precios[:40]:
+        try:
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            def _clean_field(val, imagen_name):
+                if not val:
+                    return ''
+                try:
+                    s = str(val).strip()
+                    if not imagen_name:
+                        return s
+                    img = str(imagen_name).strip()
+                    # eliminar coincidencias exactas del nombre de la imagen
+                    if img and img in s:
+                        s = s.replace(img, '')
+                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                    # limpiar espacios sobrantes
+                    s = re.sub(r'\s{2,}', ' ', s).strip()
+                    return s
+                except Exception:
+                    return str(val).strip()
 
-    # En la función responder_con_ia, modifica el system_prompt:
+            sku = (p.get('sku') or '').strip()
+            modelo = (p.get('modelo') or '').strip()
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = (p.get('categoria') or '').strip()
+            subcategoria = (p.get('subcategoria') or '').strip()
+            linea = (p.get('linea') or '').strip()
+            descripcion_p = (p.get('descripcion') or '').strip()
+            medidas = (p.get('medidas') or '').strip()
+            proveedor = (p.get('proveedor') or '').strip()
+            status = (p.get('status_ws') or 'activo').strip()
+            catalogo = (p.get('catalogo') or '')
+            imagen = (p.get('imagen') or '').strip()
+            if imagen:
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
+                    else:
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+            else:
+                imagen_url = ''
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+            precio_str = ''
+            if precio_menudeo:
+                try:
+                    precio_str = f"${float(precio_menudeo):,.2f}"
+                except Exception:
+                    precio_str = str(precio_menudeo)
+            parts = [f"{titulo}"]
+            if sku:
+                parts.append(f"(SKU: {sku})")
+            if categoria:
+                parts.append(f"Categoria: {categoria}")
+            if subcategoria:
+                parts.append(f"Subcategoria: {subcategoria}")
+            if linea:
+                parts.append(f"Linea: {linea}")
+            if precio_str:
+                parts.append(f"Precio: {precio_str}")
+            if medidas:
+                parts.append(f"Medidas: {medidas}")
+            if proveedor:
+                parts.append(f"Proveedor: {proveedor}")
+            if catalogo:
+                parts.append(f"Catalogo: {catalogo}")
+            if imagen_url:
+                parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                parts.append(f"Imagen: {imagen}")
+            if descripcion_p:
+                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+            producto_line = " | ".join(parts)
+            producto_line += f" | Status: {status}"
+        except Exception:
+            producto_line = "Sin datos legibles de producto"
+        productos_formateados.append(f"- {producto_line}")
+    productos_texto = "\n".join(productos_formateados)
+    if len(precios) > 40:
+        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
+
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
 
-Servicios y precios:
-{lista_precios}
+Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
 
-Habla de manera natural y libre, siempre basándote en la información de arriba.
-Si el usuario pregunta por algo que no está en la lista de precios o descripción,
-responde amablemente que no tienes esa información.
+{productos_texto}
+
+Reglas:
+- Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
+- Siempre indica si la información no está disponible en la base de datos.
+- Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
+- No inventes descuentos, existencias ni detalles no presentes en los campos.
+- Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
+
+Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
 """
 
-
     historial = obtener_historial(numero, config=config)
-    
-    # 🔥 CORRECCIÓN: Definir messages_chain correctamente
+
+    info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
+    if info_cita and info_cita.get('servicio_solicitado'):
+        app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
+        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        if datos_completos:
+            cita_id = guardar_cita(info_cita, config)
+            if cita_id:
+                app.logger.info(f"✅ Cita guardada con ID: {cita_id}")
+                enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
+                return confirmacion
+
     messages_chain = [{'role': 'system', 'content': system_prompt}]
-    
-    # 🔥 FILTRO CRÍTICO: Eliminar mensajes con contenido NULL o vacío
     for entry in historial:
-        # Solo agregar mensajes de usuario con contenido válido
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        
-        # Solo agregar respuestas de IA con contenido válido
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-    
-    # Agregar el mensaje actual (si es válido)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
-            # ✅ Asegúrate de que imagen_base64 ya incluye el prefijo
             messages_chain.append({
                 'role': 'user',
                 'content': [
@@ -1989,73 +4200,53 @@ responde amablemente que no tienes esa información.
                     {
                         "type": "image_url", 
                         "image_url": {
-                            "url": imagen_base64,  # Ya debería incluir "data:image/jpeg;base64,"
+                            "url": imagen_base64,
                             "detail": "auto"
                         }
                     }
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Para audio: incluir la transcripción
-            messages_chain.append({
-                'role': 'user',
-                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
-            })
+            # Avoid duplication when the transcription is identical to the message text.
+            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
+            # and it differs from the transcription, append it as "[Mensaje adicional]".
+            try:
+                tu = mensaje_usuario.strip() if mensaje_usuario else ""
+                ta = transcripcion_audio.strip() if transcripcion_audio else ""
+                if tu and ta and tu != ta:
+                    content = f"{ta}\n\n[Mensaje adicional]: {tu}"
+                else:
+                    content = ta or tu
+            except Exception:
+                content = transcripcion_audio or mensaje_usuario
+            messages_chain.append({'role': 'user', 'content': content})
+        elif es_audio and not transcripcion_audio and mensaje_usuario:
+            # If audio but no transcription, fall back to whatever text we have (caption)
+            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
-            # Para texto normal
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
-        if es_imagen:
-            # Usar OpenAI para imágenes
-            headers = {
-                "Authorization": f"Bearer {OPENAI_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "gpt-4o",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
-                "temperature": 0.7,
-                "max_tokens": 1000,
-            }
-            
-            app.logger.info(f"🖼️ Enviando imagen a OpenAI con gpt-4o")
-            response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=60)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
-        
-        else:
-            # Usar DeepSeek para texto (o audio transcrito)
-            headers = {
-                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "deepseek-chat",
-                "messages": messages_chain,  # ✅ Ahora messages_chain está definida
-                "temperature": 0.7,
-                "max_tokens": 2000
-            }
-            
-            response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-            response.raise_for_status()
-            
-            data = response.json()
-            respuesta = data['choices'][0]['message']['content'].strip()
-            # 🔒 APLICAR RESTRICCIONES CONFIGURADAS
-            respuesta = aplicar_restricciones(respuesta, numero, config)
-            return respuesta
-    
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "model": "deepseek-chat",
+            "messages": messages_chain,
+            "temperature": 0.7,
+            "max_tokens": 2000
+        }
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()
+        data = response.json()
+        respuesta = data['choices'][0]['message']['content'].strip()
+        respuesta = aplicar_restricciones(respuesta, numero, config)
+        return respuesta
+
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 API error: {e}")
         if hasattr(e, 'response') and e.response:
@@ -2064,6 +4255,81 @@ responde amablemente que no tienes esa información.
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
+
+# New helpers: enviar_imagen and buscar_sku_en_texto
+def enviar_imagen(numero, imagen_ref, config=None):
+    """
+    Envía una imagen por WhatsApp usando la API de Graph.
+    imagen_ref puede ser:
+      - URL absoluta (empieza con http)
+      - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
+    Retorna True si la API respondió OK.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        if not imagen_ref:
+            app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
+            return False
+
+        # Determinar URL pública
+        if str(imagen_ref).lower().startswith('http'):
+            image_url = imagen_ref
+        else:
+            dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+            # fallback to host-based URL if dominio appears not to be a full domain
+            if not dominio.startswith('http'):
+                image_url = f"https://{dominio}/uploads/productos/{imagen_ref}"
+            else:
+                image_url = f"{dominio}/uploads/productos/{imagen_ref}"
+
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'image',
+            'image': {
+                'link': image_url
+            }
+        }
+
+        app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code == 200:
+            app.logger.info("✅ Imagen enviada correctamente")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando imagen ({r.status_code}): {r.text}")
+            return False
+
+    except Exception as e:
+        app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
+        return False
+
+
+def buscar_sku_en_texto(texto, precios):
+    """
+    Busca un SKU presente en 'precios' dentro de 'texto'.
+    Devuelve el primer SKU encontrado (exact match substring) o None.
+    """
+    if not texto or not precios:
+        return None
+    texto_lower = texto.lower()
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        # Check SKU and modelo presence (case-insensitive)
+        if sku and sku.lower() in texto_lower:
+            return sku
+        if modelo and modelo.lower() in texto_lower:
+            # prefer returning SKU if exists for that product
+            return sku or modelo
+    return None
 
 # Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
@@ -2269,7 +4535,7 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
 
 def extraer_hora_del_mensaje(mensaje):
     """Extrae la hora del mensaje de forma simple"""
-    mensaje_lower = mensaje.lower()
+    mensaje_lower = mensaje.lower()# Convertir a minúsculas para facilitar la búsqueda
     
     # Patrones simples para horas
     patrones_hora = [
@@ -2410,7 +4676,7 @@ def procesar_codigo():
         flow = InstalledAppFlow.from_client_secrets_file(
             'client_secret.json', 
             SCOPES,
-            redirect_uri='https://www.mektia.com/completar-autorizacion'
+            redirect_uri=f'https://{request.host}/completar-autorizacion'
         )
         
         # Intercambiar código por token
@@ -2535,43 +4801,6 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
 
-def enviar_alerta_intervencion_humana(info_intervencion, config=None):
-    """Envía alerta de intervención humana al administrador"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        mensaje = f"""🚨 *SOLICITUD DE INTERVENCIÓN HUMANA*
-
-📞 *Cliente:* {info_intervencion.get('telefono', 'Número no disponible')}
-⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
-🚨 *Urgencia:* {info_intervencion.get('urgencia', 'media').upper()}
-
-📋 *Problema principal:*
-{info_intervencion.get('problema_principal', 'No especificado')}
-
-🔍 *Intentos previos:*
-{info_intervencion.get('intentos_previos', 'No detectados')}
-
-💡 *Información útil:*
-{info_intervencion.get('informacion_util', 'Sin información adicional')}
-
-📝 *Resumen:*
-{info_intervencion.get('resumen', 'Solicitud de intervención humana')}
-
-⚠️ *Acción requerida:* Contactar al cliente urgentemente.
-"""
-        
-        # Enviar a ambos números de administración
-        enviar_mensaje(ALERT_NUMBER, mensaje, config)
-        enviar_mensaje('5214493432744', mensaje, config)
-        
-        app.logger.info(f"✅ Alerta de intervención humana enviada a administradores")
-        
-    except Exception as e:
-        app.logger.error(f"Error enviando alerta de intervención: {e}")
-
-
 def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     """
     Actualiza la información del contacto usando el nombre proporcionado desde el webhook
@@ -2601,111 +4830,368 @@ def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
 
-# REEMPLAZA la llamada a procesar_mensaje en el webhook con:
+def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen enviada]'):
+    """Guarda una entrada en conversaciones representando una respuesta del BOT que contiene una imagen.
+    - numero: número del chat
+    - imagen_url: URL pública (o ruta) de la imagen
+    - nota: texto que se guardará en campo 'respuesta' (por ejemplo '[Imagen enviada]')
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        # Asegurar contacto
+        actualizar_info_contacto(numero, config)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Insertar como respuesta del BOT: mensaje vacío, respuesta = nota, imagen_url y es_imagen = True
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, %s, NOW(), %s, %s)
+        """, (numero, '', nota, imagen_url, True))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"💾 [BOT] Imagen registrada en conversaciones: {imagen_url} (numero={numero})")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
+        return False
+
+# Replace the existing procesar_mensaje_normal function with this enhanced version
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
-    """Procesa mensajes normales (no citas/intervenciones)"""
+    """Procesa mensajes normales (no citas/intervenciones) — ahora envía imagen si el usuario la solicita y existe."""
     try:
         # IA normal
-        IA_ESTADOS.setdefault(numero, {'activa': True, 'prefiere_voz': False})
+        if numero not in IA_ESTADOS:
+            IA_ESTADOS[numero] = {'activa': True, 'prefiere_voz': False}
+        elif 'prefiere_voz' not in IA_ESTADOS[numero]:
+            IA_ESTADOS[numero]['prefiere_voz'] = False
         respuesta = ""
-        
+        responder_con_voz = False
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
             if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
                 IA_ESTADOS[numero]['prefiere_voz'] = True
                 app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
-            
+
             responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
-            
+
             # Obtener respuesta de IA
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-            # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
+
+        # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
+        # --- INSERT: quick catalog request detection in procesar_mensaje_normal ---
+        # Localiza la función procesar_mensaje_normal(...) y, cerca del inicio (después de obtener/normalizar 'texto'),
+        # agrega este bloque para interceptar peticiones de catálogo antes de llamar a la IA.
+
+        # QUICK CHECK: user asked for the catalog/PDF -> send it and stop (no IA)
+        try:
+            text_lower = (texto or "").lower()
+            catalog_keywords = [
+                'catálogo', 'catalogo', 'mostrar catálogo', 'mostrar catalogo',
+                'muestrame catálogo', 'muestrame catalogo', 'envíame catálogo', 'envia catálogo',
+                'manda catálogo', 'enviame catalogo', 'catalogo completo', 'catálogo completo',
+                'ver catálogo', 'ver catalogo', 'catalog'
+            ]
+            if any(k in text_lower for k in catalog_keywords):
+                app.logger.info(f"📚 Petición de catálogo detectada en mensaje: '{texto[:80]}'")
+                enviado = enviar_catalogo(numero, original_text=texto, config=config)
+                if enviado:
+                    # ya guardado dentro de enviar_catalogo -> terminar aquí
+                    return
+                else:
+                    # si no se pudo enviar como documento, se intentó enviar el resumen; terminar
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error detectando/enviando catálogo: {e}")
+        try:
+            precios = obtener_todos_los_precios(config)
+            sku_encontrado = buscar_sku_en_texto(texto, precios)
+            imagen_encontrada = None
+
+            # 1) Detect markdown image syntax in IA response: ![alt](file_or_url)
+            md_match = None
+            if isinstance(respuesta, str):
+                md = re.search(r'!\[.*?\]\(([^)]+)\)', respuesta)
+                if md:
+                    md_match = md.group(1).strip()
+                    app.logger.info(f"🔍 Markdown image detected in IA response: {md_match}")
+
+            # 2) If user asked (keywords), try to find SKU and image
+            keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
+            user_asked_image = any(k in texto.lower() for k in keywords_imagen)
+
+            if user_asked_image and sku_encontrado:
+                # Buscar producto por SKU y obtener campo imagen
+                for p in precios:
+                    if (p.get('sku') or '').strip().lower() == sku_encontrado.lower():
+                        imagen_encontrada = p.get('imagen')
+                        break
+
+            # 3) Prefer the markdown/image returned by IA (it may include filename or URL)
+            if md_match:
+                imagen_encontrada = md_match
+
+            # 4) If IA response contains "Imagen: filename" pattern
+            if not imagen_encontrada and isinstance(respuesta, str):
+                m = re.search(r'Imagen[:\s]*([^\s,;\)\]]+)', respuesta, re.IGNORECASE)
+                if m:
+                    imagen_encontrada = m.group(1).strip()
+
+            if imagen_encontrada:
+                # Normalize: if it's a relative path like /uploads/productos/..., extract filename
+                if imagen_encontrada.startswith('/uploads/productos/'):
+                    imagen_encontrada = os.path.basename(imagen_encontrada)
+
+                # Confirm file exists locally or it's an absolute URL
+                file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
+                file_path_root = os.path.join(UPLOAD_FOLDER, imagen_encontrada)
+
+                sent = False
+                if os.path.isfile(file_path_local) or os.path.isfile(file_path_root):
+                    # send image by WhatsApp (Graph API image message with link)
+                    sent = enviar_imagen(numero, imagen_encontrada, config)
+                    if sent:
+                        public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
+                        # Save as a BOT response (no longer as a user message)
+                        guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada} ]")
+                        app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
+                        # Remove image reference from textual response to avoid sending path
+                        if isinstance(respuesta, str):
+                            respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)  # remove markdown
+                            respuesta = re.sub(re.escape(imagen_encontrada), '', respuesta)
+                    else:
+                        # fallback: send text with public URL and record as BOT response
+                        dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+                        if not dominio.startswith('http'):
+                            dominio = f"https://{dominio}"
+                        image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
+                        enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
+                        guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
+                else:
+                    # If imagen_encontrada is an absolute URL, try sending it
+                    if imagen_encontrada.lower().startswith('http'):
+                        sent = enviar_imagen(numero, imagen_encontrada, config)
+                        if sent:
+                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
+                            # strip url from textual response
+                            if isinstance(respuesta, str):
+                                respuesta = respuesta.replace(imagen_encontrada, '')
+                        else:
+                            enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
+                            # Record fallback message as bot text
+                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
+                    else:
+                        # Try to find by filename in imagenes_productos table
+                        imgs = obtener_imagenes_por_sku(sku_encontrado, config) if sku_encontrado else []
+                        if imgs:
+                            first = imgs[0].get('filename')
+                            if first:
+                                sent = enviar_imagen(numero, first, config)
+                                if sent:
+                                    public_path = f"/uploads/productos/{first}"
+                                    guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {first}]")
+                                    if isinstance(respuesta, str):
+                                        respuesta = respuesta.replace(imagen_encontrada, first)
+                        else:
+                            # No local image found; inform user (record as bot response)
+                            app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
+                            enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
+                            guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
+            else:
+                app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error intentando enviar imagen automática: {e}")
+
+        # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
         if es_archivo and 'document' in msg:
             app.logger.info(f"📎 Procesando archivo enviado por {numero}")
-            
+
             # Obtener el archivo de WhatsApp
             media_id = msg['document']['id']
             filepath, filename, extension = obtener_archivo_whatsapp(media_id, config)
-            
+
             if filepath and extension:
                 # Extraer texto del archivo
                 texto_archivo = extraer_texto_archivo(filepath, extension)
-                
+
                 if texto_archivo:
                     # Determinar tipo de negocio
                     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
                     tipo_negocio = 'laporfirianna' if es_porfirianna else 'mektia'
-                    
+
                     # Analizar con IA
                     analisis = analizar_archivo_con_ia(texto_archivo, tipo_negocio, config)
-                    
+
                     # Construir respuesta
                     respuesta = f"""📎 **He analizado tu archivo** ({filename})
 
 {analisis}
 
 ¿Te gustaría que haga algo específico con esta información?"""
-                    
+
                 else:
                     respuesta = f"❌ No pude extraer texto del archivo {filename}. ¿Podrías describirme qué contiene?"
-                
+
                 # Limpiar archivo temporal
                 try:
                     os.remove(filepath)
                 except:
                     pass
-                
+
             else:
                 respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
-            
-            # Enviar respuesta y guardar conversación
+
+            # Enviar respuesta y actualizar conversación existente
             enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, f"[Archivo: {filename}] {texto}", respuesta, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
             return
-        
-            # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
+
+        # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
         if responder_con_voz and not es_imagen:
-                # Intentar enviar respuesta de voz
-                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-                
-                if audio_url_local:
-                    # URL pública del audio (ajusta según tu configuración)
-                    audio_url_publica = f"https://{config.get('dominio', 'mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
-                    
-                    if enviar_mensaje_voz(numero, audio_url_publica, config):
-                        app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        guardar_conversacion(numero, texto, respuesta, config=config)
-                    else:
-                        # Fallback a texto
-                        enviar_mensaje(numero, respuesta, config)
-                        guardar_conversacion(numero, texto, respuesta, config=config)
+            # Intentar enviar respuesta de voz
+            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+            if audio_url_local:
+                # URL pública del audio (ajusta según tu configuración)
+                audio_url_publica = f"https://{config.get('dominio', 'smartwhats.mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+
+                if enviar_mensaje_voz(numero, audio_url_publica, config):
+                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
                 else:
                     # Fallback a texto
                     enviar_mensaje(numero, respuesta, config)
-                    guardar_conversacion(numero, texto, respuesta, config=config)
-        else:
-                # Respuesta normal de texto
+            else:
+                # Fallback a texto
                 enviar_mensaje(numero, respuesta, config)
-                guardar_conversacion(numero, texto, respuesta, config=config)
-            
-            # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-        if not es_mi_numero and detectar_intervencion_humana_ia(texto, numero, config):
-                app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-                resumen = resumen_rafa(numero, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
-        
+        else:
+            # Respuesta normal de texto
+            enviar_mensaje(numero, respuesta, config)
+            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+
+        # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+        if detectar_intervencion_humana_ia(texto, numero, config):
+            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+            resumen = resumen_rafa(numero, config)
+            enviar_alerta_humana(numero, texto, resumen, config)
+
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
         if not meta:
             inicializar_chat_meta(numero, config)
-        
+
         nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
         actualizar_columna_chat(numero, nueva_columna, config)
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
+@app.route('/chats/data')
+def obtener_datos_chat():
+    """Endpoint para obtener datos actualizados de la lista de chats"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Query to get chat list data
+    cursor.execute("""
+        SELECT 
+          conv.numero, 
+          COUNT(*) AS total_mensajes, 
+          cont.imagen_url, 
+          COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+          cont.alias,
+          cont.nombre,
+          (SELECT mensaje FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+          (SELECT CASE WHEN es_imagen THEN 'imagen' ELSE 'texto' END
+           FROM conversaciones 
+           WHERE numero = conv.numero 
+           ORDER BY timestamp DESC LIMIT 1) AS tipo_mensaje,
+          MAX(conv.timestamp) AS ultima_fecha
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
+        GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
+        ORDER BY MAX(conv.timestamp) DESC
+    """)
+    chats = cursor.fetchall()
+    
+    # Convert timestamps to ISO format for JSON
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
+            else:
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx).isoformat()
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'chats': chats,
+        'timestamp': datetime.now().timestamp(),
+        'total_chats': len(chats)
+    })
 
+@app.route('/uploads/docs/<filename>')
+def serve_public_docs(filename):
+    """Serve published PDFs from uploads/docs so Facebook can fetch them via HTTPS."""
+    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+    return send_from_directory(docs_dir, filename)
+
+def actualizar_respuesta(numero, mensaje, respuesta, config=None):
+    """Actualiza la respuesta para un mensaje ya guardado"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Log before update
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        
+        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
+        cursor.execute("""
+            UPDATE conversaciones 
+            SET respuesta = %s 
+            WHERE numero = %s 
+              AND mensaje = %s 
+              AND respuesta IS NULL 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        """, (respuesta, numero, mensaje))
+        
+        # Log results of update
+        if cursor.rowcount > 0:
+            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
+        else:
+            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
+                VALUES (%s, %s, %s, NOW())
+            """, (numero, mensaje, respuesta))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
+        # Fallback a guardar conversación normal
+        guardar_conversacion(numero, mensaje, respuesta, config)
+        return False
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -2805,22 +5291,23 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero, config = None):
+def obtener_imagen_perfil_alternativo(numero, config=None):
     """Método alternativo para obtener la imagen de perfil"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     conn = get_db_connection(config)
     try:
-        # Intentar con el endpoint específico para contactos
-        phone_number_id = "799540293238176"
+        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
+        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
+        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
         
-        url = f"https://graph.facebook.com/v18.0/{MI_NUMERO_BOT}/contacts"
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
         
         params = {
             'fields': 'profile_picture_url',
             'user_numbers': f'[{numero}]',
-            'access_token': 'whatsapp_token'
+            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
         }
         
         response = requests.get(url, params=params, timeout=10)
@@ -2837,7 +5324,81 @@ def obtener_imagen_perfil_alternativo(numero, config = None):
     except Exception as e:
         app.logger.error(f"🔴 Error en método alternativo: {e}")
         return None
+    finally:
+        conn.close()
 # ——— Envío WhatsApp y guardado de conversación ———
+def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=None):
+    """
+    Envía notificación al administrador cuando se detecta un pedido o cita
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Determinar si es un pedido o una cita según el negocio
+        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        tipo_solicitud = "pedido" if es_porfirianna else "cita"
+        
+        # Crear tabla notificaciones_ia si no existe
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notificaciones_ia (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20),
+                tipo VARCHAR(20),
+                resumen TEXT,
+                estado VARCHAR(20) DEFAULT 'pendiente',
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        conn.commit()
+        
+        # Extraer información útil del análisis
+        if analisis_pedido:
+            datos = analisis_pedido.get('datos_obtenidos', {})
+            resumen = f"Detalles: "
+            if es_porfirianna:
+                platillos = ", ".join(datos.get('platillos', ['No especificado']))
+                resumen += f"Platillos: {platillos}"
+            else:
+                resumen += f"Servicio: {mensaje[:100]}"
+        else:
+            resumen = f"Mensaje original: {mensaje[:100]}"
+        
+        # Guardar en base de datos
+        cursor.execute('''
+            INSERT INTO notificaciones_ia (numero, tipo, resumen)
+            VALUES (%s, %s, %s)
+        ''', (numero, tipo_solicitud, resumen))
+        conn.commit()
+        notificacion_id = cursor.lastrowid
+        cursor.close()
+        conn.close()
+        
+        # Construir mensaje de notificación para el administrador
+        mensaje_alerta = f"""🔔 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}*
+
+👤 *Cliente:* {numero}
+⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+💬 *Mensaje:* {mensaje[:150]}{'...' if len(mensaje) > 150 else ''}
+
+📝 *Resumen:* {resumen}
+
+🔄 *Estado:* Pendiente de atención
+🆔 *ID Notificación:* {notificacion_id}
+"""
+        
+        # Enviar notificación a los números de alerta
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        enviar_mensaje('5214493432744', mensaje_alerta, config)
+        
+        app.logger.info(f"✅ Notificación de {tipo_solicitud} enviada para {numero}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
+        return False
 # REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
@@ -2907,6 +5468,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     
     try:
         # Primero asegurar que el contacto existe con su información actualizada
+        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
         
         conn = get_db_connection(config)
@@ -3374,6 +5936,8 @@ def webhook_verification():
     
     if 'laporfirianna' in host:
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
+    elif 'ofitodo' in host:  
+        verify_token = os.getenv("FITO_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
     
@@ -3455,7 +6019,44 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
 
-# REEMPLAZA la función webhook con esta versión mejorada
+@app.route('/notificaciones')
+def ver_notificaciones():
+    """Endpoint para ver notificaciones de pedidos y citas con información ampliada"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    cursor.execute('''
+        SELECT n.*,
+               COALESCE(c.alias, c.nombre, n.numero) as nombre_cliente,
+               c.imagen_url
+        FROM notificaciones_ia n
+        LEFT JOIN contactos c ON n.numero = c.numero_telefono
+        ORDER BY n.timestamp DESC
+        LIMIT 50
+    ''')
+    
+    notificaciones = cursor.fetchall()
+    
+    # Procesar el JSON de evaluacion_ia para la vista
+    for notif in notificaciones:
+        try:
+            if notif.get('evaluacion_ia'):
+                notif['evaluacion_data'] = json.loads(notif['evaluacion_ia'])
+            else:
+                notif['evaluacion_data'] = {}
+        except:
+            notif['evaluacion_data'] = {}
+            
+        # Formatear fecha/hora para mejor legibilidad
+        if notif.get('timestamp'):
+            notif['timestamp_formateado'] = notif['timestamp'].strftime('%d/%m/%Y %H:%M')
+    
+    cursor.close()
+    conn.close()
+    
+    return render_template('notificaciones.html', notificaciones=notificaciones)
+
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -3509,9 +6110,9 @@ def webhook():
                 conn.close()
             
                 app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
+                actualizar_kanban()
         
             # Continuar con el procesamiento normal del mensaje
-            # ... tu código existente para procesar mensajes ...
         
         except Exception as e:
             app.logger.error(f"Error procesando webhook: {str(e)}")
@@ -3522,21 +6123,19 @@ def webhook():
 
         msg = mensajes[0]
         numero = msg['from']
-        # Agregar esto inmediatamente:
-        
-       # CORRECCIÓN: Manejo robusto de texto
+        # Manejo robusto de texto/flags
+        actualizar_kanban_inmediato(numero, config)
         texto = ''
         es_imagen = False
         es_audio = False
         es_video = False
         es_archivo = False
         es_documento = False
-        es_mi_numero = False  # ← Add this initialization
-         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+        es_mi_numero = False
+        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
         
-       
         # 🔥 OBTENER CONFIGURACIÓN CORRECTA
         config = None
         for numero_config, config_data in NUMEROS_CONFIG.items():
@@ -3547,52 +6146,48 @@ def webhook():
                 
         if config is None:
             app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
-            config = obtener_configuracion_por_host()  # Fallback a detección por host
+            config = obtener_configuracion_por_host()
             app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
-                # 🔥 AGREGAR ESTO - Inicializar el contacto SIEMPRE
+        
+        # 🔥 Inicializar/actualizar contacto y kanban
         nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
         actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
         inicializar_chat_meta(numero, config)
-         # 🔥 ACTUALIZAR CONTACTO CON NOMBRE DEL WEBHOOK (SI EXISTE)
+        actualizar_kanban()
         if nombre_desde_webhook:
             actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
         else:
-            actualizar_info_contacto(numero, config)  # Fallback al método normal
+            actualizar_info_contacto(numero, config)
+
         # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
         message_id = msg.get('id')
         if not message_id:
             app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
             return 'OK', 200
             
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
-        message_id = msg.get('id')
-        if not message_id:
-            # Si no hay ID, crear uno basado en timestamp y contenido
-            timestamp = msg.get('timestamp', '')
-            message_id = f"{numero}_{timestamp}_{texto[:50]}"
-            
-        # Crear un hash único del mensaje para evitar duplicados
+        # Crear hash único
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
-        # Verificar si ya procesamos este mensaje (solo si no es un audio/imagen para evitar falsos positivos)
+        # Verificar duplicados (excepto audio/imagen)
         if not es_audio and not es_imagen and message_hash in processed_messages:
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
             
-        # Agregar a mensajes procesados (con timestamp para limpieza posterior)
+        # Agregar a mensajes procesados
         processed_messages[message_hash] = time.time()
 
         # Limpiar mensajes antiguos (más de 1 hora)
         current_time = time.time()
-        for msg_hash, timestamp in list(processed_messages.items()):
-            if current_time - timestamp > 3600:  # 1 hora
+        for msg_hash, ts in list(processed_messages.items()):
+            if current_time - ts > 3600:
                 del processed_messages[msg_hash]
         
         image_id = None
         imagen_base64 = None
         public_url = None
         transcripcion = None
-        # En el webhook, después de procesar el mensaje:
+
+        # Parsear el mensaje entrante
         actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
@@ -3600,24 +6195,54 @@ def webhook():
             es_imagen = True
             image_id = msg['image']['id']
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
-            texto = msg['image'].get('caption', '').strip()
-            if not texto:
-                texto = "El usuario envió una imagen"
-            
-            # Guardar solo el mensaje del usuario (sin respuesta aún)
+            texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
+
+            # Guardar mensaje entrante (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+
+            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+            try:
+                meta = obtener_chat_meta(numero, config)
+                if not meta:
+                    inicializar_chat_meta(numero, config)
+                actualizar_columna_chat(numero, 2, config)  # En Conversación
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (imagen): {e}")
+
+            # ===== NUEVO: Analizar imagen y responder automáticamente =====
+            try:
+                respuesta_imagen = analizar_imagen_y_responder(numero, imagen_base64, texto, public_url, config)
+                if respuesta_imagen:
+                    # Enviar respuesta textual al usuario
+                    enviar_mensaje(numero, respuesta_imagen, config)
+                    # Guardar la respuesta asociada a la imagen
+                    guardar_conversacion(numero, texto, respuesta_imagen, config, public_url, True)
+                    app.logger.info(f"✅ Respuesta automática (imagen) enviada a {numero}")
+                    return 'OK', 200
+                else:
+                    app.logger.info("ℹ️ No se generó respuesta automática tras analizar la imagen; el flujo continúa normalmente")
+            except Exception as e:
+                app.logger.error(f"🔴 Error al analizar/contestar imagen automáticamente: {e}")
+
         elif 'document' in msg:
-                es_archivo = True
-                texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
-                app.logger.info(f"📎 Archivo detectado: {texto}")
-        
-                 # MODIFICAR LA LLAMADA A procesar_mensaje_normal
-                procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
+            es_archivo = True
+            texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
+            app.logger.info(f"📎 Archivo detectado: {texto}")
+            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+            try:
+                meta = obtener_chat_meta(numero, config)
+                if not meta:
+                    inicializar_chat_meta(numero, config)
+                actualizar_columna_chat(numero, 2, config)  # En Conversación
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (documento): {e}")
+            # Procesar y salir
+            procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
                                    imagen_base64, transcripcion, es_mi_numero, es_archivo)     
-                return 'OK', 200
+            return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
-            audio_id = msg['audio']['id']  # ✅ Para audio también
+            audio_id = msg['audio']['id']
             audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
             if audio_path:
                 transcripcion = transcribir_audio_con_openai(audio_path)
@@ -3626,70 +6251,125 @@ def webhook():
                 texto = "Error al procesar el audio"
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-            
+        guardar_mensaje_inmediato(numero, texto, config)
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
+
+        # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
+        try:
+            meta = obtener_chat_meta(numero, config)
+            if not meta:
+                inicializar_chat_meta(numero, config)
+            # Si es el primer mensaje de este chat -> Nuevos (1), si no -> En Conversación (2)
+            historial = obtener_historial(numero, limite=1, config=config)
+            nueva_columna = 1 if not historial else 2
+            actualizar_columna_chat(numero, nueva_columna, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (general): {e}")
         
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
         
-        # 🔄 PARA MI NÚMERO PERSONAL: Permitir todo pero sin alertas
-        es_mi_numero = numero in ['5214491182201', '524491182201', '5214493432744']
         
-        if es_mi_numero:
-            app.logger.info(f"🔵 Mensaje de mi número personal, procesando SIN alertas: {numero}")
-        
-        # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
-        
+                # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
+        # Primero, comprobar si es una cita/pedido usando el análisis mejorado
+        info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
+            
+        if info_cita and info_cita.get('servicio_solicitado'):
+            app.logger.info(f"✅ Información de cita/pedido detectada en webhook: {json.dumps(info_cita)}")
+                
+            # Comprobar si hay suficientes datos
+            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+            if datos_completos:
+                # Guardar la cita y enviar notificaciones
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    app.logger.info(f"✅ Cita/pedido guardado con ID: {cita_id}")
+                    # Enviar alertas y confirmación
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
+                    enviar_mensaje(numero, respuesta, config)
+                    guardar_conversacion(numero, texto, respuesta, config)
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    return 'OK', 200
+                
+        # Fallback a la detección básica para compatibilidad
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
-
         if analisis_pedido and analisis_pedido.get('es_pedido'):
             app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
-    
+            # Enviar notificación al administrador
+            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
             # Manejar el pedido automáticamente
             respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-    
             # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             return 'OK', 200
+            # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            
-            # Obtener historial para contexto
             historial = obtener_historial(numero, limite=5, config=config)
-            
-            # Extraer información con contexto
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                
-                # Enviar alerta al administrador
                 enviar_alerta_intervencion_humana(info_intervencion, config)
-                
-                # Responder al cliente
                 respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
                 respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            
-            # Enviar respuesta y guardar conversación
             enviar_mensaje(numero, respuesta, config)
             guardar_conversacion(numero, texto, respuesta, config)
             actualizar_kanban(numero, columna_id=1, config=config)
-            
             return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
-        return 'OK', 200
+        # ⛔ Se elimina llamada inválida con columna_id indefinido
+        # actualizar_kanban(numero, columna_id, config)  # ← eliminado
+        return 'OK', 200 
         
     except Exception as e:
         app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
+
+
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Add detailed logging before saving the message
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, NULL, NOW(), %s, %s)
+        """, (numero, texto, imagen_url, es_imagen))
+        
+        # Get the ID of the inserted message for tracking
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        msg_id = cursor.fetchone()[0]
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
+        return False
     
 def extraer_nombre_desde_webhook(payload):
     """
@@ -3777,6 +6457,79 @@ def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
 
+@app.route('/test-calendar')
+def test_calendar():
+    """Prueba el agendamiento de citas en Google Calendar"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        # Crear información de cita de prueba
+        info_cita = {
+            'servicio_solicitado': 'Servicio de Prueba',
+            'fecha_sugerida': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
+            'hora_sugerida': '10:00',
+            'nombre_cliente': 'Cliente de Prueba',
+            'telefono': '5214495486142',
+            'detalles_servicio': {
+                'descripcion': 'Esta es una cita de prueba para verificar la integración con Google Calendar',
+                'categoria': 'Prueba',
+                'precio': '100.00',
+                'precio_menudeo': '100.00'
+            }
+        }
+        
+        # Intentar autenticar con Google Calendar
+        service = autenticar_google_calendar(config)
+        
+        if not service:
+            return """
+            <h1>❌ Error de Autenticación</h1>
+            <p>No se pudo autenticar con Google Calendar. Por favor verifica:</p>
+            <ul>
+                <li>Que hayas autorizado la aplicación con Google Calendar</li>
+                <li>Que el archivo token.json exista y sea válido</li>
+                <li>Que el archivo client_secret.json esté correctamente configurado</li>
+            </ul>
+            <p><a href="/autorizar_manual" class="btn btn-primary">Intentar Autorizar de Nuevo</a></p>
+            """
+        
+        # Intentar crear evento
+        evento_id = crear_evento_calendar(service, info_cita, config)
+        
+        if evento_id:
+            # Mostrar información del correo configurado
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+            result = cursor.fetchone()
+            calendar_email = result.get('calendar_email') if result else 'No configurado'
+            cursor.close()
+            conn.close()
+            
+            return f"""
+            <h1>✅ Evento Creado Exitosamente</h1>
+            <p>Se ha creado un evento de prueba en Google Calendar.</p>
+            <p><strong>ID del Evento:</strong> {evento_id}</p>
+            <p><strong>Servicio:</strong> {info_cita['servicio_solicitado']}</p>
+            <p><strong>Fecha:</strong> {info_cita['fecha_sugerida']} a las {info_cita['hora_sugerida']}</p>
+            <p><strong>Cliente:</strong> {info_cita['nombre_cliente']}</p>
+            <p><strong>Correo para notificaciones:</strong> {calendar_email}</p>
+            <p>Verifica tu calendario de Google para confirmar que el evento se haya creado correctamente.</p>
+            """
+        else:
+            return """
+            <h1>❌ Error al Crear el Evento</h1>
+            <p>La autenticación fue exitosa, pero no se pudo crear el evento en el calendario.</p>
+            <p>Revisa los logs del servidor para más información sobre el error.</p>
+            """
+            
+    except Exception as e:
+        return f"""
+        <h1>❌ Error durante la prueba</h1>
+        <p>Ocurrió un error al intentar probar la integración con Google Calendar:</p>
+        <pre>{str(e)}</pre>
+        """
+
 @app.route('/test-contacto')
 def test_contacto(numero = '5214493432744'):
     """Endpoint para probar la obtención de información de contacto"""
@@ -3813,50 +6566,7 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     if result:
         return result['alias'] or result['nombre']
     return None
-
-def obtener_imagen_perfil_whatsapp(numero, config=None):
-    """Versión corregida de tu función actual"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # Formatear número correctamente
-        numero_formateado = numero.replace('+', '').replace(' ', '')
-        
-        # Usar el endpoint CORRECTO
-        url = f"https://graph.facebook.com/v18.0/{config['phone_number_id']}"
-        
-        params = {
-            'fields': 'contacts',
-            'user_numbers': f'["{numero_formateado}"]',
-            'access_token': config['whatsapp_token']
-        }
-        
-        headers = {'Content-Type': 'application/json'}
-        
-        app.logger.info(f"🔍 Solicitando imagen para: {numero_formateado}")
-        response = requests.get(url, params=params, headers=headers, timeout=15)
-        
-        if response.status_code == 200:
-            data = response.json()
-            
-            if 'contacts' in data and data['contacts']:
-                contacto = data['contacts'][0]
-                profile = contacto.get('profile', {})
-                imagen_url = profile.get('picture', {}).get('url')
-                nombre = profile.get('name')
-                
-                app.logger.info(f"📋 Contacto obtenido - Nombre: {nombre}, Imagen: {imagen_url}")
-                
-                return imagen_url
-        
-        app.logger.warning(f"⚠️ No se pudo obtener imagen para {numero}")
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo imagen de perfil: {e}")
-        return None
-    
+  
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host"""
     try:
@@ -3866,25 +6576,19 @@ def obtener_configuracion_por_host():
         
         host = request.headers.get('Host', '').lower()
         
-        # 🆕 DETECCIÓN UNILOVA - más específica
         if 'unilova' in host:
-            app.logger.info("✅ Configuración detectada: Unilova")
-            # Verificar si es una ruta de WhatsApp
-            path = request.path.lower()
-            rutas_whatsapp = ['/webhook', '/chats', '/kanban', '/configuracion', '/static', '/home', '/']
-            
-            if any(path.startswith(ruta) for ruta in rutas_whatsapp):
-                app.logger.info(f"🎯 Ruta de WhatsApp detectada: {path}")
-                return NUMEROS_CONFIG['524495486142']  # Usar configuración de WhatsApp
-            else:
-                app.logger.info(f"🔧 Ruta no manejada por WhatsApp: {path}")
-                # Para rutas no manejadas, igual usar WhatsApp como default
-                return NUMEROS_CONFIG['524495486142']
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['123']
         
         # DETECCIÓN PORFIRIANNA
-        if any(dominio in host for dominio in ['laporfirianna', 'porfirianna']):
-            app.logger.info("✅ Configuración detectada: La Porfirianna")
+        if 'laporfirianna' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524812372326']
+            
+        # DETECCIÓN NUEVO SUBDOMINIO
+        if 'ofitodo' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['524495486324']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
@@ -3942,10 +6646,18 @@ def home():
     )
     chat_counts = cursor.fetchone()[0]
 
-    cursor.execute(
-        "SELECT numero, COUNT(*) FROM conversaciones WHERE timestamp>= %s GROUP BY numero;",
-        (start,)
-    )
+    # 🔁 Unir con contactos y usar alias/nombre si existe
+    cursor.execute("""
+        SELECT 
+            conv.numero,
+            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+            COUNT(*) AS total
+        FROM conversaciones conv
+        LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+        WHERE conv.timestamp >= %s
+        GROUP BY conv.numero, nombre_mostrado
+        ORDER BY total DESC
+    """, (start,))
     messages_per_chat = cursor.fetchall()
 
     cursor.execute(
@@ -3957,8 +6669,9 @@ def home():
     cursor.close()
     conn.close()
 
-    labels = [num for num,_ in messages_per_chat]
-    values = [cnt for _,cnt in messages_per_chat]
+    # 🔁 Construir labels con el nombre mostrado y values con el total
+    labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
+    values = [row[2] for row in messages_per_chat]  # total
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -4024,6 +6737,19 @@ def ver_chat(numero):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
+        # Check if number exists in IA_ESTADOS
+        if numero not in IA_ESTADOS:
+            cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+            result = cursor.fetchone()
+            ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
+            IA_ESTADOS[numero] = {'activa': ia_active}
+            app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
+        else:
+            # IMPORTANT: Don't try to set IA_ESTADOS again - it's already set
+            app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
+        
+
+        app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
         cursor.execute("""
             SELECT DISTINCT
@@ -4051,10 +6777,10 @@ def ver_chat(numero):
         # Convertir timestamps
         for msg in msgs:
             if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is not None:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
                 else:
-                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
 
         cursor.close()
         conn.close()
@@ -4075,7 +6801,36 @@ def ver_chat(numero):
         return render_template('error.html', 
                              error_message="Error al cargar el chat", 
                              error_details=str(e)), 500
-                  
+       
+@app.route('/debug-calendar-email')
+def debug_calendar_email():
+    """Endpoint para verificar si el correo de Calendar está guardado"""
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Verificar si la columna existe
+    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
+    column_exists = cursor.fetchone() is not None
+    
+    # Obtener el valor actual
+    calendar_email = None
+    if column_exists:
+        cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
+        result = cursor.fetchone()
+        if result:
+            calendar_email = result['calendar_email']
+    
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'columna_existe': column_exists,
+        'calendar_email': calendar_email,
+        'host': request.host,
+        'config': config['dominio']
+    })    
+
 @app.route('/debug-db')
 def debug_db():
     """Endpoint para verificar la conexión a la base de datos"""
@@ -4120,21 +6875,36 @@ def log_configuracion():
 def toggle_ai(numero, config=None):
     config = obtener_configuracion_por_host()
     try:
+        app.logger.info(f"🔍 Toggle AI request for {numero}")
+        app.logger.info(f"🔍 Current IA_ESTADOS before toggle: {IA_ESTADOS.get(numero, {'activa': True})}")
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Cambiar el valor (si es 1 pasa a 0, si es 0 pasa a 1)
+        # First, get the current state
+        cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+        result = cursor.fetchone()
+        current_state = result[0] if result else True  # Default to True if not found
+        
+        app.logger.info(f"🔍 Current state in database: {current_state}")
+        
+        # Toggle the state in database
+        new_state = not current_state
         cursor.execute("""
             UPDATE contactos
-            SET ia_activada = NOT COALESCE(ia_activada, 1)
+            SET ia_activada = %s
             WHERE numero_telefono = %s
-        """, (numero,))
+        """, (new_state, numero))
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"🔘 Estado IA cambiado para {numero}")
+        # IMPORTANT: Update the in-memory state
+        IA_ESTADOS[numero] = {'activa': new_state}
+        
+        app.logger.info(f"🔘 Estado IA cambiado para {numero}: {new_state}")
+        app.logger.info(f"🔍 Updated IA_ESTADOS after toggle: {IA_ESTADOS.get(numero)}")
     except Exception as e:
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
@@ -4144,32 +6914,32 @@ def toggle_ai(numero, config=None):
 def enviar_manual():
         config = obtener_configuracion_por_host()
         conn = get_db_connection(config)
-        # ... código existente ...
         try:
             numero = request.form['numero']
             texto = request.form['texto'].strip()
-            
+        
             # Validar que el mensaje no esté vacío
             if not texto:
                 flash('❌ El mensaje no puede estar vacío', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
-            
+        
             app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
-            
+        
             # 1. ENVIAR MENSAJE POR WHATSAPP
             enviar_mensaje(numero, texto)
-            
+        
             # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
             conn = get_db_connection(config)
             cursor = conn.cursor()
-            
-            timestamp_utc = datetime.utcnow()
-            # 🔥 USAR TEXTO DESCRIPTIVO EN LUGAR DE NULL
+        
+            # Usar timestamp con zona horaria de México
+            timestamp_local = datetime.now(tz_mx)  # Cambiar de utcnow() a now(tz_mx)
+        
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-                (numero, '[Mensaje manual desde web]', texto, timestamp_utc)  # ← Sin NULLs
+                (numero, '[Mensaje manual desde web]', texto, timestamp_local)
             )
-            
+        
             conn.commit()
             cursor.close()
             conn.close()
@@ -4288,7 +7058,6 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios"""
     datos_requeridos = ['platillos', 'direccion']
-    
     for dato in datos_requeridos:
         if not datos_obtenidos.get(dato):
             return False
@@ -4372,6 +7141,56 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
 
+
+@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
+@login_required
+def borrar_pdf_configuracion(doc_id):
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT filename, filepath FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
+        doc = cursor.fetchone()
+        if not doc:
+            cursor.close(); conn.close()
+            flash('❌ Documento no encontrado', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        filename = doc.get('filename')
+        # Ruta esperada en uploads/docs
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        filepath = os.path.join(docs_dir, filename)
+
+        # Intentar eliminar archivo del disco si existe
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+                app.logger.info(f"🗑️ Archivo eliminado de disco: {filepath}")
+            else:
+                app.logger.info(f"ℹ️ Archivo no encontrado en disco (posiblemente ya eliminado): {filepath}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo eliminar archivo físico: {e}")
+
+        # Eliminar registro DB
+        try:
+            cursor.execute("DELETE FROM documents_publicos WHERE id = %s", (doc_id,))
+            conn.commit()
+            flash('✅ Catálogo eliminado correctamente', 'success')
+            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename}")
+        except Exception as e:
+            conn.rollback()
+            flash('❌ Error eliminando el registro en la base de datos', 'error')
+            app.logger.error(f"🔴 Error eliminando registro documents_publicos: {e}")
+        finally:
+            cursor.close(); conn.close()
+
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en borrar_pdf_configuracion: {e}")
+        flash('❌ Error eliminando el catálogo', 'error')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
@@ -4404,15 +7223,44 @@ def configuracion_tab(tab):
                 'max_mensajes': int(request.form.get('max_mensajes', 10)),
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
             }
+        elif tab == 'asesores':
+            cfg['asesores'] = {
+                'asesor1_nombre': request.form.get('asesor1_nombre', '').strip(),
+                'asesor1_telefono': request.form.get('asesor1_telefono', '').strip(),
+                'asesor2_nombre': request.form.get('asesor2_nombre', '').strip(),
+                'asesor2_telefono': request.form.get('asesor2_telefono', '').strip()
+            }
         save_config(cfg, config)
         guardado = True
 
     datos = cfg.get(tab, {})
+
+    # Si estamos en la pestaña 'negocio', obtener documentos_publicos para mostrarlos en la plantilla
+    documents_publicos = []
+    if tab == 'negocio':
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
+            if cursor.fetchone():
+                cursor.execute("""
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                    FROM documents_publicos
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """)
+                documents_publicos = cursor.fetchall()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudieron obtener documents_publicos: {e}")
+            documents_publicos = []
+
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
-        datos=datos, guardado=guardado
+        datos=datos, guardado=guardado,
+        documents_publicos=documents_publicos
     )
-
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
         config = obtener_configuracion_por_host()
@@ -4438,36 +7286,100 @@ def configuracion_precio_editar(pid):
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
-        config = obtener_configuracion_por_host()
-        data = request.form.to_dict()
-        conn   = get_db_connection(config)
+    config = obtener_configuracion_por_host()
+    data = request.form.to_dict()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # Process numeric price fields coming from form (empty -> None)
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo']:
+            if f in data and data.get(f, '').strip() == '':
+                data[f] = None
+
+        # Handle image upload (priority over URL)
+        imagen_nombre = None
+        if 'imagen' in request.files and request.files['imagen'].filename:
+            file = request.files['imagen']
+            filename = secure_filename(f"{int(time.time())}_{file.filename}")
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            file.save(filepath)
+            imagen_nombre = filename
+            data['imagen'] = imagen_nombre
+        elif data.get('imagen_url') and data.get('imagen_url').strip():
+            imagen_url = data.get('imagen_url').strip()
+            imagen_nombre = imagen_url
+            data['imagen'] = imagen_url
+
+        # Candidate fields in expected order (prefer form names)
+        candidate_fields = [
+            'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
+            'descripcion', 'medidas', 'costo', 'precio', 'precio_mayoreo', 'precio_menudeo',
+            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+        ]
+
+        # Get actual columns from DB and keep intersection (respect DB schema)
+        cursor.execute("SHOW COLUMNS FROM precios")
+        existing_cols = [row[0] for row in cursor.fetchall()]
+
+        # Fields we will actually use (preserve order)
+        fields_to_use = [f for f in candidate_fields if f in existing_cols]
+
+        if not fields_to_use:
+            app.logger.error("❌ Ninguna de las columnas del formulario existe en la tabla 'precios'")
+            flash('❌ Error interno: columnas no coinciden con la tabla de precios', 'error')
+            return redirect(url_for('configuracion_precios'))
+
+        # Build values array from data (use None when missing)
+        values = [data.get(f) for f in fields_to_use]
+
+        # If updating existing record
         if data.get('id'):
-            cursor.execute("""
-                UPDATE precios
-                   SET servicio=%s, descripcion=%s, precio=%s, moneda=%s
-                 WHERE id=%s;
-            """, (
-                data['servicio'],
-                data.get('descripcion',''),
-                data['precio'],
-                data['moneda'],
-                data['id']
-            ))
+            pid = data.get('id')
+            # For update, exclude id and only update provided columns
+            set_parts = []
+            set_values = []
+            for i, f in enumerate(fields_to_use):
+                set_parts.append(f"{f}=%s")
+                set_values.append(values[i])
+            sql = f"UPDATE precios SET {', '.join(set_parts)} WHERE id=%s"
+            cursor.execute(sql, set_values + [pid])
+            conn.commit()
+            flash('✅ Producto actualizado correctamente', 'success')
+            app.logger.info(f"✅ Precio actualizado (id={pid}) campos: {fields_to_use}")
         else:
-            cursor.execute("""
-                INSERT INTO precios (servicio, descripcion, precio, moneda)
-                VALUES (%s,%s,%s,%s);
-            """, (
-                data['servicio'],
-                data.get('descripcion',''),
-                data['precio'],
-                data['moneda']
-            ))
-        conn.commit()
-        cursor.close()
-        conn.close()
+            # Insert: build placeholder list
+            placeholders = ','.join(['%s'] * len(fields_to_use))
+            cols = ','.join(fields_to_use)
+            sql = f"INSERT INTO precios ({cols}) VALUES ({placeholders})"
+            cursor.execute(sql, values)
+            conn.commit()
+            flash('✅ Producto agregado correctamente', 'success')
+            app.logger.info(f"✅ Nuevo producto insertado campos: {fields_to_use}")
+
         return redirect(url_for('configuracion_precios'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en configuracion_precio_guardar: {e}")
+        app.logger.error(traceback.format_exc())
+        flash(f'❌ Error guardando producto: {str(e)}', 'error')
+        try:
+            if conn:
+                conn.rollback()
+        except:
+            pass
+        return redirect(url_for('configuracion_precios'))
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except:
+            pass
 
 @app.route('/configuracion/precios/borrar/<int:pid>', methods=['POST'])
 def configuracion_precio_borrar(pid):
@@ -4480,6 +7392,70 @@ def configuracion_precio_borrar(pid):
         conn.close()
         return redirect(url_for('configuracion_precios'))
 
+@app.route('/debug-image/<filename>')
+def debug_image(filename):
+    """Endpoint to debug image paths and existence"""
+    full_path = os.path.join(UPLOAD_FOLDER, filename)
+    exists = os.path.isfile(full_path)
+    return jsonify({
+        'filename': filename,
+        'full_path': full_path,
+        'exists': exists,
+        'url': url_for('serve_uploaded_file', filename=filename, _external=True)
+    })
+
+@app.route('/debug-image-full/<path:image_path>')
+def debug_image_full(image_path):
+    """Enhanced endpoint to debug images with more details"""
+    # Check different possible locations
+    possible_paths = [
+        os.path.join(UPLOAD_FOLDER, image_path),
+        os.path.join(app.static_folder, 'images', image_path),
+        os.path.join(app.static_folder, 'images', 'whatsapp', image_path),
+        os.path.join(UPLOAD_FOLDER, 'productos', image_path),
+        os.path.join(app.root_path, image_path)
+    ]
+    
+    results = []
+    for path in possible_paths:
+        exists = os.path.isfile(path)
+        size = os.path.getsize(path) if exists else 0
+        mime_type = None
+        
+        if exists:
+            try:
+                import magic
+                mime_type = magic.from_file(path, mime=True)
+            except ImportError:
+                # Fallback if python-magic not installed
+                if path.lower().endswith(('.jpg', '.jpeg')):
+                    mime_type = 'image/jpeg'
+                elif path.lower().endswith('.png'):
+                    mime_type = 'image/png'
+                else:
+                    mime_type = 'unknown'
+        
+        results.append({
+            'path': path,
+            'exists': exists,
+            'size': size,
+            'mime_type': mime_type,
+            'url': url_for('static', filename=path.replace(app.static_folder, '').lstrip('/'), _external=True) 
+                  if path.startswith(app.static_folder) else None
+        })
+    
+    # Also check the original debug info
+    original_path = os.path.join(UPLOAD_FOLDER, image_path)
+    original_exists = os.path.isfile(original_path)
+    
+    return jsonify({
+        'filename': image_path,
+        'results': results,
+        'original_path': original_path,
+        'original_exists': original_exists,
+        'static_folder': app.static_folder,
+        'upload_folder': UPLOAD_FOLDER
+    })
 
 def aplicar_restricciones(respuesta_ia, numero, config=None):
     """Aplica las restricciones configuradas a las respuestas de la IA"""
@@ -4631,7 +7607,9 @@ def kanban_mover():
         )
         conn.commit(); cursor.close(); conn.close()
         return '', 204
-        
+    
+   
+
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
         config = obtener_configuracion_por_host()
@@ -4792,19 +7770,63 @@ def reparar_contactos():
     
     return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
-def actualizar_kanban(numero, columna_id=1, config=None):
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, columna_id)
-        VALUES (%s, %s)
-        ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
-                                fecha_actualizacion = CURRENT_TIMESTAMP
-    """, (numero, columna_id))
-    conn.commit()
-    cursor.close()
-    conn.close()
+def actualizar_kanban(numero=None, columna_id=None, config=None):
+    # Actualiza la base de datos si se pasan parámetros
+    if numero and columna_id:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id),
+                                    fecha_actualizacion = CURRENT_TIMESTAMP
+        """, (numero, columna_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+    # No emitas ningún evento aquí
 
+# Add this new function that updates chat_meta immediately when receiving a message
+def actualizar_kanban_inmediato(numero, config=None):
+    """Updates the Kanban board immediately when a message is received"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Ensure contact exists in chat_meta
+        meta = obtener_chat_meta(numero, config)
+        if not meta:
+            inicializar_chat_meta(numero, config)
+            app.logger.info(f"✅ Chat meta initialized for {numero}")
+        
+        # Determine appropriate column based on message history
+        historial = obtener_historial(numero, limite=2, config=config)
+        
+        if not historial:
+            # First message ever - put in "Nuevos"
+            nueva_columna = 1
+            app.logger.info(f"📊 First message from {numero} - moving to column 1 (Nuevos)")
+        else:
+            # Existing conversation - put in "En Conversación"
+            nueva_columna = 2
+            app.logger.info(f"📊 New message from {numero} - moving to column 2 (En Conversación)")
+        
+        # Update the database
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE chat_meta SET columna_id = %s
+            WHERE numero = %s
+        """, (nueva_columna, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Kanban updated immediately for {numero} to column {nueva_columna}")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error updating Kanban immediately: {e}")
+        return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
         if config is None:
@@ -4973,5 +7995,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    
-    app.run(host='0.0.0.0', port=args.port, debug=False)  # ← Cambia a False para producción
+    app.run(host='0.0.0.0', port=args.port)
