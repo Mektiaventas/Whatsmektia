@@ -4593,7 +4593,8 @@ def enviar_imagen(numero, imagen_ref, config=None):
     imagen_ref puede ser:
       - URL absoluta (empieza con http)
       - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
-    Retorna True si la API respondió OK.
+    Para evitar duplicados, verifica si esa imagen ya fue enviada recientemente al mismo número.
+    Retorna True si la imagen ya fue enviada o fue enviada ahora, False en caso de error.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4602,6 +4603,38 @@ def enviar_imagen(numero, imagen_ref, config=None):
         if not imagen_ref:
             app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
             return False
+
+        # Determine identifier for DB check: basename for filenames, whole URL for URLs
+        try:
+            if str(imagen_ref).lower().startswith('http'):
+                image_identifier = imagen_ref
+            else:
+                image_identifier = os.path.basename(str(imagen_ref))
+        except Exception:
+            image_identifier = str(imagen_ref)
+
+        # --- CHECK: evitar reenviar la misma imagen en un corto periodo ---
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) FROM conversaciones
+                WHERE numero = %s
+                  AND (
+                        (imagen_url IS NOT NULL AND imagen_url LIKE %s)
+                     OR (respuesta IS NOT NULL AND respuesta LIKE %s)
+                  )
+                  AND timestamp > NOW() - INTERVAL 2 MINUTE
+            """, (numero, f"%{image_identifier}%", f"%{image_identifier}%"))
+            row = cursor.fetchone()
+            cursor.close()
+            conn.close()
+            if row and row[0] and int(row[0]) > 0:
+                app.logger.info(f"ℹ️ enviar_imagen: imagen '{image_identifier}' ya enviada recientemente a {numero}; omitiendo reenvío")
+                return True
+        except Exception as e:
+            # No queremos bloquear el envío por un fallo en la verificación; solo loguear y continuar
+            app.logger.warning(f"⚠️ enviar_imagen: fallo comprobación duplicado en BD: {e}")
 
         # Determinar URL pública
         if str(imagen_ref).lower().startswith('http'):
@@ -4630,7 +4663,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
 
         app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 200:
+        if r.status_code in (200, 201, 202):
             app.logger.info("✅ Imagen enviada correctamente")
             return True
         else:
