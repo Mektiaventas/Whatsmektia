@@ -3600,6 +3600,113 @@ def publicar_pdf_configuracion():
         flash('❌ Error procesando el PDF', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
+# --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
+def enviar_documento(numero, file_url, filename, config=None):
+    """
+    Envía un documento (PDF) por WhatsApp usando Graph API.
+    file_url debe ser una URL pública accesible (https://.../uploads/docs/filename).
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'document',
+            'document': {
+                'link': file_url,
+                'filename': filename
+            }
+        }
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code == 200:
+            app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando documento ({r.status_code}): {r.text}")
+            return False
+    except Exception as e:
+        app.logger.error(f"🔴 Exception en enviar_documento: {e}")
+        return False
+
+def build_texto_catalogo(precios, limit=20):
+    """Construye un texto resumen del catálogo (hasta `limit` items)."""
+    if not precios:
+        return "No hay productos registrados en el catálogo."
+    lines = []
+    for p in precios[:limit]:
+        sku = (p.get('sku') or '').strip()
+        nombre = (p.get('servicio') or p.get('modelo') or '').strip()
+        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or ''
+        precio_str = ''
+        try:
+            if precio not in (None, ''):
+                precio_str = f" - ${float(precio):,.2f}"
+        except Exception:
+            precio_str = f" - {precio}"
+        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}")
+    texto = "📚 Catálogo (resumen):\n" + "\n".join(lines)
+    if len(precios) > limit:
+        texto += f"\n\n... y {len(precios)-limit} productos más. Pide 'catálogo completo' para recibir el PDF si está publicado."
+    return texto
+
+def enviar_catalogo(numero, original_text=None, config=None):
+    """
+    Intenta enviar el PDF público si existe (documents_publicos),
+    si no existe envía un resumen textual del catálogo (primeros 20 productos).
+    Registra la acción en conversaciones.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
+        if cursor.fetchone():
+            cursor.execute("""SELECT filename, filepath, descripcion, created_at
+                              FROM documents_publicos
+                              ORDER BY created_at DESC LIMIT 1""")
+            doc = cursor.fetchone()
+        else:
+            doc = None
+        cursor.close(); conn.close()
+
+        if doc and doc.get('filename'):
+            filename = doc['filename']
+            dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+            if not dominio.startswith('http'):
+                dominio = f"https://{dominio}"
+            file_url = f"{dominio}/uploads/docs/{filename}"
+            sent = enviar_documento(numero, file_url, filename, config)
+            # Guardar en BD registro de la acción
+            respuesta_text = f"Te envío el catálogo: {doc.get('descripcion') or filename}" if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
+            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
+            return sent
+        else:
+            # Fallback to textual summary from precios
+            precios = obtener_todos_los_precios(config) or []
+            texto_catalogo = build_texto_catalogo(precios, limit=20)
+            enviar_mensaje(numero, texto_catalogo, config)
+            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            return True
+    except Exception as e:
+        app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
+        # intentamos al menos enviar texto resumen
+        try:
+            precios = obtener_todos_los_precios(config) or []
+            texto_catalogo = build_texto_catalogo(precios, limit=10)
+            enviar_mensaje(numero, texto_catalogo, config)
+            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            return True
+        except Exception as ex:
+            app.logger.error(f"🔴 Fallback también falló: {ex}")
+            return False
+
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
@@ -4632,6 +4739,30 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
 
         # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
+        # --- INSERT: quick catalog request detection in procesar_mensaje_normal ---
+        # Localiza la función procesar_mensaje_normal(...) y, cerca del inicio (después de obtener/normalizar 'texto'),
+        # agrega este bloque para interceptar peticiones de catálogo antes de llamar a la IA.
+
+        # QUICK CHECK: user asked for the catalog/PDF -> send it and stop (no IA)
+        try:
+            text_lower = (texto or "").lower()
+            catalog_keywords = [
+                'catálogo', 'catalogo', 'mostrar catálogo', 'mostrar catalogo',
+                'muestrame catálogo', 'muestrame catalogo', 'envíame catálogo', 'envia catálogo',
+                'manda catálogo', 'enviame catalogo', 'catalogo completo', 'catálogo completo',
+                'ver catálogo', 'ver catalogo', 'catalog'
+            ]
+            if any(k in text_lower for k in catalog_keywords):
+                app.logger.info(f"📚 Petición de catálogo detectada en mensaje: '{texto[:80]}'")
+                enviado = enviar_catalogo(numero, original_text=texto, config=config)
+                if enviado:
+                    # ya guardado dentro de enviar_catalogo -> terminar aquí
+                    return
+                else:
+                    # si no se pudo enviar como documento, se intentó enviar el resumen; terminar
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error detectando/enviando catálogo: {e}")
         try:
             precios = obtener_todos_los_precios(config)
             sku_encontrado = buscar_sku_en_texto(texto, precios)
