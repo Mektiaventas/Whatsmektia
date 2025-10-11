@@ -38,7 +38,7 @@
                 <span class="tab-title">Precios vista Admin</span>
             </div>
         </button>
-        <div class="tab-buttons"></div>
+        <div class="spacer" aria-hidden="true"></div>
         <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
             <div class="tab-icon">📊</div>
             <div>
@@ -587,6 +587,20 @@
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
         transition: all 0.3s ease;
         cursor: pointer;
+    }
+    /* Add near other CSS rules in the same <style> block */
+    .spacer {
+        display: inline-block;
+        width: 30px; /* espacio horizontal de 30px */
+        height: 1px; /* ocupa poco alto, puede dejarse 1px */
+        vertical-align: middle;
+    }
+
+    /* responsive: reducir el espacio en pantallas pequeñas */
+    @media (max-width: 600px) {
+        .spacer {
+            width: 12px;
+        }
     }
 
     .btn-primario {
