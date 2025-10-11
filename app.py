@@ -161,7 +161,8 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt'})
+ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
+
 
 # --- Conexión a la BD de clientes (auth) ---
 def get_clientes_conn():
@@ -3532,21 +3533,33 @@ def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
 @app.route('/configuracion/negocio/publicar-pdf', methods=['POST'])
 @login_required
 def publicar_pdf_configuracion():
-    """Recibe un PDF desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
+    """Recibe un PDF o imagen desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
     config = obtener_configuracion_por_host()
     try:
         if 'public_pdf' not in request.files or request.files['public_pdf'].filename == '':
-            flash('❌ No se seleccionó ningún archivo PDF', 'error')
+            flash('❌ No se seleccionó ningún archivo', 'error')
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
         file = request.files['public_pdf']
-        filename = secure_filename(f"pdf_{int(time.time())}_{file.filename}")
+        original_name = file.filename or 'uploaded_file'
+        # Determinar extensión y si está permitida
+        ext = ''
+        if '.' in original_name:
+            ext = original_name.rsplit('.', 1)[1].lower()
+        if ext not in ALLOWED_EXTENSIONS:
+            flash('❌ Tipo de archivo no permitido. Usa PDF, imágenes o documentos permitidos.', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        # Prefijos distintos para imagen/pdf (facilita depuración)
+        prefix = 'img' if ext in {'png','jpg','jpeg','gif','webp','svg'} else 'pdf'
+        filename = secure_filename(f"{prefix}_{int(time.time())}_{original_name}")
         docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
         os.makedirs(docs_dir, exist_ok=True)
         filepath = os.path.join(docs_dir, filename)
         file.save(filepath)
 
         descripcion = (request.form.get('public_pdf_descripcion') or '').strip()
+        mime = file.mimetype or ''
 
         # Guardar metadatos en tabla documents_publicos (crear si no existe)
         conn = get_db_connection(config)
@@ -3559,6 +3572,7 @@ def publicar_pdf_configuracion():
                     filepath VARCHAR(512) NOT NULL,
                     descripcion TEXT,
                     uploaded_by VARCHAR(100),
+                    mime VARCHAR(100),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_filename (filename)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -3574,30 +3588,36 @@ def publicar_pdf_configuracion():
                 user = au.get('user') or str(au.get('id') or '')
 
             cursor.execute("""
-                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
-                VALUES (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
-            """, (filename, filepath, descripcion, user))
+                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by, mime)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), mime=VALUES(mime), created_at=CURRENT_TIMESTAMP
+            """, (filename, filepath, descripcion, user, mime))
             conn.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando metadatos PDF: {e}")
+            app.logger.error(f"🔴 Error insertando metadatos archivo: {e}")
             conn.rollback()
             flash('❌ Error guardando metadatos en la base de datos', 'error')
             try:
                 cursor.close(); conn.close()
             except:
                 pass
+            # eliminar archivo guardado para evitar basura
+            try:
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+            except:
+                pass
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
         cursor.close(); conn.close()
 
-        flash('✅ PDF publicado correctamente', 'success')
+        flash('✅ Archivo publicado correctamente', 'success')
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
     except Exception as e:
         app.logger.error(f"🔴 Error en publicar_pdf_configuracion: {e}")
         app.logger.error(traceback.format_exc())
-        flash('❌ Error procesando el PDF', 'error')
+        flash('❌ Error procesando el archivo', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
 # --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
