@@ -21,6 +21,9 @@
     .longitud_desc{
         width: 50%;
     }
+    .PDF{
+        color:black;
+    }
 </style>
 <div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
@@ -159,7 +162,7 @@
                     <th>Acciones</th>
                 </tr>
             </thead>
-            <tbody>
+            <tbody class="PDF">
                 {% for doc in documents_publicos %}
                 <tr>
                     <td>
