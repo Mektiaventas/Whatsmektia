@@ -132,7 +132,17 @@
     </div>
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
-
+<form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
+    <div class="form-card">
+        <label>Publicar PDF (Catálogo / Documento)</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <input type="file" name="public_pdf" accept=".pdf" required>
+            <input type="text" name="public_pdf_descripcion" placeholder="Descripción (opcional)" style="flex:1;">
+            <button type="submit" class="btn-success">📄 Publicar PDF</button>
+        </div>
+        <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos.</small>
+    </div>
+</form>
 {% elif active == 'personalizacion' %}
 <form class="config-form" method="POST">
     <div class="form-card">
