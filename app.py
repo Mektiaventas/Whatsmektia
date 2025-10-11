@@ -4278,25 +4278,34 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:40]:
         try:
-            # Helper: limpiar valores que contengan el nombre/marker de la imagen
-            def _clean_field(val, imagen_name):
+        # Helper: detectar si un valor es en realidad un nombre de archivo de imagen generado
+            def is_likely_image_name(val):
                 if not val:
-                    return ''
+                    return False
                 try:
                     s = str(val).strip()
-                    if not imagen_name:
-                        return s
-                    img = str(imagen_name).strip()
-                    # eliminar coincidencias exactas del nombre de la imagen
-                    if img and img in s:
-                        s = s.replace(img, '')
-                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-                    # limpiar espacios sobrantes
-                    s = re.sub(r'\s{2,}', ' ', s).strip()
-                    return s
-                except Exception:
-                    return str(val).strip()
+                    return bool(re.search(r'(?:excel(?:_unzip)?_img_|producto_|img_)\d+.*\.(?:png|jpe?g|gif|webp)$', s, re.IGNORECASE))
+                except:
+                    return False
+
+            # Helper: limpiar campos eliminando referencias accidentales al nombre de la imagen
+            def clean_field(val, imagen_name=None):
+                if not val:
+                    return ''
+                s = str(val).strip()
+                # Si el campo parece ser el nombre de la imagen, lo ignoramos
+                if is_likely_image_name(s):
+                    return ''
+                # Si tenemos nombre de imagen, eliminar todas sus apariciones en el campo
+                if imagen_name:
+                    try:
+                        s = re.sub(re.escape(imagen_name), '', s, flags=re.IGNORECASE)
+                    except:
+                        pass
+                # Eliminar patrones generados por unzip/excel que puedan quedar
+                s = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                s = re.sub(r'\s{2,}', ' ', s).strip()
+                return s
 
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
