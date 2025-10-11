@@ -1004,6 +1004,8 @@ def importar_productos_desde_excel(filepath, config=None):
 
         # Extraer imágenes embebidas y fallback zip
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
+        imagenes_embedded = eliminar_imagenes_duplicadas(imagenes_embedded)
+        app.logger.info(f"🔄 Después de eliminar duplicados: {len(imagenes_embedded)} imágenes únicas")
         app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
 
         if not imagenes_embedded and extension == '.xlsx':
@@ -1317,6 +1319,30 @@ def importar_productos_desde_excel(filepath, config=None):
         app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
         app.logger.error(traceback.format_exc())
         return 0
+
+def eliminar_imagenes_duplicadas(imagenes_extraidas):
+    """Elimina imágenes duplicadas basándose en hash MD5"""
+    unique_imagenes = []
+    seen_hashes = set()
+    
+    for img in imagenes_extraidas:
+        try:
+            # Calcular hash del archivo de imagen
+            with open(img['path'], 'rb') as f:
+                file_hash = hashlib.md5(f.read()).hexdigest()
+            
+            if file_hash not in seen_hashes:
+                seen_hashes.add(file_hash)
+                unique_imagenes.append(img)
+            else:
+                # Es duplicada, eliminar archivo
+                os.remove(img['path'])
+                app.logger.info(f"🗑️ Imagen duplicada eliminada: {img['filename']}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error verificando duplicado {img['filename']}: {e}")
+            unique_imagenes.append(img)  # Conservar por si acaso
+    
+    return unique_imagenes
 
 def obtener_imagenes_por_sku(sku, config=None):
     """Obtiene todas las imágenes asociadas a un SKU específico"""
