@@ -3872,135 +3872,90 @@ def save_config(cfg_all, config=None):
     conn = get_db_connection(config)
     cursor = conn.cursor()
 
-    # Ensure columns exist: logo_url, calendar_email, asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono
+    # Asegurar columnas nuevas mínimas (no rompe si ya existen)
     try:
         cursor.execute("SHOW COLUMNS FROM configuracion")
         existing_cols = {row[0] for row in cursor.fetchall()}
-
-        alter_statements = []
-        if 'logo_url' not in existing_cols:
-            alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
-        if 'calendar_email' not in existing_cols:
-            alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
-        if 'asesor1_nombre' not in existing_cols:
-            alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
-        if 'asesor1_telefono' not in existing_cols:
-            alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
-        if 'asesor2_nombre' not in existing_cols:
-            alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
-        if 'asesor2_telefono' not in existing_cols:
-            alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
-
-        if alter_statements:
-            sql = f"ALTER TABLE configuracion {', '.join(alter_statements)}"
-            try:
-                cursor.execute(sql)
-                conn.commit()
-                app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
     except Exception as e:
         app.logger.warning(f"⚠️ Could not inspect configuracion table columns: {e}")
+        existing_cols = set()
 
-    # Now perform insert/update as before, using columns present
+    alter_statements = []
+    if 'logo_url' not in existing_cols:
+        alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
+    if 'calendar_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
+    if 'asesor1_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
+    if 'asesor1_telefono' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor2_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
+    if 'asesor2_telefono' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+
+    if alter_statements:
+        try:
+            sql = f"ALTER TABLE configuracion {', '.join(alter_statements)}"
+            cursor.execute(sql)
+            conn.commit()
+            app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
+            # refresh existing_cols
+            cursor.execute("SHOW COLUMNS FROM configuracion")
+            existing_cols = {row[0] for row in cursor.fetchall()}
+        except Exception as e:
+            app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
+
     try:
-        # Re-check columns to know which INSERT/UPDATE to run
-        cursor.execute("SHOW COLUMNS FROM configuracion")
-        existing_cols = {row[0] for row in cursor.fetchall()}
+        # Mapear posibles campos a valores desde cfg_all
+        candidate_map = {
+            'ia_nombre': neg.get('ia_nombre'),
+            'negocio_nombre': neg.get('negocio_nombre'),
+            'descripcion': neg.get('descripcion'),
+            'url': neg.get('url'),
+            'direccion': neg.get('direccion'),
+            'telefono': neg.get('telefono'),
+            'correo': neg.get('correo'),
+            'que_hace': neg.get('que_hace'),
+            'tono': per.get('tono'),
+            'lenguaje': per.get('lenguaje'),
+            'restricciones': res.get('restricciones'),
+            'palabras_prohibidas': res.get('palabras_prohibidas'),
+            'max_mensajes': int(res.get('max_mensajes', 10)) if res.get('max_mensajes') is not None else 10,
+            'tiempo_max_respuesta': int(res.get('tiempo_max_respuesta', 30)) if res.get('tiempo_max_respuesta') is not None else 30,
+            'logo_url': neg.get('logo_url', None) or neg.get('app_logo', None),
+            'app_logo': neg.get('app_logo', None),
+            'app_nombre': neg.get('ia_nombre', None),
+            'nombre_empresa': neg.get('nombre_empresa', None),
+            'calendar_email': neg.get('calendar_email', None),
+            'asesor1_nombre': ases.get('asesor1_nombre', None),
+            'asesor1_telefono': ases.get('asesor1_telefono', None),
+            'asesor2_nombre': ases.get('asesor2_nombre', None),
+            'asesor2_telefono': ases.get('asesor2_telefono', None)
+        }
 
-        # Preferred full upsert including asesor fields if available
-        if {'logo_url', 'asesor1_nombre', 'asesor1_telefono', 'asesor2_nombre', 'asesor2_telefono'}.issubset(existing_cols):
-            cursor.execute('''
-                INSERT INTO configuracion
-                    (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                     telefono, correo, que_hace, tono, lenguaje, restricciones, 
-                     palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa,
-                     asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono, calendar_email)
-                VALUES
-                    (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE
-                    ia_nombre = VALUES(ia_nombre),
-                    negocio_nombre = VALUES(negocio_nombre),
-                    descripcion = VALUES(descripcion),
-                    url = VALUES(url),
-                    direccion = VALUES(direccion),
-                    telefono = VALUES(telefono),
-                    correo = VALUES(correo),
-                    que_hace = VALUES(que_hace),
-                    tono = VALUES(tono),
-                    lenguaje = VALUES(lenguaje),
-                    restricciones = VALUES(restricciones),
-                    palabras_prohibidas = VALUES(palabras_prohibidas),
-                    max_mensajes = VALUES(max_mensajes),
-                    tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
-                    logo_url = VALUES(logo_url),
-                    nombre_empresa = VALUES(nombre_empresa),
-                    asesor1_nombre = VALUES(asesor1_nombre),
-                    asesor1_telefono = VALUES(asesor1_telefono),
-                    asesor2_nombre = VALUES(asesor2_nombre),
-                    asesor2_telefono = VALUES(asesor2_telefono),
-                    calendar_email = VALUES(calendar_email);
-            ''', (
-                neg.get('ia_nombre'),
-                neg.get('negocio_nombre'),
-                neg.get('descripcion'),
-                neg.get('url'),
-                neg.get('direccion'),
-                neg.get('telefono'),
-                neg.get('correo'),
-                neg.get('que_hace'),
-                per.get('tono'),
-                per.get('lenguaje'),
-                res.get('restricciones'),
-                res.get('palabras_prohibidas'),
-                res.get('max_mensajes', 10),
-                res.get('tiempo_max_respuesta', 30),
-                neg.get('logo_url', ''), 
-                neg.get('nombre_empresa', 'SmartWhats'),
-                ases.get('asesor1_nombre',''),
-                ases.get('asesor1_telefono',''),
-                ases.get('asesor2_nombre',''),
-                ases.get('asesor2_telefono',''),
-                neg.get('calendar_email','')
-            ))
-        else:
-            # Fallback: update/insert only the common fields (backward-compatible)
-            # Build columns dynamically from what exists
-            fields = {
-                'ia_nombre': neg.get('ia_nombre'),
-                'negocio_nombre': neg.get('negocio_nombre'),
-                'descripcion': neg.get('descripcion'),
-                'url': neg.get('url'),
-                'direccion': neg.get('direccion'),
-                'telefono': neg.get('telefono'),
-                'correo': neg.get('correo'),
-                'que_hace': neg.get('que_hace'),
-                'tono': per.get('tono'),
-                'lenguaje': per.get('lenguaje'),
-                'restricciones': res.get('restricciones'),
-                'palabras_prohibidas': res.get('palabras_prohibidas'),
-                'max_mensajes': res.get('max_mensajes', 10),
-                'tiempo_max_respuesta': res.get('tiempo_max_respuesta', 30),
-            }
-            if 'calendar_email' in existing_cols:
-                fields['calendar_email'] = neg.get('calendar_email','')
-            # Prepare upsert statement using existing columns intersection
-            cols = []
-            vals = []
-            for k, v in fields.items():
-                if k in existing_cols:
-                    cols.append(k)
-                    vals.append(v)
-            if cols:
-                placeholders = ','.join(['%s'] * len(cols))
-                cols_sql = ','.join(cols)
-                update_parts = ','.join([f"{c}=VALUES({c})" for c in cols])
-                sql = f"INSERT INTO configuracion (id, {cols_sql}) VALUES (1, {placeholders}) ON DUPLICATE KEY UPDATE {update_parts}"
-                cursor.execute(sql, vals)
+        # Usar solo columnas que existen en la tabla
+        cols_to_write = [col for col in candidate_map.keys() if col in existing_cols]
+        if not cols_to_write:
+            app.logger.warning("⚠️ No hay columnas conocidas para escribir en configuracion; abortando save_config")
+            cursor.close()
+            conn.close()
+            return
 
+        # Construir listas de columnas/valores y el SQL dinámico
+        cols_sql = ', '.join(cols_to_write)
+        placeholders = ', '.join(['%s'] * len(cols_to_write))
+        values = [candidate_map[c] for c in cols_to_write]
+
+        update_parts = ', '.join([f"{c}=VALUES({c})" for c in cols_to_write])
+
+        sql = f"INSERT INTO configuracion (id, {cols_sql}) VALUES (1, {placeholders}) ON DUPLICATE KEY UPDATE {update_parts}"
+        cursor.execute(sql, values)
         conn.commit()
         cursor.close()
         conn.close()
+        app.logger.info("✅ Configuración guardada (save_config)")
+
     except Exception as e:
         app.logger.error(f"🔴 Error guardando configuración (save_config): {e}")
         try:
@@ -4009,6 +3964,7 @@ def save_config(cfg_all, config=None):
         except:
             pass
         raise
+
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
