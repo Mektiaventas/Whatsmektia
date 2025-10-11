@@ -156,23 +156,23 @@
         <table class="table" style="font-size:13px;">
             <thead>
                 <tr>
-                    <th>Archivo</th>
-                    <th>Descripción</th>
-                    <th>Publicado</th>
-                    <th>Acciones</th>
+                    <th style="color:black;">Archivo</th>
+                    <th style="color:black;">Descripción</th>
+                    <th style="color:black;">Publicado</th>
+                    <th style="color:black;">Acciones</th>
                 </tr>
             </thead>
             <tbody class="PDF">
                 {% for doc in documents_publicos %}
                 <tr>
-                    <td>
+                    <td style="color:black;">
                         <a href="{{ url_for('serve_public_docs', filename=doc.filename) }}" target="_blank" rel="noopener">
                             {{ doc.filename }}
                         </a>
                     </td>
-                    <td>{{ doc.descripcion or '-' }}</td>
-                    <td>{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
-                    <td>
+                    <td style="color:black;">{{ doc.descripcion or '-' }}</td>
+                    <td style="color:black;">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
+                    <td style="color:black;">
                         <div style="display:flex; gap:8px; align-items:center;">
                             <a class="btn small" href="{{ url_for('serve_public_docs', filename=doc.filename) }}" target="_blank">Ver / Descargar</a>
                             <form action="{{ url_for('borrar_pdf_configuracion', doc_id=doc.id) }}" method="post" onsubmit="return confirm('¿Eliminar {{ doc.filename }}? Esta acción no se puede deshacer.');" style="display:inline;">
