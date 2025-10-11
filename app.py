@@ -3657,11 +3657,77 @@ def build_texto_catalogo(precios, limit=20):
         texto += f"\n\n... y {len(precios)-limit} productos más. Pide 'catálogo completo' para recibir el PDF si está publicado."
     return texto
 
+def seleccionar_mejor_doc(docs, query):
+    """
+    Selecciona el documento más relevante de la lista `docs` comparando `query`
+    contra los campos filename y descripcion. Retorna el row dict seleccionado
+    o None si no hay una coincidencia significativa.
+    """
+    try:
+        if not docs:
+            return None
+        if not query or not str(query).strip():
+            return docs[0]
+
+        q = str(query).lower()
+        q_tokens = set(re.findall(r'\w{3,}', q))
+
+        best = None
+        best_score = 0.0
+        now_ts = time.time()
+
+        for d in docs:
+            score = 0.0
+            desc = (d.get('descripcion') or '').lower()
+            fname = (d.get('filename') or '').lower()
+
+            # tokens overlap with description (más peso)
+            desc_tokens = set(re.findall(r'\w{3,}', desc))
+            common_desc = q_tokens & desc_tokens
+            score += len(common_desc) * 3.0
+
+            # tokens overlap with filename (menos peso)
+            fname_tokens = set(re.findall(r'\w{3,}', fname.replace('_', ' ')))
+            common_fname = q_tokens & fname_tokens
+            score += len(common_fname) * 1.5
+
+            # Si la query incluye palabras exactas de la descripción más puntuación
+            for t in q_tokens:
+                if t and t in desc:
+                    score += 0.5
+
+            # Ligero bonus por recencia (favor documentos más recientes)
+            try:
+                created = d.get('created_at')
+                if created:
+                    # normalized recency bonus (0..1)
+                    age_seconds = (now_ts - created.timestamp()) if hasattr(created, 'timestamp') else 0
+                    recency_bonus = max(0, 1 - (age_seconds / (60 * 60 * 24 * 30)))  # 30 días
+                    score += recency_bonus * 0.5
+            except Exception:
+                pass
+
+            if score > best_score:
+                best_score = score
+                best = d
+
+        # Umbral mínimo para considerar "relevante"
+        if best_score >= 1.0:
+            app.logger.info(f"📚 seleccionar_mejor_doc: mejor score={best_score} filename={best.get('filename') if best else None}")
+            return best
+
+        app.logger.info(f"📚 seleccionar_mejor_doc: ningún documento con score suficiente (best={best_score}), usar el más reciente")
+        return docs[0]
+    except Exception as e:
+        app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
+        return docs[0] if docs else None
+
+
 def enviar_catalogo(numero, original_text=None, config=None):
     """
-    Intenta enviar el PDF público si existe (documents_publicos),
+    Intenta enviar el PDF público más relevante (documents_publicos),
     si no existe envía un resumen textual del catálogo (primeros 20 productos).
-    Registra la acción en conversaciones (actualiza la fila de mensaje entrante para evitar duplicados).
+    Usa la descripción del PDF para decidir cuál enviar.
     """
     from flask import has_request_context, request
     if config is None:
@@ -3671,21 +3737,28 @@ def enviar_catalogo(numero, original_text=None, config=None):
         cursor = conn.cursor(dictionary=True)
         cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
         if cursor.fetchone():
-            cursor.execute("""SELECT filename, filepath, descripcion, created_at
-                              FROM documents_publicos
-                              ORDER BY created_at DESC LIMIT 1""")
-            doc = cursor.fetchone()
+            cursor.execute("""
+                SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                FROM documents_publicos
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            docs = cursor.fetchall()
         else:
-            doc = None
+            docs = []
         cursor.close(); conn.close()
 
         usuario_texto = original_text or "[Solicitud de catálogo]"
 
-        if doc and doc.get('filename'):
-            filename = doc['filename']
+        if docs:
+            # Seleccionar el doc más relevante usando descripción/filename
+            mejor = seleccionar_mejor_doc(docs, usuario_texto)
+            if not mejor:
+                mejor = docs[0]
 
-            # Preferir request.url_root (host real que recibió el webhook) si existe,
-            # esto evita usar dominios mal formados o sin esquema.
+            filename = mejor.get('filename')
+            descripcion = mejor.get('descripcion') or ''
+            # Construir base preferente desde request (host real) para evitar URLs sin esquema
             base = None
             try:
                 if has_request_context():
@@ -3698,12 +3771,12 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 base = dominio if dominio.startswith('http') else f"https://{dominio}"
 
             file_url = f"{base}/uploads/docs/{filename}"
-            app.logger.info(f"📚 Enviar catálogo -> file_url: {file_url}")
+            app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
 
             sent = enviar_documento(numero, file_url, filename, config)
-            respuesta_text = f"Te envío el catálogo: {doc.get('descripcion') or filename}" if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
+            respuesta_text = (f"Te envío el catálogo: {descripcion}" if descripcion else f"Te envío el catálogo: {filename}") if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
 
-            # UPDATE existing saved incoming message with the bot response to avoid duplicate user message rows
+            # Actualizar la fila de mensaje entrante con la respuesta para evitar duplicados
             try:
                 actualizar_respuesta(numero, usuario_texto, respuesta_text, config)
             except Exception as e:
@@ -3712,16 +3785,17 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
             return sent
         else:
+            # Fallback a texto resumen del catálogo
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=20)
             enviar_mensaje(numero, texto_catalogo, config)
-            # actualizar la fila del mensaje entrante con la respuesta (evita duplicado)
             try:
                 actualizar_respuesta(numero, usuario_texto, texto_catalogo, config)
             except Exception as e:
                 app.logger.warning(f"⚠️ actualizar_respuesta falló en fallback textual: {e}")
                 guardar_conversacion(numero, usuario_texto, texto_catalogo, config)
             return True
+
     except Exception as e:
         app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
         try:

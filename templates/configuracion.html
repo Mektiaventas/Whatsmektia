@@ -18,6 +18,9 @@
         border-radius: 8px;
         background: #fff;
     }
+    .longitud_desc{
+        width: 50%;
+    }
 </style>
 <div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
@@ -137,7 +140,7 @@
         <label>Publicar PDF (Catálogo / Documento)</label>
         <div style="display:flex;align-items:center;gap:8px;">
             <input type="file" name="public_pdf" accept=".pdf" required>
-            <input type="text" name="public_pdf_descripcion" placeholder="Descripción (opcional)" style="flex:1;">
+            <input type="text" class="longitud_desc" name="public_pdf_descripcion" placeholder="Descripción (opcional)" style="flex:1;">
             <button type="submit" class="btn-success">📄 Publicar PDF</button>
         </div>
         <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos.</small>
