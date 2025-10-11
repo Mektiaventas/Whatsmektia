@@ -163,6 +163,68 @@ PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'up
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
 
+def html_to_whatsapp(text):
+    """
+    Convierte HTML/entidades simples a formato que WhatsApp entiende.
+    - <b>, <strong> -> *bold*
+    - <i>, <em> -> _italic_
+    - <s>, <del> -> ~strike~
+    - <code>inline</code> -> `inline`
+    - <pre>..</pre> -> triple backticks block
+    - Decodifica entidades HTML y elimina etiquetas restantes
+    """
+    try:
+        if not text:
+            return text
+        import html as _html
+        import re
+
+        s = str(text)
+
+        # Decodificar entidades (&amp; &nbsp; etc.)
+        s = _html.unescape(s)
+
+        # Normalize common block tags to newlines
+        s = re.sub(r'</\s*(div|p|br|li)\s*>', '\n', s, flags=re.I)
+        s = re.sub(r'<\s*(br|hr)\s*/?\s*>', '\n', s, flags=re.I)
+
+        # Pre (preserve inner whitespace as code block)
+        def _pre_repl(m):
+            inner = m.group(1).rstrip('\n')
+            return "\n```\n" + inner + "\n```\n"
+        s = re.sub(r'<\s*pre[^>]*>(.*?)</\s*pre\s*>', _pre_repl, s, flags=re.I | re.S)
+
+        # Inline code
+        s = re.sub(r'<\s*code[^>]*>(.*?)</\s*code\s*>', lambda m: f"`{m.group(1).strip()}`", s, flags=re.I | re.S)
+
+        # Bold / strong -> *text*
+        s = re.sub(r'<\s*(b|strong)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"*{m.group(2).strip()}*", s, flags=re.I | re.S)
+
+        # Italic / em -> _text_
+        s = re.sub(r'<\s*(i|em)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"_{m.group(2).strip()}_", s, flags=re.I | re.S)
+
+        # Strike -> ~text~
+        s = re.sub(r'<\s*(s|del)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"~{m.group(2).strip()}~", s, flags=re.I | re.S)
+
+        # Remove remaining tags
+        s = re.sub(r'<[^>]+>', '', s)
+
+        # Normalize multiple newlines -> max 2
+        s = re.sub(r'\n\s*\n\s*\n+', '\n\n', s)
+
+        # Trim spaces on lines, collapse trailing spaces
+        s = "\n".join(line.rstrip() for line in s.splitlines())
+
+        # Strip at ends
+        s = s.strip()
+
+        return s
+    except Exception:
+        # Fallback básico: strip tags naive
+        import re, html as _html
+        return re.sub(r'<[^>]+>', '', _html.unescape(str(text))).strip()
+
+
 
 # --- Conexión a la BD de clientes (auth) ---
 def get_clientes_conn():
@@ -5808,20 +5870,28 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     # Validar texto
     if not texto or str(texto).strip() == '':
         app.logger.error("🔴 ERROR: Texto de mensaje vacío")
         return False
-    
-    texto_limpio = str(texto).strip()
-    
+
+    # Convertir HTML/ETags a formato WhatsApp para evitar que se vea "raro" en cliente móvil
+    try:
+        texto_limpio = html_to_whatsapp(texto)
+    except Exception as e:
+        app.logger.warning(f"⚠️ html_to_whatsapp falló: {e}")
+        texto_limpio = str(texto).strip()
+
+    # Log corto para depuración (puedes aumentar nivel a DEBUG)
+    app.logger.info(f"📤 Enviando (truncated) to {numero}: {texto_limpio[:400]}")
+
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config["whatsapp_token"]}',
         'Content-Type': 'application/json'
     }
-    
+
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
@@ -5832,7 +5902,6 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        app.logger.info(f"📤 Enviando a {numero} via {config.get('dominio','unknown')}: {texto_limpio[:80]}...")
         r = requests.post(url, headers=headers, json=payload, timeout=15)
         app.logger.info(f"📥 Graph API status: {r.status_code} - response: {r.text[:200]}")
         if r.status_code in (200, 201, 202):
