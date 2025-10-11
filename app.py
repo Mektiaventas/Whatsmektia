@@ -3663,6 +3663,7 @@ def enviar_catalogo(numero, original_text=None, config=None):
     si no existe envía un resumen textual del catálogo (primeros 20 productos).
     Registra la acción en conversaciones.
     """
+    from flask import has_request_context, request
     if config is None:
         config = obtener_configuracion_por_host()
     try:
@@ -3680,17 +3681,28 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
         if doc and doc.get('filename'):
             filename = doc['filename']
-            dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-            if not dominio.startswith('http'):
-                dominio = f"https://{dominio}"
-            file_url = f"{dominio}/uploads/docs/{filename}"
+
+            # Preferir request.url_root (host real que recibió el webhook) si existe,
+            # esto evita usar dominios mal formados o sin esquema.
+            base = None
+            try:
+                if has_request_context():
+                    base = request.url_root.rstrip('/')
+                else:
+                    dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+                    base = dominio if dominio.startswith('http') else f"https://{dominio}"
+            except Exception:
+                dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+                base = dominio if dominio.startswith('http') else f"https://{dominio}"
+
+            file_url = f"{base}/uploads/docs/{filename}"
+            app.logger.info(f"📚 Enviar catálogo -> file_url: {file_url}")
+
             sent = enviar_documento(numero, file_url, filename, config)
-            # Guardar en BD registro de la acción
             respuesta_text = f"Te envío el catálogo: {doc.get('descripcion') or filename}" if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
             guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
             return sent
         else:
-            # Fallback to textual summary from precios
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=20)
             enviar_mensaje(numero, texto_catalogo, config)
@@ -3698,7 +3710,6 @@ def enviar_catalogo(numero, original_text=None, config=None):
             return True
     except Exception as e:
         app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
-        # intentamos al menos enviar texto resumen
         try:
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=10)
