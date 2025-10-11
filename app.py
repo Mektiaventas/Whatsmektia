@@ -4303,6 +4303,32 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     for p in precios[:40]:
         try:
+            # Raw imagen token (puede ser filename o URL)
+            imagen_token = (p.get('imagen') or '').strip()
+
+            # Patrón para detectar nombres generados por el import (varias variantes)
+            imagen_pattern = re.compile(
+                r'(?:excel(?:_unzip)?_img_[\w\-\._]*\.\w+|excel_img_[\w\-\._]*\.\w+|producto_[\w\-\._]*\.\w+|img_[\w\-\._]*\.\w+)',
+                re.IGNORECASE
+            )
+
+            def strip_image_tokens(value):
+                """Quitar tokens de imagen y el nombre exacto de imagen de cualquier campo."""
+                if not value:
+                    return ''
+                s = str(value).strip()
+                # Quitar ocurrencias exactas del filename si está presente
+                if imagen_token:
+                    try:
+                        s = re.sub(re.escape(imagen_token), '', s, flags=re.IGNORECASE)
+                    except Exception:
+                        pass
+                # Quitar tokens generados por excel/unzip/producto/img
+                s = imagen_pattern.sub('', s)
+                # Normalizar espacios sobrantes y limpiar separadores repetidos
+                s = re.sub(r'[_\-]{2,}', ' ', s)
+                s = re.sub(r'\s{2,}', ' ', s).strip()
+                return s
             sku = clean_field(p.get('sku'))
             modelo = clean_field(p.get('modelo'))
             titulo = modelo or sku or 'Sin identificador'
