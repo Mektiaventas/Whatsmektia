@@ -3872,97 +3872,143 @@ def save_config(cfg_all, config=None):
     conn = get_db_connection(config)
     cursor = conn.cursor()
 
-    cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'logo_url'")
-    tiene_logo = cursor.fetchone() is not None
+    # Ensure columns exist: logo_url, calendar_email, asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono
+    try:
+        cursor.execute("SHOW COLUMNS FROM configuracion")
+        existing_cols = {row[0] for row in cursor.fetchall()}
 
-    if tiene_logo:
-        cursor.execute('''
-            INSERT INTO configuracion
-                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                 telefono, correo, que_hace, tono, lenguaje, restricciones, 
-                 palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa,
-                 asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono)
-            VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                ia_nombre = VALUES(ia_nombre),
-                negocio_nombre = VALUES(negocio_nombre),
-                descripcion = VALUES(descripcion),
-                url = VALUES(url),
-                direccion = VALUES(direccion),
-                telefono = VALUES(telefono),
-                correo = VALUES(correo),
-                que_hace = VALUES(que_hace),
-                tono = VALUES(tono),
-                lenguaje = VALUES(lenguaje),
-                restricciones = VALUES(restricciones),
-                palabras_prohibidas = VALUES(palabras_prohibidas),
-                max_mensajes = VALUES(max_mensajes),
-                tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
-                logo_url = VALUES(logo_url),
-                nombre_empresa = VALUES(nombre_empresa),
-                asesor1_nombre = VALUES(asesor1_nombre),
-                asesor1_telefono = VALUES(asesor1_telefono),
-                asesor2_nombre = VALUES(asesor2_nombre),
-                asesor2_telefono = VALUES(asesor2_telefono);
-        ''', (
-            neg.get('ia_nombre'),
-            neg.get('negocio_nombre'),
-            neg.get('descripcion'),
-            neg.get('url'),
-            neg.get('direccion'),
-            neg.get('telefono'),
-            neg.get('correo'),
-            neg.get('que_hace'),
-            per.get('tono'),
-            per.get('lenguaje'),
-            res.get('restricciones'),
-            res.get('palabras_prohibidas'),
-            res.get('max_mensajes', 10),
-            res.get('tiempo_max_respuesta', 30),
-            neg.get('logo_url', ''), 
-            neg.get('nombre_empresa', 'SmartWhats'),
-            ases.get('asesor1_nombre',''),
-            ases.get('asesor1_telefono',''),
-            ases.get('asesor2_nombre',''),
-            ases.get('asesor2_telefono','')
-        ))
-    else:
-        # Si no tiene las nuevas columnas, usar la consulta original (agrega asesor en la medida que exista)
-        cursor.execute('''
-            INSERT INTO configuracion
-                (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
-                 telefono, correo, que_hace, tono, lenguaje)
-            VALUES
-                (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                ia_nombre = VALUES(ia_nombre),
-                negocio_nombre = VALUES(negocio_nombre),
-                descripcion = VALUES(descripcion),
-                url = VALUES(url),
-                direccion = VALUES(direccion),
-                telefono = VALUES(telefono),
-                correo = VALUES(correo),
-                que_hace = VALUES(que_hace),
-                tono = VALUES(tono),
-                lenguaje = VALUES(lenguaje);
-        ''', (
-            neg.get('ia_nombre'),
-            neg.get('negocio_nombre'),
-            neg.get('descripcion'),
-            neg.get('url'),
-            neg.get('direccion'),
-            neg.get('telefono'),
-            neg.get('correo'),
-            neg.get('que_hace'),
-            per.get('tono'),
-            per.get('lenguaje')
-        ))
+        alter_statements = []
+        if 'logo_url' not in existing_cols:
+            alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
+        if 'calendar_email' not in existing_cols:
+            alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
+        if 'asesor1_nombre' not in existing_cols:
+            alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
+        if 'asesor1_telefono' not in existing_cols:
+            alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
+        if 'asesor2_nombre' not in existing_cols:
+            alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
+        if 'asesor2_telefono' not in existing_cols:
+            alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
 
-    conn.commit()
-    cursor.close()
-    conn.close()
+        if alter_statements:
+            sql = f"ALTER TABLE configuracion {', '.join(alter_statements)}"
+            try:
+                cursor.execute(sql)
+                conn.commit()
+                app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Could not inspect configuracion table columns: {e}")
 
+    # Now perform insert/update as before, using columns present
+    try:
+        # Re-check columns to know which INSERT/UPDATE to run
+        cursor.execute("SHOW COLUMNS FROM configuracion")
+        existing_cols = {row[0] for row in cursor.fetchall()}
+
+        # Preferred full upsert including asesor fields if available
+        if {'logo_url', 'asesor1_nombre', 'asesor1_telefono', 'asesor2_nombre', 'asesor2_telefono'}.issubset(existing_cols):
+            cursor.execute('''
+                INSERT INTO configuracion
+                    (id, ia_nombre, negocio_nombre, descripcion, url, direccion,
+                     telefono, correo, que_hace, tono, lenguaje, restricciones, 
+                     palabras_prohibidas, max_mensajes, tiempo_max_respuesta, logo_url, nombre_empresa,
+                     asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono, calendar_email)
+                VALUES
+                    (1, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    ia_nombre = VALUES(ia_nombre),
+                    negocio_nombre = VALUES(negocio_nombre),
+                    descripcion = VALUES(descripcion),
+                    url = VALUES(url),
+                    direccion = VALUES(direccion),
+                    telefono = VALUES(telefono),
+                    correo = VALUES(correo),
+                    que_hace = VALUES(que_hace),
+                    tono = VALUES(tono),
+                    lenguaje = VALUES(lenguaje),
+                    restricciones = VALUES(restricciones),
+                    palabras_prohibidas = VALUES(palabras_prohibidas),
+                    max_mensajes = VALUES(max_mensajes),
+                    tiempo_max_respuesta = VALUES(tiempo_max_respuesta),
+                    logo_url = VALUES(logo_url),
+                    nombre_empresa = VALUES(nombre_empresa),
+                    asesor1_nombre = VALUES(asesor1_nombre),
+                    asesor1_telefono = VALUES(asesor1_telefono),
+                    asesor2_nombre = VALUES(asesor2_nombre),
+                    asesor2_telefono = VALUES(asesor2_telefono),
+                    calendar_email = VALUES(calendar_email);
+            ''', (
+                neg.get('ia_nombre'),
+                neg.get('negocio_nombre'),
+                neg.get('descripcion'),
+                neg.get('url'),
+                neg.get('direccion'),
+                neg.get('telefono'),
+                neg.get('correo'),
+                neg.get('que_hace'),
+                per.get('tono'),
+                per.get('lenguaje'),
+                res.get('restricciones'),
+                res.get('palabras_prohibidas'),
+                res.get('max_mensajes', 10),
+                res.get('tiempo_max_respuesta', 30),
+                neg.get('logo_url', ''), 
+                neg.get('nombre_empresa', 'SmartWhats'),
+                ases.get('asesor1_nombre',''),
+                ases.get('asesor1_telefono',''),
+                ases.get('asesor2_nombre',''),
+                ases.get('asesor2_telefono',''),
+                neg.get('calendar_email','')
+            ))
+        else:
+            # Fallback: update/insert only the common fields (backward-compatible)
+            # Build columns dynamically from what exists
+            fields = {
+                'ia_nombre': neg.get('ia_nombre'),
+                'negocio_nombre': neg.get('negocio_nombre'),
+                'descripcion': neg.get('descripcion'),
+                'url': neg.get('url'),
+                'direccion': neg.get('direccion'),
+                'telefono': neg.get('telefono'),
+                'correo': neg.get('correo'),
+                'que_hace': neg.get('que_hace'),
+                'tono': per.get('tono'),
+                'lenguaje': per.get('lenguaje'),
+                'restricciones': res.get('restricciones'),
+                'palabras_prohibidas': res.get('palabras_prohibidas'),
+                'max_mensajes': res.get('max_mensajes', 10),
+                'tiempo_max_respuesta': res.get('tiempo_max_respuesta', 30),
+            }
+            if 'calendar_email' in existing_cols:
+                fields['calendar_email'] = neg.get('calendar_email','')
+            # Prepare upsert statement using existing columns intersection
+            cols = []
+            vals = []
+            for k, v in fields.items():
+                if k in existing_cols:
+                    cols.append(k)
+                    vals.append(v)
+            if cols:
+                placeholders = ','.join(['%s'] * len(cols))
+                cols_sql = ','.join(cols)
+                update_parts = ','.join([f"{c}=VALUES({c})" for c in cols])
+                sql = f"INSERT INTO configuracion (id, {cols_sql}) VALUES (1, {placeholders}) ON DUPLICATE KEY UPDATE {update_parts}"
+                cursor.execute(sql, vals)
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando configuración (save_config): {e}")
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
+        raise
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -4067,6 +4113,25 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:40]:
         try:
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            def _clean_field(val, imagen_name):
+                if not val:
+                    return ''
+                try:
+                    s = str(val).strip()
+                    if not imagen_name:
+                        return s
+                    img = str(imagen_name).strip()
+                    # eliminar coincidencias exactas del nombre de la imagen
+                    if img and img in s:
+                        s = s.replace(img, '')
+                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                    # limpiar espacios sobrantes
+                    s = re.sub(r'\s{2,}', ' ', s).strip()
+                    return s
+                except Exception:
+                    return str(val).strip()
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
             titulo = modelo or sku or 'Sin identificador'
