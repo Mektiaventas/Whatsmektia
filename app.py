@@ -4583,7 +4583,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
 def buscar_sku_en_texto(texto, precios):
     """
     Busca un SKU o modelo presente en 'precios' dentro de 'texto'.
-    Versión mejorada con búsqueda más flexible.
+    Versión mejorada con búsqueda más flexible y limpieza de texto.
     """
     if not texto or not precios:
         return None
@@ -4598,22 +4598,34 @@ def buscar_sku_en_texto(texto, precios):
         # Remover espacios múltiples
         s = re.sub(r'\s+', ' ', s)
         return s.strip()
+    
+    def limpiar_nombres_imagen(texto):
+        """Limpia nombres de archivo de imagen del texto"""
+        if not texto:
+            return ""
+        texto_limpio = str(texto)
+        # Eliminar patrones de nombres de imagen
+        texto_limpio = re.sub(r'excel(_unzip)?_img_\d+_\d+\.(png|jpg|jpeg|gif|webp)', '', texto_limpio, flags=re.IGNORECASE)
+        texto_limpio = re.sub(r'[\w\-_]*img[\w\-_]*\.(png|jpg|jpeg|gif|webp)', '', texto_limpio, flags=re.IGNORECASE)
+        # Limpiar espacios múltiples y trim
+        texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
+        return texto_limpio
 
-    texto_normalizado = normalizar_texto(texto)
+    texto_normalizado = normalizar_texto(limpiar_nombres_imagen(texto))
     
     # Lista para almacenar posibles coincidencias
     coincidencias = []
     
     for producto in precios:
-        # Buscar en múltiples campos
+        # Buscar en múltiples campos (limpios)
         campos_busqueda = [
-            producto.get('sku', ''),
-            producto.get('modelo', ''),
-            producto.get('servicio', ''),
-            producto.get('descripcion', ''),
-            producto.get('categoria', ''),
-            producto.get('subcategoria', ''),
-            producto.get('linea', '')
+            limpiar_nombres_imagen(producto.get('sku', '')),
+            limpiar_nombres_imagen(producto.get('modelo', '')),
+            limpiar_nombres_imagen(producto.get('servicio', '')),
+            limpiar_nombres_imagen(producto.get('descripcion', '')),
+            limpiar_nombres_imagen(producto.get('categoria', '')),
+            limpiar_nombres_imagen(producto.get('subcategoria', '')),
+            limpiar_nombres_imagen(producto.get('linea', ''))
         ]
         
         for campo in campos_busqueda:
@@ -4647,7 +4659,7 @@ def buscar_sku_en_texto(texto, precios):
                     puntuacion = len(palabras_comunes) * 20
             
             # Bonus por coincidencia en SKU (más específico)
-            if campo == producto.get('sku', '') and puntuacion > 0:
+            if campo == limpiar_nombres_imagen(producto.get('sku', '')) and puntuacion > 0:
                 puntuacion += 10
             
             if puntuacion > 0:
