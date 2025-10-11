@@ -446,7 +446,27 @@
 
     <div class="card">
         <div class="card-header bg-blue-100">
-            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</h3>
+            <thead>
+                <tr>
+                    <th>SKU</th>
+                    <th>Categoría</th>
+                    <th>Subcategoría</th>
+                    <th>Línea</th>
+                    <th>Modelo</th>
+                    <th>Descripción</th>
+                    <th>Medidas</th>
+                    <th>Costo</th>
+                    <th>Mayoreo</th>
+                    <th>Menudeo</th>
+                    <th>Imagen</th>
+                    <th>Status</th>
+                    <th>Catálogo</th>
+                    <th>Catálogo 2</th>
+                    <th>Catálogo 3</th>
+                    <th>Proveedor</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
         </div>
         <div class="card-body">
             {% if precios %}
