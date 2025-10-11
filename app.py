@@ -3572,7 +3572,7 @@ def publicar_pdf_configuracion():
                     filepath VARCHAR(512) NOT NULL,
                     descripcion TEXT,
                     uploaded_by VARCHAR(100),
-                    mime VARCHAR(100),
+
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE KEY uq_filename (filename)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -3588,9 +3588,9 @@ def publicar_pdf_configuracion():
                 user = au.get('user') or str(au.get('id') or '')
 
             cursor.execute("""
-                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by, mime)
-                VALUES (%s, %s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), mime=VALUES(mime), created_at=CURRENT_TIMESTAMP
+                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
+                VALUES (%s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
             """, (filename, filepath, descripcion, user, mime))
             conn.commit()
         except Exception as e:
