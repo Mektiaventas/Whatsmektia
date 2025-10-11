@@ -378,8 +378,8 @@
                                 <th>Descripción</th>
                                 <th>Medidas</th>
                                 <th>Imagen</th>
-                                <th>Mayoreo</th>
                                 <th>Menudeo</th>
+                                <th>Mayoreo</th>
                                 <th>Status</th>
                                 <th>Catálogo</th>
                                 <th>Acciones</th>
@@ -398,7 +398,7 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img  class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% else %}
                                     <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
                                     {% endif %}
@@ -406,8 +406,8 @@
                                     -
                                     {% endif %}
                                 </td>
-                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                                 <td>{{ precio.status_ws or '-' }}</td>
                                 <td>{{ precio.catalogo or '-' }}</td>
                                 <td>
@@ -451,8 +451,8 @@
                                 <th>Descripción</th>
                                 <th>Medidas</th>
                                 <th>Costo</th>
-                                <th>Mayoreo</th>
                                 <th>Menudeo</th>
+                                <th>Mayoreo</th>
                                 <th>Imagen</th>
                                 <th>Status</th>
                                 <th>Catálogo</th>
@@ -473,8 +473,8 @@
                                 <td>{{ precio.descripcion|default('-')|truncate(80) }}</td>
                                 <td>{{ precio.medidas or '-' }}</td>
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
-                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
@@ -695,6 +695,7 @@
         width: 100%;
         border-collapse: collapse;
         border-bottom: 3px solid black;
+        border: 5px dotted yellow;
         table-layout: fixed; /* columns share available width */
         font-size: 13px;
     }
