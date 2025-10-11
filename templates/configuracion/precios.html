@@ -394,7 +394,7 @@
                                 <td>{{ precio.linea or '-' }}</td>
                                 <td>{{ precio.modelo or '-' }}</td>
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
-                                    {{ precio.descripcion|default('-')|truncate(80) }}
+                                    {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
                                 <td>{{ precio.medidas or '-' }}</td>
                                 <td>
@@ -473,7 +473,7 @@
                                 <td>{{ precio.linea or '-' }}</td>
                                 <td>{{ precio.modelo or '-' }}</td>
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
-                                    {{ precio.descripcion|default('-')|truncate(80) }}
+                                    {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
                                 <td>{{ precio.medidas or '-' }}</td>
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
