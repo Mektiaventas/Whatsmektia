@@ -359,12 +359,6 @@
 
 <!-- Sección: Lista Usuario -->
 <div class="section" id="user-list" style="display:none;">
-    <div class="section-header">
-        <h3 class="flex justify-between items-center">
-            <span>👥 Lista de precios (Vista Cliente)</span>
-        </h3>
-    </div>
-
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
             <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
@@ -399,7 +393,7 @@
                                 <td>{{ precio.subcategoria or '-' }}</td>
                                 <td>{{ precio.linea or '-' }}</td>
                                 <td>{{ precio.modelo or '-' }}</td>
-                                <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                                <td>{{ precio.descripcion|default('-')|truncate(80) }}</td>
                                 <td>{{ precio.medidas or '-' }}</td>
                                 <td>
                                     {% if precio.imagen %}
@@ -438,15 +432,9 @@
 
 <!-- Sección: Lista Admin -->
 <div class="section" id="admin-list" style="display:none;">
-    <div class="section-header">
-        <h3 class="flex justify-between items-center">
-            <span>🔒 Lista de precios (Vista Completa Admin)</span>
-        </h3>
-    </div>
-
     <div class="card">
         <div class="card-header bg-blue-100">
-            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length }} registros)</h3>
+            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
         </div>
         <div class="card-body">
             {% if precios %}
@@ -482,7 +470,7 @@
                                 <td>{{ precio.subcategoria or '-' }}</td>
                                 <td>{{ precio.linea or '-' }}</td>
                                 <td>{{ precio.modelo or '-' }}</td>
-                                <td>{{ precio.descripcion|default('-')|truncate(30) }}</td>
+                                <td>{{ precio.descripcion|default('-')|truncate(80) }}</td>
                                 <td>{{ precio.medidas or '-' }}</td>
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                                 <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
@@ -704,16 +692,23 @@
         overflow-x: auto;
     }
 
+    /* force columns to fit, allow wrapping and reduce padding */
     .table {
         width: 100%;
         border-collapse: collapse;
         border-bottom: 3px solid black;
+        table-layout: fixed; /* <-- key: make columns share available width */
+        font-size: 13px;
     }
 
-        .table th, .table td {
-            padding: 12px 15px;
+        .table th,
+        .table td {
+            padding: 6px 8px; /* smaller padding */
             text-align: left;
             border-bottom: 3px solid black;
+            white-space: normal; /* allow wrapping */
+            overflow-wrap: anywhere; /* break long words / numbers */
+            word-break: break-word;
         }
 
         .table th {
@@ -725,7 +720,7 @@
     .table-scroll {
         max-height: 500px; /* Adjust default max height as needed */
         overflow-y: auto;
-        overflow-x: auto;
+        overflow-x: hidden;
         -webkit-overflow-scrolling: touch;
         border-radius: 6px;
         padding-right: 6px; /* avoid cutting last column behind scrollbar */
@@ -753,6 +748,38 @@
     .table-scroll::-webkit-scrollbar-thumb {
         background: yellow;
         border-radius: 8px;
+    }
+    /* tuned heights for views (keep your existing sizes) */
+    .table-scroll-client {
+        max-height: 360px;
+    }
+
+    .table-scroll-admin {
+        max-height: 550px;
+    }
+
+    /* prioritize wrapping for long columns (Descripción, Categoría, etc.) */
+    .table th:nth-child(6), .table td:nth-child(6) {
+        max-width: 180px;
+    }
+    /* Descripción */
+    .table th:nth-child(2), .table td:nth-child(2),
+    .table th:nth-child(3), .table td:nth-child(3),
+    .table th:nth-child(4), .table td:nth-child(4) {
+        max-width: 120px;
+    }
+
+    /* slightly smaller on narrower screens */
+    @media (max-width: 1200px) {
+        .table th, .table td {
+            padding: 5px 6px;
+            font-size: 12px;
+        }
+
+        .imagen_tabla {
+            width: 28px;
+            height: 28px;
+        }
     }
 </style>
 
