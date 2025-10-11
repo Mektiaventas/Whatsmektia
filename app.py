@@ -3762,11 +3762,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # Format products using the canonical DB fields (sku, categoria, subcategoria, linea, modelo, descripcion, medidas,
-    # costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor)
+    # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    for p in precios[:40]:  # limit to 40 to avoid huge prompts
+    for p in precios[:40]:
         try:
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
@@ -3780,58 +3779,24 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             status = (p.get('status_ws') or 'activo').strip()
             catalogo = (p.get('catalogo') or '')
             imagen = (p.get('imagen') or '').strip()
-            
-            # If DB field imagen is empty, try to find an image linked in imagenes_productos or filesystem
-            if not imagen and sku:
-                imagen_encontrada = obtener_imagen_principal_por_sku(sku, config)
-                if imagen_encontrada:
-                    imagen = imagen_encontrada
-                    # best-effort: persist association to precios.imagen (no hard-fail)
-                    try:
-                        conn_upd = get_db_connection(config)
-                        cur_upd = conn_upd.cursor()
-                        cur_upd.execute("UPDATE precios SET imagen=%s WHERE sku=%s", (imagen, sku))
-                        conn_upd.commit()
-                        cur_upd.close(); conn_upd.close()
-                        app.logger.info(f"🔧 Asociada imagen {imagen} al SKU {sku} en tabla precios")
-                    except Exception as e:
-                        app.logger.debug(f"⚠️ No se pudo actualizar precios.imagen para {sku}: {e}")
-
-            # Build public image URL when possible (prefer http if imagen already a URL)
-            imagen_url = ''
             if imagen:
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
                 else:
-                    # ensure dominio_publico is a host (no http) -> prefix https://
                     if dominio_publico.startswith('http'):
                         base = dominio_publico.rstrip('/')
                     else:
                         base = f"https://{dominio_publico}"
                     imagen_url = f"{base}/uploads/productos/{imagen}"
-
-            # Prices: prefer precio_menudeo, fallback to precio_mayoreo or costo
+            else:
+                imagen_url = ''
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
-            precio_mayoreo = p.get('precio_mayoreo') or None
-            costo = p.get('costo') or None
-
             precio_str = ''
             if precio_menudeo:
                 try:
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-            elif precio_mayoreo:
-                try:
-                    precio_str = f"mayoreo ${float(precio_mayoreo):,.2f}"
-                except Exception:
-                    precio_str = str(precio_mayoreo)
-            elif costo:
-                try:
-                    precio_str = f"costo ${float(costo):,.2f}"
-                except Exception:
-                    precio_str = str(costo)
-
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -3850,26 +3815,20 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
             if imagen_url:
-                # include full clickable URL so user can click directly
                 parts.append(f"Imagen: {imagen_url}")
             elif imagen:
-                # fallback: if somehow imagen exists but we couldn't build URL, show filename
                 parts.append(f"Imagen: {imagen}")
             if descripcion_p:
-                # keep description short in the prompt
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
-    
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
-    # Enhanced system prompt with product information (uses canonical DB fields)
     system_prompt = f"""
 Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
 Descripción del negocio: {descripcion}
@@ -3889,27 +3848,21 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
 """
 
     historial = obtener_historial(numero, config=config)
-    
-    # ANALIZAR MENSAJES PARA DETECTAR CITAS/PEDIDOS - NUEVA FUNCIONALIDAD
+
     info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
     if info_cita and info_cita.get('servicio_solicitado'):
         app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
-        # Comprobar si hay datos suficientes para guardar la cita
         datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
         if datos_completos:
-            # Guardar cita y enviar alertas
             cita_id = guardar_cita(info_cita, config)
             if cita_id:
                 app.logger.info(f"✅ Cita guardada con ID: {cita_id}")
-                # Enviar alertas
                 enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                # Devolver mensaje de confirmación al usuario
                 es_porfirianna = 'laporfirianna' in config.get('dominio', '')
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
-    
-    # Build messages chain (system + history + current)
+
     messages_chain = [{'role': 'system', 'content': system_prompt}]
     for entry in historial:
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
@@ -3932,10 +3885,22 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
                 ]
             })
         elif es_audio and transcripcion_audio:
-            messages_chain.append({
-                'role': 'user',
-                'content': f"[Audio transcrito] {transcripcion_audio}\n\nMensaje adicional: {mensaje_usuario}" if mensaje_usuario else f"[Audio transcrito] {transcripcion_audio}"
-            })
+            # Avoid duplication when the transcription is identical to the message text.
+            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
+            # and it differs from the transcription, append it as "[Mensaje adicional]".
+            try:
+                tu = mensaje_usuario.strip() if mensaje_usuario else ""
+                ta = transcripcion_audio.strip() if transcripcion_audio else ""
+                if tu and ta and tu != ta:
+                    content = f"{ta}\n\n[Mensaje adicional]: {tu}"
+                else:
+                    content = ta or tu
+            except Exception:
+                content = transcripcion_audio or mensaje_usuario
+            messages_chain.append({'role': 'user', 'content': content})
+        elif es_audio and not transcripcion_audio and mensaje_usuario:
+            # If audio but no transcription, fall back to whatever text we have (caption)
+            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
@@ -3943,7 +3908,6 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
         
-        # Use DeepSeek for regular responses (existing behavior)
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
