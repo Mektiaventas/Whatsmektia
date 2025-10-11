@@ -4060,8 +4060,10 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
-def obtener_todos_los_precios(config):
+def obtener_todos_los_precios(config=None):
     try:
+        if config is None:
+            config = obtener_configuracion_por_host()
         db = get_db_connection(config)
         cursor = db.cursor(dictionary=True)
         cursor.execute("""
@@ -4071,13 +4073,9 @@ def obtener_todos_los_precios(config):
         precios = cursor.fetchall()
         cursor.close()
         db.close()
-        return precios
+        return precios or []
     except Exception as e:
-        print(f"Error obteniendo precios: {str(e)}")
-        return []
-        
-    except Exception as e:
-        print(f"Error obteniendo precios: {str(e)}")
+        app.logger.error(f"Error obteniendo precios: {e}")
         return []
 
 def obtener_precio_por_id(pid, config=None):
@@ -5171,18 +5169,66 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
 
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-            resumen = resumen_rafa(numero, config)
-            enviar_alerta_humana(numero, texto, resumen, config)
 
-            # Además, ofrecer inmediatamente el contacto de un asesor (rotado)
+        # Replace the webhook intervention block with this (inside the /webhook POST handler)
+        if detectar_intervencion_humana_ia(texto, numero, config):
+            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
+            historial = obtener_historial(numero, limite=5, config=config)
+            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
+
+            # Notify admins about the intervention (keep existing alert behaviour)
+            if info_intervencion:
+                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
+                enviar_alerta_intervencion_humana(info_intervencion, config)
+                respuesta_base = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
+            else:
+                respuesta_base = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
+
+            # Try to obtain the next advisor (rotated) and include full contact in the reply
             try:
-                enviado_asesor = enviar_contacto_asesor_usuario(numero, config)
-                if enviado_asesor:
-                    app.logger.info(f"✅ Contacto de asesor enviado por detección automática a {numero}")
+                asesor = get_next_asesor(numero, config)
+                if asesor:
+                    nombre = asesor.get('nombre') or 'Asesor'
+                    telefono = asesor.get('telefono') or ''
+                    # Normalize digits for wa.me link
+                    tel_digits = re.sub(r'\D', '', telefono)
+                    wa_link = ''
+                    if tel_digits:
+                        # If local 10-digit (Mexico), prepend country code 52
+                        if len(tel_digits) == 10:
+                            wa_link = f"https://wa.me/52{tel_digits}"
+                        else:
+                            wa_link = f"https://wa.me/{tel_digits}"
+
+                    mensaje_asesor = (
+                        f"{respuesta_base}\n\n"
+                        f"📞 *Contacto de asesor de ventas*\n"
+                        f"👤 {nombre}\n"
+                        f"📱 {telefono or 'No disponible'}\n"
+                        f"{('🔗 ' + wa_link) if wa_link else ''}\n\n"
+                        "¿Quieres que te pase otro contacto? Responde 'otro asesor' y te paso otro."
+                    )
+
+                    enviar_mensaje(numero, mensaje_asesor, config)
+                    guardar_conversacion(numero, texto, mensaje_asesor, config)
+                    app.logger.info(f"✅ Contacto de asesor enviado inline a {numero}: {nombre} {telefono}")
+                else:
+                    # Fallback: send the generic message if no advisors configured
+                    enviar_mensaje(numero, respuesta_base, config)
+                    guardar_conversacion(numero, texto, respuesta_base, config)
+                    app.logger.info("ℹ️ No hay asesores configurados; enviado mensaje genérico al usuario")
             except Exception as e:
-                app.logger.warning(f"⚠️ Falló el envío de contacto de asesor: {e}")
+                app.logger.warning(f"⚠️ Error enviando contacto de asesor inline: {e}")
+                # Ensure user still gets the base response
+                try:
+                    enviar_mensaje(numero, respuesta_base, config)
+                    guardar_conversacion(numero, texto, respuesta_base, config)
+                except Exception as ex:
+                    app.logger.error(f"🔴 Falló envío fallback: {ex}")
+
+            # Update kanban and finish
+            actualizar_kanban(numero, columna_id=1, config=config)
+            return 'OK', 200
 
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
@@ -7754,8 +7800,9 @@ def data_deletion():
 
 @app.route('/test-alerta')
 def test_alerta():
-    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
-    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
+    config = obtener_configuracion_por_host()  # Obtener config antes
+    # Llamada corregida: enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config)
+    enviar_alerta_humana('5214493432744', 'Mensaje clave de prueba', 'Resumen de prueba.', config)
     return "🚀 Test alerta disparada."
 
 def obtener_chat_meta(numero, config=None):
@@ -8010,26 +8057,32 @@ def actualizar_info_contacto(numero, config=None):
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
-        if config is None:
-            config = obtener_configuracion_por_host()
-    
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
         historial = obtener_historial(numero, limite=5, config=config)
-        
+
         # Si es primer mensaje, mantener en "Nuevos"
         if len(historial) <= 1:
             return 1  # Nuevos
-        
-        # Si hay intervención humana, mover a "Esperando Respuesta"
-        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
+
+        # CORRECCIÓN: llamar detectar_intervencion_humana_ia con (mensaje, numero, config)
+        if detectar_intervencion_humana_ia(mensaje, numero, config):
             return 3  # Esperando Respuesta
-        
+
         # Si tiene más de 2 mensajes, mover a "En Conversación"
         if len(historial) >= 2:
             return 2  # En Conversación
-        
+
         # Si no cumple nada, mantener donde está
-        meta = obtener_chat_meta(numero)
+        meta = obtener_chat_meta(numero, config)
         return meta['columna_id'] if meta else 1
+
+    except Exception as e:
+        app.logger.error(f"Error evaluando movimiento automático: {e}")
+        # En caso de error, no interrumpir flujo; devolver columna 2 (en conversación) como fallback
+        return 2
 
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
