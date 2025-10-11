@@ -18,8 +18,24 @@
         border-radius: 8px;
         background: #fff;
     }
-    .longitud_desc{
-        width: 50%;
+    .longitud_desc {
+        /* use flex so the textarea expands inside the row */
+        flex: 1;
+        min-width: 360px;
+        max-width: 100%;
+        padding: 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 4px;
+        height: auto;
+        resize: vertical; /* user can expand vertically */
+        font-size: 14px;
+        line-height: 1.4;
+    }
+
+    @media (max-width: 900px) {
+        .longitud_desc {
+            min-width: 140px;
+        }
     }
     .PDF{
         color:black;
@@ -141,12 +157,14 @@
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
     <div class="form-card">
         <label>Publicar PDF (Catálogo / Documento)</label>
-        <div style="display:flex;align-items:center;gap:8px;">
-            <input type="file" name="public_pdf" accept=".pdf" required>
-            <input type="text" class="longitud_desc" name="public_pdf_descripcion" placeholder="Descripción (opcional)" style="flex:1;">
-            <button type="submit" class="btn-success">📄 Publicar PDF</button>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+            <input type="file" name="public_pdf" accept=".pdf" required aria-label="Seleccionar archivo PDF" style="flex:0 0 auto;">
+            <textarea name="public_pdf_descripcion" class="longitud_desc" rows="4" placeholder="Descripción (opcional). Añade palabras claves para que la IA seleccione el catálogo más relevante."></textarea>
+            <div style="flex:0 0 auto; display:flex; align-items:center;">
+                <button type="submit" class="btn-success">📄 Publicar PDF</button>
+            </div>
         </div>
-        <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos.</small>
+        <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
     </div>
 </form>
 <div class="form-card" style="margin-top:12px;">
