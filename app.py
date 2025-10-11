@@ -186,6 +186,101 @@ def obtener_cliente_por_user(username):
     cur.close(); conn.close()
     return row
 
+# --- BEGIN: Asesores helpers (añadir en app.py cerca de otros helpers) ---
+def get_asesores_from_config(config=None):
+    """
+    Devuelve lista ordenada de asesores [{ 'nombre':..., 'telefono':... }, ...]
+    tomada de la tabla configuracion (load_config).
+    """
+    try:
+        cfg = load_config(config)
+        ases = cfg.get('asesores', {}) or {}
+        lista = []
+        a1n = (ases.get('asesor1_nombre') or '').strip()
+        a1t = (ases.get('asesor1_telefono') or '').strip()
+        a2n = (ases.get('asesor2_nombre') or '').strip()
+        a2t = (ases.get('asesor2_telefono') or '').strip()
+        if a1n or a1t:
+            lista.append({'nombre': a1n or 'Asesor 1', 'telefono': a1t})
+        if a2n or a2t:
+            lista.append({'nombre': a2n or 'Asesor 2', 'telefono': a2t})
+        return lista
+    except Exception as e:
+        app.logger.error(f"🔴 get_asesores_from_config error: {e}")
+        return []
+
+def get_next_asesor(numero, config=None):
+    """
+    Devuelve el siguiente asesor que debe usarse para `numero`.
+    Mantiene rotación guardando 'ultimo_asesor_index' en estados_conversacion.datos JSON.
+    """
+    try:
+        asesores = get_asesores_from_config(config)
+        if not asesores:
+            return None
+
+        estado = obtener_estado_conversacion(numero, config) or {}
+        datos = estado.get('datos') or {}
+        try:
+            if isinstance(datos, str):
+                datos = json.loads(datos)
+        except Exception:
+            datos = datos if isinstance(datos, dict) else {}
+
+        ultimo_index = int(datos.get('ultimo_asesor_index', 0) or 0)
+        # next index (0-based in list)
+        next_idx = ultimo_index % len(asesores)
+        elegido = asesores[next_idx]
+
+        # actualizar el contador para la próxima vez
+        datos['ultimo_asesor_index'] = (next_idx + 1) % len(asesores)
+        # Mantener contexto existente si lo hay; si no, usar 'INTERVENCION'
+        contexto = estado.get('contexto') or 'INTERVENCION_ASESOR'
+        # Guardar nuevo estado con la actualización del índice
+        actualizar_estado_conversacion(numero, contexto, 'asesor_rotado', datos, config)
+        app.logger.info(f"🔁 get_next_asesor: numero={numero} -> idx={next_idx} asesor={elegido.get('nombre')}")
+        return elegido
+    except Exception as e:
+        app.logger.error(f"🔴 get_next_asesor error: {e}")
+        return None
+
+def enviar_contacto_asesor_usuario(numero, config=None):
+    """
+    Envía por WhatsApp el contacto del siguiente asesor disponible al usuario.
+    Retorna True si se envió algo.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        asesor = get_next_asesor(numero, config)
+        if not asesor:
+            app.logger.info("ℹ️ No hay asesores configurados para enviar.")
+            return False
+
+        nombre = asesor.get('nombre') or 'Asesor'
+        telefono = asesor.get('telefono') or ''
+        # Normalize phone: try to ensure international-ish format if possible
+        telefono_text = telefono
+        if telefono_text and not telefono_text.startswith('+') and telefono_text.isdigit():
+            # prefer to keep as-is; optional: add country prefix if you want
+            pass
+
+        msg = (
+            f"📞 Te puedo pasar el contacto de un asesor de ventas:\n\n"
+            f"👤 {nombre}\n"
+            f"📱 {telefono_text}\n\n"
+            "¿Quieres que te ponga en contacto con esta persona? Responde 'sí' para que te facilitemos los datos de contacto completos."
+        )
+
+        enviar_mensaje(numero, msg, config)
+        guardar_conversacion(numero, "[Solicitud asesor enviada]", msg, config)
+        app.logger.info(f"✅ Contacto de asesor enviado a {numero}: {nombre} - {telefono_text}")
+        return True
+    except Exception as e:
+        app.logger.error(f"🔴 enviar_contacto_asesor_usuario error: {e}")
+        return False
+# --- END: Asesores helpers ---
+
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
 
@@ -5075,10 +5170,19 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
 
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
+
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
             resumen = resumen_rafa(numero, config)
             enviar_alerta_humana(numero, texto, resumen, config)
+
+            # Además, ofrecer inmediatamente el contacto de un asesor (rotado)
+            try:
+                enviado_asesor = enviar_contacto_asesor_usuario(numero, config)
+                if enviado_asesor:
+                    app.logger.info(f"✅ Contacto de asesor enviado por detección automática a {numero}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Falló el envío de contacto de asesor: {e}")
 
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
