@@ -7026,6 +7026,56 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
 
+
+@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
+@login_required
+def borrar_pdf_configuracion(doc_id):
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT filename, filepath FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
+        doc = cursor.fetchone()
+        if not doc:
+            cursor.close(); conn.close()
+            flash('❌ Documento no encontrado', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        filename = doc.get('filename')
+        # Ruta esperada en uploads/docs
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        filepath = os.path.join(docs_dir, filename)
+
+        # Intentar eliminar archivo del disco si existe
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+                app.logger.info(f"🗑️ Archivo eliminado de disco: {filepath}")
+            else:
+                app.logger.info(f"ℹ️ Archivo no encontrado en disco (posiblemente ya eliminado): {filepath}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo eliminar archivo físico: {e}")
+
+        # Eliminar registro DB
+        try:
+            cursor.execute("DELETE FROM documents_publicos WHERE id = %s", (doc_id,))
+            conn.commit()
+            flash('✅ Catálogo eliminado correctamente', 'success')
+            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename}")
+        except Exception as e:
+            conn.rollback()
+            flash('❌ Error eliminando el registro en la base de datos', 'error')
+            app.logger.error(f"🔴 Error eliminando registro documents_publicos: {e}")
+        finally:
+            cursor.close(); conn.close()
+
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en borrar_pdf_configuracion: {e}")
+        flash('❌ Error eliminando el catálogo', 'error')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
@@ -7069,11 +7119,33 @@ def configuracion_tab(tab):
         guardado = True
 
     datos = cfg.get(tab, {})
+
+    # Si estamos en la pestaña 'negocio', obtener documentos_publicos para mostrarlos en la plantilla
+    documents_publicos = []
+    if tab == 'negocio':
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
+            if cursor.fetchone():
+                cursor.execute("""
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                    FROM documents_publicos
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """)
+                documents_publicos = cursor.fetchall()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudieron obtener documents_publicos: {e}")
+            documents_publicos = []
+
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
-        datos=datos, guardado=guardado
+        datos=datos, guardado=guardado,
+        documents_publicos=documents_publicos
     )
-
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
         config = obtener_configuracion_por_host()
