@@ -3623,8 +3623,10 @@ def enviar_documento(numero, file_url, filename, config=None):
                 'filename': filename
             }
         }
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 200:
+        app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
+        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
+        if r.status_code in (200, 201, 202):
             app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
             return True
         else:
@@ -4992,6 +4994,12 @@ def obtener_datos_chat():
         'timestamp': datetime.now().timestamp(),
         'total_chats': len(chats)
     })
+
+@app.route('/uploads/docs/<filename>')
+def serve_public_docs(filename):
+    """Serve published PDFs from uploads/docs so Facebook can fetch them via HTTPS."""
+    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+    return send_from_directory(docs_dir, filename)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
