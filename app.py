@@ -186,28 +186,65 @@ def obtener_cliente_por_user(username):
     cur.close(); conn.close()
     return row
 
-# --- BEGIN: Asesores helpers (añadir en app.py cerca de otros helpers) ---
 def get_asesores_from_config(config=None):
     """
-    Devuelve lista ordenada de asesores [{ 'nombre':..., 'telefono':... }, ...]
-    tomada de la tabla configuracion (load_config).
+    Read advisors directly from configuracion table (asesor1_nombre/asesor1_telefono, asesor2_*)
+    Returns list of {'nombre','telefono'} in order. Falls back to tenant env vars then admin numbers.
     """
     try:
-        cfg = load_config(config)
-        ases = cfg.get('asesores', {}) or {}
+        if config is None:
+            config = obtener_configuracion_por_host()
+
+        # Try DB first (explicit query against 'configuracion' table)
+        try:
+            conn = get_db_connection(config)
+            cur = conn.cursor(dictionary=True)
+            cur.execute("SELECT asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono FROM configuracion WHERE id = 1 LIMIT 1")
+            row = cur.fetchone()
+            cur.close()
+            conn.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ get_asesores_from_config: DB read failed: {e}")
+            row = None
+
         lista = []
-        a1n = (ases.get('asesor1_nombre') or '').strip()
-        a1t = (ases.get('asesor1_telefono') or '').strip()
-        a2n = (ases.get('asesor2_nombre') or '').strip()
-        a2t = (ases.get('asesor2_telefono') or '').strip()
-        if a1n or a1t:
-            lista.append({'nombre': a1n or 'Asesor 1', 'telefono': a1t})
-        if a2n or a2t:
-            lista.append({'nombre': a2n or 'Asesor 2', 'telefono': a2t})
+        if row:
+            a1n = (row.get('asesor1_nombre') or '').strip()
+            a1t = (row.get('asesor1_telefono') or '').strip()
+            a2n = (row.get('asesor2_nombre') or '').strip()
+            a2t = (row.get('asesor2_telefono') or '').strip()
+            if a1n or a1t:
+                lista.append({'nombre': a1n or 'Asesor 1', 'telefono': a1t})
+            if a2n or a2t:
+                lista.append({'nombre': a2n or 'Asesor 2', 'telefono': a2t})
+
+        # Tenant-specific env fallback (useful if DB not populated)
+        if not lista:
+            dominio = (config.get('dominio') or '').lower() if isinstance(config, dict) else ''
+            if 'ofitodo' in dominio:
+                name = os.getenv('OFITODO_ASESOR1_NAME', '').strip()
+                phone = os.getenv('OFITODO_ASESOR1_PHONE', '').strip()
+                if name or phone:
+                    lista.append({'nombre': name or 'Asesor OFITODO', 'telefono': phone or '5214493432744'})
+                name2 = os.getenv('OFITODO_ASESOR2_NAME', '').strip()
+                phone2 = os.getenv('OFITODO_ASESOR2_PHONE', '').strip()
+                if name2 or phone2:
+                    lista.append({'nombre': name2 or 'Asesor OFITODO 2', 'telefono': phone2 or '5214491182201'})
+
+        # Final fallback -> admin numbers (always return something)
+        if not lista:
+            admins = [
+                {'nombre': 'Asesor 1', 'telefono': os.getenv('ADMIN_ASESOR1', '5214493432744')},
+                {'nombre': 'Asesor 2', 'telefono': os.getenv('ADMIN_ASESOR2', '5214491182201')}
+            ]
+            lista.extend(admins)
+
+        app.logger.info(f"🔁 get_asesores_from_config -> returned {len(lista)} asesores for dominio={config.get('dominio') if isinstance(config, dict) else 'unknown'}")
         return lista
+
     except Exception as e:
-        app.logger.error(f"🔴 get_asesores_from_config error: {e}")
-        return []
+        app.logger.error(f"🔴 get_asesores_from_config fatal error: {e}")
+        return [{'nombre': 'Asesor', 'telefono': os.getenv('ADMIN_ASESOR1', '5214493432744')}]
 
 def get_next_asesor(numero, config=None):
     """
