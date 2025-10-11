@@ -3529,44 +3529,52 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Determinar el tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     tipo_solicitud = "pedido" if es_porfirianna else "cita"
     
+    detalles_servicio = info_cita.get('detalles_servicio', {})
+    descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+    categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+    precio_servicio = detalles_servicio.get('precio_mayudeo') or detalles_servicio.get('precio', 'No especificado')
+    
+    mensaje_alerta = f"""
+🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
+
+*Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+*Teléfono:* {info_cita.get('telefono')}
+
+*{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+*Categoría:* {categoria_servicio}
+*Precio:* ${precio_servicio}
+
+*Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
+
+*Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
+*Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
+
+⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
+"""
+    # Usar configuración principal para enviar a administradores
+    admin_config = NUMEROS_CONFIG.get('524495486142') or obtener_configuracion_por_host()
+    enviados = []
     try:
-        # Obtener detalles adicionales del servicio si existen
-        detalles_servicio = info_cita.get('detalles_servicio', {})
-        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
-        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
-        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
-        
-        mensaje_alerta = f"""
-        🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
-
-        *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
-        *Teléfono:* {info_cita.get('telefono')}
-
-        *{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
-        *Categoría:* {categoria_servicio}
-        *Precio:* ${precio_servicio} {info_cita.get('moneda', 'MXN')}
-        
-        *Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
-
-        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
-        *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
-
-        ⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
-
-        📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
-        """
-        
-        # Enviar a ambos números
-        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-        enviar_mensaje('5214493432744', mensaje_alerta, config)
-        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
-        
+        # Enviar al ALERT_NUMBER si está definido
+        if ALERT_NUMBER:
+            ok = enviar_mensaje(ALERT_NUMBER, mensaje_alerta, admin_config)
+            app.logger.info(f"📤 Envío ALERT_NUMBER ({ALERT_NUMBER}) para cita {cita_id} -> ok={ok}")
+            enviados.append(ok)
+        # Enviar a los administradores fijos
+        for admin in ['5214493432744', '5214491182201']:
+            ok = enviar_mensaje(admin, mensaje_alerta, admin_config)
+            app.logger.info(f"📤 Envío admin {admin} para cita {cita_id} -> ok={ok}")
+            enviados.append(ok)
+        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a administradores, ID: {cita_id}")
+        return any(enviados)
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
+        return False
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
@@ -5586,7 +5594,7 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
     except Exception as e:
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
-# REEMPLAZA tu función enviar_mensaje con esta versión corregida
+
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5604,7 +5612,6 @@ def enviar_mensaje(numero, texto, config=None):
         'Content-Type': 'application/json'
     }
     
-    # ✅ PAYLOAD CORRECTO
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
@@ -5615,18 +5622,17 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
-        r = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        if r.status_code == 200:
+        app.logger.info(f"📤 Enviando a {numero} via {config.get('dominio','unknown')}: {texto_limpio[:80]}...")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        app.logger.info(f"📥 Graph API status: {r.status_code} - response: {r.text[:200]}")
+        if r.status_code in (200, 201, 202):
             app.logger.info("✅ Mensaje enviado")
             return True
         else:
-            app.logger.error(f"🔴 Error {r.status_code}: {r.text}")
+            app.logger.error(f"🔴 Error al enviar mensaje ({r.status_code}): {r.text}")
             return False
-            
     except Exception as e:
-        app.logger.error(f"🔴 Exception: {e}")
+        app.logger.error(f"🔴 Exception enviando mensaje: {e}")
         return False
 
 @app.route('/actualizar-contactos')
@@ -6035,6 +6041,7 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
+
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6042,26 +6049,38 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
     if config is None:
         app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return
+        return False
     
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     mensaje += f"👤 *Cliente:* {numero_cliente}\n"
     mensaje += f"📞 *Número:* {numero_cliente}\n"
     mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
     mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
     mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
-    mensaje += f"{contexto_consulta}\n\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n{contexto_consulta}\n\n"
     mensaje += f"_________________________________________\n"
     mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
-    
-    # Enviar mensaje normal (sin template) a tu número personal
-    enviar_mensaje(ALERT_NUMBER, mensaje, config)
-    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
-    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
+
+    # Usar configuración principal (default tenant) para enviar a administradores
+    admin_config = NUMEROS_CONFIG.get('524495486142') or obtener_configuracion_por_host()
+    enviados = []
+    try:
+        # Enviar a ALERT_NUMBER si está definido
+        if ALERT_NUMBER:
+            ok = enviar_mensaje(ALERT_NUMBER, mensaje, admin_config)
+            app.logger.info(f"📤 Envío ALERT_NUMBER ({ALERT_NUMBER}) -> ok={ok}")
+            enviados.append((ALERT_NUMBER, ok))
+        # Enviar a ambos administradores fijos (E.164 sin +)
+        for admin in ['5214493432744', '5214491182201']:
+            ok = enviar_mensaje(admin, mensaje, admin_config)
+            app.logger.info(f"📤 Envío admin {admin} -> ok={ok}")
+            enviados.append((admin, ok))
+        app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {admin_config.get('dominio')}")
+        # Return True only if at least one succeeded
+        return any(ok for _, ok in enviados)
+    except Exception as e:
+        app.logger.error(f"🔴 Error enviando alerta humana: {e}")
+        return False
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
