@@ -6515,21 +6515,76 @@ def webhook():
             return 'OK', 200
             # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
+        # Replace the webhook intervention block with this (inside the /webhook POST handler)
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             historial = obtener_historial(numero, limite=5, config=config)
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
+
+            # Notify admins about the intervention (keep existing alert behaviour)
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
                 enviar_alerta_intervencion_humana(info_intervencion, config)
-                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
+                respuesta_base = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
-                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
+                respuesta_base = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
+
+            # --- DIAGNÓSTICO ADICIONAL: listar asesores disponibles ---
+            try:
+                asesores_lista = get_asesores_from_config(config) or []
+                app.logger.info(f"🔎 Asesores obtenidos (count={len(asesores_lista)}): {asesores_lista}")
+            except Exception as e:
+                asesores_lista = []
+                app.logger.warning(f"⚠️ Falló lectura de asesores para diagnóstico: {e}")
+
+            # Try to obtain the next advisor (rotated) and include full contact in the reply
+            try:
+                asesor = get_next_asesor(numero, config)
+                app.logger.info(f"🔁 get_next_asesor returned: {asesor}")
+                if asesor:
+                    nombre = asesor.get('nombre') or 'Asesor'
+                    telefono = asesor.get('telefono') or ''
+                    # Normalize digits for wa.me link
+                    tel_digits = re.sub(r'\D', '', telefono)
+                    wa_link = ''
+                    if tel_digits:
+                        # If local 10-digit (Mexico), prepend country code 52
+                        if len(tel_digits) == 10:
+                            wa_link = f"https://wa.me/52{tel_digits}"
+                        else:
+                            wa_link = f"https://wa.me/{tel_digits}"
+
+                    mensaje_asesor = (
+                        f"{respuesta_base}\n\n"
+                        f"📞 *Contacto de asesor de ventas*\n"
+                        f"👤 {nombre}\n"
+                        f"📱 {telefono or 'No disponible'}\n"
+                        f"{('🔗 ' + wa_link) if wa_link else ''}\n\n"
+                        "¿Quieres que te pase otro contacto? Responde 'otro asesor' y te paso otro."
+                    )
+
+                    ok = enviar_mensaje(numero, mensaje_asesor, config)
+                    app.logger.info(f"📤 Envío contacto asesor a {numero} -> ok={ok}")
+                    guardar_conversacion(numero, texto, mensaje_asesor, config)
+                    app.logger.info(f"✅ Contacto de asesor enviado inline a {numero}: {nombre} {telefono}")
+                else:
+                    # Fallback: send the generic message if no advisors configured
+                    app.logger.info("ℹ️ get_next_asesor devolvió None — enviando mensaje base genérico")
+                    enviar_mensaje(numero, respuesta_base, config)
+                    guardar_conversacion(numero, texto, respuesta_base, config)
+                    app.logger.info("ℹ️ No hay asesores configurados; enviado mensaje genérico al usuario")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error enviando contacto de asesor inline: {e}")
+                # Ensure user still gets the base response
+                try:
+                    enviar_mensaje(numero, respuesta_base, config)
+                    guardar_conversacion(numero, texto, respuesta_base, config)
+                except Exception as ex:
+                    app.logger.error(f"🔴 Falló envío fallback: {ex}")
+
+            # Update kanban and finish
             actualizar_kanban(numero, columna_id=1, config=config)
             return 'OK', 200
-        
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
         # ⛔ Se elimina llamada inválida con columna_id indefinido
@@ -6541,6 +6596,21 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
+
+@app.route('/debug-asesores')
+def debug_asesores():
+    """Devuelve la lista de asesores leída desde la tabla configuracion para el tenant actual"""
+    config = obtener_configuracion_por_host()
+    try:
+        asesores = get_asesores_from_config(config)
+        return jsonify({
+            'dominio': config.get('dominio'),
+            'db_name': config.get('db_name'),
+            'asesores': asesores
+        })
+    except Exception as e:
+        app.logger.error(f"🔴 debug-asesores error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
