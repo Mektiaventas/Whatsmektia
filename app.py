@@ -998,7 +998,7 @@ def importar_productos_desde_excel(filepath, config=None):
         }
 
         for excel_col, db_col in column_mapping.items():
-            if excel_col in df.columns:
+            if excel_col in df.columns: 
                 df = df.rename(columns={excel_col: db_col})
                 app.logger.info(f"Columna mapeada: {excel_col} -> {db_col}")
 
