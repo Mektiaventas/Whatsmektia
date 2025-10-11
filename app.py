@@ -3559,7 +3559,6 @@ def publicar_pdf_configuracion():
         file.save(filepath)
 
         descripcion = (request.form.get('public_pdf_descripcion') or '').strip()
-        mime = file.mimetype or ''
 
         # Guardar metadatos en tabla documents_publicos (crear si no existe)
         conn = get_db_connection(config)
@@ -3591,7 +3590,7 @@ def publicar_pdf_configuracion():
                 INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
                 VALUES (%s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
-            """, (filename, filepath, descripcion, user, mime))
+            """, (filename, filepath, descripcion, user))
             conn.commit()
         except Exception as e:
             app.logger.error(f"🔴 Error insertando metadatos archivo: {e}")
