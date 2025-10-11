@@ -379,7 +379,7 @@
                                 <!--<th>Medidas</th>-->
                                 <th>Imagen</th>
                                 <th>Menudeo</th>
-                                <th>Mayoreo</th>
+                                <!--<th>Mayoreo</th>-->
                                 <!--<th>Status</th>
                                 <th>Catálogo</th>-->
                                 <th>Acciones</th>
@@ -409,7 +409,7 @@
                                     {% endif %}
                                 </td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                                <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
                                 <td>{{ precio.catalogo or '-' }}</td>-->
                                 <td>
@@ -454,7 +454,7 @@
                                 <!--<th>Medidas</th>-->
                                 <th>Costo</th>
                                 <th>Menudeo</th>
-                                <th>Mayoreo</th>
+                                <!--<th>Mayoreo</th>-->
                                 <th>Imagen</th>
                                 <!--<th>Status</th>
                                 <th>Catálogo</th>
@@ -478,7 +478,7 @@
                                 <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
-                                <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
+                                <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
@@ -540,8 +540,8 @@
 
 <style>
     .imagen_tabla {
-        width: 60px;
-        height: 60px;
+        width: 120px;
+        height: 120px;
         object-fit: cover;
     }
 
