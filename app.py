@@ -4189,12 +4189,83 @@ def obtener_historial(numero, limite=5, config=None):
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # PRIMERO: Buscar si el mensaje hace referencia a un producto específico
+    app.logger.info(f"🔍 Búsqueda de producto en mensaje: '{mensaje_usuario}'")
+    precios = obtener_todos_los_precios(config)
+    sku_encontrado = buscar_sku_en_texto(mensaje_usuario, precios)
+    
+    producto_encontrado = None
+    if sku_encontrado:
+        # Buscar el producto completo por SKU
+        for producto in precios:
+            if producto.get('sku') == sku_encontrado:
+                producto_encontrado = producto
+                app.logger.info(f"✅ Producto encontrado: {producto.get('servicio')} (SKU: {sku_encontrado})")
+                break
+    
+    # Si encontramos un producto, preparar respuesta coherente
+    if producto_encontrado:
+        # Construir respuesta informativa sobre el producto
+        nombre = producto_encontrado.get('servicio') or producto_encontrado.get('modelo') or 'Producto'
+        descripcion = producto_encontrado.get('descripcion', 'Sin descripción disponible')
+        precio = producto_encontrado.get('precio_menudeo') or producto_encontrado.get('precio_mayoreo') or producto_encontrado.get('costo', 'Consultar')
+        imagen = producto_encontrado.get('imagen', '')
+        categoria = producto_encontrado.get('categoria', '')
+        medidas = producto_encontrado.get('medidas', '')
+        
+        respuesta_producto = f"🔍 *{nombre}*\n\n"
+        
+        if descripcion and descripcion.strip() and descripcion != 'None':
+            respuesta_producto += f"📝 *Descripción:* {descripcion}\n"
+        
+        if categoria and categoria.strip() and categoria != 'None':
+            respuesta_producto += f"📂 *Categoría:* {categoria}\n"
+            
+        if medidas and medidas.strip() and medidas != 'None':
+            respuesta_producto += f"📏 *Medidas:* {medidas}\n"
+        
+        # Formatear precio
+        try:
+            if precio and str(precio).strip() and str(precio) != '0.00' and str(precio) != 'None':
+                precio_float = float(precio)
+                respuesta_producto += f"💰 *Precio:* ${precio_float:,.2f}\n"
+        except (ValueError, TypeError):
+            if precio and str(precio).strip() and str(precio) != 'None':
+                respuesta_producto += f"💰 *Precio:* {precio}\n"
+        
+        # Manejar imagen
+        if imagen and imagen.strip() and imagen != 'None':
+            app.logger.info(f"🖼️ Intentando enviar imagen: {imagen}")
+            imagen_enviada = enviar_imagen(numero, imagen, config)
+            if imagen_enviada:
+                respuesta_producto += "\n🖼️ *Imagen:* ✅ Te he enviado la imagen del producto."
+                app.logger.info("✅ Imagen enviada exitosamente")
+            else:
+                respuesta_producto += "\n🖼️ *Imagen:* ⚠️ Disponible (pero no se pudo enviar en este momento)"
+                app.logger.warning("⚠️ No se pudo enviar la imagen")
+        else:
+            respuesta_producto += "\n📷 *Imagen:* No disponible"
+            app.logger.info("📷 Producto sin imagen")
+        
+        # Agregar SKU si está disponible
+        if sku_encontrado:
+            respuesta_producto += f"\n\n🏷️ *SKU:* {sku_encontrado}"
+        
+        # Guardar en el historial
+        guardar_conversacion(numero, mensaje_usuario, respuesta_producto, config)
+        
+        app.logger.info(f"✅ Respuesta de producto enviada a {numero}")
+        return respuesta_producto
+    
+    # Si no se encontró producto específico, continuar con el flujo normal de IA
     cfg = load_config(config)
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
+    
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
@@ -4202,12 +4273,12 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # Format products using the canonical DB fields ...
+    # Format products using the canonical DB fields
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:40]:
         try:
-             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            # Helper: limpiar valores que contengan el nombre/marker de la imagen
             def _clean_field(val, imagen_name):
                 if not val:
                     return ''
@@ -4239,6 +4310,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             status = (p.get('status_ws') or 'activo').strip()
             catalogo = (p.get('catalogo') or '')
             imagen = (p.get('imagen') or '').strip()
+            
             if imagen:
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
@@ -4250,6 +4322,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
+                
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4257,6 +4330,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
+                    
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4280,11 +4354,15 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+                
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-        except Exception:
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error formateando producto: {e}")
             producto_line = "Sin datos legibles de producto"
+            
         productos_formateados.append(f"- {producto_line}")
+        
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
@@ -4305,10 +4383,13 @@ Reglas:
 - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
 
 Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
+
+IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto, verifica primero si existe en la base de datos. Si existe, confirma que se enviará la imagen.
 """
 
     historial = obtener_historial(numero, config=config)
 
+    # Verificar si es solicitud de cita/pedido
     info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
     if info_cita and info_cita.get('servicio_solicitado'):
         app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
@@ -4323,12 +4404,17 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
 
+    # Construir cadena de mensajes para la IA
     messages_chain = [{'role': 'system', 'content': system_prompt}]
+    
+    # Agregar historial de conversación
     for entry in historial:
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+            
+    # Agregar mensaje actual
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
             messages_chain.append({
@@ -4345,9 +4431,7 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Avoid duplication when the transcription is identical to the message text.
-            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
-            # and it differs from the transcription, append it as "[Mensaje adicional]".
+            # Evitar duplicación cuando la transcripción es idéntica al texto del mensaje
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4359,7 +4443,7 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
-            # If audio but no transcription, fall back to whatever text we have (caption)
+            # Si es audio pero no hay transcripción, usar el texto que tenemos (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
@@ -4367,6 +4451,8 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
+        
+        app.logger.info(f"🤖 Enviando {len(messages_chain)} mensajes a la IA")
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -4378,21 +4464,26 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
             "temperature": 0.7,
             "max_tokens": 2000
         }
+        
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
+        
         data = response.json()
         respuesta = data['choices'][0]['message']['content'].strip()
         respuesta = aplicar_restricciones(respuesta, numero, config)
+        
+        app.logger.info(f"✅ Respuesta IA generada: {respuesta[:100]}...")
         return respuesta
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 API error: {e}")
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA.'
+        return 'Lo siento, hubo un error con la IA. Por favor intenta de nuevo.'
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
-        return 'Lo siento, hubo un error con la IA.'
+        app.logger.error(traceback.format_exc())
+        return 'Lo siento, hubo un error inesperado. Por favor intenta de nuevo.'
 
 # New helpers: enviar_imagen and buscar_sku_en_texto
 def enviar_imagen(numero, imagen_ref, config=None):
@@ -4453,67 +4544,88 @@ def enviar_imagen(numero, imagen_ref, config=None):
 def buscar_sku_en_texto(texto, precios):
     """
     Busca un SKU o modelo presente en 'precios' dentro de 'texto'.
-    Mejora: normaliza guiones/puntos/espacios, compara tanto SKU exacto como modelo,
-    y permite coincidencias parciales (preferencia: SKU exacto > modelo exacto > partial).
-    Retorna el SKU encontrado (string) o None.
+    Versión mejorada con búsqueda más flexible.
     """
     if not texto or not precios:
         return None
 
-    def norm(s):
+    def normalizar_texto(s):
+        """Normaliza texto para búsqueda flexible"""
         if not s:
             return ''
         s = str(s).strip().lower()
-        # Remove common separators and non-alphanumeric except letters+numbers
-        s = re.sub(r'[^a-z0-9]', '', s)
-        return s
+        # Remover caracteres especiales pero mantener espacios para búsqueda por palabras
+        s = re.sub(r'[^\w\sáéíóúñ]', '', s)
+        # Remover espacios múltiples
+        s = re.sub(r'\s+', ' ', s)
+        return s.strip()
 
-    texto_norm = norm(texto)
-
-    # Build maps for quick lookup
-    sku_map = {}
-    modelo_map = {}
-    partial_map = []  # list of tuples (key_norm, original_sku_or_modelo)
-    for p in precios:
-        sku = (p.get('sku') or '').strip()
-        modelo = (p.get('modelo') or '').strip()
-        if sku:
-            k = norm(sku)
-            sku_map[k] = sku  # keep original casing
-            partial_map.append((k, sku))
-        if modelo:
-            k2 = norm(modelo)
-            modelo_map[k2] = sku or modelo
-            partial_map.append((k2, sku or modelo))
-
-    # 1) Try exact SKU match (fast and deterministic)
-    for k, orig in sku_map.items():
-        if k and k in texto_norm:
-            return orig
-
-    # 2) Try exact modelo match
-    for k, orig in modelo_map.items():
-        if k and k in texto_norm:
-            return orig
-
-    # 3) Try partial token matches (look for tokens of length >=4 to avoid noise)
-    tokens = re.findall(r'\w{4,}', texto_norm)
-    if tokens:
-        for t in tokens:
-            for k, orig in partial_map:
-                if t in k or k in t:
-                    return orig
-
-    # 4) Fallback: try plain substring search on original fields (case-insensitive)
-    texto_lower = texto.lower()
-    for p in precios:
-        sku = (p.get('sku') or '').strip()
-        modelo = (p.get('modelo') or '').strip()
-        if sku and sku.lower() in texto_lower:
-            return sku
-        if modelo and modelo.lower() in texto_lower:
-            return sku or modelo
-
+    texto_normalizado = normalizar_texto(texto)
+    
+    # Lista para almacenar posibles coincidencias
+    coincidencias = []
+    
+    for producto in precios:
+        # Buscar en múltiples campos
+        campos_busqueda = [
+            producto.get('sku', ''),
+            producto.get('modelo', ''),
+            producto.get('servicio', ''),
+            producto.get('descripcion', ''),
+            producto.get('categoria', ''),
+            producto.get('subcategoria', ''),
+            producto.get('linea', '')
+        ]
+        
+        for campo in campos_busqueda:
+            if not campo or campo == 'None':
+                continue
+                
+            campo_normalizado = normalizar_texto(campo)
+            if not campo_normalizado:
+                continue
+            
+            # Verificar diferentes tipos de coincidencia
+            puntuacion = 0
+            
+            # Coincidencia exacta (máxima prioridad)
+            if campo_normalizado == texto_normalizado:
+                puntuacion = 100
+            # El campo está contenido en el texto
+            elif campo_normalizado in texto_normalizado:
+                puntuacion = 80
+            # El texto está contenido en el campo
+            elif texto_normalizado in campo_normalizado:
+                puntuacion = 60
+            # Coincidencia de palabras (para búsquedas parciales)
+            else:
+                palabras_texto = set(texto_normalizado.split())
+                palabras_campo = set(campo_normalizado.split())
+                palabras_comunes = palabras_texto.intersection(palabras_campo)
+                
+                if palabras_comunes:
+                    # Puntuación basada en el número de palabras comunes
+                    puntuacion = len(palabras_comunes) * 20
+            
+            # Bonus por coincidencia en SKU (más específico)
+            if campo == producto.get('sku', '') and puntuacion > 0:
+                puntuacion += 10
+            
+            if puntuacion > 0:
+                coincidencias.append({
+                    'producto': producto,
+                    'campo': campo,
+                    'puntuacion': puntuacion,
+                    'sku': producto.get('sku', '')
+                })
+    
+    # Ordenar por puntuación y devolver el mejor resultado
+    if coincidencias:
+        mejor_coincidencia = max(coincidencias, key=lambda x: x['puntuacion'])
+        app.logger.info(f"✅ Mejor coincidencia: '{mejor_coincidencia['campo']}' -> SKU: {mejor_coincidencia['sku']} (puntuación: {mejor_coincidencia['puntuacion']})")
+        return mejor_coincidencia['sku']
+    
+    app.logger.info(f"❌ No se encontraron coincidencias para: '{texto}'")
     return None
 
 # Agregar esta función para manejar el estado de la conversación
