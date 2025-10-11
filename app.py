@@ -3661,7 +3661,7 @@ def enviar_catalogo(numero, original_text=None, config=None):
     """
     Intenta enviar el PDF público si existe (documents_publicos),
     si no existe envía un resumen textual del catálogo (primeros 20 productos).
-    Registra la acción en conversaciones.
+    Registra la acción en conversaciones (actualiza la fila de mensaje entrante para evitar duplicados).
     """
     from flask import has_request_context, request
     if config is None:
@@ -3678,6 +3678,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
         else:
             doc = None
         cursor.close(); conn.close()
+
+        usuario_texto = original_text or "[Solicitud de catálogo]"
 
         if doc and doc.get('filename'):
             filename = doc['filename']
@@ -3700,13 +3702,25 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
             sent = enviar_documento(numero, file_url, filename, config)
             respuesta_text = f"Te envío el catálogo: {doc.get('descripcion') or filename}" if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
-            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
+
+            # UPDATE existing saved incoming message with the bot response to avoid duplicate user message rows
+            try:
+                actualizar_respuesta(numero, usuario_texto, respuesta_text, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
+                guardar_conversacion(numero, usuario_texto, respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
+
             return sent
         else:
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=20)
             enviar_mensaje(numero, texto_catalogo, config)
-            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            # actualizar la fila del mensaje entrante con la respuesta (evita duplicado)
+            try:
+                actualizar_respuesta(numero, usuario_texto, texto_catalogo, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta falló en fallback textual: {e}")
+                guardar_conversacion(numero, usuario_texto, texto_catalogo, config)
             return True
     except Exception as e:
         app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
@@ -3714,7 +3728,10 @@ def enviar_catalogo(numero, original_text=None, config=None):
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=10)
             enviar_mensaje(numero, texto_catalogo, config)
-            guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            try:
+                actualizar_respuesta(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
+            except:
+                guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
             return True
         except Exception as ex:
             app.logger.error(f"🔴 Fallback también falló: {ex}")
