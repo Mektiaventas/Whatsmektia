@@ -952,7 +952,7 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
 
 
 def importar_productos_desde_excel(filepath, config=None):
-    """Importa productos desde Excel; mejora mapeo de imágenes para evitar desfases."""
+    """Importa productos desde Excel; añade OCR + fuzzy-match para mapear imágenes con mayor precisión."""
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -1004,8 +1004,6 @@ def importar_productos_desde_excel(filepath, config=None):
 
         # Extraer imágenes embebidas y fallback zip
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
-        imagenes_embedded = eliminar_imagenes_duplicadas(imagenes_embedded)
-        app.logger.info(f"🔄 Después de eliminar duplicados: {len(imagenes_embedded)} imágenes únicas")
         app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
 
         if not imagenes_embedded and extension == '.xlsx':
@@ -1054,8 +1052,8 @@ def importar_productos_desde_excel(filepath, config=None):
                 app.logger.warning(f"⚠️ Error insertando metadato imagen {img.get('filename')}: {e}")
         conn.commit()
 
-        # --- Construir estructuras para mapeo robusto ---
-        images_map = {}            # map (sheet, row) -> filename
+        # --- Preparar estructuras para mapeo robusto ---
+        images_map = {}            # map (sheet, row) -> filename (from anchors)
         images_by_sheet = {}       # sheet -> list(img dict)
         for img in imagenes_embedded:
             s = img.get('sheet')
@@ -1121,7 +1119,7 @@ def importar_productos_desde_excel(filepath, config=None):
         else:
             data_excel_rows = list(range(2, 2 + len(df)))
 
-        # Filas que contienen identificador (sku o modelo) - para alinear imágenes por índice de forma más fiable
+        # Filas que contienen identificador (sku o modelo)
         rows_with_id = []
         if sheet is not None:
             for r in data_excel_rows:
@@ -1129,48 +1127,118 @@ def importar_productos_desde_excel(filepath, config=None):
                 modelo_val = sheet.cell(row=r, column=modelo_col_idx).value if modelo_col_idx else None
                 if (sku_val and str(sku_val).strip()) or (modelo_val and str(modelo_val).strip()):
                     rows_with_id.append(r)
-            # Fallback: si no hay filas con id, usar todas las data_excel_rows
             if not rows_with_id:
                 rows_with_id = list(data_excel_rows)
         else:
-            # CSV fallback: align by index using 0-based df rows
             rows_with_id = list(range(2, 2 + len(df)))
 
         app.logger.info(f"📑 Data rows: {len(data_excel_rows)}, rows with id: {len(rows_with_id)}, images with anchors: {len(images_map)}")
 
-        # Construir mapa final row_num -> filename con heurísticas:
+        # --- OCR + fuzzy matching step ---
+        ocr_available = False
+        try:
+            import pytesseract
+            ocr_available = True
+        except Exception:
+            app.logger.info("ℹ️ pytesseract no disponible, saltando paso OCR (instala pytesseract + tesseract en sistema para habilitar)")
+
+        from difflib import SequenceMatcher
+
+        # Build product candidate strings for matching (lowercase)
+        product_candidates = []  # list of (excel_row_number, combined_text, sku, modelo)
+        df_records = df.to_dict('records')
+        for idx, rec in enumerate(df_records):
+            excel_row_number = data_excel_rows[idx] if idx < len(data_excel_rows) else (header_row + 1 + idx)
+            sku = (rec.get('sku') or '') or ''
+            modelo = (rec.get('modelo') or '') or (rec.get('servicio') or '') or ''
+            combined = " ".join([str(sku), str(modelo)]).strip().lower()
+            product_candidates.append((excel_row_number, combined, sku.strip(), modelo.strip()))
+
         row_to_image = {}
 
-        # 1) Asignar imágenes con ancla exacta (sheet,row)
+        # 1) Assign exact anchors first
         for (s, r), fname in list(images_map.items()):
             if s == sheet_name and r in data_excel_rows:
                 row_to_image[r] = fname
 
-        # 2) Asignar imágenes que tengan columna info: buscar en esa columna la fila de datos más cercana con contenido
+        # 2) For images without anchor, try OCR -> fuzzy match to product_candidates
+        if ocr_available and imagenes_embedded:
+            app.logger.info("🔎 Intentando asignar imágenes usando OCR + fuzzy-match")
+            for img in imagenes_embedded:
+                fname = img.get('filename')
+                if not fname or fname in row_to_image.values():
+                    continue
+                img_path = img.get('path')
+                try:
+                    ocr_text = ''
+                    try:
+                        pil = Image.open(img_path).convert('RGB')
+                        # small preprocessing could be added here (resize, threshold) if needed
+                        ocr_text = pytesseract.image_to_string(pil, lang='spa')
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ OCR fallo para {fname}: {e}")
+                        ocr_text = ''
+
+                    if not ocr_text or len(ocr_text.strip()) < 3:
+                        continue
+
+                    ocr_norm = re.sub(r'[^0-9A-Za-zÁÉÍÓÚáéíóúÑñ_-]', ' ', ocr_text).lower()
+                    best_score = 0.0
+                    best_row = None
+                    for (rownum, combined, sku, modelo) in product_candidates:
+                        # Compare OCR text vs candidate strings
+                        # If SKU token appears in OCR text, boost score
+                        score = SequenceMatcher(None, ocr_norm, combined).ratio()
+                        if sku and sku.strip() and sku.lower() in ocr_norm:
+                            score = max(score, 0.9)
+                        # small boost if modelo token in ocr
+                        if modelo and modelo.strip() and modelo.lower() in ocr_norm:
+                            score = max(score, score + 0.1)
+                        if score > best_score:
+                            best_score = score
+                            best_row = rownum
+
+                    # Threshold: only accept confident matches
+                    if best_score >= 0.65 and best_row and best_row in data_excel_rows and best_row not in row_to_image:
+                        row_to_image[best_row] = fname
+                        app.logger.info(f"✅ OCR matched image {fname} -> row {best_row} (score={best_score:.2f})")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error matching OCR for {fname}: {e}")
+                    continue
+
+        # 3) Column-aware assignment (existing heuristic)
         for img in imagenes_embedded:
-            if img.get('col') and img.get('sheet') == sheet_name:
-                col = img.get('col')
-                if img.get('row') is None:
-                    # buscar fila data_excel_rows con contenido en esa columna nearest by index
-                    nearest = None
-                    min_dist = 1e9
-                    for r in data_excel_rows:
+            if img.get('sheet') != sheet_name:
+                continue
+            fname = img.get('filename')
+            if fname in row_to_image.values():
+                continue
+            col = img.get('col')
+            if col and img.get('row') is None:
+                # nearest row with content in that column
+                nearest = None
+                min_dist = 1e9
+                for r in data_excel_rows:
+                    try:
                         val = sheet.cell(row=r, column=col).value
                         if val and str(val).strip():
                             dist = abs(r - (img.get('row') or data_excel_rows[0]))
                             if dist < min_dist:
                                 min_dist = dist
                                 nearest = r
-                    if nearest and nearest not in row_to_image:
-                        row_to_image[nearest] = img['filename']
+                    except Exception:
+                        continue
+                if nearest and nearest not in row_to_image:
+                    row_to_image[nearest] = fname
+                    app.logger.info(f"🔗 Column-based assigned {fname} -> row {nearest}")
 
-        # 3) Si no hay anchors y cantidad de imágenes coincide con filas_with_id -> mapear por orden
+        # 4) fallbacks: map by rows_with_id order only if it seems safe
         if not row_to_image and fallback_by_index and len(fallback_by_index) == len(rows_with_id):
             for i, r in enumerate(rows_with_id):
                 row_to_image[r] = fallback_by_index[i]
             app.logger.info("🧭 Asignación por orden a filas con identificador (rows_with_id)")
 
-        # 4) Si aún vacío y fallback images exist, asignar por índice relativo al df (solo a filas con id si existen)
+        # 5) fallback relative index
         if not row_to_image and fallback_by_index:
             for i, fname in enumerate(fallback_by_index):
                 if i < len(rows_with_id):
@@ -1178,12 +1246,12 @@ def importar_productos_desde_excel(filepath, config=None):
                 elif i < len(data_excel_rows):
                     row_to_image[data_excel_rows[i]] = fname
 
-        # 5) Proximity fallback: for any remaining images with explicit row, map to nearest data row
+        # 6) proximity fallback for explicit anchor rows not yet used
         for img in imagenes_embedded:
-            if img.get('filename') in row_to_image.values():
+            fname = img.get('filename')
+            if fname in row_to_image.values():
                 continue
             if img.get('row') and img.get('sheet') == sheet_name:
-                # nearest data row
                 nearest = None
                 min_dist = 1e9
                 for r in data_excel_rows:
@@ -1192,28 +1260,26 @@ def importar_productos_desde_excel(filepath, config=None):
                         min_dist = d
                         nearest = r
                 if nearest and nearest not in row_to_image:
-                    row_to_image[nearest] = img['filename']
+                    row_to_image[nearest] = fname
 
-        app.logger.info(f"🔗 Mapeo final imágenes->filas (ejemplos): {list(row_to_image.items())[:10]}")
+        app.logger.info(f"🔗 Mapeo final imágenes->filas (ejemplos): {list(row_to_image.items())[:12]}")
+        unassigned = [img['filename'] for img in imagenes_embedded if img['filename'] not in row_to_image.values()]
+        if unassigned:
+            app.logger.warning(f"⚠️ Imágenes sin asignar tras heurísticas: {len(unassigned)}. Ejemplos: {unassigned[:8]}")
 
-        # Ahora iterar df y guardar productos, usando el mapping row_to_image
+        # Ahora iterar df y guardar productos usando mapping
         productos_importados = 0
         filas_procesadas = 0
         filas_omitidas = 0
 
-        df_records = df.to_dict('records')
         for idx, row in enumerate(df_records):
             filas_procesadas += 1
             try:
-                # determinar excel_row_number correspondiente
                 excel_row_number = data_excel_rows[idx] if idx < len(data_excel_rows) else (header_row + 1 + idx)
-
-                # asignar imagen desde columna mapeada
                 assigned_image = ''
                 if 'imagen' in df.columns and str(row.get('imagen', '')).strip():
                     assigned_image = str(row.get('imagen')).strip()
                 else:
-                    # prefer explicit mapping
                     assigned_image = row_to_image.get(excel_row_number, '') or ''
 
                 producto = {}
@@ -1319,30 +1385,6 @@ def importar_productos_desde_excel(filepath, config=None):
         app.logger.error(f"🔴 Error en importar_productos_desde_excel: {e}")
         app.logger.error(traceback.format_exc())
         return 0
-
-def eliminar_imagenes_duplicadas(imagenes_extraidas):
-    """Elimina imágenes duplicadas basándose en hash MD5"""
-    unique_imagenes = []
-    seen_hashes = set()
-    
-    for img in imagenes_extraidas:
-        try:
-            # Calcular hash del archivo de imagen
-            with open(img['path'], 'rb') as f:
-                file_hash = hashlib.md5(f.read()).hexdigest()
-            
-            if file_hash not in seen_hashes:
-                seen_hashes.add(file_hash)
-                unique_imagenes.append(img)
-            else:
-                # Es duplicada, eliminar archivo
-                os.remove(img['path'])
-                app.logger.info(f"🗑️ Imagen duplicada eliminada: {img['filename']}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ Error verificando duplicado {img['filename']}: {e}")
-            unique_imagenes.append(img)  # Conservar por si acaso
-    
-    return unique_imagenes
 
 def obtener_imagenes_por_sku(sku, config=None):
     """Obtiene todas las imágenes asociadas a un SKU específico"""
