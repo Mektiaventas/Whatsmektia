@@ -372,7 +372,7 @@
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
-                <div>
+                <div class="table-scroll table-scroll-client">
                     <table class="table">
                         <thead>
                             <tr>
@@ -391,7 +391,7 @@
                                 <th>Acciones</th>
                             </tr>
                         </thead>
-                        <tbody class="table-scroll table-scroll-client">
+                        <tbody>
                             {% for precio in precios %}
                             <tr>
                                 <td>{{ precio.sku or '-' }}</td>
