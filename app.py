@@ -4452,21 +4452,68 @@ def enviar_imagen(numero, imagen_ref, config=None):
 
 def buscar_sku_en_texto(texto, precios):
     """
-    Busca un SKU presente en 'precios' dentro de 'texto'.
-    Devuelve el primer SKU encontrado (exact match substring) o None.
+    Busca un SKU o modelo presente en 'precios' dentro de 'texto'.
+    Mejora: normaliza guiones/puntos/espacios, compara tanto SKU exacto como modelo,
+    y permite coincidencias parciales (preferencia: SKU exacto > modelo exacto > partial).
+    Retorna el SKU encontrado (string) o None.
     """
     if not texto or not precios:
         return None
+
+    def norm(s):
+        if not s:
+            return ''
+        s = str(s).strip().lower()
+        # Remove common separators and non-alphanumeric except letters+numbers
+        s = re.sub(r'[^a-z0-9]', '', s)
+        return s
+
+    texto_norm = norm(texto)
+
+    # Build maps for quick lookup
+    sku_map = {}
+    modelo_map = {}
+    partial_map = []  # list of tuples (key_norm, original_sku_or_modelo)
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        if sku:
+            k = norm(sku)
+            sku_map[k] = sku  # keep original casing
+            partial_map.append((k, sku))
+        if modelo:
+            k2 = norm(modelo)
+            modelo_map[k2] = sku or modelo
+            partial_map.append((k2, sku or modelo))
+
+    # 1) Try exact SKU match (fast and deterministic)
+    for k, orig in sku_map.items():
+        if k and k in texto_norm:
+            return orig
+
+    # 2) Try exact modelo match
+    for k, orig in modelo_map.items():
+        if k and k in texto_norm:
+            return orig
+
+    # 3) Try partial token matches (look for tokens of length >=4 to avoid noise)
+    tokens = re.findall(r'\w{4,}', texto_norm)
+    if tokens:
+        for t in tokens:
+            for k, orig in partial_map:
+                if t in k or k in t:
+                    return orig
+
+    # 4) Fallback: try plain substring search on original fields (case-insensitive)
     texto_lower = texto.lower()
     for p in precios:
         sku = (p.get('sku') or '').strip()
         modelo = (p.get('modelo') or '').strip()
-        # Check SKU and modelo presence (case-insensitive)
         if sku and sku.lower() in texto_lower:
             return sku
         if modelo and modelo.lower() in texto_lower:
-            # prefer returning SKU if exists for that product
             return sku or modelo
+
     return None
 
 # Agregar esta función para manejar el estado de la conversación
@@ -6596,6 +6643,68 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
+@app.route('/debug-sku/<sku>')
+def debug_sku(sku):
+    """
+    Devuelve info de imágenes vinculadas al SKU y si los archivos existen.
+    Útil para comprobar por qué el bot dice 'no existe' pero igual muestra imagen.
+    """
+    config = obtener_configuracion_por_host()
+    try:
+        sku_input = (sku or '').strip()
+        if not sku_input:
+            return jsonify({'error': 'SKU vacío'}), 400
+
+        # Obtener imágenes asociadas (desde la tabla imagenes_productos)
+        imagenes = obtener_imagenes_por_sku(sku_input, config) or []
+
+        detalles = []
+        dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
+        if not dominio.startswith('http'):
+            base = f"https://{dominio}"
+        else:
+            base = dominio
+
+        for img in imagenes:
+            filename = img.get('filename')
+            path = img.get('path')
+            exists_disk = os.path.isfile(path) if path else False
+            public_url = f"{base}/uploads/productos/{filename}" if filename else None
+            detalles.append({
+                'filename': filename,
+                'path': path,
+                'exists_on_disk': exists_disk,
+                'public_url': public_url,
+                'sheet': img.get('sheet'),
+                'row_num': img.get('row_num'),
+                'col_num': img.get('col_num'),
+                'created_at': img.get('created_at').isoformat() if img.get('created_at') else None
+            })
+
+        # If no images found, attempt a fuzzy filename search in uploads/productos
+        if not detalles:
+            productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+            posibles = []
+            try:
+                for fname in os.listdir(productos_dir):
+                    if sku_input.lower().replace('-', '').replace('_', '') in fname.lower().replace('-', '').replace('_', ''):
+                        full = os.path.join(productos_dir, fname)
+                        posibles.append({
+                            'filename': fname,
+                            'path': full,
+                            'exists_on_disk': os.path.isfile(full),
+                            'public_url': f"{base}/uploads/productos/{fname}"
+                        })
+            except Exception as e:
+                app.logger.debug(f"⚠️ debug-sku scan error: {e}")
+
+            return jsonify({'sku': sku_input, 'imagenes_db': detalles, 'imagenes_posibles_en_folder': posibles})
+
+        return jsonify({'sku': sku_input, 'imagenes_db': detalles})
+
+    except Exception as e:
+        app.logger.error(f"🔴 debug-sku error: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/debug-asesores')
 def debug_asesores():
