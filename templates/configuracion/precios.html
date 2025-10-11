@@ -376,7 +376,7 @@
                                 <th>Línea</th>
                                 <th>Modelo</th>
                                 <th>Descripción</th>
-                                <th>Medidas</th>
+                                <!--<th>Medidas</th>-->
                                 <th>Imagen</th>
                                 <th>Menudeo</th>
                                 <th>Mayoreo</th>
@@ -396,7 +396,7 @@
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
                                     {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
-                                <td>{{ precio.medidas or '-' }}</td>
+                                <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
@@ -411,7 +411,7 @@
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                                 <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
-                                  <td>{{ precio.catalogo or '-' }}</td>-->
+                                <td>{{ precio.catalogo or '-' }}</td>-->
                                 <td>
                                     <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
                                        class="btn small primary">Editar</a>
@@ -451,7 +451,7 @@
                                 <th>Línea</th>
                                 <th>Modelo</th>
                                 <th>Descripción</th>
-                                <th>Medidas</th>
+                                <!--<th>Medidas</th>-->
                                 <th>Costo</th>
                                 <th>Menudeo</th>
                                 <th>Mayoreo</th>
@@ -475,7 +475,7 @@
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
                                     {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
-                                <td>{{ precio.medidas or '-' }}</td>
+                                <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                                 <td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>
