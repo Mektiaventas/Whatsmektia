@@ -4665,7 +4665,6 @@ def enviar_imagen(numero, imagen_ref, config=None):
         }
 
         app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
         if r.status_code in (200, 201, 202):
             app.logger.info("✅ Imagen enviada correctamente")
             return True
