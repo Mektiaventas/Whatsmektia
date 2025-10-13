@@ -4108,10 +4108,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    for p in precios[:1000]:
-        try:
-             # Helper: limpiar valores que contengan el nombre/marker de la imagen
-            def _clean_field(val, imagen_name):
+    def _clean_field(val, imagen_name):
                 if not val:
                     return ''
                 try:
@@ -4149,6 +4146,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         
                 except Exception:
                     return str(val).strip() if val else ''
+    for p in precios[:1000]:
+        try:
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            
 
             # Clean each field
             imagen_name = p.get('imagen')
