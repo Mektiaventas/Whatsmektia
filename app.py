@@ -4101,75 +4101,58 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
     
+    # ... existing code continues ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # 🔥 FUNCIÓN DE LIMPIEZA MEJORADA - FUERA DEL LOOP
-    def _clean_field(val, imagen_name):
-        if not val:
-            return ''
-        try:
-            s = str(val).strip()
-            if not imagen_name:
-                return s
-            
-            img_name = str(imagen_name).strip()
-            if not img_name:
-                return s
-            
-            # Eliminar el nombre exacto de la imagen
-            if img_name in s:
-                s = s.replace(img_name, '')
-            
-            # Eliminar patrones de Excel/unzip más agresivamente
-            patterns = [
-                r'excel_unzip_img_\d+_\d+\.png',
-                r'excel_unzip_img_[\w\-\._]+',
-                r'excel_img_\d+_\d+\.png',
-                r'excel_unzip_[\w\-\._]+',
-                r'img_\d+_\d+\.png'
-            ]
-            
-            for pattern in patterns:
-                s = re.sub(pattern, '', s, flags=re.IGNORECASE)
-            
-            # Limpiar espacios sobrantes y caracteres extraños
-            s = re.sub(r'\s{2,}', ' ', s).strip()
-            s = re.sub(r'^\||\|\s*$', '', s).strip()  # Eliminar pipes sueltos
-            s = re.sub(r'\s+\|\s+', ' | ', s)  # Normalizar separadores
-            
-            return s
-            
-        except Exception:
-            return str(val).strip() if val else ''
-
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    
-    # Procesamos TODOS los productos pero limpiamos cada campo
-    productos_procesados = 0
     for p in precios[:1000]:
         try:
-            # Clean each field - PERO MANTENEMOS LA IMAGEN ORIGINAL PARA URL
-            imagen_name_original = p.get('imagen')
-            sku = _clean_field(p.get('sku'), imagen_name_original)
-            modelo = _clean_field(p.get('modelo'), imagen_name_original)
-            
-            # Verificar si el producto tiene datos válidos
-            campos_importantes = [sku, modelo, p.get('descripcion'), p.get('categoria')]
-            if not any(campos_importantes):
-                continue  # Saltar productos completamente vacíos
-                
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            def _clean_field(val, imagen_name):
+                if not val:
+                    return ''
+                try:
+                    s = str(val).strip()
+                    if not imagen_name:
+                        return s
+                    img = str(imagen_name).strip()
+                    # eliminar coincidencias exactas del nombre de la imagen
+                    if img and img in s:
+                        s = s.replace(img, '')
+                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                    # limpiar espacios sobrantes
+                    s = re.sub(r'\s{2,}', ' ', s).strip()
+                    return s
+                except Exception:
+                    return str(val).strip()
+
+            sku = (p.get('sku') or '').strip()
+            modelo = (p.get('modelo') or '').strip()
             titulo = modelo or sku or 'Sin identificador'
-            categoria = _clean_field(p.get('categoria'), imagen_name_original)
-            subcategoria = _clean_field(p.get('subcategoria'), imagen_name_original)
-            linea = _clean_field(p.get('linea'), imagen_name_original)
-            descripcion_p = _clean_field(p.get('descripcion'), imagen_name_original)
-            medidas = _clean_field(p.get('medidas'), imagen_name_original)
-            proveedor = _clean_field(p.get('proveedor'), imagen_name_original)
-            status = _clean_field(p.get('status_ws'), imagen_name_original) or 'activo'
-            catalogo = _clean_field(p.get('catalogo'), imagen_name_original)
+            categoria = (p.get('categoria') or '').strip()
+            subcategoria = (p.get('subcategoria') or '').strip()
+            linea = (p.get('linea') or '').strip()
+            descripcion_p = (p.get('descripcion') or '').strip()
+            medidas = (p.get('medidas') or '').strip()
+            proveedor = (p.get('proveedor') or '').strip()
+            status = (p.get('status_ws') or 'activo').strip()
+            catalogo = (p.get('catalogo') or '')
+            imagen = (p.get('imagen') or '').strip()
+            if imagen:
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
+                    else:
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+            else:
+                imagen_url = ''
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4177,35 +4160,15 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-            
-            # 🔥 DETERMINAR SI TIENE IMAGEN VÁLIDA Y GENERAR URL COMPLETA
-            tiene_imagen_valida = False
-            url_imagen = None
-            
-            # Inside responder_con_ia, when building the image URL:
-            if imagen_name_original and isinstance(imagen_name_original, str) and imagen_name_original.strip() and not re.search(r'excel_unzip_img_\d+_\d+\.png', imagen_name_original):
-                tiene_imagen_valida = True
-                if imagen_name_original.startswith('http'):
-                    url_imagen = imagen_name_original
-                else:
-                    url_imagen = f"https://{dominio_publico}/uploads/productos/{imagen_name_original.strip()}"
-                parts.append(f"Imagen_URL: {url_imagen}")
-            elif imagen_name_original and imagen_name_original.strip():
-                # If only filename, but not valid, show as "Imagen disponible"
-                parts.append(f"Imagen disponible")
-            
-            # Formateo del producto
-            parts = []
-            if titulo and titulo != 'Sin identificador':
-                parts.append(f"{titulo}")
+            parts = [f"{titulo}"]
             if sku:
-                parts.append(f"SKU: {sku}")
+                parts.append(f"(SKU: {sku})")
             if categoria:
-                parts.append(f"Categoría: {categoria}")
+                parts.append(f"Categoria: {categoria}")
             if subcategoria:
-                parts.append(f"Subcategoría: {subcategoria}")
+                parts.append(f"Subcategoria: {subcategoria}")
             if linea:
-                parts.append(f"Línea: {linea}")
+                parts.append(f"Linea: {linea}")
             if precio_str:
                 parts.append(f"Precio: {precio_str}")
             if medidas:
@@ -4213,57 +4176,38 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if proveedor:
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
-                parts.append(f"Catálogo: {catalogo}")
-            
-            # 🔥 INCLUIR URL COMPLETA DE IMAGEN CON NOMBRE DE ARCHIVO
-            if tiene_imagen_valida and url_imagen:
-                parts.append(f"Imagen_URL: {url_imagen}")
-            elif tiene_imagen_valida:
-                parts.append(f"Imagen disponible")
-                
+                parts.append(f"Catalogo: {catalogo}")
+            if imagen_url:
+                parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                parts.append(f"Imagen: {imagen}")
             if descripcion_p:
-                parts.append(f"Descripción: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-
+                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-            
-            productos_formateados.append(f"- {producto_line}")
-            productos_procesados += 1
-            
-        except Exception as e:
-            app.logger.error(f"Error procesando producto: {e}")
-            continue
-    
+        except Exception:
+            producto_line = "Sin datos legibles de producto"
+        productos_formateados.append(f"- {producto_line}")
     productos_texto = "\n".join(productos_formateados)
-    
-    # 🔥 SYSTEM PROMPT MEJORADO CON INSTRUCCIONES MÁS ESPECÍFICAS
+    if len(precios) > 40:
+        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
+
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
 
-    CATÁLOGO DE PRODUCTOS DISPONIBLES:
+    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+
     {productos_texto}
 
-    REGLAS CRÍTICAS SOBRE IMÁGENES:
-    1. ✅ CUANDO UN PRODUCTO TENGA "Imagen_URL: [URL_COMPLETA]" en el catálogo, DEBES mostrar esa URL COMPLETA al usuario
-    2. ✅ La URL completa incluye el nombre del archivo de imagen (ej: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg)
-    3. ✅ COPIA Y PEGA LA URL EXACTA como aparece en el catálogo, sin modificarla
-    4. ✅ Formato de respuesta: "¡Aquí tienes la imagen: [URL_COMPLETA_CON_NOMBRE_ARCHIVO]"
-    5. ✅ NO modifiques, acortes o cambies la URL - cópiala exactamente
+    Reglas:
+    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
+    - Siempre indica si la información no está disponible en la base de datos.
+    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
+    - No inventes descuentos, existencias ni detalles no presentes en los campos.
+    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
 
-    EJEMPLOS CORRECTOS:
-    - Catálogo tiene: "Imagen_URL: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg"
-    - TÚ: "¡Claro! Aquí tienes la imagen: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg"
-    
-    - Catálogo tiene: "Imagen_URL: https://ofitodo.mektia.com/images/productos/mesa-ohm-7168b-bt.png"
-    - TÚ: "Aquí está la imagen: https://ofitodo.mektia.com/images/productos/mesa-ohm-7168b-bt.png"
-
-    REGLAS GENERALES:
-    1. Busca productos por SKU, modelo, categoría o descripción
-    2. Si no encuentras un producto, di que no está disponible
-    3. Para intenciones de compra, agenda cita solicitando datos
-
-    ¡IMPORTANTE! Copia las URLs EXACTAMENTE como aparecen en el catálogo, incluyendo el nombre del archivo.
+    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
     """
 
     historial = obtener_historial(numero, config=config)
@@ -4304,6 +4248,9 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 ]
             })
         elif es_audio and transcripcion_audio:
+            # Avoid duplication when the transcription is identical to the message text.
+            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
+            # and it differs from the transcription, append it as "[Mensaje adicional]".
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4315,6 +4262,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
+            # If audio but no transcription, fall back to whatever text we have (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
