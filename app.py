@@ -3065,6 +3065,37 @@ def kanban_data(config=None):
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
 
+def sanitize_whatsapp_text(text):
+    """
+    Limpia artefactos típicos de extracción desde Excel (p.ej. excel_unzip_img_...),
+    colapsa espacios y mantiene links intactos.
+    """
+    if not text:
+        return text
+
+    try:
+        # 1) Eliminar tokens generados por el unzip de .xlsx (con o sin extensión)
+        text = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+
+        # 2) Eliminar repeticiones sobrantes de la misma cadena (por si quedó repetido)
+        text = re.sub(r'(\b\s){2,}', ' ', text)
+
+        # 3) Reemplazar múltiples saltos de línea/espacios por uno solo y limpiar espacios alrededor de saltos
+        text = re.sub(r'\s*\n\s*', '\n', text)
+        text = re.sub(r'[ \t]{2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # 4) Quitar espacios duplicados resultantes y trim
+        text = re.sub(r' {2,}', ' ', text).strip()
+
+        # 5) Si la línea contiene solo "Imagen:" o "Imagen: " repetido, normalizar
+        text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
+
+        return text
+    except Exception as e:
+        app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
+        return text.strip() if isinstance(text, str) else text
+
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5523,31 +5554,37 @@ def actualizar_contactos():
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
-    """Función compatible con la estructura actual de la base de datos"""
+    """Función compatible con la estructura actual de la base de datos.
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize inputs
+        mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
+        respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
+
         # Primero asegurar que el contacto existe con su información actualizada
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
-        """, (numero, mensaje, respuesta, imagen_url, es_imagen))
-        
+        """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
@@ -6398,36 +6435,40 @@ def webhook():
 
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize incoming text
+        texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
+
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Add detailed logging before saving the message
         app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
-        
+
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
-        """, (numero, texto, imagen_url, es_imagen))
-        
+        """, (numero, texto_limpio, imagen_url, es_imagen))
+
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         msg_id = cursor.fetchone()[0]
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
