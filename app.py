@@ -4060,6 +4060,37 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    if detectar_solicitud_cita_keywords(mensaje_usuario, config):
+        app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
+        
+        info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
+        
+    if info_cita and info_cita.get('servicio_solicitado'):
+        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+            
+        if datos_completos:
+            # Guardar cita completa
+            cita_id = guardar_cita(info_cita, config)
+            if cita_id:
+                enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
+        else:
+            # Pedir datos faltantes de manera conversacional
+            mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
+                
+            if 'fecha' in faltantes:
+                mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
+            if 'hora' in faltantes:
+                mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
+            if 'nombre' in faltantes:
+                mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
+                
+            mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
+            return mensaje_faltantes
+    else:
+        # No hay información específica, pedir general
+        return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
     
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
