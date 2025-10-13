@@ -2439,42 +2439,60 @@ def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
         return "¡Gracias por tu pedido! ¿Qué más deseas agregar?"
     
 def autenticar_google_calendar(config=None):
-    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas"""
+    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas.
+    Busca tokens en ruta absoluta y hace fallback a token.json; refresca si es posible."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     creds = None
-    
+
     try:
-        # Usar un nombre de token específico para cada tenant/dominio
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        app.logger.info(f"🔐 Intentando autenticar con OAuth para {config['dominio']} usando {token_filename}")
-        
-        # 1. Verificar si ya tenemos token guardado para este tenant
-        if os.path.exists(token_filename):
-            try:
-                creds = Credentials.from_authorized_user_file(token_filename, SCOPES)
-                if creds and creds.valid:
-                    app.logger.info(f"✅ Token OAuth válido encontrado para {config['dominio']}")
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-                elif creds and creds.expired and creds.refresh_token:
-                    app.logger.info(f"🔄 Refrescando token expirado para {config['dominio']}...")
-                    creds.refresh(Request())
-                    with open(token_filename, 'w') as token:
-                        token.write(creds.to_json())
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-            except Exception as e:
-                app.logger.error(f"❌ Error con token existente para {config['dominio']}: {e}")
-        
-        # 2. Si no hay token válido, necesitamos redirección OAuth
-        app.logger.info(f"⚠️ No hay token válido para {config['dominio']}, requiere autorización")
-        return None
-            
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        tenant_token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        tenant_token_path = os.path.join(BASE_DIR, tenant_token_filename)
+        generic_token_path = os.path.join(BASE_DIR, 'token.json')
+
+        app.logger.info(f"🔐 Intentando autenticar Google Calendar para {config.get('dominio')} (buscar: {tenant_token_path} then {generic_token_path})")
+
+        # Prefer tenant-specific token
+        token_path_to_use = None
+        if os.path.exists(tenant_token_path):
+            token_path_to_use = tenant_token_path
+            app.logger.info(f"✅ Usando token tenant-specific: {tenant_token_path}")
+        elif os.path.exists(generic_token_path):
+            token_path_to_use = generic_token_path
+            app.logger.warning(f"⚠️ No se encontró token tenant-specific, usando fallback: {generic_token_path}")
+        else:
+            app.logger.warning(f"⚠️ No se encontró ningún token OAuth para {config.get('dominio')} (esperado: {tenant_token_path})")
+            return None
+
+        try:
+            creds = Credentials.from_authorized_user_file(token_path_to_use, SCOPES)
+            if creds and creds.valid:
+                service = build('calendar', 'v3', credentials=creds)
+                app.logger.info(f"✅ Token válido cargado desde {token_path_to_use}")
+                return service
+            elif creds and creds.expired and creds.refresh_token:
+                app.logger.info("🔄 Token expirado, intentando refresh...")
+                creds.refresh(Request())
+                # Guardar en el archivo tenant-specific (intentar preservar tenant filename)
+                save_path = tenant_token_path if token_path_to_use != generic_token_path else generic_token_path
+                with open(save_path, 'w') as token_file:
+                    token_file.write(creds.to_json())
+                app.logger.info(f"✅ Token refrescado y guardado en {save_path}")
+                service = build('calendar', 'v3', credentials=creds)
+                return service
+            else:
+                app.logger.warning(f"⚠️ Token encontrado en {token_path_to_use} pero no es válido ni refrescable")
+                return None
+        except Exception as e:
+            app.logger.error(f"❌ Error leyendo/refresh token en {token_path_to_use}: {e}")
+            app.logger.error(traceback.format_exc())
+            return None
+
     except Exception as e:
-        app.logger.error(f'❌ Error inesperado: {e}')
+        app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
 
@@ -2739,117 +2757,67 @@ def validar_datos_cita_completos(info_cita, config=None):
 
 @app.route('/completar-autorizacion')
 def completar_autorizacion():
-    """Endpoint para completar la autorización con el código"""
+    """Endpoint para completar la autorización con el código — guarda token tenant-specific en BASE_DIR"""
     try:
-        # Obtener todos los parámetros de la URL
         code = request.args.get('code')
-        state = request.args.get('state')
+        state = request.args.get('state')  # intentamos usar state como tenant identifier
         scope = request.args.get('scope')
-        
-        # Obtener la configuración actual
-        config = obtener_configuracion_por_host()
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        
-        app.logger.info(f"🔐 Completando autorización para {config['dominio']}")
-        app.logger.info(f"🔐 Guardando en: {token_filename}")
-        
-        app.logger.info(f"🔐 Parámetros recibidos:")
-        app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
-        app.logger.info(f"  - State: {state}")
-        app.logger.info(f"  - Scope: {scope}")
-        
+
+        # Determinar tenant desde el state si viene, sino por host
+        tenant_domain = None
+        if state:
+            # state fue generado como tenant_id = dominio.replace('.', '_')
+            tenant_domain = state.replace('_', '.')
+            app.logger.info(f"🔍 Tenant desde state: {tenant_domain}")
+        else:
+            config_host = obtener_configuracion_por_host()
+            tenant_domain = config_host.get('dominio')
+
         if not code:
             app.logger.error("❌ No se proporcionó código de autorización")
             return "❌ Error: No se proporcionó código de autorización"
-        
-        # Definir rutas absolutas
+
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
-        token_path = os.path.join(BASE_DIR, 'token.json')
-        
-        # Verificar que el archivo client_secret.json existe
         if not os.path.exists(client_secret_path):
             app.logger.error(f"❌ No se encuentra {client_secret_path}")
-            return f"❌ Error: No se encuentra el archivo de configuración de Google"
-        
-        # Obtener el host actual de la solicitud
+            return f"❌ Error: No se encuentra el archivo client_secret.json en {BASE_DIR}"
+
+        # Construir redirect_uri basado en host actual (mantener compatibilidad)
         host = request.host
-        app.logger.info(f"🔍 Host actual: {host}")
-        
-        # Construir la URI de redirección basada en el host actual
         redirect_uri = f'https://{host}/completar-autorizacion'
-        app.logger.info(f"🔐 URI de redirección: {redirect_uri}")
-        
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        
-        # Crear el flujo de OAuth
+
         app.logger.info("🔄 Creando flujo de OAuth...")
-        flow = InstalledAppFlow.from_client_secrets_file(
-            client_secret_path, 
-            SCOPES,
-            redirect_uri=redirect_uri
-        )
-        
-        # Intercambiar código por token
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
+
         app.logger.info("🔄 Intercambiando código por token...")
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        app.logger.info("✅ Token obtenido correctamente")
-        
-        # Guardar token
-        app.logger.info(f"💾 Guardando token en: {token_path}")
-        
-        # Modificar esta parte para usar el nombre de archivo específico
-        with open(token_filename, 'w') as token:
+
+        # Guardar token en ruta absoluta tenant-specific
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
-        app.logger.info(f"✅ Autorización completada para {config['dominio']}")
-        
+        app.logger.info(f"✅ Token guardado en: {token_path} para tenant {tenant_domain}")
+
         return """
         <html>
-        <head>
-            <title>Autorización Completada</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
-                .success { color: green; font-size: 24px; }
-                .info { margin: 20px; }
-            </style>
-        </head>
+        <head><title>Autorización Completada</title></head>
         <body>
-            <h1 class="success">✅ Autorización completada correctamente</h1>
-            <div class="info">
-                <p>Ya puedes usar Google Calendar para agendar citas.</p>
-                <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
-            </div>
+            <h1>✅ Autorización completada correctamente</h1>
+            <p>Ya puedes usar Google Calendar para agendar citas.</p>
+            <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
         </body>
         </html>
         """
-        
+
     except Exception as e:
-        app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
+        app.logger.error(f"❌ Error en completar_autorizacion: {e}")
         app.logger.error(traceback.format_exc())
-        return f"""
-        <html>
-        <head>
-            <title>Error de Autorización</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
-                .error {{ color: red; font-size: 24px; }}
-                .info {{ margin: 20px; }}
-                pre {{ background: #f5f5f5; padding: 10px; text-align: left; margin: 20px auto; max-width: 80%; }}
-            </style>
-        </head>
-        <body>
-            <h1 class="error">❌ Error en la autorización</h1>
-            <div class="info">
-                <p>Ocurrió un error al procesar la autorización de Google:</p>
-                <pre>{str(e)}</pre>
-                <p>Por favor, contacta al administrador del sistema.</p>
-            </div>
-        </body>
-        </html>
-        """
+        return f"❌ Error: {str(e)}"
          
 def convertir_audio(audio_path):
     try:
@@ -3097,6 +3065,37 @@ def kanban_data(config=None):
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
 
+def sanitize_whatsapp_text(text):
+    """
+    Limpia artefactos típicos de extracción desde Excel (p.ej. excel_unzip_img_...),
+    colapsa espacios y mantiene links intactos.
+    """
+    if not text:
+        return text
+
+    try:
+        # 1) Eliminar tokens generados por el unzip de .xlsx (con o sin extensión)
+        text = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+
+        # 2) Eliminar repeticiones sobrantes de la misma cadena (por si quedó repetido)
+        text = re.sub(r'(\b\s){2,}', ' ', text)
+
+        # 3) Reemplazar múltiples saltos de línea/espacios por uno solo y limpiar espacios alrededor de saltos
+        text = re.sub(r'\s*\n\s*', '\n', text)
+        text = re.sub(r'[ \t]{2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # 4) Quitar espacios duplicados resultantes y trim
+        text = re.sub(r' {2,}', ' ', text).strip()
+
+        # 5) Si la línea contiene solo "Imagen:" o "Imagen: " repetido, normalizar
+        text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
+
+        return text
+    except Exception as e:
+        app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
+        return text.strip() if isinstance(text, str) else text
+
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -3231,8 +3230,8 @@ def guardar_cita(info_cita, config=None):
                 tipo VARCHAR(20),
                 resumen TEXT,
                 estado VARCHAR(20) DEFAULT 'pendiente',
-                mensaje text,
-                evaluacion_ia json,
+                mensaje TEXT,
+                evaluacion_ia JSON,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 calendar_event_id VARCHAR(255),
                 INDEX idx_numero (numero),
@@ -3240,7 +3239,31 @@ def guardar_cita(info_cita, config=None):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
         conn.commit()
-        
+
+        # Asegurarnos de que las columnas esperadas EXISTAN (por si la tabla venía de esquema antiguo)
+        try:
+            cursor.execute("SHOW COLUMNS FROM notificaciones_ia")
+            existing_cols = {row[0] for row in cursor.fetchall()}
+            required = {
+                'tipo': "VARCHAR(20)",
+                'resumen': "TEXT",
+                'estado': "VARCHAR(20) DEFAULT 'pendiente'",
+                'mensaje': "TEXT",
+                'evaluacion_ia': "JSON",
+                'calendar_event_id': "VARCHAR(255)"
+            }
+            alters = []
+            for col, col_def in required.items():
+                if col not in existing_cols:
+                    alters.append(f"ADD COLUMN {col} {col_def}")
+            if alters:
+                sql = f"ALTER TABLE notificaciones_ia {', '.join(alters)}"
+                cursor.execute(sql)
+                conn.commit()
+                app.logger.info(f"🔧 Columnas añadidas a notificaciones_ia: {', '.join([a.split()[2] for a in alters])}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar columnas en notificaciones_ia: {e}")
+
         # Guardar en tabla citas
         cursor.execute('''
             INSERT INTO citas (
@@ -3284,12 +3307,21 @@ def guardar_cita(info_cita, config=None):
             if service:
                 evento_id = crear_evento_calendar(service, info_cita, config)
                 if evento_id:
-                    # Guardar el ID del evento en la base de datos
-                    cursor.execute('''
-                        UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                    ''', (evento_id, cita_id))
-                    conn.commit()
-                    app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    # Asegurarnos de que la columna exista antes de actualizar citas
+                    try:
+                        cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
+                        if cursor.fetchone() is None:
+                            cursor.execute("ALTER TABLE citas ADD COLUMN evento_calendar_id VARCHAR(255) DEFAULT NULL")
+                            conn.commit()
+                            app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
+
+                        cursor.execute('''
+                            UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                        ''', (evento_id, cita_id))
+                        conn.commit()
+                        app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    except Exception as e:
+                        app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
         
         # Guardar en notificaciones_ia
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -4049,25 +4081,6 @@ def obtener_historial(numero, limite=5, config=None):
         return []
     
 # ... existing code ...
-# Helper: limpiar valores que contengan el nombre/marker de la imagen
-def _clean_field(val, imagen_name):
-    if not val:
-        return ''
-    try:
-        s = str(val).strip()
-        if not imagen_name:
-            return s
-        img = str(imagen_name).strip()
-        # eliminar coincidencias exactas del nombre de la imagen
-        if img and img in s:
-            s = s.replace(img, '')
-        # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-        s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-        # limpiar espacios sobrantes
-        s = re.sub(r'\s{2,}', ' ', s).strip()
-        return s
-    except Exception:
-        return str(val).strip()
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -4127,22 +4140,46 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+    
+    # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
+    def _clean_field(val, imagen_name):
+        if not val:
+            return ''
+        try:
+            s = str(val).strip()
+            if not imagen_name:
+                return s
+            img = str(imagen_name).strip()
+            # eliminar coincidencias exactas del nombre de la imagen
+            if img and img in s:
+                s = s.replace(img, '')
+            # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+            s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+            # limpiar espacios sobrantes
+            s = re.sub(r'\s{2,}', ' ', s).strip()
+            return s
+        except Exception:
+            return str(val).strip()
+    
     for p in precios[:1000]:
         try:
-             
-
-            sku = (p.get('sku') or '').strip()
-            modelo = (p.get('modelo') or '').strip()
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = (p.get('categoria') or '').strip()
-            subcategoria = (p.get('subcategoria') or '').strip()
-            linea = (p.get('linea') or '').strip()
-            descripcion_p = (p.get('descripcion') or '').strip()
-            medidas = (p.get('medidas') or '').strip()
-            proveedor = (p.get('proveedor') or '').strip()
-            status = (p.get('status_ws') or 'activo').strip()
-            catalogo = (p.get('catalogo') or '')
+            # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
             imagen = (p.get('imagen') or '').strip()
+        
+            # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
+            sku = sanitize_whatsapp_text(p.get('sku', ''))
+            modelo = sanitize_whatsapp_text(p.get('modelo', ''))
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = sanitize_whatsapp_text(p.get('categoria', ''))
+            subcategoria = sanitize_whatsapp_text(p.get('subcategoria', ''))
+            linea = sanitize_whatsapp_text(p.get('linea', ''))
+            descripcion_p = sanitize_whatsapp_text(p.get('descripcion', ''))
+            medidas = sanitize_whatsapp_text(p.get('medidas', ''))
+            proveedor = sanitize_whatsapp_text(p.get('proveedor', ''))
+            status = sanitize_whatsapp_text(p.get('status_ws', '')) or 'activo'
+            catalogo = sanitize_whatsapp_text(p.get('catalogo', ''))
+        
+            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
@@ -4154,6 +4191,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
+            
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4161,6 +4199,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
+                
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4186,40 +4225,39 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
+        
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
-         # Clean up image filenames from the formatted products text to prevent AI from including them in responses
-    productos_formateados = [re.sub(r'excel_unzip_img_\d+_\d+\.png', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\b\w+\.png\b', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\s+', ' ', line).strip() for line in productos_formateados]  # Clean extra spaces
+        
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
-    productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-
+    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
 
-    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+    Dispones de la siguiente lista de productos/servicios:
 
     {productos_texto}
 
-    Reglas:
-    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
-    - Siempre indica si la información no está disponible en la base de datos.
-    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
-    - No inventes descuentos, existencias ni detalles no presentes en los campos.
-    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
-    - Entrega al usuario un texto claro y conciso.
-    - No llenes el mensaje con basura.
-    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
+    REGLAS IMPORTANTES:
+    1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
+    2. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
+    3. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
+    4. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
+    5. Mantén las respuestas limpias y profesionales.
+
+    Ejemplo de cómo limpiar textos:
+    - Texto corrupto: "Mesa redonda alta con base... excel_unzip_img_335_1760366786.png"
+    - Texto limpio: "Mesa redonda alta con base..."
+
+    Si el usuario expresa intención de comprar, solicita sus datos para agendar cita.
     """
 
+    # ... el resto de tu función se mantiene igual ...
     historial = obtener_historial(numero, config=config)
 
     info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
@@ -4258,9 +4296,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Avoid duplication when the transcription is identical to the message text.
-            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
-            # and it differs from the transcription, append it as "[Mensaje adicional]".
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4272,7 +4307,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
-            # If audio but no transcription, fall back to whatever text we have (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
@@ -4294,14 +4328,24 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-                # Después de obtener respuesta de la IA
-        respuesta = data['choices'][0]['message']['content'].strip()
+        respuesta = data['choices'][0]['message']['content']
 
-        # Limpieza mejorada
-        respuesta = re.sub(r'excel_unzip_img_\d+_\d+\.png', '[Imagen del producto]', respuesta)
-        respuesta = re.sub(r'\s+', ' ', respuesta).strip()
-        
+        # Manejo de posibles estructuras multimodales (lista/dict)
+        if isinstance(respuesta, list):
+            parts = []
+            for item in respuesta:
+                if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
+                    parts.append(item.get('text'))
+                elif isinstance(item, str):
+                    parts.append(item)
+            respuesta = "\n".join(parts)
+        else:
+            respuesta = str(respuesta or '').strip()
+
+        # Aplicar restricciones de negocio y luego limpieza final para quitar artefactos de filenames
         respuesta = aplicar_restricciones(respuesta, numero, config)
+        respuesta = clean_ai_response(respuesta)
+
         return respuesta
 
     except requests.exceptions.RequestException as e:
@@ -4721,38 +4765,46 @@ def obtener_imagen_whatsapp(image_id, config=None):
 
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
-    """Procesa el código de autorización manualmente"""
+    """Procesa el código de autorización manualmente y guarda token tenant-specific en BASE_DIR"""
     try:
         code = request.form.get('codigo')
         if not code:
             return "❌ Error: No se proporcionó código"
-        
-        # En app.py, la función autenticar_google_calendar()
-        SCOPES = ['https://www.googleapis.com/auth/calendar']  # Este scope está correcto
-        
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', 
-            SCOPES,
-            redirect_uri=f'https://{request.host}/completar-autorizacion'
-        )
-        
-        # Intercambiar código por token
+
+        # Determinar tenant por host actual (la autorización manual se inició desde el host correcto)
+        config = obtener_configuracion_por_host()
+        tenant_domain = config.get('dominio', 'default')
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
+        if not os.path.exists(client_secret_path):
+            return f"❌ Error: No se encuentra client_secret.json en {BASE_DIR}"
+
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        redirect_uri = f'https://{request.host}/completar-autorizacion'
+
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        # Guardar token
-        with open('token.json', 'w') as token:
+
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
+
+        app.logger.info(f"✅ Token guardado en {token_path} para tenant {tenant_domain}")
+
         return '''
         <h1>✅ ¡Autorización completada!</h1>
-        <p>Google Calendar está ahora configurado correctamente.</p>
+        <p>Google Calendar está ahora configurado correctamente para este dominio.</p>
         <p>Puedes cerrar esta ventana y probar agendar una cita.</p>
         <a href="/">Volver al inicio</a>
         '''
-        
+
     except Exception as e:
-        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"  
+        app.logger.error(f"🔴 Error en procesar_codigo: {e}")
+        app.logger.error(traceback.format_exc())
+        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
 
 def procesar_fecha_relativa(fecha_str):
     """
@@ -5518,31 +5570,37 @@ def actualizar_contactos():
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
-    """Función compatible con la estructura actual de la base de datos"""
+    """Función compatible con la estructura actual de la base de datos.
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize inputs
+        mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
+        respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
+
         # Primero asegurar que el contacto existe con su información actualizada
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
-        """, (numero, mensaje, respuesta, imagen_url, es_imagen))
-        
+        """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
@@ -6393,36 +6451,40 @@ def webhook():
 
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize incoming text
+        texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
+
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Add detailed logging before saving the message
         app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
-        
+
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
-        """, (numero, texto, imagen_url, es_imagen))
-        
+        """, (numero, texto_limpio, imagen_url, es_imagen))
+
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         msg_id = cursor.fetchone()[0]
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
@@ -6480,8 +6542,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         # Palabras clave para servicios digitales
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
-            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
-            'necesito', 'requiero', 'solicitar', 'comprar'
+            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
+            ,'quiero comprar'
         ]
     
     # Verificar si contiene palabras clave principales
@@ -6965,6 +7027,41 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
+
+def clean_ai_response(text):
+    """
+    Limpia artefactos comunes generados por extracción de .xlsx (.zip) y nombres de archivo
+    repetidos en las respuestas de la IA, preservando URLs completas.
+    """
+    if not text:
+        return text
+    try:
+        # Eliminar ocurrencias de nombres de imagen generados por unzip/openpyxl
+        # Solo eliminar si NO están precedidos por "/" (evita borrar partes de URLs)
+        text = re.sub(r'(?<!/)\bexcel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'(?<!/)\bexcel_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+        text = re.sub(r'(?<!/)\bproducto_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+
+        # Eliminar repeticiones redundantes como "Imagen: Imagen: ..." o tokens duplicados
+        text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
+
+        # Quitar extensiones sueltas que quedaron pegadas a palabras (pero solo si no forman parte de una URL)
+        text = re.sub(r'(?<!/)\.(?:png|jpg|jpeg|gif|webp)\b', ' ', text, flags=re.IGNORECASE)
+
+        # Normalizar espacios y saltos de línea
+        text = re.sub(r'\s*\n\s*', '\n', text)
+        text = re.sub(r'[ \t]{2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+        text = re.sub(r' {2,}', ' ', text)
+
+        # Limpiar espacios sobrantes alrededor de signos de puntuación
+        text = re.sub(r'\s+([,;:\.\-])', r'\1', text)
+        text = text.strip()
+
+        return text
+    except Exception as e:
+        app.logger.warning(f"⚠️ clean_ai_response falló: {e}")
+        return text
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
