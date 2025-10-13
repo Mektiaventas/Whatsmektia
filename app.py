@@ -4062,7 +4062,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    
     info_cita = None  # Initialize to avoid UnboundLocalError
     
     # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
@@ -4194,22 +4193,22 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
     system_prompt = f"""
-Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-Descripción del negocio: {descripcion}
+    Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+    Descripción del negocio: {descripcion}
 
-Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
 
-{productos_texto}
+    {productos_texto}
 
-Reglas:
-- Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
-- Siempre indica si la información no está disponible en la base de datos.
-- Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
-- No inventes descuentos, existencias ni detalles no presentes en los campos.
-- Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
+    Reglas:
+    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
+    - Siempre indica si la información no está disponible en la base de datos.
+    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
+    - No inventes descuentos, existencias ni detalles no presentes en los campos.
+    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
 
-Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
-"""
+    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
+    """
 
     historial = obtener_historial(numero, config=config)
 
