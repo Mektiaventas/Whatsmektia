@@ -4185,10 +4185,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
-            if imagen_url:
-                parts.append(f"Imagen: {imagen_url}")
-            elif imagen:
-                parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
