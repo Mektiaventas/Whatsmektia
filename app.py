@@ -4151,26 +4151,25 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     productos_procesados = 0
     for p in precios[:1000]:
         try:
-            # Clean each field
-            imagen_name = p.get('imagen')
-            sku = _clean_field(p.get('sku'), imagen_name)
-            modelo = _clean_field(p.get('modelo'), imagen_name)
+            # Clean each field - PERO MANTENEMOS LA IMAGEN ORIGINAL PARA URL
+            imagen_name_original = p.get('imagen')
+            sku = _clean_field(p.get('sku'), imagen_name_original)
+            modelo = _clean_field(p.get('modelo'), imagen_name_original)
             
-            # 🔥 VERIFICAR SI EL PRODUCTO TIENE DATOS VÁLIDOS
-            # Si después de limpiar, todos los campos importantes están vacíos, saltar este producto
+            # Verificar si el producto tiene datos válidos
             campos_importantes = [sku, modelo, p.get('descripcion'), p.get('categoria')]
             if not any(campos_importantes):
                 continue  # Saltar productos completamente vacíos
                 
             titulo = modelo or sku or 'Sin identificador'
-            categoria = _clean_field(p.get('categoria'), imagen_name)
-            subcategoria = _clean_field(p.get('subcategoria'), imagen_name)
-            linea = _clean_field(p.get('linea'), imagen_name)
-            descripcion_p = _clean_field(p.get('descripcion'), imagen_name)
-            medidas = _clean_field(p.get('medidas'), imagen_name)
-            proveedor = _clean_field(p.get('proveedor'), imagen_name)
-            status = _clean_field(p.get('status_ws'), imagen_name) or 'activo'
-            catalogo = _clean_field(p.get('catalogo'), imagen_name)
+            categoria = _clean_field(p.get('categoria'), imagen_name_original)
+            subcategoria = _clean_field(p.get('subcategoria'), imagen_name_original)
+            linea = _clean_field(p.get('linea'), imagen_name_original)
+            descripcion_p = _clean_field(p.get('descripcion'), imagen_name_original)
+            medidas = _clean_field(p.get('medidas'), imagen_name_original)
+            proveedor = _clean_field(p.get('proveedor'), imagen_name_original)
+            status = _clean_field(p.get('status_ws'), imagen_name_original) or 'activo'
+            catalogo = _clean_field(p.get('catalogo'), imagen_name_original)
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4179,7 +4178,20 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 except Exception:
                     precio_str = str(precio_menudeo)
             
-            # 🔥 FORMATEO MÁS LIMPIO
+            # 🔥 DETERMINAR SI TIENE IMAGEN VÁLIDA Y GENERAR URL
+            tiene_imagen_valida = False
+            url_imagen = None
+            
+            if imagen_name_original and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name_original)):
+                tiene_imagen_valida = True
+                # Generar URL completa de la imagen
+                if imagen_name_original.startswith('http'):
+                    url_imagen = imagen_name_original
+                else:
+                    # Asumiendo que tus imágenes están en una carpeta específica
+                    url_imagen = f"{dominio_publico}/images/productos/{imagen_name_original}"
+            
+            # Formateo del producto
             parts = []
             if titulo and titulo != 'Sin identificador':
                 parts.append(f"{titulo}")
@@ -4200,9 +4212,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if catalogo:
                 parts.append(f"Catálogo: {catalogo}")
             
-            # 🔥 SOLO mencionar imagen si existe y NO es basura
-            tiene_imagen_valida = imagen_name and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name))
-            if tiene_imagen_valida:
+            # 🔥 INCLUIR URL DE IMAGEN SI ES VÁLIDA - ESTO ES CLAVE
+            if tiene_imagen_valida and url_imagen:
+                parts.append(f"Imagen: {url_imagen}")
+            elif tiene_imagen_valida:
                 parts.append(f"Imagen disponible")
                 
             if descripcion_p:
@@ -4220,7 +4233,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     
     productos_texto = "\n".join(productos_formateados)
     
-    # 🔥 MEJORAR EL SYSTEM PROMPT PARA QUE SEA MÁS FLEXIBLE
+    # 🔥 SYSTEM PROMPT MEJORADO CON INSTRUCCIONES EXPLÍCITAS PARA MOSTRAR IMÁGENES
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
@@ -4228,20 +4241,26 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     CATÁLOGO DE PRODUCTOS DISPONIBLES:
     {productos_texto}
 
-    REGLAS IMPORTANTES:
-    1. Si un producto NO aparece en el catálogo anterior, NO existe en nuestro inventario.
-    2. Cuando busques productos, busca por: SKU, modelo, categoría, descripción o palabras clave.
-    3. Si el usuario pregunta por algo que no está en el catálogo, responde amablemente que no lo tienes disponible.
-    4. Para productos similares, sugiere alternativas basadas en categorías o descripciones.
-    5. Los precios mostrados son de referencia - confirma disponibilidad al agendar cita.
+    REGLAS CRÍTICAS SOBRE IMÁGENES:
+    1. ✅ CUANDO UN PRODUCTO TENGA "Imagen: [URL]" en el catálogo, DEBES mostrar esa URL directamente al usuario
+    2. ✅ Formato de respuesta con imagen: "¡Aquí tienes la imagen del producto [modelo]: [URL]"
+    3. ✅ Las URLs de imágenes son reales y funcionan - el usuario puede hacer clic en ellas
+    4. ✅ NO digas que no puedes mostrar imágenes si el producto tiene URL en el catálogo
+    5. ✅ Si el usuario pide ver imagen y el producto tiene URL, responde inmediatamente con la URL
 
-    EJEMPLOS DE BÚSQUEDA:
-    - "mesa redonda" → buscar en descripción y categoría
-    - "OR-M1000" → buscar por SKU exacto
-    - "OHM-7168B-BT" → buscar por modelo
-    - "muebles restaurante" → buscar por categoría/línea
+    EJEMPLOS CORRECTOS:
+    - Usuario: "¿Tienes imagen del modelo TC-WV1041?"
+    - TÚ: "¡Claro! Aquí tienes la imagen: https://ofitodo.com.mx/images/productos/tc-wv1041.jpg"
+    
+    - Usuario: "Muéstrame cómo se ve el OHM-7168B-BT"
+    - TÚ: "Aquí está la imagen del modelo OHM-7168B-BT: [URL completa de la imagen]"
 
-    Si el usuario expresa intención de comprar, solicita sus datos para agendar cita (nombre, dirección, fecha preferida).
+    REGLAS GENERALES:
+    1. Busca productos por SKU, modelo, categoría o descripción
+    2. Si no encuentras un producto, di que no está disponible
+    3. Para intenciones de compra, agenda cita solicitando datos
+
+    ¡IMPORTANTE! Las URLs de imágenes son reales y deben mostrarse directamente.
     """
 
     historial = obtener_historial(numero, config=config)
