@@ -4147,21 +4147,22 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     
-    # 🔥 FILTRAR PRODUCTOS CON IMÁGENES BASURA PRIMERO
-    precios_limpios = []
+    # 🔥 NO FILTRAR PRODUCTOS - EN SU LUGAR, LIMPIAR CADA CAMPO INDIVIDUALMENTE
+    # Procesamos TODOS los productos pero limpiamos cada campo
+    productos_procesados = 0
     for p in precios[:1000]:
-        imagen_name = p.get('imagen')
-        # Si la imagen es basura, saltar este producto completamente
-        if imagen_name and re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name)):
-            continue
-        precios_limpios.append(p)
-    
-    for p in precios_limpios:  # Usar la lista filtrada
         try:
             # Clean each field
             imagen_name = p.get('imagen')
             sku = _clean_field(p.get('sku'), imagen_name)
             modelo = _clean_field(p.get('modelo'), imagen_name)
+            
+            # 🔥 VERIFICAR SI EL PRODUCTO TIENE DATOS VÁLIDOS
+            # Si después de limpiar, todos los campos importantes están vacíos, saltar este producto
+            campos_importantes = [sku, modelo, p.get('descripcion'), p.get('categoria')]
+            if not any(campos_importantes):
+                continue  # Saltar productos completamente vacíos
+                
             titulo = modelo or sku or 'Sin identificador'
             categoria = _clean_field(p.get('categoria'), imagen_name)
             subcategoria = _clean_field(p.get('subcategoria'), imagen_name)
@@ -4179,7 +4180,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 except Exception:
                     precio_str = str(precio_menudeo)
             
-            # 🔥 FORMATEO MÁS LIMPIO - SIN DUPLICADOS
+            # 🔥 FORMATEO MÁS LIMPIO
             parts = []
             if titulo and titulo != 'Sin identificador':
                 parts.append(f"{titulo}")
@@ -4199,44 +4200,49 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catálogo: {catalogo}")
-            # 🔥 SOLO mostrar imagen si existe y NO es basura
-            if imagen_name and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name)):
+            
+            # 🔥 SOLO mencionar imagen si existe y NO es basura
+            tiene_imagen_valida = imagen_name and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name))
+            if tiene_imagen_valida:
                 parts.append(f"Imagen disponible")
+                
             if descripcion_p:
-                # Limpiar aún más la descripción
-                desc_limpia = re.sub(r'excel_unzip_img_\d+_\d+\.png', '', descripcion_p)
-                parts.append(f"Descripción: {desc_limpia[:140]}{'...' if len(desc_limpia) > 140 else ''}")
+                parts.append(f"Descripción: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
 
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
             
-        except Exception:
-            producto_line = "Sin datos legibles de producto"
-        
-        productos_formateados.append(f"- {producto_line}")
+            productos_formateados.append(f"- {producto_line}")
+            productos_procesados += 1
+            
+        except Exception as e:
+            app.logger.error(f"Error procesando producto: {e}")
+            continue
     
     productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 1000:
-        productos_texto += f"\n... y {len(precios) - 1000} productos/servicios más."
-
+    
+    # 🔥 MEJORAR EL SYSTEM PROMPT PARA QUE SEA MÁS FLEXIBLE
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
-    IMPORTANTE: Solo puedes responder usando la información del catálogo proporcionado abajo. 
-    NO uses conocimiento general, NO inventes productos, NO proporciones información que no esté en la lista.
 
-    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
-
+    CATÁLOGO DE PRODUCTOS DISPONIBLES:
     {productos_texto}
 
-    Reglas:
-    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
-    - Siempre indica si la información no está disponible en la base de datos.
-    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
-    - No inventes descuentos, existencias ni detalles no presentes en los campos.
-    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
+    REGLAS IMPORTANTES:
+    1. Si un producto NO aparece en el catálogo anterior, NO existe en nuestro inventario.
+    2. Cuando busques productos, busca por: SKU, modelo, categoría, descripción o palabras clave.
+    3. Si el usuario pregunta por algo que no está en el catálogo, responde amablemente que no lo tienes disponible.
+    4. Para productos similares, sugiere alternativas basadas en categorías o descripciones.
+    5. Los precios mostrados son de referencia - confirma disponibilidad al agendar cita.
 
-    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
+    EJEMPLOS DE BÚSQUEDA:
+    - "mesa redonda" → buscar en descripción y categoría
+    - "OR-M1000" → buscar por SKU exacto
+    - "OHM-7168B-BT" → buscar por modelo
+    - "muebles restaurante" → buscar por categoría/línea
+
+    Si el usuario expresa intención de comprar, solicita sus datos para agendar cita (nombre, dirección, fecha preferida).
     """
 
     historial = obtener_historial(numero, config=config)
@@ -4277,9 +4283,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Avoid duplication when the transcription is identical to the message text.
-            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
-            # and it differs from the transcription, append it as "[Mensaje adicional]".
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4291,7 +4294,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
-            # If audio but no transcription, fall back to whatever text we have (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
