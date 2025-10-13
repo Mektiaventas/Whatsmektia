@@ -4285,6 +4285,15 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response.raise_for_status()
         data = response.json()
         respuesta = data['choices'][0]['message']['content'].strip()
+                # Clean up any unwanted image filenames from the response
+
+        # Remove Excel unzip image filenames
+        respuesta = re.sub(r'excel_unzip_img_\d+_\d+\.png', '', respuesta)
+        # Remove any other image filenames that might appear
+        respuesta = re.sub(r'\b\w+\.png\b', '', respuesta)
+        # Clean up extra whitespace
+        respuesta = re.sub(r'\s+', ' ', respuesta).strip()
+        
         respuesta = aplicar_restricciones(respuesta, numero, config)
         return respuesta
 
