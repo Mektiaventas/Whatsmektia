@@ -4165,20 +4165,20 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         try:
             # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
             imagen = (p.get('imagen') or '').strip()
-            
+        
             # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
-            sku = _clean_field(p.get('sku'), imagen)
-            modelo = _clean_field(p.get('modelo'), imagen)
+            sku = sanitize_whatsapp_text(p.get('sku', ''))
+            modelo = sanitize_whatsapp_text(p.get('modelo', ''))
             titulo = modelo or sku or 'Sin identificador'
-            categoria = _clean_field(p.get('categoria'), imagen)
-            subcategoria = _clean_field(p.get('subcategoria'), imagen)
-            linea = _clean_field(p.get('linea'), imagen)
-            descripcion_p = _clean_field(p.get('descripcion'), imagen)
-            medidas = _clean_field(p.get('medidas'), imagen)
-            proveedor = _clean_field(p.get('proveedor'), imagen)
-            status = _clean_field(p.get('status_ws'), imagen) or 'activo'
-            catalogo = _clean_field(p.get('catalogo'), imagen)
-            
+            categoria = sanitize_whatsapp_text(p.get('categoria', ''))
+            subcategoria = sanitize_whatsapp_text(p.get('subcategoria', ''))
+            linea = sanitize_whatsapp_text(p.get('linea', ''))
+            descripcion_p = sanitize_whatsapp_text(p.get('descripcion', ''))
+            medidas = sanitize_whatsapp_text(p.get('medidas', ''))
+            proveedor = sanitize_whatsapp_text(p.get('proveedor', ''))
+            status = sanitize_whatsapp_text(p.get('status_ws', '')) or 'activo'
+            catalogo = sanitize_whatsapp_text(p.get('catalogo', ''))
+        
             # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
@@ -4191,7 +4191,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
-                
+            
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4199,7 +4199,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-                    
+                
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4225,7 +4225,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-            
+        
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
