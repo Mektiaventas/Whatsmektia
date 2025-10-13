@@ -4049,6 +4049,25 @@ def obtener_historial(numero, limite=5, config=None):
         return []
     
 # ... existing code ...
+# Helper: limpiar valores que contengan el nombre/marker de la imagen
+def _clean_field(val, imagen_name):
+    if not val:
+        return ''
+    try:
+        s = str(val).strip()
+        if not imagen_name:
+            return s
+        img = str(imagen_name).strip()
+        # eliminar coincidencias exactas del nombre de la imagen
+        if img and img in s:
+            s = s.replace(img, '')
+        # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+        s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+        # limpiar espacios sobrantes
+        s = re.sub(r'\s{2,}', ' ', s).strip()
+        return s
+    except Exception:
+        return str(val).strip()
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -4110,25 +4129,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:1000]:
         try:
-             # Helper: limpiar valores que contengan el nombre/marker de la imagen
-            def _clean_field(val, imagen_name):
-                if not val:
-                    return ''
-                try:
-                    s = str(val).strip()
-                    if not imagen_name:
-                        return s
-                    img = str(imagen_name).strip()
-                    # eliminar coincidencias exactas del nombre de la imagen
-                    if img and img in s:
-                        s = s.replace(img, '')
-                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-                    # limpiar espacios sobrantes
-                    s = re.sub(r'\s{2,}', ' ', s).strip()
-                    return s
-                except Exception:
-                    return str(val).strip()
+             
 
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
