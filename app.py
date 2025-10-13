@@ -7032,33 +7032,67 @@ def clean_ai_response(text):
     """
     Limpia artefactos comunes generados por extracción de .xlsx (.zip) y nombres de archivo
     repetidos en las respuestas de la IA, preservando URLs completas.
+    - Extrae URLs primero y las reemplaza por placeholders.
+    - Elimina tokens tipo excel_unzip_img_..., excel_img_..., producto_... en todo el texto.
+    - Normaliza etiquetas repetidas (Imagen:, Descripción:, etc.) y espacios/saltos de línea.
+    - Restaura las URLs al final.
     """
     if not text:
         return text
+
     try:
-        # Eliminar ocurrencias de nombres de imagen generados por unzip/openpyxl
-        # Solo eliminar si NO están precedidos por "/" (evita borrar partes de URLs)
-        text = re.sub(r'(?<!/)\bexcel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
-        text = re.sub(r'(?<!/)\bexcel_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
-        text = re.sub(r'(?<!/)\bproducto_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+        # 1) Extraer y proteger URLs para no dañarlas durante la limpieza
+        urls = re.findall(r'https?://\S+', text)
+        placeholders = {}
+        for i, u in enumerate(urls):
+            key = f"__URL_PLACEHOLDER_{i}__"
+            placeholders[key] = u
+            text = text.replace(u, key)
 
-        # Eliminar repeticiones redundantes como "Imagen: Imagen: ..." o tokens duplicados
+        # 2) Eliminar patrones de filenames generados por unzip/openpyxl en todo el texto
+        patterns = [
+            r'excel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,5})?',  # excel_unzip_img_...(.png)
+            r'excel_img_[\w\-\._]+(?:\.[a-zA-Z]{2,5})?',            # excel_img_...
+            r'producto_[\w\-\._]+(?:\.[a-zA-Z]{2,5})?'              # producto_...
+        ]
+        for pat in patterns:
+            text = re.sub(pat, ' ', text, flags=re.IGNORECASE)
+
+        # 3) Normalizar etiquetas comunes que pueden haber quedado pegadas
+        # Ejemplos: "Imagen:excel_unzip..." -> "Imagen:"
+        text = re.sub(r'(?i)\bimagen[:\s]*', 'Imagen: ', text)
+        text = re.sub(r'(?i)\bdescri(?:pción|pcion)[:\s]*', 'Descripción: ', text)
+        text = re.sub(r'(?i)\bprecio[:\s]*', 'Precio: ', text)
+        text = re.sub(r'(?i)\bsku[:\s]*', 'SKU: ', text)
+        text = re.sub(r'(?i)\bcategor(?:ía|ia)[:\s]*', 'Categoría: ', text)
+        text = re.sub(r'(?i)\bsubcategor(?:ía|ia)[:\s]*', 'Subcategoría: ', text)
+        text = re.sub(r'(?i)\blínea[:\s]*', 'Línea: ', text)
+
+        # 4) Quitar extensiones sueltas que quedaron pegadas a palabras (no afectará URLs por placeholders)
+        text = re.sub(r'\.(?:png|jpg|jpeg|gif|webp)\b', ' ', text, flags=re.IGNORECASE)
+
+        # 5) Eliminar repeticiones redundantes de etiquetas
         text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
+        text = re.sub(r'(Descripción:\s*){2,}', 'Descripción: ', text, flags=re.IGNORECASE)
 
-        # Quitar extensiones sueltas que quedaron pegadas a palabras (pero solo si no forman parte de una URL)
-        text = re.sub(r'(?<!/)\.(?:png|jpg|jpeg|gif|webp)\b', ' ', text, flags=re.IGNORECASE)
-
-        # Normalizar espacios y saltos de línea
+        # 6) Normalizar espacios y saltos de línea
         text = re.sub(r'\s*\n\s*', '\n', text)
         text = re.sub(r'[ \t]{2,}', ' ', text)
         text = re.sub(r'\n{3,}', '\n\n', text)
         text = re.sub(r' {2,}', ' ', text)
-
-        # Limpiar espacios sobrantes alrededor de signos de puntuación
         text = re.sub(r'\s+([,;:\.\-])', r'\1', text)
         text = text.strip()
 
+        # 7) Restaurar URLs protegidas
+        for k, v in placeholders.items():
+            text = text.replace(k, v)
+
+        # 8) Última pasada para limpiar espacios sobrantes causados por remociones previas
+        text = re.sub(r'\s{2,}', ' ', text).strip()
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
         return text
+
     except Exception as e:
         app.logger.warning(f"⚠️ clean_ai_response falló: {e}")
         return text
