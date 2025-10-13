@@ -4189,8 +4189,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
     productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
+    if len(precios) > 1000:
+        productos_texto += f"\n... y {len(precios) - 1000} productos/servicios más."
 
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
