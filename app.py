@@ -4189,10 +4189,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-            if imagen_url:
-                parts.append(f"Imagen: {imagen_url}")
-            elif imagen:
-                parts.append(f"Imagen: {imagen}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
             
@@ -4219,7 +4215,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     3. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
     4. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
     5. Mantén las respuestas limpias y profesionales.
-
+    6. Envia la imagen del producto si esta disponible en {imagen_url} o {imagen}
     Ejemplo de cómo limpiar textos:
     - Texto corrupto: "Mesa redonda alta con base... excel_unzip_img_335_1760366786.png"
     - Texto limpio: "Mesa redonda alta con base..."
