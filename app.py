@@ -4048,6 +4048,8 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
+# ... existing code ...
+
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4060,7 +4062,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    info_cita = None
+    
+    info_cita = None  # Initialize to avoid UnboundLocalError
+    
+    # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
         app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
         
@@ -4091,8 +4096,13 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 return mensaje_faltantes
         else:
             # No hay información específica, pedir general
-            return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
+            es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+            if es_porfirianna:
+                return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
+            else:
+                return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
     
+    # ... existing code continues ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
