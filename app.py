@@ -4101,56 +4101,63 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
     
-    # ... existing code continues ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
+    # 🔥 FUNCIÓN DE LIMPIEZA MEJORADA - FUERA DEL LOOP
+    def _clean_field(val, imagen_name):
+        if not val:
+            return ''
+        try:
+            s = str(val).strip()
+            if not imagen_name:
+                return s
+            
+            img_name = str(imagen_name).strip()
+            if not img_name:
+                return s
+            
+            # Eliminar el nombre exacto de la imagen
+            if img_name in s:
+                s = s.replace(img_name, '')
+            
+            # Eliminar patrones de Excel/unzip más agresivamente
+            patterns = [
+                r'excel_unzip_img_\d+_\d+\.png',
+                r'excel_unzip_img_[\w\-\._]+',
+                r'excel_img_\d+_\d+\.png',
+                r'excel_unzip_[\w\-\._]+',
+                r'img_\d+_\d+\.png'
+            ]
+            
+            for pattern in patterns:
+                s = re.sub(pattern, '', s, flags=re.IGNORECASE)
+            
+            # Limpiar espacios sobrantes y caracteres extraños
+            s = re.sub(r'\s{2,}', ' ', s).strip()
+            s = re.sub(r'^\||\|\s*$', '', s).strip()  # Eliminar pipes sueltos
+            s = re.sub(r'\s+\|\s+', ' | ', s)  # Normalizar separadores
+            
+            return s
+            
+        except Exception:
+            return str(val).strip() if val else ''
+
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    def _clean_field(val, imagen_name):
-                if not val:
-                    return ''
-                try:
-                    s = str(val).strip()
-                    if not imagen_name:
-                        return s
-        
-                    # Convertir imagen_name a string y limpiar
-                    img_name = str(imagen_name).strip()
-                    if not img_name:
-                        return s
-        
-                    # Eliminar el nombre exacto de la imagen
-                    if img_name in s:
-                        s = s.replace(img_name, '')
-        
-                    # Eliminar patrones de Excel/unzip más agresivamente
-                    patterns = [
-                        r'excel_unzip_img_\d+_\d+\.png',
-                        r'excel_unzip_img_[\w\-\._]+',
-                        r'excel_img_\d+_\d+\.png',
-                        r'excel_unzip_[\w\-\._]+',
-                        r'img_\d+_\d+\.png'
-                    ]
-        
-                    for pattern in patterns:
-                        s = re.sub(pattern, '', s, flags=re.IGNORECASE)
-        
-                    # Limpiar espacios sobrantes y caracteres extraños
-                    s = re.sub(r'\s{2,}', ' ', s).strip()
-                    s = re.sub(r'^\||\|\s*$', '', s).strip()  # Eliminar pipes sueltos
-                    s = re.sub(r'\s+\|\s+', ' | ', s)  # Normalizar separadores
-        
-                    return s
-        
-                except Exception:
-                    return str(val).strip() if val else ''
+    
+    # 🔥 FILTRAR PRODUCTOS CON IMÁGENES BASURA PRIMERO
+    precios_limpios = []
     for p in precios[:1000]:
+        imagen_name = p.get('imagen')
+        # Si la imagen es basura, saltar este producto completamente
+        if imagen_name and re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name)):
+            continue
+        precios_limpios.append(p)
+    
+    for p in precios_limpios:  # Usar la lista filtrada
         try:
-             # Helper: limpiar valores que contengan el nombre/marker de la imagen
-            
-
             # Clean each field
             imagen_name = p.get('imagen')
             sku = _clean_field(p.get('sku'), imagen_name)
@@ -4171,17 +4178,19 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
+            
+            # 🔥 FORMATEO MÁS LIMPIO - SIN DUPLICADOS
             parts = []
             if titulo and titulo != 'Sin identificador':
                 parts.append(f"{titulo}")
             if sku:
-                parts.append(f"(SKU: {sku})")
+                parts.append(f"SKU: {sku}")
             if categoria:
-                parts.append(f"Categoria: {categoria}")
+                parts.append(f"Categoría: {categoria}")
             if subcategoria:
-                parts.append(f"Subcategoria: {subcategoria}")
+                parts.append(f"Subcategoría: {subcategoria}")
             if linea:
-                parts.append(f"Linea: {linea}")
+                parts.append(f"Línea: {linea}")
             if precio_str:
                 parts.append(f"Precio: {precio_str}")
             if medidas:
@@ -4189,19 +4198,23 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if proveedor:
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
-                parts.append(f"Catalogo: {catalogo}")
-            if imagen_name:
-                parts.append(f"Imagen: {imagen_name}")
-            if descripcion_p:
-                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+                parts.append(f"Catálogo: {catalogo}")
+            # 🔥 SOLO mostrar imagen si existe y NO es basura
             if imagen_name and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name)):
                 parts.append(f"Imagen disponible")
+            if descripcion_p:
+                # Limpiar aún más la descripción
+                desc_limpia = re.sub(r'excel_unzip_img_\d+_\d+\.png', '', descripcion_p)
+                parts.append(f"Descripción: {desc_limpia[:140]}{'...' if len(desc_limpia) > 140 else ''}")
 
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
+            
         except Exception:
             producto_line = "Sin datos legibles de producto"
+        
         productos_formateados.append(f"- {producto_line}")
+    
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 1000:
         productos_texto += f"\n... y {len(precios) - 1000} productos/servicios más."
@@ -4215,7 +4228,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
 
     {productos_texto}
-    No respondar con informacion basura como esta: excel_unzip_img_335_1760366786.png 
+
     Reglas:
     - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
     - Siempre indica si la información no está disponible en la base de datos.
