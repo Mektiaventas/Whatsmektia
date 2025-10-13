@@ -4060,6 +4060,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    info_cita = None
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
         app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
         
