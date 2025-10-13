@@ -4186,6 +4186,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
+            if imagen_url:
+                parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
@@ -4206,7 +4210,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     Dispones de la siguiente lista de productos/servicios:
 
-    {productos_texto}{imagen_url} o {imagen}
+    {productos_texto}
 
     REGLAS IMPORTANTES:
     1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
@@ -4214,7 +4218,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     3. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
     4. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
     5. Mantén las respuestas limpias y profesionales.
-    6. Envia la imagen del producto si esta disponible en 
+
     Ejemplo de cómo limpiar textos:
     - Texto corrupto: "Mesa redonda alta con base... excel_unzip_img_335_1760366786.png"
     - Texto limpio: "Mesa redonda alta con base..."
