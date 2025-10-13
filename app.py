@@ -163,68 +163,6 @@ PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'up
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
 
-def html_to_whatsapp(text):
-    """
-    Convierte HTML/entidades simples a formato que WhatsApp entiende.
-    - <b>, <strong> -> *bold*
-    - <i>, <em> -> _italic_
-    - <s>, <del> -> ~strike~
-    - <code>inline</code> -> `inline`
-    - <pre>..</pre> -> triple backticks block
-    - Decodifica entidades HTML y elimina etiquetas restantes
-    """
-    try:
-        if not text:
-            return text
-        import html as _html
-        import re
-
-        s = str(text)
-
-        # Decodificar entidades (&amp; &nbsp; etc.)
-        s = _html.unescape(s)
-
-        # Normalize common block tags to newlines
-        s = re.sub(r'</\s*(div|p|br|li)\s*>', '\n', s, flags=re.I)
-        s = re.sub(r'<\s*(br|hr)\s*/?\s*>', '\n', s, flags=re.I)
-
-        # Pre (preserve inner whitespace as code block)
-        def _pre_repl(m):
-            inner = m.group(1).rstrip('\n')
-            return "\n```\n" + inner + "\n```\n"
-        s = re.sub(r'<\s*pre[^>]*>(.*?)</\s*pre\s*>', _pre_repl, s, flags=re.I | re.S)
-
-        # Inline code
-        s = re.sub(r'<\s*code[^>]*>(.*?)</\s*code\s*>', lambda m: f"`{m.group(1).strip()}`", s, flags=re.I | re.S)
-
-        # Bold / strong -> *text*
-        s = re.sub(r'<\s*(b|strong)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"*{m.group(2).strip()}*", s, flags=re.I | re.S)
-
-        # Italic / em -> _text_
-        s = re.sub(r'<\s*(i|em)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"_{m.group(2).strip()}_", s, flags=re.I | re.S)
-
-        # Strike -> ~text~
-        s = re.sub(r'<\s*(s|del)[^>]*>(.*?)</\s*\1\s*>', lambda m: f"~{m.group(2).strip()}~", s, flags=re.I | re.S)
-
-        # Remove remaining tags
-        s = re.sub(r'<[^>]+>', '', s)
-
-        # Normalize multiple newlines -> max 2
-        s = re.sub(r'\n\s*\n\s*\n+', '\n\n', s)
-
-        # Trim spaces on lines, collapse trailing spaces
-        s = "\n".join(line.rstrip() for line in s.splitlines())
-
-        # Strip at ends
-        s = s.strip()
-
-        return s
-    except Exception:
-        # Fallback básico: strip tags naive
-        import re, html as _html
-        return re.sub(r'<[^>]+>', '', _html.unescape(str(text))).strip()
-
-
 
 # --- Conexión a la BD de clientes (auth) ---
 def get_clientes_conn():
@@ -247,138 +185,6 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
-
-def get_asesores_from_config(config=None):
-    """
-    Read advisors directly from configuracion table (asesor1_nombre/asesor1_telefono, asesor2_*)
-    Returns list of {'nombre','telefono'} in order. Falls back to tenant env vars then admin numbers.
-    """
-    try:
-        if config is None:
-            config = obtener_configuracion_por_host()
-
-        # Try DB first (explicit query against 'configuracion' table)
-        try:
-            conn = get_db_connection(config)
-            cur = conn.cursor(dictionary=True)
-            cur.execute("SELECT asesor1_nombre, asesor1_telefono, asesor2_nombre, asesor2_telefono FROM configuracion WHERE id = 1 LIMIT 1")
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-        except Exception as e:
-            app.logger.warning(f"⚠️ get_asesores_from_config: DB read failed: {e}")
-            row = None
-
-        lista = []
-        if row:
-            a1n = (row.get('asesor1_nombre') or '').strip()
-            a1t = (row.get('asesor1_telefono') or '').strip()
-            a2n = (row.get('asesor2_nombre') or '').strip()
-            a2t = (row.get('asesor2_telefono') or '').strip()
-            if a1n or a1t:
-                lista.append({'nombre': a1n or 'Asesor 1', 'telefono': a1t})
-            if a2n or a2t:
-                lista.append({'nombre': a2n or 'Asesor 2', 'telefono': a2t})
-
-        # Tenant-specific env fallback (useful if DB not populated)
-        if not lista:
-            dominio = (config.get('dominio') or '').lower() if isinstance(config, dict) else ''
-            if 'ofitodo' in dominio:
-                name = os.getenv('OFITODO_ASESOR1_NAME', '').strip()
-                phone = os.getenv('OFITODO_ASESOR1_PHONE', '').strip()
-                if name or phone:
-                    lista.append({'nombre': name or 'Asesor OFITODO', 'telefono': phone or '5214493432744'})
-                name2 = os.getenv('OFITODO_ASESOR2_NAME', '').strip()
-                phone2 = os.getenv('OFITODO_ASESOR2_PHONE', '').strip()
-                if name2 or phone2:
-                    lista.append({'nombre': name2 or 'Asesor OFITODO 2', 'telefono': phone2 or '5214491182201'})
-
-        # Final fallback -> admin numbers (always return something)
-        if not lista:
-            admins = [
-                {'nombre': 'Asesor 1', 'telefono': os.getenv('ADMIN_ASESOR1', '5214493432744')},
-                {'nombre': 'Asesor 2', 'telefono': os.getenv('ADMIN_ASESOR2', '5214491182201')}
-            ]
-            lista.extend(admins)
-
-        app.logger.info(f"🔁 get_asesores_from_config -> returned {len(lista)} asesores for dominio={config.get('dominio') if isinstance(config, dict) else 'unknown'}")
-        return lista
-
-    except Exception as e:
-        app.logger.error(f"🔴 get_asesores_from_config fatal error: {e}")
-        return [{'nombre': 'Asesor', 'telefono': os.getenv('ADMIN_ASESOR1', '5214493432744')}]
-
-def get_next_asesor(numero, config=None):
-    """
-    Devuelve el siguiente asesor que debe usarse para `numero`.
-    Mantiene rotación guardando 'ultimo_asesor_index' en estados_conversacion.datos JSON.
-    """
-    try:
-        asesores = get_asesores_from_config(config)
-        if not asesores:
-            return None
-
-        estado = obtener_estado_conversacion(numero, config) or {}
-        datos = estado.get('datos') or {}
-        try:
-            if isinstance(datos, str):
-                datos = json.loads(datos)
-        except Exception:
-            datos = datos if isinstance(datos, dict) else {}
-
-        ultimo_index = int(datos.get('ultimo_asesor_index', 0) or 0)
-        # next index (0-based in list)
-        next_idx = ultimo_index % len(asesores)
-        elegido = asesores[next_idx]
-
-        # actualizar el contador para la próxima vez
-        datos['ultimo_asesor_index'] = (next_idx + 1) % len(asesores)
-        # Mantener contexto existente si lo hay; si no, usar 'INTERVENCION'
-        contexto = estado.get('contexto') or 'INTERVENCION_ASESOR'
-        # Guardar nuevo estado con la actualización del índice
-        actualizar_estado_conversacion(numero, contexto, 'asesor_rotado', datos, config)
-        app.logger.info(f"🔁 get_next_asesor: numero={numero} -> idx={next_idx} asesor={elegido.get('nombre')}")
-        return elegido
-    except Exception as e:
-        app.logger.error(f"🔴 get_next_asesor error: {e}")
-        return None
-
-def enviar_contacto_asesor_usuario(numero, config=None):
-    """
-    Envía por WhatsApp el contacto del siguiente asesor disponible al usuario.
-    Retorna True si se envió algo.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        asesor = get_next_asesor(numero, config)
-        if not asesor:
-            app.logger.info("ℹ️ No hay asesores configurados para enviar.")
-            return False
-
-        nombre = asesor.get('nombre') or 'Asesor'
-        telefono = asesor.get('telefono') or ''
-        # Normalize phone: try to ensure international-ish format if possible
-        telefono_text = telefono
-        if telefono_text and not telefono_text.startswith('+') and telefono_text.isdigit():
-            # prefer to keep as-is; optional: add country prefix if you want
-            pass
-
-        msg = (
-            f"📞 Te puedo pasar el contacto de un asesor de ventas:\n\n"
-            f"👤 {nombre}\n"
-            f"📱 {telefono_text}\n\n"
-            "¿Quieres que te ponga en contacto con esta persona? Responde 'sí' para que te facilitemos los datos de contacto completos."
-        )
-
-        enviar_mensaje(numero, msg, config)
-        guardar_conversacion(numero, "[Solicitud asesor enviada]", msg, config)
-        app.logger.info(f"✅ Contacto de asesor enviado a {numero}: {nombre} - {telefono_text}")
-        return True
-    except Exception as e:
-        app.logger.error(f"🔴 enviar_contacto_asesor_usuario error: {e}")
-        return False
-# --- END: Asesores helpers ---
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
@@ -3591,52 +3397,44 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # Determinar el tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     tipo_solicitud = "pedido" if es_porfirianna else "cita"
     
-    detalles_servicio = info_cita.get('detalles_servicio', {})
-    descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
-    categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
-    precio_servicio = detalles_servicio.get('precio_mayudeo') or detalles_servicio.get('precio', 'No especificado')
-    
-    mensaje_alerta = f"""
-🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
-
-*Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
-*Teléfono:* {info_cita.get('telefono')}
-
-*{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
-*Categoría:* {categoria_servicio}
-*Precio:* ${precio_servicio}
-
-*Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
-
-*Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
-*Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
-
-⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
-
-📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
-"""
-    # Usar configuración principal para enviar a administradores
-    admin_config = NUMEROS_CONFIG.get('524495486142') or obtener_configuracion_por_host()
-    enviados = []
     try:
-        # Enviar al ALERT_NUMBER si está definido
-        if ALERT_NUMBER:
-            ok = enviar_mensaje(ALERT_NUMBER, mensaje_alerta, admin_config)
-            app.logger.info(f"📤 Envío ALERT_NUMBER ({ALERT_NUMBER}) para cita {cita_id} -> ok={ok}")
-            enviados.append(ok)
-        # Enviar a los administradores fijos
-        for admin in ['5214493432744', '5214491182201']:
-            ok = enviar_mensaje(admin, mensaje_alerta, admin_config)
-            app.logger.info(f"📤 Envío admin {admin} para cita {cita_id} -> ok={ok}")
-            enviados.append(ok)
-        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a administradores, ID: {cita_id}")
-        return any(enviados)
+        # Obtener detalles adicionales del servicio si existen
+        detalles_servicio = info_cita.get('detalles_servicio', {})
+        descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+        categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+        precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+        
+        mensaje_alerta = f"""
+        🚨 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}* - ID: #{cita_id}
+
+        *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+        *Teléfono:* {info_cita.get('telefono')}
+
+        *{'Platillo' if es_porfirianna else 'Servicio'} solicitado:* {info_cita.get('servicio_solicitado', 'No especificado')}
+        *Categoría:* {categoria_servicio}
+        *Precio:* ${precio_servicio} {info_cita.get('moneda', 'MXN')}
+        
+        *Descripción:* {descripcion_servicio[:150]}{'...' if len(descripcion_servicio) > 150 else ''}
+
+        *Fecha sugerida:* {info_cita.get('fecha_sugerida', 'No especificada')}
+        *Hora sugerida:* {info_cita.get('hora_sugerida', 'No especificada')}
+
+        ⏰ *Fecha de solicitud:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+        📋 *Acción requerida:* Contactar al cliente para confirmar disponibilidad.
+        """
+        
+        # Enviar a ambos números
+        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        enviar_mensaje('5214493432744', mensaje_alerta, config)
+        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
+        
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-        return False
 
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
@@ -4167,10 +3965,8 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
-def obtener_todos_los_precios(config=None):
+def obtener_todos_los_precios(config):
     try:
-        if config is None:
-            config = obtener_configuracion_por_host()
         db = get_db_connection(config)
         cursor = db.cursor(dictionary=True)
         cursor.execute("""
@@ -4180,9 +3976,13 @@ def obtener_todos_los_precios(config=None):
         precios = cursor.fetchall()
         cursor.close()
         db.close()
-        return precios or []
+        return precios
     except Exception as e:
-        app.logger.error(f"Error obteniendo precios: {e}")
+        print(f"Error obteniendo precios: {str(e)}")
+        return []
+        
+    except Exception as e:
+        print(f"Error obteniendo precios: {str(e)}")
         return []
 
 def obtener_precio_por_id(pid, config=None):
@@ -4248,133 +4048,15 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-def limpiar_nombre_imagen(texto, imagen_filename):
-    """
-    Limpia nombres de imagen de campos de texto de manera más agresiva
-    """
-    if not texto:
-        return texto
-    
-    texto_limpio = str(texto)
-    
-    # Si no hay nombre de imagen específico, limpiar patrones comunes
-    if not imagen_filename:
-        # Eliminar patrones de nombres de imagen generados automáticamente
-        patrones = [
-            r'excel(_unzip)?_img_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
-            r'producto_\d+_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
-            r'img_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
-            r'[\w\-_]*img[\w\-_]*\.(png|jpg|jpeg|gif|webp)'
-        ]
-        
-        for patron in patrones:
-            texto_limpio = re.sub(patron, '', texto_limpio, flags=re.IGNORECASE)
-    
-    # Si hay un nombre de imagen específico, eliminarlo de todas formas posibles
-    if imagen_filename:
-        # Eliminar el nombre exacto del archivo
-        texto_limpio = texto_limpio.replace(imagen_filename, '')
-        
-        # Eliminar variantes (sin extensión, etc.)
-        nombre_sin_ext = os.path.splitext(imagen_filename)[0]
-        texto_limpio = texto_limpio.replace(nombre_sin_ext, '')
-    
-    # Limpiar espacios múltiples y caracteres extraños resultantes
-    texto_limpio = re.sub(r'[\s_\-]+', ' ', texto_limpio)  # Reemplazar múltiples espacios/guiones/barras bajas con un solo espacio
-    texto_limpio = texto_limpio.strip()
-    
-    # Eliminar separadores duplicados que puedan quedar
-    separadores = [' | ', '  ', ' - ', ' _ ']
-    for sep in separadores:
-        while sep in texto_limpio:
-            texto_limpio = texto_limpio.replace(sep, ' | ' if sep == ' | ' else ' ')
-    
-    # Limpiar separadores al inicio/final
-    texto_limpio = re.sub(r'^[\s\|_\-\:]+|[\s\|_\-\:]+$', '', texto_limpio)
-    
-    return texto_limpio
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-    
-    # PRIMERO: Buscar si el mensaje hace referencia a un producto específico
-    app.logger.info(f"🔍 Búsqueda de producto en mensaje: '{mensaje_usuario}'")
-    precios = obtener_todos_los_precios(config)
-    sku_encontrado = buscar_sku_en_texto(mensaje_usuario, precios)
-    
-    producto_encontrado = None
-    if sku_encontrado:
-        # Buscar el producto completo por SKU
-        for producto in precios:
-            if producto.get('sku') == sku_encontrado:
-                producto_encontrado = producto
-                app.logger.info(f"✅ Producto encontrado: {producto.get('servicio')} (SKU: {sku_encontrado})")
-                break
-    
-    # Si encontramos un producto, preparar respuesta coherente
-    if producto_encontrado:
-        precio = producto_encontrado.get('precio_menudeo') or producto_encontrado.get('precio_mayoreo') or producto_encontrado.get('costo', 'Consultar')
-        imagen = producto_encontrado.get('imagen', '')
-    
-        # LIMPIAR TODOS LOS CAMPOS CON LA NUEVA FUNCIÓN
-        nombre = limpiar_nombre_imagen(producto_encontrado.get('servicio') or producto_encontrado.get('modelo') or 'Producto', imagen)
-        descripcion = limpiar_nombre_imagen(producto_encontrado.get('descripcion', 'Sin descripción disponible'), imagen)
-        categoria = limpiar_nombre_imagen(producto_encontrado.get('categoria', ''), imagen)
-        medidas = limpiar_nombre_imagen(producto_encontrado.get('medidas', ''), imagen)
-    
-        # Solo incluir campos que tengan contenido real después de la limpieza
-        respuesta_producto = f"🔍 *{nombre}*\n\n"
-        
-        if descripcion and descripcion.strip() and descripcion != 'None':
-            respuesta_producto += f"📝 *Descripción:* {descripcion}\n"
-        
-        if categoria and categoria.strip() and categoria != 'None':
-            respuesta_producto += f"📂 *Categoría:* {categoria}\n"
-            
-        if medidas and medidas.strip() and medidas != 'None':
-            respuesta_producto += f"📏 *Medidas:* {medidas}\n"
-        
-        # Formatear precio
-        try:
-            if precio and str(precio).strip() and str(precio) != '0.00' and str(precio) != 'None':
-                precio_float = float(precio)
-                respuesta_producto += f"💰 *Precio:* ${precio_float:,.2f}\n"
-        except (ValueError, TypeError):
-            if precio and str(precio).strip() and str(precio) != 'None':
-                respuesta_producto += f"💰 *Precio:* {precio}\n"
-        
-        # Manejar imagen
-        if imagen and imagen.strip() and imagen != 'None':
-            app.logger.info(f"🖼️ Intentando enviar imagen: {imagen}")
-            imagen_enviada = enviar_imagen(numero, imagen, config)
-            if imagen_enviada:
-                respuesta_producto += "\n🖼️ *Imagen:* ✅ Te he enviado la imagen del producto."
-                app.logger.info("✅ Imagen enviada exitosamente")
-            else:
-                respuesta_producto += "\n🖼️ *Imagen:* ⚠️ Disponible (pero no se pudo enviar en este momento)"
-                app.logger.warning("⚠️ No se pudo enviar la imagen")
-        else:
-            respuesta_producto += "\n📷 *Imagen:* No disponible"
-            app.logger.info("📷 Producto sin imagen")
-        
-        # Agregar SKU si está disponible
-        if sku_encontrado:
-            respuesta_producto += f"\n\n🏷️ *SKU:* {sku_encontrado}"
-        
-        # Guardar en el historial
-        guardar_conversacion(numero, mensaje_usuario, respuesta_producto, config)
-        
-        app.logger.info(f"✅ Respuesta de producto enviada a {numero}")
-        return respuesta_producto
-    
-    # Si no se encontró producto específico, continuar con el flujo normal de IA
     cfg = load_config(config)
     neg = cfg['negocio']
     ia_nombre = neg.get('ia_nombre', 'Asistente')
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
-    
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
@@ -4382,93 +4064,54 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
-    # Format products using the canonical DB fields
+    # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-
-    def is_likely_image_name(val):
-        if not val:
-            return False
-        s = str(val).strip()
-        return bool(re.search(r'(?:excel(?:_unzip)?_img_|producto_|img_)\d+.*\.(?:png|jpe?g|gif|webp)$', s, re.IGNORECASE))
-
-    def clean_field(val, imagen_name=None):
-        if not val:
-            return ''
-        s = str(val).strip()
-        # If the whole value looks like an autogenerated image filename, drop it
-        if is_likely_image_name(s):
-            return ''
-        # Remove any explicit occurrences of the image filename inside textual fields
-        if imagen_name:
-            try:
-                s = re.sub(re.escape(imagen_name), '', s, flags=re.IGNORECASE)
-            except Exception:
-                pass
-        # Remove common excel_unzip tokens left over
-        s = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-        s = re.sub(r'\s{2,}', ' ', s).strip()
-        return s
-
     for p in precios[:40]:
         try:
-            # Raw imagen token (puede ser filename o URL)
-            imagen_token = (p.get('imagen') or '').strip()
-
-            # Patrón para detectar nombres generados por el import (varias variantes)
-            imagen_pattern = re.compile(
-                r'(?:excel(?:_unzip)?_img_[\w\-\._]*\.\w+|excel_img_[\w\-\._]*\.\w+|producto_[\w\-\._]*\.\w+|img_[\w\-\._]*\.\w+)',
-                re.IGNORECASE
-            )
-
-            def strip_image_tokens(value):
-                """Quitar tokens de imagen y el nombre exacto de imagen de cualquier campo."""
-                if not value:
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            def _clean_field(val, imagen_name):
+                if not val:
                     return ''
-                s = str(value).strip()
-                # Quitar ocurrencias exactas del filename si está presente
-                if imagen_token:
-                    try:
-                        s = re.sub(re.escape(imagen_token), '', s, flags=re.IGNORECASE)
-                    except Exception:
-                        pass
-                # Quitar tokens generados por excel/unzip/producto/img
-                s = imagen_pattern.sub('', s)
-                # Normalizar espacios sobrantes y limpiar separadores repetidos
-                s = re.sub(r'[_\-]{2,}', ' ', s)
-                s = re.sub(r'\s{2,}', ' ', s).strip()
-                return s
-            sku = clean_field(p.get('sku'))
-            modelo = clean_field(p.get('modelo'))
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = clean_field(p.get('categoria'))
-            subcategoria = clean_field(p.get('subcategoria'))
-            linea = clean_field(p.get('linea'))
-            descripcion_p = clean_field(p.get('descripcion'), p.get('imagen'))
-            medidas = clean_field(p.get('medidas'))
-            proveedor = clean_field(p.get('proveedor'))
-            status = clean_field(p.get('status_ws')) or 'activo'
-            catalogo = clean_field(p.get('catalogo'))
-            imagen = (p.get('imagen') or '').strip()
+                try:
+                    s = str(val).strip()
+                    if not imagen_name:
+                        return s
+                    img = str(imagen_name).strip()
+                    # eliminar coincidencias exactas del nombre de la imagen
+                    if img and img in s:
+                        s = s.replace(img, '')
+                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                    # limpiar espacios sobrantes
+                    s = re.sub(r'\s{2,}', ' ', s).strip()
+                    return s
+                except Exception:
+                    return str(val).strip()
 
-            # Build safe imagen_url only if it's a real URL or the file exists
-            imagen_url = ''
+            sku = (p.get('sku') or '').strip()
+            modelo = (p.get('modelo') or '').strip()
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = (p.get('categoria') or '').strip()
+            subcategoria = (p.get('subcategoria') or '').strip()
+            linea = (p.get('linea') or '').strip()
+            descripcion_p = (p.get('descripcion') or '').strip()
+            medidas = (p.get('medidas') or '').strip()
+            proveedor = (p.get('proveedor') or '').strip()
+            status = (p.get('status_ws') or 'activo').strip()
+            catalogo = (p.get('catalogo') or '')
+            imagen = (p.get('imagen') or '').strip()
             if imagen:
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
                 else:
-                    # if it looks like a generated image filename, check disk before exposing
-                    if is_likely_image_name(imagen):
-                        local_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen)
-                        if os.path.isfile(local_path):
-                            base = dominio_publico if dominio_publico.startswith('http') else f"https://{dominio_publico}"
-                            imagen_url = f"{base}/uploads/productos/{imagen}"
-                        else:
-                            imagen_url = ''
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
                     else:
-                        base = dominio_publico if dominio_publico.startswith('http') else f"https://{dominio_publico}"
-                        imagen_url = f"{base}/uploads/productos/{imagen}"
-
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+            else:
+                imagen_url = ''
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4476,8 +4119,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-
-            parts = [titulo]
+            parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
             if categoria:
@@ -4496,21 +4138,15 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Catalogo: {catalogo}")
             if imagen_url:
                 parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-
-            producto_line = " | ".join([p for p in parts if p])
-            if not producto_line:
-                producto_line = "Sin datos legibles de producto"
-
+            producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-
-        except Exception as e:
-            app.logger.warning(f"⚠️ Error formateando producto: {e}")
+        except Exception:
             producto_line = "Sin datos legibles de producto"
-
         productos_formateados.append(f"- {producto_line}")
-        
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
@@ -4531,13 +4167,10 @@ Reglas:
 - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
 
 Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
-
-IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto, verifica primero si existe en la base de datos. Si existe, confirma que se enviará la imagen.
 """
 
     historial = obtener_historial(numero, config=config)
 
-    # Verificar si es solicitud de cita/pedido
     info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
     if info_cita and info_cita.get('servicio_solicitado'):
         app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
@@ -4552,17 +4185,12 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
 
-    # Construir cadena de mensajes para la IA
     messages_chain = [{'role': 'system', 'content': system_prompt}]
-    
-    # Agregar historial de conversación
     for entry in historial:
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
         if entry['respuesta'] and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-            
-    # Agregar mensaje actual
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
             messages_chain.append({
@@ -4579,7 +4207,9 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Evitar duplicación cuando la transcripción es idéntica al texto del mensaje
+            # Avoid duplication when the transcription is identical to the message text.
+            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
+            # and it differs from the transcription, append it as "[Mensaje adicional]".
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4591,7 +4221,7 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
-            # Si es audio pero no hay transcripción, usar el texto que tenemos (caption)
+            # If audio but no transcription, fall back to whatever text we have (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
@@ -4599,8 +4229,6 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
-        
-        app.logger.info(f"🤖 Enviando {len(messages_chain)} mensajes a la IA")
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -4612,72 +4240,21 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
             "temperature": 0.7,
             "max_tokens": 2000
         }
-        
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
-        
         data = response.json()
         respuesta = data['choices'][0]['message']['content'].strip()
         respuesta = aplicar_restricciones(respuesta, numero, config)
-        
-        app.logger.info(f"✅ Respuesta IA generada: {respuesta[:100]}...")
         return respuesta
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 API error: {e}")
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA. Por favor intenta de nuevo.'
+        return 'Lo siento, hubo un error con la IA.'
     except Exception as e: 
         app.logger.error(f"🔴 Error inesperado: {e}")
-        app.logger.error(traceback.format_exc())
-        return 'Lo siento, hubo un error inesperado. Por favor intenta de nuevo.'
-
-def limpiar_campos_productos_batch(config=None):
-    """Limpia todos los campos de productos de nombres de imagen (una sola ejecución)"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Obtener todos los productos
-        cursor.execute("SELECT id, sku, modelo, servicio, descripcion, categoria, medidas, imagen FROM precios")
-        productos = cursor.fetchall()
-        
-        actualizados = 0
-        for producto in productos:
-            imagen = producto.get('imagen', '')
-            
-            # Limpiar cada campo
-            campos_limpiar = ['sku', 'modelo', 'servicio', 'descripcion', 'categoria', 'medidas']
-            updates = []
-            valores = []
-            
-            for campo in campos_limpiar:
-                valor_original = producto.get(campo, '')
-                valor_limpio = limpiar_nombre_imagen(valor_original, imagen)
-                
-                if valor_limpio != valor_original:
-                    updates.append(f"{campo} = %s")
-                    valores.append(valor_limpio)
-            
-            if updates:
-                valores.append(producto['id'])
-                cursor.execute(f"UPDATE precios SET {', '.join(updates)} WHERE id = %s", valores)
-                actualizados += 1
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        app.logger.info(f"✅ Limpiados {actualizados} productos de nombres de imagen")
-        return actualizados
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error limpiando productos batch: {e}")
-        return 0
+        return 'Lo siento, hubo un error con la IA.'
 
 # New helpers: enviar_imagen and buscar_sku_en_texto
 def enviar_imagen(numero, imagen_ref, config=None):
@@ -4686,8 +4263,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
     imagen_ref puede ser:
       - URL absoluta (empieza con http)
       - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
-    Para evitar duplicados, verifica si esa imagen ya fue enviada recientemente al mismo número.
-    Retorna True si la imagen ya fue enviada o fue enviada ahora, False en caso de error.
+    Retorna True si la API respondió OK.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4696,38 +4272,6 @@ def enviar_imagen(numero, imagen_ref, config=None):
         if not imagen_ref:
             app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
             return False
-
-        # Determine identifier for DB check: basename for filenames, whole URL for URLs
-        try:
-            if str(imagen_ref).lower().startswith('http'):
-                image_identifier = imagen_ref
-            else:
-                image_identifier = os.path.basename(str(imagen_ref))
-        except Exception:
-            image_identifier = str(imagen_ref)
-
-        # --- CHECK: evitar reenviar la misma imagen en un corto periodo ---
-        try:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM conversaciones
-                WHERE numero = %s
-                  AND (
-                        (imagen_url IS NOT NULL AND imagen_url LIKE %s)
-                     OR (respuesta IS NOT NULL AND respuesta LIKE %s)
-                  )
-                  AND timestamp > NOW() - INTERVAL 2 MINUTE
-            """, (numero, f"%{image_identifier}%", f"%{image_identifier}%"))
-            row = cursor.fetchone()
-            cursor.close()
-            conn.close()
-            if row and row[0] and int(row[0]) > 0:
-                app.logger.info(f"ℹ️ enviar_imagen: imagen '{image_identifier}' ya enviada recientemente a {numero}; omitiendo reenvío")
-                return True
-        except Exception as e:
-            # No queremos bloquear el envío por un fallo en la verificación; solo loguear y continuar
-            app.logger.warning(f"⚠️ enviar_imagen: fallo comprobación duplicado en BD: {e}")
 
         # Determinar URL pública
         if str(imagen_ref).lower().startswith('http'):
@@ -4756,7 +4300,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
 
         app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code in (200, 201, 202):
+        if r.status_code == 200:
             app.logger.info("✅ Imagen enviada correctamente")
             return True
         else:
@@ -4770,115 +4314,21 @@ def enviar_imagen(numero, imagen_ref, config=None):
 
 def buscar_sku_en_texto(texto, precios):
     """
-    Busca un SKU o modelo presente en 'precios' dentro de 'texto'.
-    Versión mejorada con búsqueda por categorías específicas.
+    Busca un SKU presente en 'precios' dentro de 'texto'.
+    Devuelve el primer SKU encontrado (exact match substring) o None.
     """
     if not texto or not precios:
         return None
-
-    def normalizar_texto(s):
-        """Normaliza texto para búsqueda flexible"""
-        if not s:
-            return ''
-        s = str(s).strip().lower()
-        # Remover caracteres especiales pero mantener espacios para búsqueda por palabras
-        s = re.sub(r'[^\w\sáéíóúñ]', '', s)
-        # Remover espacios múltiples
-        s = re.sub(r'\s+', ' ', s)
-        return s.strip()
-    
-    texto_normalizado = normalizar_texto(texto)
-    
-    # Palabras clave para búsqueda por categoría
-    categorias_clave = {
-        'mesa': ['mesa', 'mesas', 'escritorio', 'escritorios'],
-        'silla': ['silla', 'sillas', 'asiento', 'asientos'],
-        'mueble': ['mueble', 'muebles', 'gabinete', 'gabinetes'],
-        'archivador': ['archivador', 'archivadores', 'archivero']
-    }
-    
-    # Determinar qué categoría busca el usuario
-    categoria_buscada = None
-    for categoria, palabras in categorias_clave.items():
-        if any(palabra in texto_normalizado for palabra in palabras):
-            categoria_buscada = categoria
-            break
-    
-    # Lista para almacenar posibles coincidencias
-    coincidencias = []
-    
-    for producto in precios:
-        # Limpiar campos antes de buscar
-        sku_limpio = limpiar_nombre_imagen(producto.get('sku', ''), producto.get('imagen'))
-        modelo_limpio = limpiar_nombre_imagen(producto.get('modelo', ''), producto.get('imagen'))
-        servicio_limpio = limpiar_nombre_imagen(producto.get('servicio', ''), producto.get('imagen'))
-        categoria_limpio = limpiar_nombre_imagen(producto.get('categoria', ''), producto.get('imagen'))
-        descripcion_limpio = limpiar_nombre_imagen(producto.get('descripcion', ''), producto.get('imagen'))
-        
-        campos_busqueda = [
-            (sku_limpio, 10),           # SKU tiene mayor peso
-            (modelo_limpio, 8),         # Modelo tiene buen peso
-            (servicio_limpio, 7),       # Servicio/nombre
-            (categoria_limpio, 5),      # Categoría
-            (descripcion_limpio, 3)     # Descripción tiene menor peso
-        ]
-        
-        for campo, peso_base in campos_busqueda:
-            if not campo or campo == 'None':
-                continue
-                
-            campo_normalizado = normalizar_texto(campo)
-            if not campo_normalizado:
-                continue
-            
-            puntuacion = 0
-            
-            # Bonus por coincidencia de categoría si el usuario especificó una
-            if categoria_buscada:
-                if categoria_buscada in campo_normalizado:
-                    puntuacion += 20
-                if categoria_buscada in normalizar_texto(producto.get('categoria', '')):
-                    puntuacion += 15
-            
-            # Coincidencia exacta (máxima prioridad)
-            if campo_normalizado == texto_normalizado:
-                puntuacion += 100
-            # El campo está contenido en el texto
-            elif campo_normalizado in texto_normalizado:
-                puntuacion += 80
-            # El texto está contenido en el campo
-            elif texto_normalizado in campo_normalizado:
-                puntuacion += 60
-            # Coincidencia de palabras (para búsquedas parciales)
-            else:
-                palabras_texto = set(texto_normalizado.split())
-                palabras_campo = set(campo_normalizado.split())
-                palabras_comunes = palabras_texto.intersection(palabras_campo)
-                
-                if palabras_comunes:
-                    # Puntuación basada en el número de palabras comunes
-                    puntuacion += len(palabras_comunes) * 20
-            
-            # Aplicar peso base del campo
-            if puntuacion > 0:
-                puntuacion *= peso_base / 5  # Normalizar el peso
-                
-                coincidencias.append({
-                    'producto': producto,
-                    'campo': campo,
-                    'puntuacion': puntuacion,
-                    'sku': producto.get('sku', '')
-                })
-    
-    # Ordenar por puntuación y devolver el mejor resultado
-    if coincidencias:
-        mejor_coincidencia = max(coincidencias, key=lambda x: x['puntuacion'])
-        # Solo devolver si la puntuación es suficientemente alta
-        if mejor_coincidencia['puntuacion'] > 50:
-            app.logger.info(f"✅ Mejor coincidencia: '{mejor_coincidencia['campo']}' -> SKU: {mejor_coincidencia['sku']} (puntuación: {mejor_coincidencia['puntuacion']})")
-            return mejor_coincidencia['sku']
-    
-    app.logger.info(f"❌ No se encontraron coincidencias para: '{texto}'")
+    texto_lower = texto.lower()
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        # Check SKU and modelo presence (case-insensitive)
+        if sku and sku.lower() in texto_lower:
+            return sku
+        if modelo and modelo.lower() in texto_lower:
+            # prefer returning SKU if exists for that product
+            return sku or modelo
     return None
 
 # Agregar esta función para manejar el estado de la conversación
@@ -5625,67 +5075,10 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
 
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-
-
-        # Replace the webhook intervention block with this (inside the /webhook POST handler)
         if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            historial = obtener_historial(numero, limite=5, config=config)
-            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-
-            # Notify admins about the intervention (keep existing alert behaviour)
-            if info_intervencion:
-                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                enviar_alerta_intervencion_humana(info_intervencion, config)
-                respuesta_base = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
-            else:
-                respuesta_base = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-
-            # Try to obtain the next advisor (rotated) and include full contact in the reply
-            try:
-                asesor = get_next_asesor(numero, config)
-                if asesor:
-                    nombre = asesor.get('nombre') or 'Asesor'
-                    telefono = asesor.get('telefono') or ''
-                    # Normalize digits for wa.me link
-                    tel_digits = re.sub(r'\D', '', telefono)
-                    wa_link = ''
-                    if tel_digits:
-                        # If local 10-digit (Mexico), prepend country code 52
-                        if len(tel_digits) == 10:
-                            wa_link = f"https://wa.me/52{tel_digits}"
-                        else:
-                            wa_link = f"https://wa.me/{tel_digits}"
-
-                    mensaje_asesor = (
-                        f"{respuesta_base}\n\n"
-                        f"📞 *Contacto de asesor de ventas*\n"
-                        f"👤 {nombre}\n"
-                        f"📱 {telefono or 'No disponible'}\n"
-                        f"{('🔗 ' + wa_link) if wa_link else ''}\n\n"
-                        "¿Quieres que te pase otro contacto? Responde 'otro asesor' y te paso otro."
-                    )
-
-                    enviar_mensaje(numero, mensaje_asesor, config)
-                    guardar_conversacion(numero, texto, mensaje_asesor, config)
-                    app.logger.info(f"✅ Contacto de asesor enviado inline a {numero}: {nombre} {telefono}")
-                else:
-                    # Fallback: send the generic message if no advisors configured
-                    enviar_mensaje(numero, respuesta_base, config)
-                    guardar_conversacion(numero, texto, respuesta_base, config)
-                    app.logger.info("ℹ️ No hay asesores configurados; enviado mensaje genérico al usuario")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error enviando contacto de asesor inline: {e}")
-                # Ensure user still gets the base response
-                try:
-                    enviar_mensaje(numero, respuesta_base, config)
-                    guardar_conversacion(numero, texto, respuesta_base, config)
-                except Exception as ex:
-                    app.logger.error(f"🔴 Falló envío fallback: {ex}")
-
-            # Update kanban and finish
-            actualizar_kanban(numero, columna_id=1, config=config)
-            return 'OK', 200
+            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
+            resumen = resumen_rafa(numero, config)
+            enviar_alerta_humana(numero, texto, resumen, config)
 
         # KANBAN AUTOMÁTICO
         meta = obtener_chat_meta(numero, config)
@@ -6006,32 +5399,25 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
     except Exception as e:
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
-
+# REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-
+    
     # Validar texto
     if not texto or str(texto).strip() == '':
         app.logger.error("🔴 ERROR: Texto de mensaje vacío")
         return False
-
-    # Convertir HTML/ETags a formato WhatsApp para evitar que se vea "raro" en cliente móvil
-    try:
-        texto_limpio = html_to_whatsapp(texto)
-    except Exception as e:
-        app.logger.warning(f"⚠️ html_to_whatsapp falló: {e}")
-        texto_limpio = str(texto).strip()
-
-    # Log corto para depuración (puedes aumentar nivel a DEBUG)
-    app.logger.info(f"📤 Enviando (truncated) to {numero}: {texto_limpio[:400]}")
-
+    
+    texto_limpio = str(texto).strip()
+    
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config["whatsapp_token"]}',
         'Content-Type': 'application/json'
     }
-
+    
+    # ✅ PAYLOAD CORRECTO
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
@@ -6042,16 +5428,18 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        app.logger.info(f"📥 Graph API status: {r.status_code} - response: {r.text[:200]}")
-        if r.status_code in (200, 201, 202):
+        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
+        r = requests.post(url, headers=headers, json=payload, timeout=10)
+        
+        if r.status_code == 200:
             app.logger.info("✅ Mensaje enviado")
             return True
         else:
-            app.logger.error(f"🔴 Error al enviar mensaje ({r.status_code}): {r.text}")
+            app.logger.error(f"🔴 Error {r.status_code}: {r.text}")
             return False
+            
     except Exception as e:
-        app.logger.error(f"🔴 Exception enviando mensaje: {e}")
+        app.logger.error(f"🔴 Exception: {e}")
         return False
 
 @app.route('/actualizar-contactos')
@@ -6460,7 +5848,6 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
-
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6468,38 +5855,26 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
     if config is None:
         app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return False
+        return
     
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
     mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
     mensaje += f"👤 *Cliente:* {numero_cliente}\n"
     mensaje += f"📞 *Número:* {numero_cliente}\n"
     mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
     mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
     mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n{contexto_consulta}\n\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
+    mensaje += f"{contexto_consulta}\n\n"
     mensaje += f"_________________________________________\n"
     mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
-
-    # Usar configuración principal (default tenant) para enviar a administradores
-    admin_config = NUMEROS_CONFIG.get('524495486142') or obtener_configuracion_por_host()
-    enviados = []
-    try:
-        # Enviar a ALERT_NUMBER si está definido
-        if ALERT_NUMBER:
-            ok = enviar_mensaje(ALERT_NUMBER, mensaje, admin_config)
-            app.logger.info(f"📤 Envío ALERT_NUMBER ({ALERT_NUMBER}) -> ok={ok}")
-            enviados.append((ALERT_NUMBER, ok))
-        # Enviar a ambos administradores fijos (E.164 sin +)
-        for admin in ['5214493432744', '5214491182201']:
-            ok = enviar_mensaje(admin, mensaje, admin_config)
-            app.logger.info(f"📤 Envío admin {admin} -> ok={ok}")
-            enviados.append((admin, ok))
-        app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {admin_config.get('dominio')}")
-        # Return True only if at least one succeeded
-        return any(ok for _, ok in enviados)
-    except Exception as e:
-        app.logger.error(f"🔴 Error enviando alerta humana: {e}")
-        return False
+    
+    # Enviar mensaje normal (sin template) a tu número personal
+    enviar_mensaje(ALERT_NUMBER, mensaje, config)
+    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
+    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
@@ -6934,76 +6309,21 @@ def webhook():
             return 'OK', 200
             # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
-        # Replace the webhook intervention block with this (inside the /webhook POST handler)
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             historial = obtener_historial(numero, limite=5, config=config)
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-
-            # Notify admins about the intervention (keep existing alert behaviour)
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
                 enviar_alerta_intervencion_humana(info_intervencion, config)
-                respuesta_base = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
+                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
-                respuesta_base = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-
-            # --- DIAGNÓSTICO ADICIONAL: listar asesores disponibles ---
-            try:
-                asesores_lista = get_asesores_from_config(config) or []
-                app.logger.info(f"🔎 Asesores obtenidos (count={len(asesores_lista)}): {asesores_lista}")
-            except Exception as e:
-                asesores_lista = []
-                app.logger.warning(f"⚠️ Falló lectura de asesores para diagnóstico: {e}")
-
-            # Try to obtain the next advisor (rotated) and include full contact in the reply
-            try:
-                asesor = get_next_asesor(numero, config)
-                app.logger.info(f"🔁 get_next_asesor returned: {asesor}")
-                if asesor:
-                    nombre = asesor.get('nombre') or 'Asesor'
-                    telefono = asesor.get('telefono') or ''
-                    # Normalize digits for wa.me link
-                    tel_digits = re.sub(r'\D', '', telefono)
-                    wa_link = ''
-                    if tel_digits:
-                        # If local 10-digit (Mexico), prepend country code 52
-                        if len(tel_digits) == 10:
-                            wa_link = f"https://wa.me/52{tel_digits}"
-                        else:
-                            wa_link = f"https://wa.me/{tel_digits}"
-
-                    mensaje_asesor = (
-                        f"{respuesta_base}\n\n"
-                        f"📞 *Contacto de asesor de ventas*\n"
-                        f"👤 {nombre}\n"
-                        f"📱 {telefono or 'No disponible'}\n"
-                        f"{('🔗 ' + wa_link) if wa_link else ''}\n\n"
-                        "¿Quieres que te pase otro contacto? Responde 'otro asesor' y te paso otro."
-                    )
-
-                    ok = enviar_mensaje(numero, mensaje_asesor, config)
-                    app.logger.info(f"📤 Envío contacto asesor a {numero} -> ok={ok}")
-                    guardar_conversacion(numero, texto, mensaje_asesor, config)
-                    app.logger.info(f"✅ Contacto de asesor enviado inline a {numero}: {nombre} {telefono}")
-                else:
-                    # Fallback: send the generic message if no advisors configured
-                    app.logger.info("ℹ️ get_next_asesor devolvió None — enviando mensaje base genérico")
-                    enviar_mensaje(numero, respuesta_base, config)
-                    guardar_conversacion(numero, texto, respuesta_base, config)
-                    app.logger.info("ℹ️ No hay asesores configurados; enviado mensaje genérico al usuario")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error enviando contacto de asesor inline: {e}")
-                # Ensure user still gets the base response
-                try:
-                    enviar_mensaje(numero, respuesta_base, config)
-                    guardar_conversacion(numero, texto, respuesta_base, config)
-                except Exception as ex:
-                    app.logger.error(f"🔴 Falló envío fallback: {ex}")
-
-            # Update kanban and finish
+                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
             actualizar_kanban(numero, columna_id=1, config=config)
             return 'OK', 200
+        
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
         # ⛔ Se elimina llamada inválida con columna_id indefinido
@@ -7015,83 +6335,6 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
-@app.route('/debug-sku/<sku>')
-def debug_sku(sku):
-    """
-    Devuelve info de imágenes vinculadas al SKU y si los archivos existen.
-    Útil para comprobar por qué el bot dice 'no existe' pero igual muestra imagen.
-    """
-    config = obtener_configuracion_por_host()
-    try:
-        sku_input = (sku or '').strip()
-        if not sku_input:
-            return jsonify({'error': 'SKU vacío'}), 400
-
-        # Obtener imágenes asociadas (desde la tabla imagenes_productos)
-        imagenes = obtener_imagenes_por_sku(sku_input, config) or []
-
-        detalles = []
-        dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
-        if not dominio.startswith('http'):
-            base = f"https://{dominio}"
-        else:
-            base = dominio
-
-        for img in imagenes:
-            filename = img.get('filename')
-            path = img.get('path')
-            exists_disk = os.path.isfile(path) if path else False
-            public_url = f"{base}/uploads/productos/{filename}" if filename else None
-            detalles.append({
-                'filename': filename,
-                'path': path,
-                'exists_on_disk': exists_disk,
-                'public_url': public_url,
-                'sheet': img.get('sheet'),
-                'row_num': img.get('row_num'),
-                'col_num': img.get('col_num'),
-                'created_at': img.get('created_at').isoformat() if img.get('created_at') else None
-            })
-
-        # If no images found, attempt a fuzzy filename search in uploads/productos
-        if not detalles:
-            productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-            posibles = []
-            try:
-                for fname in os.listdir(productos_dir):
-                    if sku_input.lower().replace('-', '').replace('_', '') in fname.lower().replace('-', '').replace('_', ''):
-                        full = os.path.join(productos_dir, fname)
-                        posibles.append({
-                            'filename': fname,
-                            'path': full,
-                            'exists_on_disk': os.path.isfile(full),
-                            'public_url': f"{base}/uploads/productos/{fname}"
-                        })
-            except Exception as e:
-                app.logger.debug(f"⚠️ debug-sku scan error: {e}")
-
-            return jsonify({'sku': sku_input, 'imagenes_db': detalles, 'imagenes_posibles_en_folder': posibles})
-
-        return jsonify({'sku': sku_input, 'imagenes_db': detalles})
-
-    except Exception as e:
-        app.logger.error(f"🔴 debug-sku error: {e}")
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/debug-asesores')
-def debug_asesores():
-    """Devuelve la lista de asesores leída desde la tabla configuracion para el tenant actual"""
-    config = obtener_configuracion_por_host()
-    try:
-        asesores = get_asesores_from_config(config)
-        return jsonify({
-            'dominio': config.get('dominio'),
-            'db_name': config.get('db_name'),
-            'asesores': asesores
-        })
-    except Exception as e:
-        app.logger.error(f"🔴 debug-asesores error: {e}")
-        return jsonify({'error': str(e)}), 500
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
@@ -8407,9 +7650,8 @@ def data_deletion():
 
 @app.route('/test-alerta')
 def test_alerta():
-    config = obtener_configuracion_por_host()  # Obtener config antes
-    # Llamada corregida: enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config)
-    enviar_alerta_humana('5214493432744', 'Mensaje clave de prueba', 'Resumen de prueba.', config)
+    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
     return "🚀 Test alerta disparada."
 
 def obtener_chat_meta(numero, config=None):
@@ -8664,32 +7906,26 @@ def actualizar_info_contacto(numero, config=None):
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    try:
+        if config is None:
+            config = obtener_configuracion_por_host()
+    
         historial = obtener_historial(numero, limite=5, config=config)
-
+        
         # Si es primer mensaje, mantener en "Nuevos"
         if len(historial) <= 1:
             return 1  # Nuevos
-
-        # CORRECCIÓN: llamar detectar_intervencion_humana_ia con (mensaje, numero, config)
-        if detectar_intervencion_humana_ia(mensaje, numero, config):
+        
+        # Si hay intervención humana, mover a "Esperando Respuesta"
+        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
             return 3  # Esperando Respuesta
-
+        
         # Si tiene más de 2 mensajes, mover a "En Conversación"
         if len(historial) >= 2:
             return 2  # En Conversación
-
+        
         # Si no cumple nada, mantener donde está
-        meta = obtener_chat_meta(numero, config)
+        meta = obtener_chat_meta(numero)
         return meta['columna_id'] if meta else 1
-
-    except Exception as e:
-        app.logger.error(f"Error evaluando movimiento automático: {e}")
-        # En caso de error, no interrumpir flujo; devolver columna 2 (en conversación) como fallback
-        return 2
 
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
