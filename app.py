@@ -3199,8 +3199,8 @@ def guardar_cita(info_cita, config=None):
                 tipo VARCHAR(20),
                 resumen TEXT,
                 estado VARCHAR(20) DEFAULT 'pendiente',
-                mensaje text,
-                evaluacion_ia json,
+                mensaje TEXT,
+                evaluacion_ia JSON,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 calendar_event_id VARCHAR(255),
                 INDEX idx_numero (numero),
@@ -3208,7 +3208,31 @@ def guardar_cita(info_cita, config=None):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
         conn.commit()
-        
+
+        # Asegurarnos de que las columnas esperadas EXISTAN (por si la tabla venía de esquema antiguo)
+        try:
+            cursor.execute("SHOW COLUMNS FROM notificaciones_ia")
+            existing_cols = {row[0] for row in cursor.fetchall()}
+            required = {
+                'tipo': "VARCHAR(20)",
+                'resumen': "TEXT",
+                'estado': "VARCHAR(20) DEFAULT 'pendiente'",
+                'mensaje': "TEXT",
+                'evaluacion_ia': "JSON",
+                'calendar_event_id': "VARCHAR(255)"
+            }
+            alters = []
+            for col, col_def in required.items():
+                if col not in existing_cols:
+                    alters.append(f"ADD COLUMN {col} {col_def}")
+            if alters:
+                sql = f"ALTER TABLE notificaciones_ia {', '.join(alters)}"
+                cursor.execute(sql)
+                conn.commit()
+                app.logger.info(f"🔧 Columnas añadidas a notificaciones_ia: {', '.join([a.split()[2] for a in alters])}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar columnas en notificaciones_ia: {e}")
+
         # Guardar en tabla citas
         cursor.execute('''
             INSERT INTO citas (
@@ -3252,12 +3276,21 @@ def guardar_cita(info_cita, config=None):
             if service:
                 evento_id = crear_evento_calendar(service, info_cita, config)
                 if evento_id:
-                    # Guardar el ID del evento en la base de datos
-                    cursor.execute('''
-                        UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                    ''', (evento_id, cita_id))
-                    conn.commit()
-                    app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    # Asegurarnos de que la columna exista antes de actualizar citas
+                    try:
+                        cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
+                        if cursor.fetchone() is None:
+                            cursor.execute("ALTER TABLE citas ADD COLUMN evento_calendar_id VARCHAR(255) DEFAULT NULL")
+                            conn.commit()
+                            app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
+
+                        cursor.execute('''
+                            UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                        ''', (evento_id, cita_id))
+                        conn.commit()
+                        app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    except Exception as e:
+                        app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
         
         # Guardar en notificaciones_ia
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
