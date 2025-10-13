@@ -4248,6 +4248,11 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
+def limpiar_nombre_imagen(texto, imagen_filename):
+    if not texto or not imagen_filename:
+        return texto
+    return texto.replace(imagen_filename, '').replace(f"{imagen_filename} ", '').replace(f" {imagen_filename}", '').strip()
+
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4268,14 +4273,12 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     
     # Si encontramos un producto, preparar respuesta coherente
     if producto_encontrado:
-        # Construir respuesta informativa sobre el producto
-        nombre = producto_encontrado.get('servicio') or producto_encontrado.get('modelo') or 'Producto'
-        descripcion = producto_encontrado.get('descripcion', 'Sin descripción disponible')
         precio = producto_encontrado.get('precio_menudeo') or producto_encontrado.get('precio_mayoreo') or producto_encontrado.get('costo', 'Consultar')
         imagen = producto_encontrado.get('imagen', '')
-        categoria = producto_encontrado.get('categoria', '')
-        medidas = producto_encontrado.get('medidas', '')
-        
+        nombre = limpiar_nombre_imagen(producto_encontrado.get('servicio') or producto_encontrado.get('modelo') or 'Producto', imagen)
+        descripcion = limpiar_nombre_imagen(producto_encontrado.get('descripcion', 'Sin descripción disponible'), imagen)
+        categoria = limpiar_nombre_imagen(producto_encontrado.get('categoria', ''), imagen)
+        medidas = limpiar_nombre_imagen(producto_encontrado.get('medidas', ''), imagen)
         respuesta_producto = f"🔍 *{nombre}*\n\n"
         
         if descripcion and descripcion.strip() and descripcion != 'None':
@@ -5413,6 +5416,9 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         if not dominio.startswith('http'):
                             dominio = f"https://{dominio}"
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
+                        if image_url:
+                            respuesta_producto = limpiar_nombre_imagen(respuesta_producto, image_url)
+
                         enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
                         guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
                 else:
