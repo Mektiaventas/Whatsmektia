@@ -1355,7 +1355,7 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         # 1) Obtener catálogo resumido para contexto (limitado para no exceder tokens)
         precios = obtener_todos_los_precios(config) or []
         productos_lines = []
-        for p in precios[:30]:
+        for p in precios[:1000]:
             nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
@@ -4067,7 +4067,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    for p in precios[:40]:
+    for p in precios[:1000]:
         try:
              # Helper: limpiar valores que contengan el nombre/marker de la imagen
             def _clean_field(val, imagen_name):
