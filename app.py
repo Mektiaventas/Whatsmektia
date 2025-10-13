@@ -6466,7 +6466,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
-            'necesito', 'requiero', 'me interesa', 'información', 'solicitar'
+            'necesito', 'requiero', 'me interesa', 'información', 'solicitar', 'comprar'
         ]
     
     # Verificar si contiene palabras clave principales
