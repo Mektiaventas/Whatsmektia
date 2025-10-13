@@ -4066,32 +4066,32 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         
         info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
         
-    if info_cita and info_cita.get('servicio_solicitado'):
-        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        if info_cita and info_cita.get('servicio_solicitado'):
+            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
             
-        if datos_completos:
-            # Guardar cita completa
-            cita_id = guardar_cita(info_cita, config)
-            if cita_id:
-                enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
+            if datos_completos:
+                # Guardar cita completa
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
+            else:
+                # Pedir datos faltantes de manera conversacional
+                mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
+                
+                if 'fecha' in faltantes:
+                    mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
+                if 'hora' in faltantes:
+                    mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
+                if 'nombre' in faltantes:
+                    mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
+                
+                mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
+                return mensaje_faltantes
         else:
-            # Pedir datos faltantes de manera conversacional
-            mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                
-            if 'fecha' in faltantes:
-                mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
-            if 'hora' in faltantes:
-                mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
-            if 'nombre' in faltantes:
-                mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                
-            mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
-            return mensaje_faltantes
-    else:
-        # No hay información específica, pedir general
-        return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
+            # No hay información específica, pedir general
+            return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
     
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
