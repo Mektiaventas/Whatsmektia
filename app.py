@@ -3845,7 +3845,7 @@ def enviar_documento(numero, file_url, filename, config=None):
             }
         }
         app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
+
         app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
         if r.status_code in (200, 201, 202):
             app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
@@ -4665,6 +4665,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
         }
 
         app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
         if r.status_code in (200, 201, 202):
             app.logger.info("✅ Imagen enviada correctamente")
             return True
