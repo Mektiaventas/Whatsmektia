@@ -4165,20 +4165,20 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         try:
             # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
             imagen = (p.get('imagen') or '').strip()
-        
+            
             # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
-            sku = sanitize_whatsapp_text(p.get('sku', ''))
-            modelo = sanitize_whatsapp_text(p.get('modelo', ''))
+            sku = _clean_field(p.get('sku'), imagen)
+            modelo = _clean_field(p.get('modelo'), imagen)
             titulo = modelo or sku or 'Sin identificador'
-            categoria = sanitize_whatsapp_text(p.get('categoria', ''))
-            subcategoria = sanitize_whatsapp_text(p.get('subcategoria', ''))
-            linea = sanitize_whatsapp_text(p.get('linea', ''))
-            descripcion_p = sanitize_whatsapp_text(p.get('descripcion', ''))
-            medidas = sanitize_whatsapp_text(p.get('medidas', ''))
-            proveedor = sanitize_whatsapp_text(p.get('proveedor', ''))
-            status = sanitize_whatsapp_text(p.get('status_ws', '')) or 'activo'
-            catalogo = sanitize_whatsapp_text(p.get('catalogo', ''))
-        
+            categoria = _clean_field(p.get('categoria'), imagen)
+            subcategoria = _clean_field(p.get('subcategoria'), imagen)
+            linea = _clean_field(p.get('linea'), imagen)
+            descripcion_p = _clean_field(p.get('descripcion'), imagen)
+            medidas = _clean_field(p.get('medidas'), imagen)
+            proveedor = _clean_field(p.get('proveedor'), imagen)
+            status = _clean_field(p.get('status_ws'), imagen) or 'activo'
+            catalogo = _clean_field(p.get('catalogo'), imagen)
+            
             # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
@@ -4191,7 +4191,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
-            
+                
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4199,7 +4199,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-                
+                    
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4225,7 +4225,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-        
+            
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
@@ -4328,24 +4328,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        respuesta = data['choices'][0]['message']['content']
-
-        # Manejo de posibles estructuras multimodales (lista/dict)
-        if isinstance(respuesta, list):
-            parts = []
-            for item in respuesta:
-                if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
-                    parts.append(item.get('text'))
-                elif isinstance(item, str):
-                    parts.append(item)
-            respuesta = "\n".join(parts)
-        else:
-            respuesta = str(respuesta or '').strip()
-
-        # Aplicar restricciones de negocio y luego limpieza final para quitar artefactos de filenames
+        respuesta = data['choices'][0]['message']['content'].strip()
         respuesta = aplicar_restricciones(respuesta, numero, config)
-        respuesta = clean_ai_response(respuesta)
-
         return respuesta
 
     except requests.exceptions.RequestException as e:
@@ -6543,7 +6527,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
-            ,'quiero comprar'
+
         ]
     
     # Verificar si contiene palabras clave principales
@@ -7027,41 +7011,6 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
-
-def clean_ai_response(text):
-    """
-    Limpia artefactos comunes generados por extracción de .xlsx (.zip) y nombres de archivo
-    repetidos en las respuestas de la IA, preservando URLs completas.
-    """
-    if not text:
-        return text
-    try:
-        # Eliminar ocurrencias de nombres de imagen generados por unzip/openpyxl
-        # Solo eliminar si NO están precedidos por "/" (evita borrar partes de URLs)
-        text = re.sub(r'(?<!/)\bexcel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
-        text = re.sub(r'(?<!/)\bexcel_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
-        text = re.sub(r'(?<!/)\bproducto_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
-
-        # Eliminar repeticiones redundantes como "Imagen: Imagen: ..." o tokens duplicados
-        text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
-
-        # Quitar extensiones sueltas que quedaron pegadas a palabras (pero solo si no forman parte de una URL)
-        text = re.sub(r'(?<!/)\.(?:png|jpg|jpeg|gif|webp)\b', ' ', text, flags=re.IGNORECASE)
-
-        # Normalizar espacios y saltos de línea
-        text = re.sub(r'\s*\n\s*', '\n', text)
-        text = re.sub(r'[ \t]{2,}', ' ', text)
-        text = re.sub(r'\n{3,}', '\n\n', text)
-        text = re.sub(r' {2,}', ' ', text)
-
-        # Limpiar espacios sobrantes alrededor de signos de puntuación
-        text = re.sub(r'\s+([,;:\.\-])', r'\1', text)
-        text = text.strip()
-
-        return text
-    except Exception as e:
-        app.logger.warning(f"⚠️ clean_ai_response falló: {e}")
-        return text
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
