@@ -4182,14 +4182,17 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             tiene_imagen_valida = False
             url_imagen = None
             
-            if imagen_name_original and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name_original)):
+            # Inside responder_con_ia, when building the image URL:
+            if imagen_name_original and isinstance(imagen_name_original, str) and imagen_name_original.strip() and not re.search(r'excel_unzip_img_\d+_\d+\.png', imagen_name_original):
                 tiene_imagen_valida = True
-                # Generar URL completa de la imagen CON EL NOMBRE DEL ARCHIVO
                 if imagen_name_original.startswith('http'):
                     url_imagen = imagen_name_original
                 else:
-                    # 🔥 INCLUIR EL NOMBRE REAL DEL ARCHIVO EN LA URL
-                    url_imagen = f"https://{dominio_publico}/uploads/productos/{imagen_name_original}"
+                    url_imagen = f"https://{dominio_publico}/uploads/productos/{imagen_name_original.strip()}"
+                parts.append(f"Imagen_URL: {url_imagen}")
+            elif imagen_name_original and imagen_name_original.strip():
+                # If only filename, but not valid, show as "Imagen disponible"
+                parts.append(f"Imagen disponible")
             
             # Formateo del producto
             parts = []
