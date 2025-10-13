@@ -3270,7 +3270,7 @@ def guardar_cita(info_cita, config=None):
                 fecha_actual = datetime.now().date()
                 
                 # Solo agendar si la fecha es al menos un día después
-                if (fecha_cita - fecha_actual).days >= 1:
+                if (fecha_cita - fecha_actual).days >= 0:
                     debe_agendar = True
                     app.logger.info(f"✅ Cita para fecha futura ({fecha_cita}), se agendará en Calendar")
                 else:
