@@ -4130,31 +4130,21 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 except Exception:
                     return str(val).strip()
 
-            sku = (p.get('sku') or '').strip()
-            modelo = (p.get('modelo') or '').strip()
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = (p.get('categoria') or '').strip()
-            subcategoria = (p.get('subcategoria') or '').strip()
-            linea = (p.get('linea') or '').strip()
-            descripcion_p = (p.get('descripcion') or '').strip()
-            medidas = (p.get('medidas') or '').strip()
-            proveedor = (p.get('proveedor') or '').strip()
-            status = (p.get('status_ws') or 'activo').strip()
-            catalogo = (p.get('catalogo') or '')
-            imagen = (p.get('imagen') or '').strip()
-            if imagen:
-                if imagen.lower().startswith('http'):
-                    imagen_url = imagen
-                else:
-                    if dominio_publico.startswith('http'):
-                        base = dominio_publico.rstrip('/')
-                    else:
-                        base = f"https://{dominio_publico}"
-                    imagen_url = f"{base}/uploads/productos/{imagen}"
-            else:
-                imagen_url = ''
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
-            precio_str = ''
+                # Clean each field
+                imagen_name = p.get('imagen')
+                sku = _clean_field(p.get('sku'), imagen_name)
+                modelo = _clean_field(p.get('modelo'), imagen_name)
+                titulo = modelo or sku or 'Sin identificador'
+                categoria = _clean_field(p.get('categoria'), imagen_name)
+                subcategoria = _clean_field(p.get('subcategoria'), imagen_name)
+                linea = _clean_field(p.get('linea'), imagen_name)
+                descripcion_p = _clean_field(p.get('descripcion'), imagen_name)
+                medidas = _clean_field(p.get('medidas'), imagen_name)
+                proveedor = _clean_field(p.get('proveedor'), imagen_name)
+                status = _clean_field(p.get('status_ws'), imagen_name) or 'activo'
+                catalogo = _clean_field(p.get('catalogo'), imagen_name)
+                precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+                precio_str = ''
             if precio_menudeo:
                 try:
                     precio_str = f"${float(precio_menudeo):,.2f}"
