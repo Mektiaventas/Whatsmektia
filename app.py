@@ -5000,7 +5000,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         else:
                             # No local image found; inform user (record as bot response)
                             app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
-                            enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
                             guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
             else:
                 app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
