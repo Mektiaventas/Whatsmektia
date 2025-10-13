@@ -4147,17 +4147,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             status = p.get('status_ws') or 'activo'
             catalogo = p.get('catalogo')
             imagen = (p.get('imagen') or '').strip()
-            
-                
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
-            precio_str = ''
-            if precio_menudeo:
-                try:
-                    precio_str = f"${float(precio_menudeo):,.2f}"
-                except Exception:
-                    precio_str = str(precio_menudeo)
-                    
-            parts = [f"{titulo}"]
             # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
@@ -4170,6 +4159,16 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
+                
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+            precio_str = ''
+            if precio_menudeo:
+                try:
+                    precio_str = f"${float(precio_menudeo):,.2f}"
+                except Exception:
+                    precio_str = str(precio_menudeo)
+                    
+            parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
             if categoria:
