@@ -4130,51 +4130,49 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 except Exception:
                     return str(val).strip()
 
-                # Clean each field
-                imagen_name = p.get('imagen')
-                sku = _clean_field(p.get('sku'), imagen_name)
-                modelo = _clean_field(p.get('modelo'), imagen_name)
-                titulo = modelo or sku or 'Sin identificador'
-                categoria = _clean_field(p.get('categoria'), imagen_name)
-                subcategoria = _clean_field(p.get('subcategoria'), imagen_name)
-                linea = _clean_field(p.get('linea'), imagen_name)
-                descripcion_p = _clean_field(p.get('descripcion'), imagen_name)
-                medidas = _clean_field(p.get('medidas'), imagen_name)
-                proveedor = _clean_field(p.get('proveedor'), imagen_name)
-                status = _clean_field(p.get('status_ws'), imagen_name) or 'activo'
-                catalogo = _clean_field(p.get('catalogo'), imagen_name)
-                precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
-                precio_str = ''
-                if precio_menudeo:
-                    try:
-                        precio_str = f"${float(precio_menudeo):,.2f}"
-                    except Exception:
-                        precio_str = str(precio_menudeo)
-                parts = [f"{titulo}"]
-                if sku:
-                    parts.append(f"(SKU: {sku})")
-                if categoria:
-                    parts.append(f"Categoria: {categoria}")
-                if subcategoria:
-                    parts.append(f"Subcategoria: {subcategoria}")
-                if linea:
-                    parts.append(f"Linea: {linea}")
-                if precio_str:
-                    parts.append(f"Precio: {precio_str}")
-                if medidas:
-                    parts.append(f"Medidas: {medidas}")
-                if proveedor:
-                    parts.append(f"Proveedor: {proveedor}")
-                if catalogo:
-                    parts.append(f"Catalogo: {catalogo}")
-                if imagen_url:
-                    parts.append(f"Imagen: {imagen_url}")
-                elif imagen:
-                    parts.append(f"Imagen: {imagen}")
-                if descripcion_p:
-                    parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-                producto_line = " | ".join(parts)
-                producto_line += f" | Status: {status}"
+            # Clean each field
+            imagen_name = p.get('imagen')
+            sku = _clean_field(p.get('sku'), imagen_name)
+            modelo = _clean_field(p.get('modelo'), imagen_name)
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = _clean_field(p.get('categoria'), imagen_name)
+            subcategoria = _clean_field(p.get('subcategoria'), imagen_name)
+            linea = _clean_field(p.get('linea'), imagen_name)
+            descripcion_p = _clean_field(p.get('descripcion'), imagen_name)
+            medidas = _clean_field(p.get('medidas'), imagen_name)
+            proveedor = _clean_field(p.get('proveedor'), imagen_name)
+            status = _clean_field(p.get('status_ws'), imagen_name) or 'activo'
+            catalogo = _clean_field(p.get('catalogo'), imagen_name)
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+            precio_str = ''
+            if precio_menudeo:
+                try:
+                    precio_str = f"${float(precio_menudeo):,.2f}"
+                except Exception:
+                    precio_str = str(precio_menudeo)
+            parts = [f"{titulo}"]
+            if sku:
+                parts.append(f"(SKU: {sku})")
+            if categoria:
+                parts.append(f"Categoria: {categoria}")
+            if subcategoria:
+                parts.append(f"Subcategoria: {subcategoria}")
+            if linea:
+                parts.append(f"Linea: {linea}")
+            if precio_str:
+                parts.append(f"Precio: {precio_str}")
+            if medidas:
+                parts.append(f"Medidas: {medidas}")
+            if proveedor:
+                parts.append(f"Proveedor: {proveedor}")
+            if catalogo:
+                parts.append(f"Catalogo: {catalogo}")
+            if imagen_name:
+                parts.append(f"Imagen: {imagen_name}")
+            if descripcion_p:
+                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+            producto_line = " | ".join(parts)
+            producto_line += f" | Status: {status}"
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
