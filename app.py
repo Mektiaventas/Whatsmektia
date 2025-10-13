@@ -4158,6 +4158,18 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = str(precio_menudeo)
                     
             parts = [f"{titulo}"]
+            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
+            if imagen:
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
+                    else:
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+            else:
+                imagen_url = ''
             if sku:
                 parts.append(f"(SKU: {sku})")
             if categoria:
@@ -4174,24 +4186,13 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
-            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
-            if imagen:
-                if imagen.lower().startswith('http'):
-                    imagen_url = imagen
-                else:
-                    if dominio_publico.startswith('http'):
-                        base = dominio_publico.rstrip('/')
-                    else:
-                        base = f"https://{dominio_publico}"
-                    imagen_url = f"{base}/uploads/productos/{imagen}"
-            else:
-                imagen_url = ''
+            
+            if descripcion_p:
+                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             if imagen_url:
                 parts.append(f"Imagen: {imagen_url}")
             elif imagen:
                 parts.append(f"Imagen: {imagen}")
-            if descripcion_p:
-                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
             
