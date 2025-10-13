@@ -1355,7 +1355,7 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         # 1) Obtener catálogo resumido para contexto (limitado para no exceder tokens)
         precios = obtener_todos_los_precios(config) or []
         productos_lines = []
-        for p in precios[:30]:
+        for p in precios[:1000]:
             nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
@@ -3270,7 +3270,7 @@ def guardar_cita(info_cita, config=None):
                 fecha_actual = datetime.now().date()
                 
                 # Solo agendar si la fecha es al menos un día después
-                if (fecha_cita - fecha_actual).days >= 1:
+                if (fecha_cita - fecha_actual).days >= -30:
                     debe_agendar = True
                     app.logger.info(f"✅ Cita para fecha futura ({fecha_cita}), se agendará en Calendar")
                 else:
@@ -4048,6 +4048,27 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
+# ... existing code ...
+# Helper: limpiar valores que contengan el nombre/marker de la imagen
+def _clean_field(val, imagen_name):
+    if not val:
+        return ''
+    try:
+        s = str(val).strip()
+        if not imagen_name:
+            return s
+        img = str(imagen_name).strip()
+        # eliminar coincidencias exactas del nombre de la imagen
+        if img and img in s:
+            s = s.replace(img, '')
+        # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+        s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+        # limpiar espacios sobrantes
+        s = re.sub(r'\s{2,}', ' ', s).strip()
+        return s
+    except Exception:
+        return str(val).strip()
+
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4060,34 +4081,55 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    info_cita = None  # Initialize to avoid UnboundLocalError
     
+    # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
+    if detectar_solicitud_cita_keywords(mensaje_usuario, config):
+        app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
+        
+        info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
+        
+        if info_cita and info_cita.get('servicio_solicitado'):
+            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+            
+            if datos_completos:
+                # Guardar cita completa
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
+            else:
+                # Pedir datos faltantes de manera conversacional
+                mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
+                
+                if 'fecha' in faltantes:
+                    mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
+                if 'hora' in faltantes:
+                    mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
+                if 'nombre' in faltantes:
+                    mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
+                
+                mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
+                return mensaje_faltantes
+        else:
+            # No hay información específica, pedir general
+            es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+            if es_porfirianna:
+                return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
+            else:
+                return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
+    
+    # ... existing code continues ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
     
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    for p in precios[:40]:
+    for p in precios[:1000]:
         try:
-             # Helper: limpiar valores que contengan el nombre/marker de la imagen
-            def _clean_field(val, imagen_name):
-                if not val:
-                    return ''
-                try:
-                    s = str(val).strip()
-                    if not imagen_name:
-                        return s
-                    img = str(imagen_name).strip()
-                    # eliminar coincidencias exactas del nombre de la imagen
-                    if img and img in s:
-                        s = s.replace(img, '')
-                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-                    # limpiar espacios sobrantes
-                    s = re.sub(r'\s{2,}', ' ', s).strip()
-                    return s
-                except Exception:
-                    return str(val).strip()
+             
 
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
@@ -4147,27 +4189,36 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
+         # Clean up image filenames from the formatted products text to prevent AI from including them in responses
+    productos_formateados = [re.sub(r'excel_unzip_img_\d+_\d+\.png', '', line) for line in productos_formateados]
+    productos_formateados = [re.sub(r'\b\w+\.png\b', '', line) for line in productos_formateados]
+    productos_formateados = [re.sub(r'\s+', ' ', line).strip() for line in productos_formateados]  # Clean extra spaces
+    productos_texto = "\n".join(productos_formateados)
+    if len(precios) > 40:
+        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
+
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
     system_prompt = f"""
-Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-Descripción del negocio: {descripcion}
+    Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+    Descripción del negocio: {descripcion}
 
-Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
 
-{productos_texto}
+    {productos_texto}
 
-Reglas:
-- Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
-- Siempre indica si la información no está disponible en la base de datos.
-- Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
-- No inventes descuentos, existencias ni detalles no presentes en los campos.
-- Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
-
-Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los campos relevantes.
-"""
+    Reglas:
+    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
+    - Siempre indica si la información no está disponible en la base de datos.
+    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
+    - No inventes descuentos, existencias ni detalles no presentes en los campos.
+    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
+    - Entrega al usuario un texto claro y conciso.
+    - No llenes el mensaje con basura.
+    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
+    """
 
     historial = obtener_historial(numero, config=config)
 
@@ -4243,7 +4294,13 @@ Si el usuario da un SKU o modelo exacto, devuelve un bloque informativo con los 
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
+                # Después de obtener respuesta de la IA
         respuesta = data['choices'][0]['message']['content'].strip()
+
+        # Limpieza mejorada
+        respuesta = re.sub(r'excel_unzip_img_\d+_\d+\.png', '[Imagen del producto]', respuesta)
+        respuesta = re.sub(r'\s+', ' ', respuesta).strip()
+        
         respuesta = aplicar_restricciones(respuesta, numero, config)
         return respuesta
 
@@ -5000,7 +5057,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         else:
                             # No local image found; inform user (record as bot response)
                             app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
-                            enviar_mensaje(numero, "Lo siento, no pude encontrar la imagen en nuestro sistema.", config)
                             guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
             else:
                 app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
@@ -6425,7 +6481,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
-            'necesito', 'requiero', 'me interesa', 'información', 'solicitar'
+            'necesito', 'requiero', 'me interesa', 'información', 'solicitar', 'comprar'
         ]
     
     # Verificar si contiene palabras clave principales

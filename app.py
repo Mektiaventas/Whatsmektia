@@ -4049,25 +4049,6 @@ def obtener_historial(numero, limite=5, config=None):
         return []
     
 # ... existing code ...
-# Helper: limpiar valores que contengan el nombre/marker de la imagen
-def _clean_field(val, imagen_name):
-    if not val:
-        return ''
-    try:
-        s = str(val).strip()
-        if not imagen_name:
-            return s
-        img = str(imagen_name).strip()
-        # eliminar coincidencias exactas del nombre de la imagen
-        if img and img in s:
-            s = s.replace(img, '')
-        # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-        s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-        # limpiar espacios sobrantes
-        s = re.sub(r'\s{2,}', ' ', s).strip()
-        return s
-    except Exception:
-        return str(val).strip()
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -4129,7 +4110,25 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     for p in precios[:1000]:
         try:
-             
+             # Helper: limpiar valores que contengan el nombre/marker de la imagen
+            def _clean_field(val, imagen_name):
+                if not val:
+                    return ''
+                try:
+                    s = str(val).strip()
+                    if not imagen_name:
+                        return s
+                    img = str(imagen_name).strip()
+                    # eliminar coincidencias exactas del nombre de la imagen
+                    if img and img in s:
+                        s = s.replace(img, '')
+                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+                    # limpiar espacios sobrantes
+                    s = re.sub(r'\s{2,}', ' ', s).strip()
+                    return s
+                except Exception:
+                    return str(val).strip()
 
             sku = (p.get('sku') or '').strip()
             modelo = (p.get('modelo') or '').strip()
@@ -4189,14 +4188,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
-         # Clean up image filenames from the formatted products text to prevent AI from including them in responses
-    productos_formateados = [re.sub(r'excel_unzip_img_\d+_\d+\.png', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\b\w+\.png\b', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\s+', ' ', line).strip() for line in productos_formateados]  # Clean extra spaces
-    productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
@@ -4215,8 +4206,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
     - No inventes descuentos, existencias ni detalles no presentes en los campos.
     - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
-    - Entrega al usuario un texto claro y conciso.
-    - No llenes el mensaje con basura.
+
     Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
     """
 
@@ -4294,13 +4284,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-                # Después de obtener respuesta de la IA
         respuesta = data['choices'][0]['message']['content'].strip()
-
-        # Limpieza mejorada
-        respuesta = re.sub(r'excel_unzip_img_\d+_\d+\.png', '[Imagen del producto]', respuesta)
-        respuesta = re.sub(r'\s+', ' ', respuesta).strip()
-        
         respuesta = aplicar_restricciones(respuesta, numero, config)
         return respuesta
 
