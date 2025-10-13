@@ -4109,12 +4109,31 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     
-
+    # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
+    def _clean_field(val, imagen_name):
+        if not val:
+            return ''
+        try:
+            s = str(val).strip()
+            if not imagen_name:
+                return s
+            img = str(imagen_name).strip()
+            # eliminar coincidencias exactas del nombre de la imagen
+            if img and img in s:
+                s = s.replace(img, '')
+            # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+            s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+            # limpiar espacios sobrantes
+            s = re.sub(r'\s{2,}', ' ', s).strip()
+            return s
+        except Exception:
+            return str(val).strip()
     
     for p in precios[:1000]:
         try:
             # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
-
+            imagen = (p.get('imagen') or '').strip()
+            
             # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
             sku = p.get('sku')
             modelo = p.get('modelo')
@@ -4127,8 +4146,20 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             proveedor = p.get('proveedor')
             status = p.get('status_ws') or 'activo'
             catalogo = p.get('catalogo')
-            
-           
+            imagen = (p.get('imagen') or '').strip()
+            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
+            if imagen:
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    if dominio_publico.startswith('http'):
+                        base = dominio_publico.rstrip('/')
+                    else:
+                        base = f"https://{dominio_publico}"
+                    imagen_url = f"{base}/uploads/productos/{imagen}"
+            else:
+                imagen_url = ''
+                
             precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
             precio_str = ''
             if precio_menudeo:
@@ -4154,6 +4185,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Proveedor: {proveedor}")
             if catalogo:
                 parts.append(f"Catalogo: {catalogo}")
+            if imagen_url:
+                parts.append(f"Imagen: {imagen_url}")
+            elif imagen:
+                parts.append(f"Imagen: {imagen}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
