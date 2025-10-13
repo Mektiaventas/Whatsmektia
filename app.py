@@ -4195,11 +4195,13 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
+    IMPORTANTE: Solo puedes responder usando la información del catálogo proporcionado abajo. 
+    NO uses conocimiento general, NO inventes productos, NO proporciones información que no esté en la lista.
 
     Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
 
     {productos_texto}
-
+    No respondar con informacion basura como esta: excel_unzip_img_335_1760366786.png 
     Reglas:
     - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
     - Siempre indica si la información no está disponible en la base de datos.
