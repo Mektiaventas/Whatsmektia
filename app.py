@@ -4147,7 +4147,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
     
-    # 🔥 NO FILTRAR PRODUCTOS - EN SU LUGAR, LIMPIAR CADA CAMPO INDIVIDUALMENTE
     # Procesamos TODOS los productos pero limpiamos cada campo
     productos_procesados = 0
     for p in precios[:1000]:
