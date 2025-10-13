@@ -4178,17 +4178,17 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 except Exception:
                     precio_str = str(precio_menudeo)
             
-            # 🔥 DETERMINAR SI TIENE IMAGEN VÁLIDA Y GENERAR URL
+            # 🔥 DETERMINAR SI TIENE IMAGEN VÁLIDA Y GENERAR URL COMPLETA
             tiene_imagen_valida = False
             url_imagen = None
             
             if imagen_name_original and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name_original)):
                 tiene_imagen_valida = True
-                # Generar URL completa de la imagen
+                # Generar URL completa de la imagen CON EL NOMBRE DEL ARCHIVO
                 if imagen_name_original.startswith('http'):
                     url_imagen = imagen_name_original
                 else:
-                    # Asumiendo que tus imágenes están en una carpeta específica
+                    # 🔥 INCLUIR EL NOMBRE REAL DEL ARCHIVO EN LA URL
                     url_imagen = f"{dominio_publico}/images/productos/{imagen_name_original}"
             
             # Formateo del producto
@@ -4212,9 +4212,9 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if catalogo:
                 parts.append(f"Catálogo: {catalogo}")
             
-            # 🔥 INCLUIR URL DE IMAGEN SI ES VÁLIDA - ESTO ES CLAVE
+            # 🔥 INCLUIR URL COMPLETA DE IMAGEN CON NOMBRE DE ARCHIVO
             if tiene_imagen_valida and url_imagen:
-                parts.append(f"Imagen: {url_imagen}")
+                parts.append(f"Imagen_URL: {url_imagen}")
             elif tiene_imagen_valida:
                 parts.append(f"Imagen disponible")
                 
@@ -4233,7 +4233,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     
     productos_texto = "\n".join(productos_formateados)
     
-    # 🔥 SYSTEM PROMPT MEJORADO CON INSTRUCCIONES EXPLÍCITAS PARA MOSTRAR IMÁGENES
+    # 🔥 SYSTEM PROMPT MEJORADO CON INSTRUCCIONES MÁS ESPECÍFICAS
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
@@ -4242,25 +4242,25 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     {productos_texto}
 
     REGLAS CRÍTICAS SOBRE IMÁGENES:
-    1. ✅ CUANDO UN PRODUCTO TENGA "Imagen: [URL]" en el catálogo, DEBES mostrar esa URL directamente al usuario
-    2. ✅ Formato de respuesta con imagen: "¡Aquí tienes la imagen del producto [modelo]: [URL]"
-    3. ✅ Las URLs de imágenes son reales y funcionan - el usuario puede hacer clic en ellas
-    4. ✅ NO digas que no puedes mostrar imágenes si el producto tiene URL en el catálogo
-    5. ✅ Si el usuario pide ver imagen y el producto tiene URL, responde inmediatamente con la URL
+    1. ✅ CUANDO UN PRODUCTO TENGA "Imagen_URL: [URL_COMPLETA]" en el catálogo, DEBES mostrar esa URL COMPLETA al usuario
+    2. ✅ La URL completa incluye el nombre del archivo de imagen (ej: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg)
+    3. ✅ COPIA Y PEGA LA URL EXACTA como aparece en el catálogo, sin modificarla
+    4. ✅ Formato de respuesta: "¡Aquí tienes la imagen: [URL_COMPLETA_CON_NOMBRE_ARCHIVO]"
+    5. ✅ NO modifiques, acortes o cambies la URL - cópiala exactamente
 
     EJEMPLOS CORRECTOS:
-    - Usuario: "¿Tienes imagen del modelo TC-WV1041?"
-    - TÚ: "¡Claro! Aquí tienes la imagen: https://ofitodo.com.mx/images/productos/tc-wv1041.jpg"
+    - Catálogo tiene: "Imagen_URL: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg"
+    - TÚ: "¡Claro! Aquí tienes la imagen: https://ofitodo.mektia.com/images/productos/tc-wv1041.jpg"
     
-    - Usuario: "Muéstrame cómo se ve el OHM-7168B-BT"
-    - TÚ: "Aquí está la imagen del modelo OHM-7168B-BT: [URL completa de la imagen]"
+    - Catálogo tiene: "Imagen_URL: https://ofitodo.mektia.com/images/productos/mesa-ohm-7168b-bt.png"
+    - TÚ: "Aquí está la imagen: https://ofitodo.mektia.com/images/productos/mesa-ohm-7168b-bt.png"
 
     REGLAS GENERALES:
     1. Busca productos por SKU, modelo, categoría o descripción
     2. Si no encuentras un producto, di que no está disponible
     3. Para intenciones de compra, agenda cita solicitando datos
 
-    ¡IMPORTANTE! Las URLs de imágenes son reales y deben mostrarse directamente.
+    ¡IMPORTANTE! Copia las URLs EXACTAMENTE como aparecen en el catálogo, incluyendo el nombre del archivo.
     """
 
     historial = obtener_historial(numero, config=config)
