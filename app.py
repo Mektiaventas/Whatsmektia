@@ -3845,7 +3845,7 @@ def enviar_documento(numero, file_url, filename, config=None):
             }
         }
         app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
-
+        r = requests.post(url, headers=headers, json=payload, timeout=20)
         app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
         if r.status_code in (200, 201, 202):
             app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
@@ -4249,10 +4249,50 @@ def obtener_historial(numero, limite=5, config=None):
         return []
     
 def limpiar_nombre_imagen(texto, imagen_filename):
-    if not texto or not imagen_filename:
+    """
+    Limpia nombres de imagen de campos de texto de manera más agresiva
+    """
+    if not texto:
         return texto
-    return texto.replace(imagen_filename, '').replace(f"{imagen_filename} ", '').replace(f" {imagen_filename}", '').strip()
-
+    
+    texto_limpio = str(texto)
+    
+    # Si no hay nombre de imagen específico, limpiar patrones comunes
+    if not imagen_filename:
+        # Eliminar patrones de nombres de imagen generados automáticamente
+        patrones = [
+            r'excel(_unzip)?_img_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
+            r'producto_\d+_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
+            r'img_\d+_\d+\.(png|jpg|jpeg|gif|webp)',
+            r'[\w\-_]*img[\w\-_]*\.(png|jpg|jpeg|gif|webp)'
+        ]
+        
+        for patron in patrones:
+            texto_limpio = re.sub(patron, '', texto_limpio, flags=re.IGNORECASE)
+    
+    # Si hay un nombre de imagen específico, eliminarlo de todas formas posibles
+    if imagen_filename:
+        # Eliminar el nombre exacto del archivo
+        texto_limpio = texto_limpio.replace(imagen_filename, '')
+        
+        # Eliminar variantes (sin extensión, etc.)
+        nombre_sin_ext = os.path.splitext(imagen_filename)[0]
+        texto_limpio = texto_limpio.replace(nombre_sin_ext, '')
+    
+    # Limpiar espacios múltiples y caracteres extraños resultantes
+    texto_limpio = re.sub(r'[\s_\-]+', ' ', texto_limpio)  # Reemplazar múltiples espacios/guiones/barras bajas con un solo espacio
+    texto_limpio = texto_limpio.strip()
+    
+    # Eliminar separadores duplicados que puedan quedar
+    separadores = [' | ', '  ', ' - ', ' _ ']
+    for sep in separadores:
+        while sep in texto_limpio:
+            texto_limpio = texto_limpio.replace(sep, ' | ' if sep == ' | ' else ' ')
+    
+    # Limpiar separadores al inicio/final
+    texto_limpio = re.sub(r'^[\s\|_\-\:]+|[\s\|_\-\:]+$', '', texto_limpio)
+    
+    return texto_limpio
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4275,10 +4315,14 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if producto_encontrado:
         precio = producto_encontrado.get('precio_menudeo') or producto_encontrado.get('precio_mayoreo') or producto_encontrado.get('costo', 'Consultar')
         imagen = producto_encontrado.get('imagen', '')
+    
+        # LIMPIAR TODOS LOS CAMPOS CON LA NUEVA FUNCIÓN
         nombre = limpiar_nombre_imagen(producto_encontrado.get('servicio') or producto_encontrado.get('modelo') or 'Producto', imagen)
         descripcion = limpiar_nombre_imagen(producto_encontrado.get('descripcion', 'Sin descripción disponible'), imagen)
         categoria = limpiar_nombre_imagen(producto_encontrado.get('categoria', ''), imagen)
         medidas = limpiar_nombre_imagen(producto_encontrado.get('medidas', ''), imagen)
+    
+        # Solo incluir campos que tengan contenido real después de la limpieza
         respuesta_producto = f"🔍 *{nombre}*\n\n"
         
         if descripcion and descripcion.strip() and descripcion != 'None':
@@ -4589,6 +4633,52 @@ IMPORTANTE: Si el usuario pregunta específicamente por la imagen de un producto
         app.logger.error(traceback.format_exc())
         return 'Lo siento, hubo un error inesperado. Por favor intenta de nuevo.'
 
+def limpiar_campos_productos_batch(config=None):
+    """Limpia todos los campos de productos de nombres de imagen (una sola ejecución)"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Obtener todos los productos
+        cursor.execute("SELECT id, sku, modelo, servicio, descripcion, categoria, medidas, imagen FROM precios")
+        productos = cursor.fetchall()
+        
+        actualizados = 0
+        for producto in productos:
+            imagen = producto.get('imagen', '')
+            
+            # Limpiar cada campo
+            campos_limpiar = ['sku', 'modelo', 'servicio', 'descripcion', 'categoria', 'medidas']
+            updates = []
+            valores = []
+            
+            for campo in campos_limpiar:
+                valor_original = producto.get(campo, '')
+                valor_limpio = limpiar_nombre_imagen(valor_original, imagen)
+                
+                if valor_limpio != valor_original:
+                    updates.append(f"{campo} = %s")
+                    valores.append(valor_limpio)
+            
+            if updates:
+                valores.append(producto['id'])
+                cursor.execute(f"UPDATE precios SET {', '.join(updates)} WHERE id = %s", valores)
+                actualizados += 1
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Limpiados {actualizados} productos de nombres de imagen")
+        return actualizados
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error limpiando productos batch: {e}")
+        return 0
+
 # New helpers: enviar_imagen and buscar_sku_en_texto
 def enviar_imagen(numero, imagen_ref, config=None):
     """
@@ -4681,7 +4771,7 @@ def enviar_imagen(numero, imagen_ref, config=None):
 def buscar_sku_en_texto(texto, precios):
     """
     Busca un SKU o modelo presente en 'precios' dentro de 'texto'.
-    Versión mejorada con búsqueda más flexible y limpieza de texto.
+    Versión mejorada con búsqueda por categorías específicas.
     """
     if not texto or not precios:
         return None
@@ -4697,36 +4787,43 @@ def buscar_sku_en_texto(texto, precios):
         s = re.sub(r'\s+', ' ', s)
         return s.strip()
     
-    def limpiar_nombres_imagen(texto):
-        """Limpia nombres de archivo de imagen del texto"""
-        if not texto:
-            return ""
-        texto_limpio = str(texto)
-        # Eliminar patrones de nombres de imagen
-        texto_limpio = re.sub(r'excel(_unzip)?_img_\d+_\d+\.(png|jpg|jpeg|gif|webp)', '', texto_limpio, flags=re.IGNORECASE)
-        texto_limpio = re.sub(r'[\w\-_]*img[\w\-_]*\.(png|jpg|jpeg|gif|webp)', '', texto_limpio, flags=re.IGNORECASE)
-        # Limpiar espacios múltiples y trim
-        texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
-        return texto_limpio
-
-    texto_normalizado = normalizar_texto(limpiar_nombres_imagen(texto))
+    texto_normalizado = normalizar_texto(texto)
+    
+    # Palabras clave para búsqueda por categoría
+    categorias_clave = {
+        'mesa': ['mesa', 'mesas', 'escritorio', 'escritorios'],
+        'silla': ['silla', 'sillas', 'asiento', 'asientos'],
+        'mueble': ['mueble', 'muebles', 'gabinete', 'gabinetes'],
+        'archivador': ['archivador', 'archivadores', 'archivero']
+    }
+    
+    # Determinar qué categoría busca el usuario
+    categoria_buscada = None
+    for categoria, palabras in categorias_clave.items():
+        if any(palabra in texto_normalizado for palabra in palabras):
+            categoria_buscada = categoria
+            break
     
     # Lista para almacenar posibles coincidencias
     coincidencias = []
     
     for producto in precios:
-        # Buscar en múltiples campos (limpios)
+        # Limpiar campos antes de buscar
+        sku_limpio = limpiar_nombre_imagen(producto.get('sku', ''), producto.get('imagen'))
+        modelo_limpio = limpiar_nombre_imagen(producto.get('modelo', ''), producto.get('imagen'))
+        servicio_limpio = limpiar_nombre_imagen(producto.get('servicio', ''), producto.get('imagen'))
+        categoria_limpio = limpiar_nombre_imagen(producto.get('categoria', ''), producto.get('imagen'))
+        descripcion_limpio = limpiar_nombre_imagen(producto.get('descripcion', ''), producto.get('imagen'))
+        
         campos_busqueda = [
-            limpiar_nombres_imagen(producto.get('sku', '')),
-            limpiar_nombres_imagen(producto.get('modelo', '')),
-            limpiar_nombres_imagen(producto.get('servicio', '')),
-            limpiar_nombres_imagen(producto.get('descripcion', '')),
-            limpiar_nombres_imagen(producto.get('categoria', '')),
-            limpiar_nombres_imagen(producto.get('subcategoria', '')),
-            limpiar_nombres_imagen(producto.get('linea', ''))
+            (sku_limpio, 10),           # SKU tiene mayor peso
+            (modelo_limpio, 8),         # Modelo tiene buen peso
+            (servicio_limpio, 7),       # Servicio/nombre
+            (categoria_limpio, 5),      # Categoría
+            (descripcion_limpio, 3)     # Descripción tiene menor peso
         ]
         
-        for campo in campos_busqueda:
+        for campo, peso_base in campos_busqueda:
             if not campo or campo == 'None':
                 continue
                 
@@ -4734,18 +4831,24 @@ def buscar_sku_en_texto(texto, precios):
             if not campo_normalizado:
                 continue
             
-            # Verificar diferentes tipos de coincidencia
             puntuacion = 0
+            
+            # Bonus por coincidencia de categoría si el usuario especificó una
+            if categoria_buscada:
+                if categoria_buscada in campo_normalizado:
+                    puntuacion += 20
+                if categoria_buscada in normalizar_texto(producto.get('categoria', '')):
+                    puntuacion += 15
             
             # Coincidencia exacta (máxima prioridad)
             if campo_normalizado == texto_normalizado:
-                puntuacion = 100
+                puntuacion += 100
             # El campo está contenido en el texto
             elif campo_normalizado in texto_normalizado:
-                puntuacion = 80
+                puntuacion += 80
             # El texto está contenido en el campo
             elif texto_normalizado in campo_normalizado:
-                puntuacion = 60
+                puntuacion += 60
             # Coincidencia de palabras (para búsquedas parciales)
             else:
                 palabras_texto = set(texto_normalizado.split())
@@ -4754,13 +4857,12 @@ def buscar_sku_en_texto(texto, precios):
                 
                 if palabras_comunes:
                     # Puntuación basada en el número de palabras comunes
-                    puntuacion = len(palabras_comunes) * 20
+                    puntuacion += len(palabras_comunes) * 20
             
-            # Bonus por coincidencia en SKU (más específico)
-            if campo == limpiar_nombres_imagen(producto.get('sku', '')) and puntuacion > 0:
-                puntuacion += 10
-            
+            # Aplicar peso base del campo
             if puntuacion > 0:
+                puntuacion *= peso_base / 5  # Normalizar el peso
+                
                 coincidencias.append({
                     'producto': producto,
                     'campo': campo,
@@ -4771,8 +4873,10 @@ def buscar_sku_en_texto(texto, precios):
     # Ordenar por puntuación y devolver el mejor resultado
     if coincidencias:
         mejor_coincidencia = max(coincidencias, key=lambda x: x['puntuacion'])
-        app.logger.info(f"✅ Mejor coincidencia: '{mejor_coincidencia['campo']}' -> SKU: {mejor_coincidencia['sku']} (puntuación: {mejor_coincidencia['puntuacion']})")
-        return mejor_coincidencia['sku']
+        # Solo devolver si la puntuación es suficientemente alta
+        if mejor_coincidencia['puntuacion'] > 50:
+            app.logger.info(f"✅ Mejor coincidencia: '{mejor_coincidencia['campo']}' -> SKU: {mejor_coincidencia['sku']} (puntuación: {mejor_coincidencia['puntuacion']})")
+            return mejor_coincidencia['sku']
     
     app.logger.info(f"❌ No se encontraron coincidencias para: '{texto}'")
     return None
@@ -5416,9 +5520,6 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                         if not dominio.startswith('http'):
                             dominio = f"https://{dominio}"
                         image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
-                        if image_url:
-                            respuesta_producto = limpiar_nombre_imagen(respuesta_producto, image_url)
-
                         enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
                         guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
                 else:
