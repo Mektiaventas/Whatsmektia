@@ -4189,7 +4189,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     url_imagen = imagen_name_original
                 else:
                     # 🔥 INCLUIR EL NOMBRE REAL DEL ARCHIVO EN LA URL
-                    url_imagen = f"{dominio_publico}/images/productos/{imagen_name_original}"
+                    url_imagen = f"https://{dominio_publico}/uploads/productos/{imagen_name_original}"
             
             # Formateo del producto
             parts = []
