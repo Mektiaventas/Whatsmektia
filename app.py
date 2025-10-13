@@ -2439,42 +2439,60 @@ def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
         return "¡Gracias por tu pedido! ¿Qué más deseas agregar?"
     
 def autenticar_google_calendar(config=None):
-    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas"""
+    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas.
+    Busca tokens en ruta absoluta y hace fallback a token.json; refresca si es posible."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     creds = None
-    
+
     try:
-        # Usar un nombre de token específico para cada tenant/dominio
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        app.logger.info(f"🔐 Intentando autenticar con OAuth para {config['dominio']} usando {token_filename}")
-        
-        # 1. Verificar si ya tenemos token guardado para este tenant
-        if os.path.exists(token_filename):
-            try:
-                creds = Credentials.from_authorized_user_file(token_filename, SCOPES)
-                if creds and creds.valid:
-                    app.logger.info(f"✅ Token OAuth válido encontrado para {config['dominio']}")
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-                elif creds and creds.expired and creds.refresh_token:
-                    app.logger.info(f"🔄 Refrescando token expirado para {config['dominio']}...")
-                    creds.refresh(Request())
-                    with open(token_filename, 'w') as token:
-                        token.write(creds.to_json())
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-            except Exception as e:
-                app.logger.error(f"❌ Error con token existente para {config['dominio']}: {e}")
-        
-        # 2. Si no hay token válido, necesitamos redirección OAuth
-        app.logger.info(f"⚠️ No hay token válido para {config['dominio']}, requiere autorización")
-        return None
-            
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        tenant_token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        tenant_token_path = os.path.join(BASE_DIR, tenant_token_filename)
+        generic_token_path = os.path.join(BASE_DIR, 'token.json')
+
+        app.logger.info(f"🔐 Intentando autenticar Google Calendar para {config.get('dominio')} (buscar: {tenant_token_path} then {generic_token_path})")
+
+        # Prefer tenant-specific token
+        token_path_to_use = None
+        if os.path.exists(tenant_token_path):
+            token_path_to_use = tenant_token_path
+            app.logger.info(f"✅ Usando token tenant-specific: {tenant_token_path}")
+        elif os.path.exists(generic_token_path):
+            token_path_to_use = generic_token_path
+            app.logger.warning(f"⚠️ No se encontró token tenant-specific, usando fallback: {generic_token_path}")
+        else:
+            app.logger.warning(f"⚠️ No se encontró ningún token OAuth para {config.get('dominio')} (esperado: {tenant_token_path})")
+            return None
+
+        try:
+            creds = Credentials.from_authorized_user_file(token_path_to_use, SCOPES)
+            if creds and creds.valid:
+                service = build('calendar', 'v3', credentials=creds)
+                app.logger.info(f"✅ Token válido cargado desde {token_path_to_use}")
+                return service
+            elif creds and creds.expired and creds.refresh_token:
+                app.logger.info("🔄 Token expirado, intentando refresh...")
+                creds.refresh(Request())
+                # Guardar en el archivo tenant-specific (intentar preservar tenant filename)
+                save_path = tenant_token_path if token_path_to_use != generic_token_path else generic_token_path
+                with open(save_path, 'w') as token_file:
+                    token_file.write(creds.to_json())
+                app.logger.info(f"✅ Token refrescado y guardado en {save_path}")
+                service = build('calendar', 'v3', credentials=creds)
+                return service
+            else:
+                app.logger.warning(f"⚠️ Token encontrado en {token_path_to_use} pero no es válido ni refrescable")
+                return None
+        except Exception as e:
+            app.logger.error(f"❌ Error leyendo/refresh token en {token_path_to_use}: {e}")
+            app.logger.error(traceback.format_exc())
+            return None
+
     except Exception as e:
-        app.logger.error(f'❌ Error inesperado: {e}')
+        app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
 
@@ -2739,117 +2757,67 @@ def validar_datos_cita_completos(info_cita, config=None):
 
 @app.route('/completar-autorizacion')
 def completar_autorizacion():
-    """Endpoint para completar la autorización con el código"""
+    """Endpoint para completar la autorización con el código — guarda token tenant-specific en BASE_DIR"""
     try:
-        # Obtener todos los parámetros de la URL
         code = request.args.get('code')
-        state = request.args.get('state')
+        state = request.args.get('state')  # intentamos usar state como tenant identifier
         scope = request.args.get('scope')
-        
-        # Obtener la configuración actual
-        config = obtener_configuracion_por_host()
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        
-        app.logger.info(f"🔐 Completando autorización para {config['dominio']}")
-        app.logger.info(f"🔐 Guardando en: {token_filename}")
-        
-        app.logger.info(f"🔐 Parámetros recibidos:")
-        app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
-        app.logger.info(f"  - State: {state}")
-        app.logger.info(f"  - Scope: {scope}")
-        
+
+        # Determinar tenant desde el state si viene, sino por host
+        tenant_domain = None
+        if state:
+            # state fue generado como tenant_id = dominio.replace('.', '_')
+            tenant_domain = state.replace('_', '.')
+            app.logger.info(f"🔍 Tenant desde state: {tenant_domain}")
+        else:
+            config_host = obtener_configuracion_por_host()
+            tenant_domain = config_host.get('dominio')
+
         if not code:
             app.logger.error("❌ No se proporcionó código de autorización")
             return "❌ Error: No se proporcionó código de autorización"
-        
-        # Definir rutas absolutas
+
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
-        token_path = os.path.join(BASE_DIR, 'token.json')
-        
-        # Verificar que el archivo client_secret.json existe
         if not os.path.exists(client_secret_path):
             app.logger.error(f"❌ No se encuentra {client_secret_path}")
-            return f"❌ Error: No se encuentra el archivo de configuración de Google"
-        
-        # Obtener el host actual de la solicitud
+            return f"❌ Error: No se encuentra el archivo client_secret.json en {BASE_DIR}"
+
+        # Construir redirect_uri basado en host actual (mantener compatibilidad)
         host = request.host
-        app.logger.info(f"🔍 Host actual: {host}")
-        
-        # Construir la URI de redirección basada en el host actual
         redirect_uri = f'https://{host}/completar-autorizacion'
-        app.logger.info(f"🔐 URI de redirección: {redirect_uri}")
-        
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        
-        # Crear el flujo de OAuth
+
         app.logger.info("🔄 Creando flujo de OAuth...")
-        flow = InstalledAppFlow.from_client_secrets_file(
-            client_secret_path, 
-            SCOPES,
-            redirect_uri=redirect_uri
-        )
-        
-        # Intercambiar código por token
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
+
         app.logger.info("🔄 Intercambiando código por token...")
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        app.logger.info("✅ Token obtenido correctamente")
-        
-        # Guardar token
-        app.logger.info(f"💾 Guardando token en: {token_path}")
-        
-        # Modificar esta parte para usar el nombre de archivo específico
-        with open(token_filename, 'w') as token:
+
+        # Guardar token en ruta absoluta tenant-specific
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
-        app.logger.info(f"✅ Autorización completada para {config['dominio']}")
-        
+        app.logger.info(f"✅ Token guardado en: {token_path} para tenant {tenant_domain}")
+
         return """
         <html>
-        <head>
-            <title>Autorización Completada</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
-                .success { color: green; font-size: 24px; }
-                .info { margin: 20px; }
-            </style>
-        </head>
+        <head><title>Autorización Completada</title></head>
         <body>
-            <h1 class="success">✅ Autorización completada correctamente</h1>
-            <div class="info">
-                <p>Ya puedes usar Google Calendar para agendar citas.</p>
-                <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
-            </div>
+            <h1>✅ Autorización completada correctamente</h1>
+            <p>Ya puedes usar Google Calendar para agendar citas.</p>
+            <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
         </body>
         </html>
         """
-        
+
     except Exception as e:
-        app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
+        app.logger.error(f"❌ Error en completar_autorizacion: {e}")
         app.logger.error(traceback.format_exc())
-        return f"""
-        <html>
-        <head>
-            <title>Error de Autorización</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
-                .error {{ color: red; font-size: 24px; }}
-                .info {{ margin: 20px; }}
-                pre {{ background: #f5f5f5; padding: 10px; text-align: left; margin: 20px auto; max-width: 80%; }}
-            </style>
-        </head>
-        <body>
-            <h1 class="error">❌ Error en la autorización</h1>
-            <div class="info">
-                <p>Ocurrió un error al procesar la autorización de Google:</p>
-                <pre>{str(e)}</pre>
-                <p>Por favor, contacta al administrador del sistema.</p>
-            </div>
-        </body>
-        </html>
-        """
+        return f"❌ Error: {str(e)}"
          
 def convertir_audio(audio_path):
     try:
@@ -4717,38 +4685,46 @@ def obtener_imagen_whatsapp(image_id, config=None):
 
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
-    """Procesa el código de autorización manualmente"""
+    """Procesa el código de autorización manualmente y guarda token tenant-specific en BASE_DIR"""
     try:
         code = request.form.get('codigo')
         if not code:
             return "❌ Error: No se proporcionó código"
-        
-        # En app.py, la función autenticar_google_calendar()
-        SCOPES = ['https://www.googleapis.com/auth/calendar']  # Este scope está correcto
-        
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', 
-            SCOPES,
-            redirect_uri=f'https://{request.host}/completar-autorizacion'
-        )
-        
-        # Intercambiar código por token
+
+        # Determinar tenant por host actual (la autorización manual se inició desde el host correcto)
+        config = obtener_configuracion_por_host()
+        tenant_domain = config.get('dominio', 'default')
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
+        if not os.path.exists(client_secret_path):
+            return f"❌ Error: No se encuentra client_secret.json en {BASE_DIR}"
+
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        redirect_uri = f'https://{request.host}/completar-autorizacion'
+
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        # Guardar token
-        with open('token.json', 'w') as token:
+
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
+
+        app.logger.info(f"✅ Token guardado en {token_path} para tenant {tenant_domain}")
+
         return '''
         <h1>✅ ¡Autorización completada!</h1>
-        <p>Google Calendar está ahora configurado correctamente.</p>
+        <p>Google Calendar está ahora configurado correctamente para este dominio.</p>
         <p>Puedes cerrar esta ventana y probar agendar una cita.</p>
         <a href="/">Volver al inicio</a>
         '''
-        
+
     except Exception as e:
-        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"  
+        app.logger.error(f"🔴 Error en procesar_codigo: {e}")
+        app.logger.error(traceback.format_exc())
+        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
 
 def procesar_fecha_relativa(fecha_str):
     """
