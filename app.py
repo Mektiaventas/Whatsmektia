@@ -4118,17 +4118,37 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     s = str(val).strip()
                     if not imagen_name:
                         return s
-                    img = str(imagen_name).strip()
-                    # eliminar coincidencias exactas del nombre de la imagen
-                    if img and img in s:
-                        s = s.replace(img, '')
-                    # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-                    s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-                    # limpiar espacios sobrantes
+        
+                    # Convertir imagen_name a string y limpiar
+                    img_name = str(imagen_name).strip()
+                    if not img_name:
+                        return s
+        
+                    # Eliminar el nombre exacto de la imagen
+                    if img_name in s:
+                        s = s.replace(img_name, '')
+        
+                    # Eliminar patrones de Excel/unzip más agresivamente
+                    patterns = [
+                        r'excel_unzip_img_\d+_\d+\.png',
+                        r'excel_unzip_img_[\w\-\._]+',
+                        r'excel_img_\d+_\d+\.png',
+                        r'excel_unzip_[\w\-\._]+',
+                        r'img_\d+_\d+\.png'
+                    ]
+        
+                    for pattern in patterns:
+                        s = re.sub(pattern, '', s, flags=re.IGNORECASE)
+        
+                    # Limpiar espacios sobrantes y caracteres extraños
                     s = re.sub(r'\s{2,}', ' ', s).strip()
+                    s = re.sub(r'^\||\|\s*$', '', s).strip()  # Eliminar pipes sueltos
+                    s = re.sub(r'\s+\|\s+', ' | ', s)  # Normalizar separadores
+        
                     return s
+        
                 except Exception:
-                    return str(val).strip()
+                    return str(val).strip() if val else ''
 
             # Clean each field
             imagen_name = p.get('imagen')
@@ -4150,7 +4170,9 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     precio_str = f"${float(precio_menudeo):,.2f}"
                 except Exception:
                     precio_str = str(precio_menudeo)
-            parts = [f"{titulo}"]
+            parts = []
+            if titulo and titulo != 'Sin identificador':
+                parts.append(f"{titulo}")
             if sku:
                 parts.append(f"(SKU: {sku})")
             if categoria:
@@ -4171,6 +4193,9 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Imagen: {imagen_name}")
             if descripcion_p:
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
+            if imagen_name and not re.search(r'excel_unzip_img_\d+_\d+\.png', str(imagen_name)):
+                parts.append(f"Imagen disponible")
+
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
         except Exception:
