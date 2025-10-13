@@ -4188,6 +4188,14 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
+         # Clean up image filenames from the formatted products text to prevent AI from including them in responses
+    productos_formateados = [re.sub(r'excel_unzip_img_\d+_\d+\.png', '', line) for line in productos_formateados]
+    productos_formateados = [re.sub(r'\b\w+\.png\b', '', line) for line in productos_formateados]
+    productos_formateados = [re.sub(r'\s+', ' ', line).strip() for line in productos_formateados]  # Clean extra spaces
+    productos_texto = "\n".join(productos_formateados)
+    if len(precios) > 40:
+        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
+
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
