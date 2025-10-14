@@ -360,7 +360,10 @@
 
     <div class="card" role="form" aria-label="Formulario de acceso">
         <div class="brand">
-            <span class="titulo">SmartWhats</span>
+            {# Obtener subdominio desde el Host; si no hay subdominio usar app_nombre (inyectado desde app.py) #}
+            {% set host = request.host.split(':')[0] %}
+            {% set subdomain = host.split('.')[0] if '.' in host else '' %}
+            <span class="titulo">{{ subdomain|capitalize if subdomain else app_nombre }}</span>
             <small>Panel Seguro</small>
         </div>
         <h1>Acceder</h1>
