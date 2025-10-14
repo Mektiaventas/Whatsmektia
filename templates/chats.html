@@ -2,12 +2,13 @@
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
-{% set es_porfirianna = tenant_config.dominio == 'laporfirianna.mektia.com' %}
-{% set negocio_nombre = 'La Porfirianna' if es_porfirianna else 'Mektia' %}
+{% set host = request.host.split(':')[0] %}
+{% set subdomain = host.split('.')[0] if '.' in host else '' %}
+{% set negocio_nombre = subdomain|capitalize if subdomain else (tenant_config.negocio_nombre or 'Mektia') %}
 
 <div class="chat-list-header">
     <h2>Conversaciones - {{ negocio_nombre }}</h2>
-    <span class="tenant-badge {% if es_porfirianna %}porfirianna-badge{% else %}mektia-badge{% endif %}">
+    <span class="tenant-badge">
         {{ negocio_nombre }}
     </span>
     <span style="font-size: 12px; color: #ffffff; margin-left: 15px;">
@@ -270,9 +271,11 @@
         width: 8%;
         height: 8%;
     }
+
     .card-content {
         color: white;
     }
+
     .emoji-picker-list {
         box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         min-width: 220px;
@@ -290,9 +293,11 @@
         border: none;
         cursor: pointer;
     }
+
     .input-group {
         position: relative;
     }
+
     .msg-manual {
         left: 20%
     }
