@@ -7671,8 +7671,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
 
 
-@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
-@login_required
+
 @app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 @login_required
 def borrar_pdf_configuracion(doc_id):
