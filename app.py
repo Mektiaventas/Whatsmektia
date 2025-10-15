@@ -3894,15 +3894,12 @@ def _ensure_precios_plan_column(config=None):
 
 def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
     """
-    Asigna un plan (precios.id) al cliente identificado por `username` (en CLIENTES_DB).
-    Copia mensajes_incluidos desde precios (tenant) al registro cliente.mensajes_incluidos.
+    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
+    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
     """
     try:
-        # asegurar columnas
+        # asegurar columnas en cliente
         _ensure_cliente_plan_columns()
-        if config is None:
-            config = obtener_configuracion_por_host()
-        _ensure_precios_plan_column(config)
 
         # 1) Obtener cliente en CLIENTES_DB
         conn_cli = get_clientes_conn()
@@ -3914,20 +3911,20 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             app.logger.error(f"🔴 Cliente no encontrado para user={username}")
             return False
 
-        # 2) Obtener mensajes_incluidos desde tabla precios del tenant (si existe el plan)
+        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
         mensajes_incluidos = 0
         plan_name = None
         try:
-            conn_tenant = get_db_connection(config)
-            cur_t = conn_tenant.cursor(dictionary=True)
-            cur_t.execute("SELECT id, servicio, mensajes_incluidos FROM precios WHERE id = %s LIMIT 1", (plan_id,))
-            plan_row = cur_t.fetchone()
+            cur_pl = conn_cli.cursor(dictionary=True)
+            cur_pl.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+            plan_row = cur_pl.fetchone()
             if plan_row:
                 mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
-                plan_name = plan_row.get('servicio')
-            cur_t.close(); conn_tenant.close()
+                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
+                plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+            cur_pl.close()
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo leer plan desde precios (tenant): {e}")
+            app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
 
         # 3) Actualizar cliente en CLIENTES_DB
         try:
@@ -3954,10 +3951,10 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
 def get_plan_status_for_user(username, config=None):
     """
     Retorna el estado del plan para el cliente user:
-    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos' }
+    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
 
-    Mejora: intenta múltiples variantes del teléfono (limpieza, prefijos 52/521, +) y
-    un fallback por coincidencia de últimos dígitos para evitar 0s debidos a formatos.
+    Ahora lee metadata del plan desde la tabla `planes` en la BD de clientes (CLIENTES_DB).
+    Los mensajes consumidos se cuentan desde la BD tenant (conversaciones).
     """
     try:
         # Obtener cliente desde CLIENTES_DB
@@ -3974,6 +3971,22 @@ def get_plan_status_for_user(username, config=None):
         mensajes_incluidos = int(cliente.get('mensajes_incluidos') or 0)
         plan_name = None
 
+        # Si hay plan_id, intentar leer la definición desde CLIENTES_DB.planes
+        if plan_id:
+            try:
+                conn_cli = get_clientes_conn()
+                curp = conn_cli.cursor(dictionary=True)
+                curp.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, descripcion, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                plan_row = curp.fetchone()
+                curp.close(); conn_cli.close()
+                if plan_row:
+                    # Preferimos modelo como nombre representativo, sino categoria
+                    plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+                    # Si la tabla planes tiene mensajes_incluidos, usarlo (mantener coherencia)
+                    mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or mensajes_incluidos or 0)
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
+
         telefono = (cliente.get('telefono') or '').strip()
         app.logger.info(f"🔍 get_plan_status_for_user: user={username} telefono='{telefono}'")
 
@@ -3989,7 +4002,6 @@ def get_plan_status_for_user(username, config=None):
                 return re.sub(r'\D', '', s or '')
 
             clean_tel = only_digits(telefono)
-            tried = []
 
             # 1) Intentar coincidencia exacta con varias variantes
             variants = []
@@ -3998,15 +4010,13 @@ def get_plan_status_for_user(username, config=None):
             if clean_tel:
                 variants.append(clean_tel)
                 variants.append('+' + clean_tel)
-                # Mexico common prefix 52 / 521
                 if not clean_tel.startswith('52'):
                     variants.append('52' + clean_tel)
-                    variants.append('521' + clean_tel)  # celular formato en algunos sistemas
+                    variants.append('521' + clean_tel)
             # dedupe
             variants = [v for i, v in enumerate(variants) if v and v not in variants[:i]]
 
             for v in variants:
-                tried.append(('exact', v))
                 cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (v,))
                 row = cur_t.fetchone()
                 cnt = int(row[0]) if row and row[0] is not None else 0
@@ -4015,13 +4025,11 @@ def get_plan_status_for_user(username, config=None):
                     mensajes_consumidos = cnt
                     break
 
-            # 2) Si sigue 0: intentar comparar solo los últimos dígitos (fallback razonable)
+            # 2) Si sigue 0: intentar comparar solo los últimos dígitos
             if mensajes_consumidos == 0 and clean_tel:
-                for n in (9, 8, 7):  # probar last 9,8,7 digits
+                for n in (9, 8, 7):
                     last_n = clean_tel[-n:]
                     pattern = f"%{last_n}"
-                    tried.append(('like_last', last_n))
-                    # Usamos REPLACE para normalizar número en la consulta (quitar +, espacios, guiones)
                     sql = """
                         SELECT COUNT(*) FROM conversaciones
                         WHERE REPLACE(REPLACE(REPLACE(REPLACE(numero, '+', ''), '-', ''), ' ', ''), '(', '') LIKE %s
@@ -4034,40 +4042,27 @@ def get_plan_status_for_user(username, config=None):
                         mensajes_consumidos = cnt
                         break
 
-            # 3) último recurso: contar todas las filas si telefono está vacío (defensivo)
+            # 3) último recurso: si telefono vacío, mantener 0
             if mensajes_consumidos == 0 and not telefono:
-                app.logger.warning("⚠️ get_plan_status_for_user: telefono vacío, mensajes_consumidos queda 0")
                 mensajes_consumidos = 0
 
             cur_t.close(); conn_t.close()
-
-            app.logger.info(f"✅ get_plan_status_for_user resultados: tried={tried} mensajes_consumidos={mensajes_consumidos}")
+            app.logger.info(f"✅ get_plan_status_for_user results: mensajes_consumidos={mensajes_consumidos}")
 
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
             mensajes_consumidos = 0
 
-        # Intentar leer nombre de plan desde tabla precios si plan_id está presente
-        if plan_id:
-            try:
-                if config is None:
-                    config = obtener_configuracion_por_host()
-                conn_t2 = get_db_connection(config)
-                cur_t2 = conn_t2.cursor(dictionary=True)
-                cur_t2.execute("SELECT servicio FROM precios WHERE id = %s LIMIT 1", (plan_id,))
-                pr = cur_t2.fetchone()
-                if pr:
-                    plan_name = pr.get('servicio')
-                cur_t2.close(); conn_t2.close()
-            except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo leer servicio/plan desde precios: {e}")
+        mensajes_disponibles = None
+        if mensajes_incluidos is not None:
+            mensajes_disponibles = max(0, mensajes_incluidos - mensajes_consumidos)
 
         return {
             'plan_id': plan_id,
             'plan_name': plan_name,
             'mensajes_incluidos': mensajes_incluidos,
             'mensajes_consumidos': mensajes_consumidos,
-            'mensajes_disponibles': max(0, mensajes_incluidos - mensajes_consumidos) if mensajes_incluidos is not None else None
+            'mensajes_disponibles': mensajes_disponibles
         }
 
     except Exception as e:
