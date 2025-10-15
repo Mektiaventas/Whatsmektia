@@ -5408,7 +5408,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                 'catálogo', 'catalogo', 'mostrar catálogo', 'mostrar catalogo',
                 'muestrame catálogo', 'muestrame catalogo', 'envíame catálogo', 'envia catálogo',
                 'manda catálogo', 'enviame catalogo', 'catalogo completo', 'catálogo completo',
-                'ver catálogo', 'ver catalogo', 'catalog'
+                'ver catálogo', 'ver catalogo', 'catalog', 'plan de estudios', 'plan'
             ]
             if any(k in text_lower for k in catalog_keywords):
                 app.logger.info(f"📚 Petición de catálogo detectada en mensaje: '{texto[:80]}'")
