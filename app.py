@@ -758,8 +758,13 @@ def extraer_texto_e_imagenes_pdf(file_path):
         # Abrir el PDF con PyMuPDF
         doc = fitz.open(file_path)
         
-        # Crear directorio para imágenes si no existe
-        img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+        # Crear directorio para imágenes si no existe (tenant-aware fallback)
+        try:
+            productos_dir, tenant_slug = get_productos_dir_for_config()
+            img_dir = productos_dir
+        except Exception as e:
+            app.logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy uploads/productos. Error: {e}")
+            img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
         os.makedirs(img_dir, exist_ok=True)
         
         for page_num in range(len(doc)):
@@ -810,7 +815,7 @@ def extraer_texto_e_imagenes_pdf(file_path):
                             'rect': rect
                         })
                         
-                        app.logger.info(f"✅ Imagen extraída: {img_filename}")
+                        app.logger.info(f"✅ Imagen extraída: {img_filename} (tenant_dir={img_dir})")
                         
                     except Exception as e:
                         app.logger.warning(f"⚠️ Error extrayendo imagen específica {xref}: {e}")
@@ -978,13 +983,17 @@ def importar_productos_desde_excel(filepath, config=None):
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
         app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
 
-        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media)
+        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media) usando tenant dir
         if not imagenes_embedded and extension == '.xlsx':
-            output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+            try:
+                output_dir, tenant_slug = get_productos_dir_for_config(config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ get_productos_dir_for_config falló para fallback ZIP, usando legacy. Error: {e}")
+                output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
             imagenes_zip = _extraer_imagenes_desde_zip_xlsx(filepath, output_dir)
             if imagenes_zip:
                 imagenes_embedded = imagenes_zip
-                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media: {len(imagenes_embedded)}")
+                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media -> {len(imagenes_embedded)} (dir={output_dir})")
             else:
                 app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
 
