@@ -2010,6 +2010,17 @@ def subir_pdf_servicios():
             pass
         return redirect(url_for('configuracion_precios'))
 
+def get_docs_dir_for_config(config=None):
+    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    dominio = (config.get('dominio') or '').strip().lower()
+    # fallback tenant slug: subdomain portion before first dot
+    tenant_slug = dominio.split('.')[0] if dominio else 'default'
+    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug)
+    os.makedirs(docs_dir, exist_ok=True)
+    return docs_dir, tenant_slug
+
 def get_db_connection(config=None):
     if config is None:
         try:
@@ -3585,8 +3596,9 @@ def publicar_pdf_configuracion():
         # Prefijos distintos para imagen/pdf (facilita depuración)
         prefix = 'img' if ext in {'png','jpg','jpeg','gif','webp','svg'} else 'pdf'
         filename = secure_filename(f"{prefix}_{int(time.time())}_{original_name}")
-        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        os.makedirs(docs_dir, exist_ok=True)
+
+        # Tenant-aware docs directory
+        docs_dir, tenant_slug = get_docs_dir_for_config(config)
         filepath = os.path.join(docs_dir, filename)
         file.save(filepath)
 
@@ -3603,9 +3615,9 @@ def publicar_pdf_configuracion():
                     filepath VARCHAR(512) NOT NULL,
                     descripcion TEXT,
                     uploaded_by VARCHAR(100),
-
+                    tenant_slug VARCHAR(128),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY uq_filename (filename)
+                    UNIQUE KEY uq_filename (filename, tenant_slug)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """)
             conn.commit()
@@ -3619,13 +3631,13 @@ def publicar_pdf_configuracion():
                 user = au.get('user') or str(au.get('id') or '')
 
             cursor.execute("""
-                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
-                VALUES (%s, %s, %s, %s)
+                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by, tenant_slug)
+                VALUES (%s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
-            """, (filename, filepath, descripcion, user))
+            """, (filename, filepath, descripcion, user, tenant_slug))
             conn.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando metadatos archivo: {e}")
+            app.logger.error(f"🔴 Error insertando metadato archivo: {e}")
             conn.rollback()
             flash('❌ Error guardando metadatos en la base de datos', 'error')
             try:
@@ -3650,6 +3662,7 @@ def publicar_pdf_configuracion():
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
+
 
 # --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
 def enviar_documento(numero, file_url, filename, config=None):
@@ -3789,7 +3802,7 @@ def enviar_catalogo(numero, original_text=None, config=None):
         cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
         if cursor.fetchone():
             cursor.execute("""
-                SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
                 FROM documents_publicos
                 ORDER BY created_at DESC
                 LIMIT 20
@@ -3809,7 +3822,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
             filename = mejor.get('filename')
             descripcion = mejor.get('descripcion') or ''
-            # Construir base preferente desde request (host real) para evitar URLs sin esquema
+
+            # Build tenant-aware file_url
             base = None
             try:
                 if has_request_context():
@@ -3821,7 +3835,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
                 base = dominio if dominio.startswith('http') else f"https://{dominio}"
 
-            file_url = f"{base}/uploads/docs/{filename}"
+            tenant_slug = mejor.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
+            file_url = f"{base}/uploads/docs/{tenant_slug}/{filename}"
             app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
 
             sent = enviar_documento(numero, file_url, filename, config)
