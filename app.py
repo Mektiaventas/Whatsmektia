@@ -2382,30 +2382,42 @@ def texto_a_voz(texto, filename,config=None):
     try:
         from gtts import gTTS
         import os
-        
+
         # ✅ Ruta ABSOLUTA para evitar problemas
         base_dir = os.path.dirname(os.path.abspath(__file__))
         audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-        
+
         # Crear directorio si no existe
         os.makedirs(audio_dir, exist_ok=True)
-        
+
         # Ruta completa del archivo
         filepath = os.path.join(audio_dir, f"{filename}.mp3")
-        
+
         # Convertir texto a voz
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(filepath)
-        
-        # ✅ URL PÚBLICA - Usa tu dominio real
-        MI_DOMINIO = os.getenv('MI_DOMINIO', 'https://tu-dominio.com')
-        audio_url = f"{MI_DOMINIO}/static/audio/respuestas/{filename}.mp3"
-        
+
+        # Construir URL pública usando config['dominio'] cuando esté disponible
+        dominio_conf = None
+        try:
+            if isinstance(config, dict):
+                dominio_conf = config.get('dominio')
+        except Exception:
+            dominio_conf = None
+
+        # Fallback al env var MI_DOMINIO o localhost
+        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
+        # Asegurar esquema http(s)
+        if not dominio.startswith('http'):
+            dominio = 'https://' + dominio
+
+        audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
+
         app.logger.info(f"🎵 Audio guardado en: {filepath}")
         app.logger.info(f"🌐 URL pública: {audio_url}")
-        
+
         return audio_url
-        
+
     except Exception as e:
         app.logger.error(f"Error en texto a voz: {e}")
         return None
