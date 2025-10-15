@@ -7,6 +7,8 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
+from mysql.connector import pooling
+from flask import render_template_string
 import pytz
 import os
 import logging
@@ -2096,6 +2098,10 @@ def get_productos_dir_for_config(config=None):
     return productos_dir, tenant_slug
 
 def get_db_connection(config=None):
+    """
+    Get a DB connection using a small MySQLConnectionPool per tenant (cached).
+    Falls back to direct mysql.connector.connect() if pooling fails.
+    """
     if config is None:
         try:
             from flask import has_request_context
@@ -2106,21 +2112,57 @@ def get_db_connection(config=None):
         except Exception as e:
             app.logger.error(f"Error obteniendo configuración: {e}")
             config = NUMEROS_CONFIG['524495486142']
-    
-    app.logger.info(f"🗄️ Conectando a BD: {config['db_name']} en {config['db_host']}")
-    
+
+    # pool size can be tuned via env var
+    POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+    pool_key = f"{config.get('db_host')}|{config.get('db_user')}|{config.get('db_name')}"
+
+    # module-level cache for pools
+    global _MYSQL_POOLS
     try:
-        conn = mysql.connector.connect(
-            host=config['db_host'],
-            user=config['db_user'],
-            password=config['db_password'],
-            database=config['db_name']
-        )
-        app.logger.info(f"✅ Conexión exitosa a {config['db_name']}")
+        _MYSQL_POOLS
+    except NameError:
+        _MYSQL_POOLS = {}
+
+    try:
+        # create pool if not present
+        if pool_key not in _MYSQL_POOLS:
+            app.logger.info(f"🔧 Creating MySQL pool for {config.get('db_name')} (size={POOL_SIZE})")
+            _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
+                pool_name=f"pool_{config.get('db_name')}",
+                pool_size=POOL_SIZE,
+                host=config['db_host'],
+                user=config['db_user'],
+                password=config['db_password'],
+                database=config['db_name'],
+                charset='utf8mb4'
+            )
+        conn = _MYSQL_POOLS[pool_key].get_connection()
+        # ensure the connection is alive
+        try:
+            if not conn.is_connected():
+                conn.reconnect(attempts=2, delay=0.5)
+        except Exception:
+            pass
+        app.logger.info(f"🗄️ Borrowed connection from pool for {config.get('db_name')}")
         return conn
-    except Exception as e:
-        app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
-        raise
+
+    except Exception as pool_err:
+        # Pooling might not be supported or failed: fallback to direct connect
+        app.logger.warning(f"⚠️ MySQL pool error (fallback to direct connect): {pool_err}")
+        try:
+            conn = mysql.connector.connect(
+                host=config['db_host'],
+                user=config['db_user'],
+                password=config['db_password'],
+                database=config['db_name'],
+                charset='utf8mb4'
+            )
+            app.logger.info(f"✅ Direct connection established to {config['db_name']}")
+            return conn
+        except Exception as e:
+            app.logger.error(f"❌ Error connectando a BD {config['db_name']}: {e}")
+            raise
 
 @app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
 def renombrar_columna_kanban(columna_id):
@@ -7218,14 +7260,12 @@ def ver_chat(numero):
         if numero not in IA_ESTADOS:
             cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
             result = cursor.fetchone()
-            ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
+            ia_active = True if result is None or result.get('ia_activada') is None else bool(result.get('ia_activada'))
             IA_ESTADOS[numero] = {'activa': ia_active}
             app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
         else:
-            # IMPORTANT: Don't try to set IA_ESTADOS again - it's already set
             app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
         
-
         app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
         cursor.execute("""
@@ -7273,11 +7313,21 @@ def ver_chat(numero):
         )
         
     except Exception as e:
-        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return render_template('error.html', 
-                             error_message="Error al cargar el chat", 
-                             error_details=str(e)), 500
+        # Log full traceback and provide a safe inline error page (do not rely on error.html template)
+        import traceback as _tb, hashlib as _hash, time as _time
+        tb = _tb.format_exc()
+        err_id = _hash.md5(f"{_time.time()}_{numero}_{str(e)}".encode()).hexdigest()[:8]
+        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat (id={err_id}): {e}")
+        app.logger.error(tb)
+        # Avoid rendering a missing template — return a minimal safe page with error id
+        html = """
+        <html><head><title>Error</title></head><body>
+          <h1>Internal server error</h1>
+          <p>An internal error occurred while loading the chat. Error ID: <strong>{{ err_id }}</strong></p>
+          <p>Please check server logs for details (search for the same Error ID).</p>
+        </body></html>
+        """
+        return render_template_string(html, err_id=err_id), 500
        
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
