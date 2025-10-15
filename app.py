@@ -7673,12 +7673,14 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
 
 @app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 @login_required
+@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
+@login_required
 def borrar_pdf_configuracion(doc_id):
     config = obtener_configuracion_por_host()
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT filename, filepath FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
+        cursor.execute("SELECT id, filename, filepath, tenant_slug FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
         doc = cursor.fetchone()
         if not doc:
             cursor.close(); conn.close()
@@ -7686,17 +7688,32 @@ def borrar_pdf_configuracion(doc_id):
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
         filename = doc.get('filename')
-        # Ruta esperada en uploads/docs
-        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        filepath = os.path.join(docs_dir, filename)
+        filepath_db = doc.get('filepath')
+        tenant_slug = doc.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
 
-        # Intentar eliminar archivo del disco si existe
+        # Intentar eliminar usando el filepath guardado en la BD (mejor opción)
+        removed = False
         try:
-            if os.path.isfile(filepath):
-                os.remove(filepath)
-                app.logger.info(f"🗑️ Archivo eliminado de disco: {filepath}")
+            if filepath_db and os.path.isfile(filepath_db):
+                os.remove(filepath_db)
+                app.logger.info(f"🗑️ Archivo eliminado de disco (ruta BD): {filepath_db}")
+                removed = True
             else:
-                app.logger.info(f"ℹ️ Archivo no encontrado en disco (posiblemente ya eliminado): {filepath}")
+                # Intentar carpeta tenant-aware uploads/docs/<tenant_slug>/<filename>
+                candidate_tenant = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug, filename)
+                if os.path.isfile(candidate_tenant):
+                    os.remove(candidate_tenant)
+                    app.logger.info(f"🗑️ Archivo eliminado de disco (tenant): {candidate_tenant}")
+                    removed = True
+                else:
+                    # Fallback legacy: uploads/docs/<filename>
+                    candidate_legacy = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', filename)
+                    if os.path.isfile(candidate_legacy):
+                        os.remove(candidate_legacy)
+                        app.logger.info(f"🗑️ Archivo eliminado de disco (legacy): {candidate_legacy}")
+                        removed = True
+                    else:
+                        app.logger.info(f"ℹ️ Archivo no encontrado en disco en ninguna ruta para: {filename}")
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo eliminar archivo físico: {e}")
 
@@ -7705,7 +7722,7 @@ def borrar_pdf_configuracion(doc_id):
             cursor.execute("DELETE FROM documents_publicos WHERE id = %s", (doc_id,))
             conn.commit()
             flash('✅ Catálogo eliminado correctamente', 'success')
-            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename}")
+            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename} removed={removed}")
         except Exception as e:
             conn.rollback()
             flash('❌ Error eliminando el registro en la base de datos', 'error')
@@ -7773,7 +7790,7 @@ def configuracion_tab(tab):
             cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
             if cursor.fetchone():
                 cursor.execute("""
-                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
                     FROM documents_publicos
                     ORDER BY created_at DESC
                     LIMIT 50
@@ -7790,6 +7807,7 @@ def configuracion_tab(tab):
         datos=datos, guardado=guardado,
         documents_publicos=documents_publicos
     )
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
         config = obtener_configuracion_por_host()
