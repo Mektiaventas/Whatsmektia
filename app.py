@@ -4696,7 +4696,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-
+    asesores_block = format_asesores_block(cfg)
     # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT para considerar inscripcion/mensualidad
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
@@ -4706,6 +4706,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     {productos_texto}
 
+    {asesores_block}
+
     REGLAS IMPORTANTES:
     1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
     2. SI el producto tiene campos de Inscripción o Mensualidad, muéstralos claramente (ej: "Inscripción: $100.00, Mensualidad: $20.00").
@@ -4714,7 +4716,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     5. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
     6. Mantén las respuestas limpias, concisas y orientadas al cliente.
     """
-
     # ... el resto de tu función se mantiene igual ...
     historial = obtener_historial(numero, config=config)
 
@@ -6325,7 +6326,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     
     # Palabras clave que indican solicitud de humano
     palabras_clave_humano = [
-        'humano', 'persona', 'asesor', 'agente', 'ejecutivo', 'representante',
+        'humano', 'persona', 'agente', 'ejecutivo', 'representante',
         'operador', 'atendedor', 'atender', 'hablar con alguien', 
         'no eres humano', 'no me entiendes', 'quiero hablar con una persona',
         'atención humana', 'servicio humano', 'ayuda humana', 'asistencia humana',
@@ -7028,6 +7029,41 @@ def extraer_nombre_desde_webhook(payload):
     except Exception as e:
         app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
         return None
+
+def format_asesores_block(cfg):
+    """
+    Devuelve un bloque de texto listo para inyectar en el system prompt
+    con la información de asesor1/asesor2 (si existen) y reglas claras
+    para que la IA entregue/proponga el contacto cuando el usuario lo pida.
+    """
+    try:
+        ases = cfg.get('asesores', {}) if isinstance(cfg, dict) else {}
+        a1n = (ases.get('asesor1_nombre') or '').strip()
+        a1t = (ases.get('asesor1_telefono') or '').strip()
+        a2n = (ases.get('asesor2_nombre') or '').strip()
+        a2t = (ases.get('asesor2_telefono') or '').strip()
+
+        lines = []
+        if a1n or a1t:
+            lines.append(f"• Asesor 1: {a1n or 'Nombre no configurado'}{(' — ' + a1t) if a1t else ''}")
+        if a2n or a2t:
+            lines.append(f"• Asesor 2: {a2n or 'Nombre no configurado'}{(' — ' + a2t) if a2t else ''}")
+
+        if not lines:
+            return ""  # nada que agregar
+
+        block = (
+            "ASESORES DISPONIBLES:\n"
+            + "\n".join(lines)
+            + "\n\nINSTRUCCIONES PARA LA IA RESPECTO A ASESORES:\n"
+            "- Si el usuario pide 'hablar con un asesor' o 'asesor', pregunta primero si prefiere que le compartas el número o que le comuniques directamente con el asesor.\n"
+            "- Si el usuario solicita el número, proporciona nombre y teléfono del asesor solicitado tal como aparece arriba.\n"
+            "- Si el usuario pide 'conectar' o 'llamar', ofrece opciones (Asesor 1 / Asesor 2) y confirma antes de compartir datos.\n"
+            "- No inventes números o nombres; usa únicamente los datos proporcionados arriba.\n"
+        )
+        return block
+    except Exception:
+        return ""
 
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
