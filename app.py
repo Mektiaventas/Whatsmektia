@@ -933,6 +933,29 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
         app.logger.warning(f"⚠️ Error extrayendo imágenes desde zip: {e}")
     return imagenes
 
+def get_docs_dir_for_config(config=None):
+    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
+    if config is None:
+        try:
+            from flask import has_request_context
+            if has_request_context():
+                config = obtener_configuracion_por_host()
+            else:
+                config = NUMEROS_CONFIG['524495486142']
+        except Exception:
+            config = NUMEROS_CONFIG['524495486142']
+
+    dominio = (config.get('dominio') or '').strip().lower()
+    tenant_slug = dominio.split('.')[0] if dominio else 'default'
+    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug)
+    try:
+        os.makedirs(docs_dir, exist_ok=True)
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo crear docs_dir {docs_dir}: {e}")
+        # fallback to a shared docs dir
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        os.makedirs(docs_dir, exist_ok=True)
+    return docs_dir, tenant_slug
 
 def importar_productos_desde_excel(filepath, config=None):
     """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
