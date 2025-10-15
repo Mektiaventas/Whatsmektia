@@ -252,7 +252,25 @@
                                    placeholder="0.00">
                         </div>
                     </div>
+                    <div class="form-group">
+                        <label for="inscripcion">Inscripción</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                            <input type="number" step="0.01" min="0" id="inscripcion" name="inscripcion" class="input pl-8"
+                                   value="{{ precio_edit.inscripcion if precio_edit else '' }}"
+                                   placeholder="0.00">
+                        </div>
+                    </div>
 
+                    <div class="form-group">
+                        <label for="mensualidad">Mensualidad</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-gray-600">$</span>
+                            <input type="number" step="0.01" min="0" id="mensualidad" name="mensualidad" class="input pl-8"
+                                   value="{{ precio_edit.mensualidad if precio_edit else '' }}"
+                                   placeholder="0.00">
+                        </div>
+                    </div>
                     <div class="form-group">
                         <label for="precio_mayoreo">Precio Mayoreo</label>
                         <div class="relative">

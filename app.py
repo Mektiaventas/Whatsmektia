@@ -3878,6 +3878,24 @@ def _ensure_cliente_plan_columns():
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
 
+def _ensure_precios_subscription_columns(config=None):
+    """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'inscripcion'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN inscripcion DECIMAL(10,2) DEFAULT 0.00")
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensualidad'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN mensualidad DECIMAL(10,2) DEFAULT 0.00")
+        conn.commit()
+        cur.close()
+        conn.close()
+        app.logger.info("🔧 Columnas 'inscripcion' y 'mensualidad' aseguradas en tabla precios")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
+
 def _ensure_precios_plan_column(config=None):
     """Asegura que la tabla `precios` del tenant tenga la columna mensajes_incluidos (opcional para definir planes)."""
     try:
@@ -7898,7 +7916,6 @@ def configuracion_precio_editar(pid):
             precio_edit=precio_edit
         )
 
-@app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
     config = obtener_configuracion_por_host()
     data = request.form.to_dict()
@@ -7908,8 +7925,14 @@ def configuracion_precio_guardar():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
+        # Ensure subscription columns exist in precios table
+        try:
+            _ensure_precios_subscription_columns(config)
+        except Exception as _:
+            app.logger.warning("⚠️ _ensure_precios_subscription_columns falló (continuando)")
+
         # Process numeric price fields coming from form (empty -> None)
-        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo']:
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad']:
             if f in data and data.get(f, '').strip() == '':
                 data[f] = None
 
@@ -7931,7 +7954,8 @@ def configuracion_precio_guardar():
         # Candidate fields in expected order (prefer form names)
         candidate_fields = [
             'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
-            'descripcion', 'medidas', 'costo', 'precio', 'precio_mayoreo', 'precio_menudeo',
+            'descripcion', 'medidas', 'costo', 'inscripcion', 'mensualidad',
+            'precio', 'precio_mayoreo', 'precio_menudeo',
             'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
         ]
 
