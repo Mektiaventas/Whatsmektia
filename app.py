@@ -5349,7 +5349,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         responder_con_voz = False
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
-            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
+            if "envíame audio" in (texto or "").lower() or "respuesta en audio" in (texto or "").lower():
                 IA_ESTADOS[numero]['prefiere_voz'] = True
                 app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
 
@@ -5398,7 +5398,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             # 2) If user asked (keywords), try to find SKU and image
             keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
-            user_asked_image = any(k in texto.lower() for k in keywords_imagen)
+            user_asked_image = any(k in (texto or "").lower() for k in keywords_imagen)
 
             if user_asked_image and sku_encontrado:
                 # Buscar producto por SKU y obtener campo imagen
@@ -5526,27 +5526,75 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             return
 
         # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-        if responder_con_voz and not es_imagen:
-            # Intentar enviar respuesta de voz
-            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
-            if audio_url_local:
-                # URL pública del audio (ajusta según tu configuración)
-                audio_url_publica = f"https://{config.get('dominio', 'smartwhats.mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+        try:
+            # Normalize respuesta to string
+            if respuesta is None:
+                respuesta = ""
+            respuesta = str(respuesta).strip()
 
-                if enviar_mensaje_voz(numero, audio_url_publica, config):
-                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                else:
-                    # Fallback a texto
-                    enviar_mensaje(numero, respuesta, config)
+            if not respuesta:
+                app.logger.info(f"ℹ️ IA returned empty response for {numero}; nothing to send")
+                return
+
+            sent_ok = False
+
+            if responder_con_voz and not es_imagen:
+                # Try TTS first
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+                if audio_url_local:
+                    # Build public URL robustly
+                    dominio = config.get('dominio', '').rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio or os.getenv('MI_DOMINIO', 'smartwhats.mektia.com')}"
+                    audio_url_publica = f"{dominio}/static/audio/respuestas/{audio_filename}.mp3"
+                    try:
+                        if enviar_mensaje_voz(numero, audio_url_publica, config):
+                            sent_ok = True
+                            app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        else:
+                            app.logger.warning(f"⚠️ enviar_mensaje_voz falló para {numero}, intentando fallback texto")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Exception al enviar voz: {e}, intentando fallback texto")
+
+                # If TTS not available or sending failed, fallback to text
+                if not sent_ok:
+                    try:
+                        sent_ok = enviar_mensaje(numero, respuesta, config)
+                        if sent_ok:
+                            app.logger.info(f"✅ Respuesta (texto fallback) enviada a {numero}")
+                        else:
+                            app.logger.error(f"🔴 Fallback texto no pudo ser enviado a {numero}")
+                    except Exception as e:
+                        app.logger.error(f"🔴 Exception al enviar fallback texto a {numero}: {e}")
+                        sent_ok = False
+
+                # Update DB after delivery attempt
+                actualizar_respuesta(numero, texto, respuesta, config)
+                if not sent_ok:
+                    app.logger.error(f"🔴 No se pudo enviar la respuesta por voz ni por texto a {numero}. Response persisted in DB.")
+                return
+
             else:
-                # Fallback a texto
-                enviar_mensaje(numero, respuesta, config)
-        else:
-            # Respuesta normal de texto
-            enviar_mensaje(numero, respuesta, config)
-            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+                # Send plain text
+                try:
+                    sent_ok = enviar_mensaje(numero, respuesta, config)
+                    if sent_ok:
+                        app.logger.info(f"✅ Respuesta enviada (texto) a {numero}")
+                    else:
+                        app.logger.error(f"🔴 Error enviando respuesta (texto) a {numero}")
+                except Exception as e:
+                    app.logger.error(f"🔴 Exception enviando respuesta (texto) a {numero}: {e}")
+                    sent_ok = False
+
+                # Update DB after attempting to send
+                actualizar_respuesta(numero, texto, respuesta, config)
+                if not sent_ok:
+                    app.logger.error(f"🔴 Respuesta guardada pero no enviada a {numero}")
+                return
+
+        except Exception as e:
+            app.logger.error(f"🔴 Error en el envío de la respuesta: {e}")
 
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if detectar_intervencion_humana_ia(texto, numero, config):
@@ -5564,6 +5612,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
+
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
