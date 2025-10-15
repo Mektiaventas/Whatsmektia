@@ -1214,9 +1214,35 @@ def obtener_imagenes_por_sku(sku, config=None):
 
 @app.route('/uploads/productos/<filename>')
 def serve_product_image(filename):
-    """Sirve imágenes de productos desde el directorio de uploads"""
-    productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-    return send_from_directory(productos_dir, filename)
+    """Sirve imágenes de productos desde la carpeta tenant-aware:
+       uploads/productos/<tenant_slug>/<filename>
+       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
+    try:
+        config = obtener_configuracion_por_host()
+        productos_dir, tenant_slug = get_productos_dir_for_config(config)
+
+        # 1) Intentar carpeta tenant específica
+        candidate = os.path.join(productos_dir, filename)
+        if os.path.isfile(candidate):
+            return send_from_directory(productos_dir, filename)
+
+        # 2) Fallback: carpeta legacy uploads/productos/
+        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+        candidate_legacy = os.path.join(legacy_dir, filename)
+        if os.path.isfile(candidate_legacy):
+            return send_from_directory(legacy_dir, filename)
+
+        # 3) Fallback adicional: raíz de uploads/
+        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+        if os.path.isfile(root_candidate):
+            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+
+        # No encontrado
+        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
+        abort(404)
+    except Exception as e:
+        app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
+        abort(500)
 
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
@@ -2010,16 +2036,15 @@ def subir_pdf_servicios():
             pass
         return redirect(url_for('configuracion_precios'))
 
-def get_docs_dir_for_config(config=None):
-    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
+def get_productos_dir_for_config(config=None):
+    """Return (productos_dir, tenant_slug). Ensures uploads/productos/<tenant_slug> exists."""
     if config is None:
         config = obtener_configuracion_por_host()
     dominio = (config.get('dominio') or '').strip().lower()
-    # fallback tenant slug: subdomain portion before first dot
     tenant_slug = dominio.split('.')[0] if dominio else 'default'
-    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug)
-    os.makedirs(docs_dir, exist_ok=True)
-    return docs_dir, tenant_slug
+    productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', tenant_slug)
+    os.makedirs(productos_dir, exist_ok=True)
+    return productos_dir, tenant_slug
 
 def get_db_connection(config=None):
     if config is None:
