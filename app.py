@@ -161,8 +161,11 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
-
+ALLOWED_EXTENSIONS = {
+    'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
+}
 
 # --- Conexión a la BD de clientes (auth) ---
 def get_clientes_conn():
