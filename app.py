@@ -4131,14 +4131,29 @@ def build_texto_catalogo(precios, limit=20):
     for p in precios[:limit]:
         sku = (p.get('sku') or '').strip()
         nombre = (p.get('servicio') or p.get('modelo') or '').strip()
+        # Preferencia en orden para precio mostrado
         precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or ''
+        inscripcion = p.get('inscripcion')
+        mensualidad = p.get('mensualidad')
         precio_str = ''
         try:
             if precio not in (None, ''):
                 precio_str = f" - ${float(precio):,.2f}"
         except Exception:
             precio_str = f" - {precio}"
-        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}")
+        extras = []
+        try:
+            if inscripcion not in (None, '', 0):
+                extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
+        except Exception:
+            extras.append(f"Inscripción: {inscripcion}")
+        try:
+            if mensualidad not in (None, '', 0):
+                extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
+        except Exception:
+            extras.append(f"Mensualidad: {mensualidad}")
+        extras_str = (f" ({', '.join(extras)})") if extras else ""
+        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}{extras_str}")
     texto = "📚 Catálogo (resumen):\n" + "\n".join(lines)
     if len(precios) > limit:
         texto += f"\n\n... y {len(precios)-limit} productos más. Pide 'catálogo completo' para recibir el PDF si está publicado."
@@ -4518,7 +4533,7 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-# ... existing code ...
+
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -4533,52 +4548,44 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
     info_cita = None  # Initialize to avoid UnboundLocalError
-    
+
     # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
         app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
-        
         info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
-        
         if info_cita and info_cita.get('servicio_solicitado'):
             datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            
             if datos_completos:
-                # Guardar cita completa
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
             else:
-                # Pedir datos faltantes de manera conversacional
                 mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                
                 if 'fecha' in faltantes:
                     mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
                 if 'hora' in faltantes:
                     mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
                 if 'nombre' in faltantes:
                     mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                
                 mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
                 return mensaje_faltantes
         else:
-            # No hay información específica, pedir general
             es_porfirianna = 'laporfirianna' in config.get('dominio', '')
             if es_porfirianna:
                 return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
-    
+
     # ... existing code continues ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
-    
+
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    
+
     # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
     def _clean_field(val, imagen_name):
         if not val:
@@ -4598,12 +4605,12 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             return s
         except Exception:
             return str(val).strip()
-    
+
     for p in precios[:1000]:
         try:
             # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
             imagen = (p.get('imagen') or '').strip()
-            
+
             # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
             sku = _clean_field(p.get('sku'), imagen)
             modelo = _clean_field(p.get('modelo'), imagen)
@@ -4616,7 +4623,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             proveedor = _clean_field(p.get('proveedor'), imagen)
             status = _clean_field(p.get('status_ws'), imagen) or 'activo'
             catalogo = _clean_field(p.get('catalogo'), imagen)
-            
+
             # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
@@ -4629,15 +4636,31 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
-                
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+
+            # Precios y campos de suscripción
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or None
+            inscripcion = p.get('inscripcion')
+            mensualidad = p.get('mensualidad')
+
             precio_str = ''
-            if precio_menudeo:
-                try:
+            try:
+                if precio_menudeo:
                     precio_str = f"${float(precio_menudeo):,.2f}"
-                except Exception:
-                    precio_str = str(precio_menudeo)
-                    
+            except Exception:
+                precio_str = str(precio_menudeo) if precio_menudeo is not None else ''
+
+            extras = []
+            try:
+                if inscripcion not in (None, '', 0):
+                    extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
+            except Exception:
+                extras.append(f"Inscripción: {inscripcion}")
+            try:
+                if mensualidad not in (None, '', 0):
+                    extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
+            except Exception:
+                extras.append(f"Mensualidad: {mensualidad}")
+
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4649,6 +4672,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Linea: {linea}")
             if precio_str:
                 parts.append(f"Precio: {precio_str}")
+            if extras:
+                parts.append(f"{', '.join(extras)}")
             if medidas:
                 parts.append(f"Medidas: {medidas}")
             if proveedor:
@@ -4663,16 +4688,16 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
-            
+
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
-        
+
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
-    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT
+    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT para considerar inscripcion/mensualidad
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
@@ -4683,16 +4708,11 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
 
     REGLAS IMPORTANTES:
     1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
-    2. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
-    3. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
-    4. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
-    5. Mantén las respuestas limpias y profesionales.
-
-    Ejemplo de cómo limpiar textos:
-    - Texto corrupto: "Mesa redonda alta con base... excel_unzip_img_335_1760366786.png"
-    - Texto limpio: "Mesa redonda alta con base..."
-
-    Si el usuario expresa intención de comprar, solicita sus datos para agendar cita.
+    2. SI el producto tiene campos de Inscripción o Mensualidad, muéstralos claramente (ej: "Inscripción: $100.00, Mensualidad: $20.00").
+    3. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
+    4. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
+    5. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
+    6. Mantén las respuestas limpias, concisas y orientadas al cliente.
     """
 
     # ... el resto de tu función se mantiene igual ...
@@ -4725,7 +4745,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 'content': [
                     {"type": "text", "text": mensaje_usuario},
                     {
-                        "type": "image_url", 
+                        "type": "image_url",
                         "image_url": {
                             "url": imagen_base64,
                             "detail": "auto"
@@ -4752,7 +4772,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
-        
+
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -4775,7 +4795,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
         return 'Lo siento, hubo un error con la IA.'
-    except Exception as e: 
+    except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
