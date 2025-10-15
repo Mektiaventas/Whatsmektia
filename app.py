@@ -5570,11 +5570,32 @@ def obtener_datos_chat():
         'total_chats': len(chats)
     })
 
-@app.route('/uploads/docs/<filename>')
-def serve_public_docs(filename):
-    """Serve published PDFs from uploads/docs so Facebook can fetch them via HTTPS."""
-    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-    return send_from_directory(docs_dir, filename)
+@app.route('/uploads/docs/<path:relpath>')
+def serve_public_docs(relpath):
+    """Serve published files from uploads/docs/<tenant_slug>/<filename> (tenant-aware).
+    Accepts paths like 'tenant_slug/filename.pdf' so Facebook can fetch the file_url built by enviar_catalogo.
+    """
+    try:
+        # Base docs dir
+        docs_base = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        # Avoid path traversal attacks by normalizing
+        safe_relpath = os.path.normpath(relpath)
+        # If normalized path tries to go above docs_base, block it
+        if safe_relpath.startswith('..') or os.path.isabs(safe_relpath):
+            app.logger.warning(f"⚠️ Attempted path traversal in serve_public_docs: {relpath}")
+            abort(404)
+
+        full_path = os.path.join(docs_base, safe_relpath)
+        if not os.path.isfile(full_path):
+            app.logger.info(f"❌ Public doc not found: {full_path}")
+            abort(404)
+
+        directory = os.path.dirname(full_path)
+        filename = os.path.basename(full_path)
+        return send_from_directory(directory, filename)
+    except Exception as e:
+        app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
+        abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
