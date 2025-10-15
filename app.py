@@ -2371,7 +2371,7 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
        
         url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
         headers = {
-            'Authorization': f'Bearer {config['whatsapp_token']}",
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
             'Content-Type': 'application/json'
         }
 
