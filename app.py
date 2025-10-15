@@ -3870,7 +3870,8 @@ def get_plan_status_for_user(username, config=None):
     """
     Retorna el estado del plan para el cliente user:
     { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos' }
-    mensajes_consumidos se calcula consultando la BD del tenant (conversaciones.numero == cliente.telefono).
+    Mensajes consumidos = conteo TOTAL de mensajes RECIBIDOS (sin límite de tiempo),
+    es decir, filas en conversaciones donde numero = telefono y mensaje IS NOT NULL / != ''.
     """
     try:
         # Obtener cliente desde CLIENTES_DB
@@ -3893,10 +3894,10 @@ def get_plan_status_for_user(username, config=None):
                 config = obtener_configuracion_por_host()
             conn_t = get_db_connection(config)
             cur_t = conn_t.cursor()
-            # contar mensajes (entrantes) asociados al teléfono del cliente
             telefono = cliente.get('telefono')
             if telefono:
-                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (telefono,))
+                # Contar solo mensajes recibidos por el cliente (campo 'mensaje' no vacío)
+                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje <> ''", (telefono,))
                 row = cur_t.fetchone()
                 mensajes_consumidos = int(row[0]) if row and row[0] is not None else 0
             cur_t.close(); conn_t.close()
