@@ -2345,59 +2345,83 @@ def inicializar_kanban_multitenant():
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
-    """Envía un mensaje de voz por WhatsApp"""
+    """Envía un mensaje de audio por WhatsApp; valida accesibilidad y registra respuesta detallada."""
     if config is None:
         config = obtener_configuracion_por_host()
     if config is None:
         config = obtener_configuracion_numero(numero)
-    
-    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-    headers = {
-        'Authorization': f'Bearer {config['whatsapp_token']}',
-        'Content-Type': 'application/json'
-    }
-    
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': numero,
-        'type': 'audio',
-        'audio': {
-            'link': audio_url
-        }
-    }
-    
+
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        app.logger.info(f"✅ Audio enviado a {numero}")
-        return True
+        if not audio_url or not audio_url.startswith('http'):
+            app.logger.error(f"🔴 enviar_mensaje_voz: audio_url inválida: {audio_url}")
+            return False
+
+        # Verificar que Facebook pueda acceder al archivo (HEAD)
+        try:
+            head = requests.head(audio_url, timeout=8, allow_redirects=True)
+            if head.status_code >= 400:
+                app.logger.error(f"🔴 enviar_mensaje_voz: audio URL not reachable (HEAD {head.status_code}): {audio_url}")
+                return False
+            content_type = head.headers.get('content-type', '')
+            if not content_type.startswith('audio'):
+                app.logger.warning(f"⚠️ enviar_mensaje_voz: content-type no es audio: {content_type}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ enviar_mensaje_voz: HEAD check failed for {audio_url}: {e}")
+            # no short-circuit — intentaremos enviar pero lo registramos
+       
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config['whatsapp_token']}",
+            'Content-Type': 'application/json'
+        }
+
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'audio',
+            'audio': {
+                'link': audio_url
+            }
+        }
+
+        app.logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero} -> {audio_url}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
+
+        if r.status_code in (200, 201, 202):
+            app.logger.info(f"✅ Audio enviado a {numero}")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text}")
+            return False
     except Exception as e:
-        app.logger.error(f"🔴 Error enviando audio: {e}")
+        app.logger.error(f"🔴 Exception en enviar_mensaje_voz: {e}")
         return False
     
 def texto_a_voz(texto, filename,config=None):
-    """Convierte texto a audio usando Google TTS"""
+    """Convierte texto a audio usando Google TTS y devuelve URL pública verificable."""
     if config is None:
         config = obtener_configuracion_por_host()
     try:
         from gtts import gTTS
         import os
 
-        # ✅ Ruta ABSOLUTA para evitar problemas
         base_dir = os.path.dirname(os.path.abspath(__file__))
         audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-
-        # Crear directorio si no existe
         os.makedirs(audio_dir, exist_ok=True)
 
-        # Ruta completa del archivo
         filepath = os.path.join(audio_dir, f"{filename}.mp3")
 
-        # Convertir texto a voz
+        # Generar y guardar MP3
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(filepath)
 
-        # Construir URL pública usando config['dominio'] cuando esté disponible
+        # Verificar que el archivo se creó
+        if not os.path.isfile(filepath):
+            app.logger.error(f"🔴 texto_a_voz: archivo no encontrado después de gTTS: {filepath}")
+            return None
+
+        # Construir URL pública robusta
         dominio_conf = None
         try:
             if isinstance(config, dict):
@@ -2405,21 +2429,28 @@ def texto_a_voz(texto, filename,config=None):
         except Exception:
             dominio_conf = None
 
-        # Fallback al env var MI_DOMINIO o localhost
         dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
-        # Asegurar esquema http(s)
         if not dominio.startswith('http'):
             dominio = 'https://' + dominio
 
         audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
 
-        app.logger.info(f"🎵 Audio guardado en: {filepath}")
-        app.logger.info(f"🌐 URL pública: {audio_url}")
+        # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
+        try:
+            resp = requests.head(audio_url, timeout=6, allow_redirects=True)
+            if resp.status_code >= 400:
+                app.logger.warning(f"⚠️ texto_a_voz: HEAD {audio_url} returned {resp.status_code}. The URL may not be publicly accessible.")
+            else:
+                ct = resp.headers.get('content-type', '')
+                app.logger.info(f"🎵 texto_a_voz: audio saved and reachable. HEAD status {resp.status_code} content-type={ct}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ texto_a_voz: unable to HEAD audio_url ({audio_url}): {e}")
 
+        app.logger.info(f"🌐 URL pública generada: {audio_url} (archivo: {filepath})")
         return audio_url
 
     except Exception as e:
-        app.logger.error(f"Error en texto a voz: {e}")
+        app.logger.error(f"Error en texto_a_voz: {e}")
         return None
 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
