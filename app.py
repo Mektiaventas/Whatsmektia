@@ -7916,6 +7916,7 @@ def configuracion_precio_editar(pid):
             precio_edit=precio_edit
         )
 
+@app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
     config = obtener_configuracion_por_host()
     data = request.form.to_dict()
