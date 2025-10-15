@@ -3870,8 +3870,9 @@ def get_plan_status_for_user(username, config=None):
     """
     Retorna el estado del plan para el cliente user:
     { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos' }
-    Mensajes consumidos = conteo TOTAL de mensajes RECIBIDOS (sin límite de tiempo),
-    es decir, filas en conversaciones donde numero = telefono y mensaje IS NOT NULL / != ''.
+
+    Mejora: intenta múltiples variantes del teléfono (limpieza, prefijos 52/521, +) y
+    un fallback por coincidencia de últimos dígitos para evitar 0s debidos a formatos.
     """
     try:
         # Obtener cliente desde CLIENTES_DB
@@ -3881,26 +3882,82 @@ def get_plan_status_for_user(username, config=None):
         cliente = cur_cli.fetchone()
         cur_cli.close(); conn_cli.close()
         if not cliente:
+            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado para user={username}")
             return None
 
         plan_id = cliente.get('plan_id')
         mensajes_incluidos = int(cliente.get('mensajes_incluidos') or 0)
         plan_name = None
 
-        # Calcular mensajes consumidos en la BD del tenant (conversaciones)
+        telefono = (cliente.get('telefono') or '').strip()
+        app.logger.info(f"🔍 get_plan_status_for_user: user={username} telefono='{telefono}'")
+
         mensajes_consumidos = 0
         try:
             if config is None:
                 config = obtener_configuracion_por_host()
             conn_t = get_db_connection(config)
             cur_t = conn_t.cursor()
-            telefono = cliente.get('telefono')
+
+            # Helper: limpiar dígitos
+            def only_digits(s):
+                return re.sub(r'\D', '', s or '')
+
+            clean_tel = only_digits(telefono)
+            tried = []
+
+            # 1) Intentar coincidencia exacta con varias variantes
+            variants = []
             if telefono:
-                # Contar solo mensajes recibidos por el cliente (campo 'mensaje' no vacío)
-                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje <> ''", (telefono,))
+                variants.append(telefono)
+            if clean_tel:
+                variants.append(clean_tel)
+                variants.append('+' + clean_tel)
+                # Mexico common prefix 52 / 521
+                if not clean_tel.startswith('52'):
+                    variants.append('52' + clean_tel)
+                    variants.append('521' + clean_tel)  # celular formato en algunos sistemas
+            # dedupe
+            variants = [v for i, v in enumerate(variants) if v and v not in variants[:i]]
+
+            for v in variants:
+                tried.append(('exact', v))
+                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (v,))
                 row = cur_t.fetchone()
-                mensajes_consumidos = int(row[0]) if row and row[0] is not None else 0
+                cnt = int(row[0]) if row and row[0] is not None else 0
+                app.logger.info(f"🔎 Conteo exact match numero='{v}' => {cnt}")
+                if cnt > 0:
+                    mensajes_consumidos = cnt
+                    break
+
+            # 2) Si sigue 0: intentar comparar solo los últimos dígitos (fallback razonable)
+            if mensajes_consumidos == 0 and clean_tel:
+                for n in (9, 8, 7):  # probar last 9,8,7 digits
+                    last_n = clean_tel[-n:]
+                    pattern = f"%{last_n}"
+                    tried.append(('like_last', last_n))
+                    # Usamos REPLACE para normalizar número en la consulta (quitar +, espacios, guiones)
+                    sql = """
+                        SELECT COUNT(*) FROM conversaciones
+                        WHERE REPLACE(REPLACE(REPLACE(REPLACE(numero, '+', ''), '-', ''), ' ', ''), '(', '') LIKE %s
+                    """
+                    cur_t.execute(sql, (pattern,))
+                    row = cur_t.fetchone()
+                    cnt = int(row[0]) if row and row[0] is not None else 0
+                    app.logger.info(f"🔎 Conteo LIKE ...{last_n} => {cnt}")
+                    if cnt > 0:
+                        mensajes_consumidos = cnt
+                        break
+
+            # 3) último recurso: contar todas las filas si telefono está vacío (defensivo)
+            if mensajes_consumidos == 0 and not telefono:
+                app.logger.warning("⚠️ get_plan_status_for_user: telefono vacío, mensajes_consumidos queda 0")
+                mensajes_consumidos = 0
+
             cur_t.close(); conn_t.close()
+
+            app.logger.info(f"✅ get_plan_status_for_user resultados: tried={tried} mensajes_consumidos={mensajes_consumidos}")
+
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
             mensajes_consumidos = 0
