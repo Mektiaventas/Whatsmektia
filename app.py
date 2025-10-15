@@ -3770,8 +3770,166 @@ def publicar_pdf_configuracion():
         app.logger.error(f"🔴 Error en publicar_pdf_configuracion: {e}")
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
-        return redirect(url_for('configuracion_tab', tab='negocio'))
+        return redirect(url_for('configuracion_tab', tab='negocio')) 
 
+
+# Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
+
+def _ensure_cliente_plan_columns():
+    """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        # Crear columnas si no existen
+        cur.execute("SHOW COLUMNS FROM cliente LIKE 'plan_id'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE cliente ADD COLUMN plan_id INT DEFAULT NULL")
+        cur.execute("SHOW COLUMNS FROM cliente LIKE 'mensajes_incluidos'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE cliente ADD COLUMN mensajes_incluidos INT DEFAULT 0")
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
+
+def _ensure_precios_plan_column(config=None):
+    """Asegura que la tabla `precios` del tenant tenga la columna mensajes_incluidos (opcional para definir planes)."""
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensajes_incluidos'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN mensajes_incluidos INT DEFAULT 0")
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna mensajes_incluidos en precios: {e}")
+
+def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
+    """
+    Asigna un plan (precios.id) al cliente identificado por `username` (en CLIENTES_DB).
+    Copia mensajes_incluidos desde precios (tenant) al registro cliente.mensajes_incluidos.
+    """
+    try:
+        # asegurar columnas
+        _ensure_cliente_plan_columns()
+        if config is None:
+            config = obtener_configuracion_por_host()
+        _ensure_precios_plan_column(config)
+
+        # 1) Obtener cliente en CLIENTES_DB
+        conn_cli = get_clientes_conn()
+        cur_cli = conn_cli.cursor(dictionary=True)
+        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
+        if not cliente:
+            cur_cli.close(); conn_cli.close()
+            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
+            return False
+
+        # 2) Obtener mensajes_incluidos desde tabla precios del tenant (si existe el plan)
+        mensajes_incluidos = 0
+        plan_name = None
+        try:
+            conn_tenant = get_db_connection(config)
+            cur_t = conn_tenant.cursor(dictionary=True)
+            cur_t.execute("SELECT id, servicio, mensajes_incluidos FROM precios WHERE id = %s LIMIT 1", (plan_id,))
+            plan_row = cur_t.fetchone()
+            if plan_row:
+                mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+                plan_name = plan_row.get('servicio')
+            cur_t.close(); conn_tenant.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo leer plan desde precios (tenant): {e}")
+
+        # 3) Actualizar cliente en CLIENTES_DB
+        try:
+            cur_cli.execute("""
+                UPDATE cliente
+                   SET plan_id = %s, mensajes_incluidos = %s
+                 WHERE id_cliente = %s
+            """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
+            conn_cli.commit()
+        except Exception as e:
+            app.logger.error(f"🔴 Error actualizando cliente con plan: {e}")
+            conn_cli.rollback()
+            cur_cli.close(); conn_cli.close()
+            return False
+
+        cur_cli.close(); conn_cli.close()
+        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
+        return False
+
+def get_plan_status_for_user(username, config=None):
+    """
+    Retorna el estado del plan para el cliente user:
+    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos' }
+    mensajes_consumidos se calcula consultando la BD del tenant (conversaciones.numero == cliente.telefono).
+    """
+    try:
+        # Obtener cliente desde CLIENTES_DB
+        conn_cli = get_clientes_conn()
+        cur_cli = conn_cli.cursor(dictionary=True)
+        cur_cli.execute("SELECT id_cliente, telefono, plan_id, mensajes_incluidos FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
+        cur_cli.close(); conn_cli.close()
+        if not cliente:
+            return None
+
+        plan_id = cliente.get('plan_id')
+        mensajes_incluidos = int(cliente.get('mensajes_incluidos') or 0)
+        plan_name = None
+
+        # Calcular mensajes consumidos en la BD del tenant (conversaciones)
+        mensajes_consumidos = 0
+        try:
+            if config is None:
+                config = obtener_configuracion_por_host()
+            conn_t = get_db_connection(config)
+            cur_t = conn_t.cursor()
+            # contar mensajes (entrantes) asociados al teléfono del cliente
+            telefono = cliente.get('telefono')
+            if telefono:
+                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (telefono,))
+                row = cur_t.fetchone()
+                mensajes_consumidos = int(row[0]) if row and row[0] is not None else 0
+            cur_t.close(); conn_t.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
+            mensajes_consumidos = 0
+
+        # Intentar leer nombre de plan desde tabla precios si plan_id está presente
+        if plan_id:
+            try:
+                if config is None:
+                    config = obtener_configuracion_por_host()
+                conn_t2 = get_db_connection(config)
+                cur_t2 = conn_t2.cursor(dictionary=True)
+                cur_t2.execute("SELECT servicio FROM precios WHERE id = %s LIMIT 1", (plan_id,))
+                pr = cur_t2.fetchone()
+                if pr:
+                    plan_name = pr.get('servicio')
+                cur_t2.close(); conn_t2.close()
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo leer servicio/plan desde precios: {e}")
+
+        return {
+            'plan_id': plan_id,
+            'plan_name': plan_name,
+            'mensajes_incluidos': mensajes_incluidos,
+            'mensajes_consumidos': mensajes_consumidos,
+            'mensajes_disponibles': max(0, mensajes_incluidos - mensajes_consumidos) if mensajes_incluidos is not None else None
+        }
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_plan_status_for_user: {e}")
+        return None
 
 # --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
 def enviar_documento(numero, file_url, filename, config=None):
@@ -6855,6 +7013,9 @@ def diagnostico():
     except Exception as e:
         return jsonify({'error': str(e)})    
 
+# Modificar la función home para inyectar plan_info cuando el usuario está autenticado.
+# Reemplaza la parte final de home() donde haces render_template(...) por la versión que incluye plan_info.
+
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -6895,9 +7056,19 @@ def home():
     cursor.close()
     conn.close()
 
-    # 🔁 Construir labels con el nombre mostrado y values con el total
     labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
     values = [row[2] for row in messages_per_chat]  # total
+
+    # Obtener plan info para el usuario autenticado (si aplica)
+    plan_info = None
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            # obtener plan status
+            plan_info = get_plan_status_for_user(au.get('user'), config=config)
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
+        plan_info = None
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -6905,7 +7076,8 @@ def home():
         total_responded=total_responded,
         period=period,
         labels=labels,
-        values=values
+        values=values,
+        plan_info=plan_info
     )
 
 @app.route('/chats')

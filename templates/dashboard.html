@@ -1,78 +1,108 @@
+{# Agrego la visualización del plan en la parte superior del dashboard #}
 {% extends "base.html" %}
 {% block title %}Dashboard General{% endblock %}
 
 {% block content %}
 <style>
-  .tabs a {
-    padding: 10px 20px;
-    text-decoration: none;
-    border-radius: 20px;
-    border: 2px solid #1f4e79;
-    color: #1f4e79;
-    margin-right: 10px;
-    display: inline-block;
-    margin-bottom: 10px;
-  }
-  .tabs a.active {
-    background-color: #1f4e79;
-    color: white;
-  }
-  .stats {
-    margin-top: 20px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 1rem;
-  }
-  .stat-card {
-    background: rgba(255, 255, 255, 0.9);
-    padding: 1rem;
-    border-radius: 8px;
-    border-left: 6px solid #1f4e79;
-    min-width: 200px;
-    flex: 1;
-  }
-  .chart-container {
-    margin-top: 2rem;
-    width: 100%;
-    position: relative;
-    height: 400px;
-  }
-  
-  /* Responsive */
-  @media (max-width: 768px) {
-    .stats {
-      flex-direction: column;
-    }
-    .stat-card {
-      min-width: auto;
-    }
     .tabs a {
-      padding: 8px 16px;
-      font-size: 0.9rem;
+        padding: 10px 20px;
+        text-decoration: none;
+        border-radius: 20px;
+        border: 2px solid #1f4e79;
+        color: #1f4e79;
+        margin-right: 10px;
+        display: inline-block;
+        margin-bottom: 10px;
     }
-  }
+
+        .tabs a.active {
+            background-color: #1f4e79;
+            color: white;
+        }
+
+    .stats {
+        margin-top: 20px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    .stat-card {
+        background: rgba(255, 255, 255, 0.9);
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 6px solid #1f4e79;
+        min-width: 200px;
+        flex: 1;
+    }
+
+    .chart-container {
+        margin-top: 2rem;
+        width: 100%;
+        position: relative;
+        height: 400px;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .stats {
+            flex-direction: column;
+        }
+
+        .stat-card {
+            min-width: auto;
+        }
+
+        .tabs a {
+            padding: 8px 16px;
+            font-size: 0.9rem;
+        }
+    }
+
+    .plan-box {
+        background: rgba(255,255,255,0.06);
+        padding: 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        color: #fff;
+    }
+
+    .plan-metric {
+        display: inline-block;
+        margin-right: 16px;
+    }
 </style>
 
 <div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
-  <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
+    <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
 
-  <div class="tabs" style="margin-bottom: 2rem;">
-    <a href="/home?period=week" class="{{ 'active' if period == 'week' else '' }}">Últimos 7 días</a>
-    <a href="/home?period=month" class="{{ 'active' if period == 'month' else '' }}">Últimos 30 días</a>
-  </div>
-
-  <div class="stats">
-    <div class="stat-card">
-      <strong>Chats distintos:</strong> {{ chat_counts }}
+    <div class="tabs" style="margin-bottom: 2rem;">
+        <a href="/home?period=week" class="{{ 'active' if period == 'week' else '' }}">Últimos 7 días</a>
+        <a href="/home?period=month" class="{{ 'active' if period == 'month' else '' }}">Últimos 30 días</a>
     </div>
-    <div class="stat-card">
-      <strong>Respuestas enviadas:</strong> {{ total_responded }}
-    </div>
-  </div>
 
-  <div class="chart-container">
-      <canvas id="barChart" style="display: block; box-sizing: border-box; height: 400px; width: 1168px;" width="1460" height="500"></canvas>
-  </div>
+    {# Mostrar información del plan si está disponible #}
+    {% if plan_info %}
+    <div class="plan-box">
+        <strong>Plan actual:</strong> {{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}<br>
+        <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }} mensajes</span>
+        <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }} mensajes</span>
+        <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
+    </div>
+    {% endif %}
+
+    <div class="stats">
+        <div class="stat-card">
+            <strong>Chats distintos:</strong> {{ chat_counts }}
+        </div>
+        <div class="stat-card">
+            <strong>Respuestas enviadas:</strong> {{ total_responded }}
+        </div>
+    </div>
+
+    <div class="chart-container">
+        <canvas id="barChart" style="display: block; box-sizing: border-box; height: 400px; width: 1168px;" width="1460" height="500"></canvas>
+    </div>
 </div>
 
 <!-- Chart.js y plugin datalabels -->
