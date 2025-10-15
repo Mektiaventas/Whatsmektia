@@ -7,6 +7,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
+from werkzeug.exceptions import NotFound
 import pytz
 import os
 import logging
@@ -4116,7 +4117,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
     """
     Intenta enviar el PDF público más relevante (documents_publicos),
     si no existe envía un resumen textual del catálogo (primeros 20 productos).
-    Usa la descripción del PDF para decidir cuál enviar.
+    Antes de llamar a la Graph API hacemos un HEAD sobre file_url (forzando https)
+    y aplicamos fallback textual si el archivo no es accesible públicamente.
     """
     from flask import has_request_context, request
     if config is None:
@@ -4140,15 +4142,11 @@ def enviar_catalogo(numero, original_text=None, config=None):
         usuario_texto = original_text or "[Solicitud de catálogo]"
 
         if docs:
-            # Seleccionar el doc más relevante usando descripción/filename
-            mejor = seleccionar_mejor_doc(docs, usuario_texto)
-            if not mejor:
-                mejor = docs[0]
-
+            mejor = seleccionar_mejor_doc(docs, usuario_texto) or docs[0]
             filename = mejor.get('filename')
             descripcion = mejor.get('descripcion') or ''
 
-            # Build tenant-aware file_url
+            # Build tenant-aware file_url (preferir MI_DOMINIO env var, forzar https)
             base = None
             try:
                 if has_request_context():
@@ -4160,14 +4158,55 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
                 base = dominio if dominio.startswith('http') else f"https://{dominio}"
 
+            mi_dom = os.getenv('MI_DOMINIO')
+            if mi_dom:
+                mi_dom = mi_dom.rstrip('/')
+                base = mi_dom if mi_dom.startswith('http') else f"https://{mi_dom}"
+
             tenant_slug = mejor.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
             file_url = f"{base}/uploads/docs/{tenant_slug}/{filename}"
+
+            # Force https scheme
+            if file_url.startswith('http://'):
+                file_url = file_url.replace('http://', 'https://', 1)
+
             app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
 
-            sent = enviar_documento(numero, file_url, filename, config)
+            # HEAD check para asegurar que Facebook podrá descargar el archivo
+            try:
+                head = requests.head(file_url, timeout=6, allow_redirects=True)
+                if head.status_code != 200:
+                    app.logger.warning(f"⚠️ HEAD {file_url} returned {head.status_code}. Intentando fallback sin tenant...")
+                    # intento fallback: archivo en uploads/docs/ sin subcarpeta tenant
+                    alt = file_url.replace(f"/uploads/docs/{tenant_slug}/", "/uploads/docs/")
+                    head2 = requests.head(alt, timeout=6, allow_redirects=True)
+                    if head2.status_code == 200:
+                        file_url = alt
+                        app.logger.info(f"✅ Fallback encontrado: {file_url}")
+                    else:
+                        app.logger.error(f"🔴 File not reachable at {file_url} nor {alt} (HEADs {head.status_code}/{head2.status_code}). Enviando fallback textual.")
+                        # enviar fallback textual
+                        precios = obtener_todos_los_precios(config) or []
+                        texto_catalogo = build_texto_catalogo(precios, limit=20)
+                        enviar_mensaje(numero, texto_catalogo, config)
+                        try:
+                            actualizar_respuesta(numero, usuario_texto, texto_catalogo, config)
+                        except:
+                            guardar_conversacion(numero, usuario_texto, texto_catalogo, config)
+                        return False
+            except Exception as e:
+                app.logger.warning(f"⚠️ HEAD check fallo para {file_url}: {e}. Procederé a intentar enviar, pero puede fallar en Facebook.")
+
+            # Decide send method (document/video) by extension
+            ext = filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
+            video_exts = {'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'}
+            if ext in video_exts:
+                sent = enviar_video(numero, file_url, filename, caption=descripcion, config=config)
+            else:
+                sent = enviar_documento(numero, file_url, filename, config)
+
             respuesta_text = (f"Te envío el catálogo: {descripcion}" if descripcion else f"Te envío el catálogo: {filename}") if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
 
-            # Actualizar la fila de mensaje entrante con la respuesta para evitar duplicados
             try:
                 actualizar_respuesta(numero, usuario_texto, respuesta_text, config)
             except Exception as e:
@@ -4175,8 +4214,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 guardar_conversacion(numero, usuario_texto, respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
 
             return sent
+
         else:
-            # Fallback a texto resumen del catálogo
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=20)
             enviar_mensaje(numero, texto_catalogo, config)
@@ -5576,23 +5615,36 @@ def serve_public_docs(relpath):
     Accepts paths like 'tenant_slug/filename.pdf' so Facebook can fetch the file_url built by enviar_catalogo.
     """
     try:
-        # Base docs dir
         docs_base = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        # Avoid path traversal attacks by normalizing
         safe_relpath = os.path.normpath(relpath)
-        # If normalized path tries to go above docs_base, block it
+
+        # Prevent path traversal
         if safe_relpath.startswith('..') or os.path.isabs(safe_relpath):
             app.logger.warning(f"⚠️ Attempted path traversal in serve_public_docs: {relpath}")
-            abort(404)
+            raise NotFound()
 
         full_path = os.path.join(docs_base, safe_relpath)
+
+        # Log the expected path for easier debugging
+        app.logger.info(f"🌐 [serve_public_docs] requested relpath={relpath} resolved full_path={full_path}")
+
         if not os.path.isfile(full_path):
+            # Extra logs: listar contenido cercano para diagnóstico
+            try:
+                tenant_dir = os.path.dirname(full_path)
+                files = os.listdir(tenant_dir) if os.path.isdir(tenant_dir) else []
+                app.logger.info(f"ℹ️ Tenant dir exists: {os.path.isdir(tenant_dir)} files_count={len(files)}")
+            except Exception as _:
+                app.logger.info("ℹ️ Could not list tenant dir contents")
             app.logger.info(f"❌ Public doc not found: {full_path}")
-            abort(404)
+            raise NotFound()
 
         directory = os.path.dirname(full_path)
         filename = os.path.basename(full_path)
         return send_from_directory(directory, filename)
+    except NotFound:
+        # Re-raise to let Flask return a 404 (no stacktrace/500)
+        raise
     except Exception as e:
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
