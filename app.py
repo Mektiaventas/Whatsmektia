@@ -8311,8 +8311,11 @@ def ver_kanban(config=None):
 
     cursor.close()
     conn.close()
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats)     
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
