@@ -4550,7 +4550,24 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
     info_cita = None  # Initialize to avoid UnboundLocalError
-
+      # Interceptar petición explícita de asesor (antes de llamar a la IA)
+    text_lower = (texto or "").lower()
+    advisor_keywords = [
+        'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
+        'pásame un asesor', 'pasame un asesor', 'quiero un asesor', 'asesor',
+        'conectar con asesor', 'contacto de asesor'
+    ]
+    if any(k in text_lower for k in advisor_keywords):
+        sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+        if sent:
+            app.logger.info(f"✅ Se envió contacto de asesor a {numero} por petición explícita")
+            # Guardar conversacion que se le pasó el contacto (no duplicar datos)
+            guardar_conversacion(numero, texto, f"Se compartió contacto de asesor.", config)
+        else:
+            app.logger.info(f"ℹ️ No se envió asesor a {numero} (no configurado)")
+            enviar_mensaje(numero, "Lo siento, no hay asesores configurados ahora. ¿Quieres que te comparta otra opción?", config)
+            guardar_conversacion(numero, texto, "No hay asesores configurados.", config)
+        return
     # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
         app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
@@ -5413,6 +5430,113 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         return True
     except Exception as e:
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
+        return False
+
+def obtener_siguiente_asesor(config=None):
+    """
+    Retorna el siguiente asesor disponible en forma round-robin.
+    Persiste/asegura la columna 'asesor_next_index' en la tabla configuracion.
+    Devuelve dict {'nombre','telefono'} o None si no hay asesores configurados.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Asegurar columna asesor_next_index
+        try:
+            cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'asesor_next_index'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE configuracion ADD COLUMN asesor_next_index INT DEFAULT 1")
+                conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_next_index: {e}")
+
+        cursor.execute("""
+            SELECT asesor1_nombre, asesor1_telefono,
+                   asesor2_nombre, asesor2_telefono,
+                   COALESCE(asesor_next_index, 1) AS asesor_next_index
+            FROM configuracion WHERE id = 1 LIMIT 1
+        """)
+        row = cursor.fetchone()
+        if not row:
+            cursor.close(); conn.close()
+            return None
+
+        asesores = []
+        if (row.get('asesor1_nombre') or row.get('asesor1_telefono')):
+            asesores.append({
+                'nombre': (row.get('asesor1_nombre') or '').strip(),
+                'telefono': (row.get('asesor1_telefono') or '').strip()
+            })
+        if (row.get('asesor2_nombre') or row.get('asesor2_telefono')):
+            asesores.append({
+                'nombre': (row.get('asesor2_nombre') or '').strip(),
+                'telefono': (row.get('asesor2_telefono') or '').strip()
+            })
+
+        if not asesores:
+            cursor.close(); conn.close()
+            return None
+
+        idx = int(row.get('asesor_next_index') or 1)
+        n = len(asesores)
+        chosen_index = (idx - 1) % n
+        elegido = asesores[chosen_index]
+
+        siguiente = chosen_index + 2  # next index 1-based
+        if siguiente > n:
+            siguiente = 1
+
+        try:
+            cursor.execute("UPDATE configuracion SET asesor_next_index = %s WHERE id = 1", (siguiente,))
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo actualizar asesor_next_index: {e}")
+
+        cursor.close(); conn.close()
+        return elegido
+
+    except Exception as e:
+        app.logger.error(f"🔴 obtener_siguiente_asesor error: {e}")
+        return None
+
+def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
+    """
+    Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
+    También notifica al asesor seleccionado (opcional).
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        asesor = obtener_siguiente_asesor(config)
+        if not asesor:
+            app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
+            return False
+
+        nombre = asesor.get('nombre') or 'Asesor'
+        telefono = asesor.get('telefono') or ''
+
+        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}\n\n¿Quieres que te conecte ahora?"
+        enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        if enviado:
+            guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
+            app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
+        else:
+            app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
+
+        if notificar_asesor and telefono:
+            try:
+                texto_asesor = f"ℹ️ Se compartió tu contacto con cliente {numero_cliente}. Por favor, estate atento para contactarlo si corresponde."
+                enviar_mensaje(telefono, texto_asesor, config)
+                app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo notificar al asesor {telefono}: {e}")
+
+        return enviado
+    except Exception as e:
+        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
         return False
 
 # Replace the existing procesar_mensaje_normal function with this enhanced version
@@ -7035,34 +7159,30 @@ def extraer_nombre_desde_webhook(payload):
 def format_asesores_block(cfg):
     """
     Devuelve un bloque de texto listo para inyectar en el system prompt
-    con la información de asesor1/asesor2 (si existen) y reglas claras
-    para que la IA entregue/proponga el contacto cuando el usuario lo pida.
+    con la información de los asesores (solo nombres, NO teléfonos) y una regla
+    clara: la IA NUNCA debe compartir números. El servidor decide y envía UN asesor.
     """
     try:
-
         ases = cfg.get('asesores', {}) if isinstance(cfg, dict) else {}
         a1n = (ases.get('asesor1_nombre') or '').strip()
-        a1t = (ases.get('asesor1_telefono') or '').strip()
         a2n = (ases.get('asesor2_nombre') or '').strip()
-        a2t = (ases.get('asesor2_telefono') or '').strip()
 
         lines = []
-        if a1n or a1t:
-            lines.append(f"• Asesor 1: {a1n or 'Nombre no configurado'}{(' — ' + a1t) if a1t else ''}")
-        if a2n or a2t:
-            lines.append(f"• Asesor 2: {a2n or 'Nombre no configurado'}{(' — ' + a2t) if a2t else ''}")
+        if a1n:
+            lines.append(f"• Asesor 1: {a1n}")
+        if a2n:
+            lines.append(f"• Asesor 2: {a2n}")
 
         if not lines:
-            return ""  # nada que agregar
+            return ""
 
         block = (
-            "ASESORES DISPONIBLES:\n"
-            + "\n".join(lines)
-            + "\n\nINSTRUCCIONES PARA LA IA RESPECTO A ASESORES:\n"
-            "- Si el usuario pide 'hablar con un asesor' o 'asesor', pregunta primero si prefiere que le compartas el número o que le comuniques directamente con el asesor.\n"
-            "- Si el usuario solicita el número, proporciona nombre y teléfono del asesor solicitado tal como aparece arriba.\n"
-            "- Si el usuario pide 'conectar' o 'llamar', ofrece opciones (Asesor 1 / Asesor 2) y confirma antes de compartir datos.\n"
-            "- No inventes números o nombres; usa únicamente los datos proporcionados arriba.\n"
+            "ASESORES DISPONIBLES (solo nombres; teléfonos NO incluidos aquí):\n"
+            + "\n".join(lines) +
+            "\n\nREGLA IMPORTANTE: La IA NO debe compartir números de teléfono ni datos de contacto directos. "
+            "Si el usuario solicita explícitamente contactar a un asesor, la aplicación servidor (no la IA) enviará "
+            "UN SOLO asesor al cliente usando la política round-robin. La IA puede ofrecer describir el perfil del asesor "
+            "o preguntar si el usuario prefiere llamada o WhatsApp, pero NO debe revelar teléfonos."
         )
         return block
     except Exception:
