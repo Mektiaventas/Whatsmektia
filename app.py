@@ -3318,6 +3318,75 @@ def sanitize_whatsapp_text(text):
         app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
         return text.strip() if isinstance(text, str) else text
 
+def eliminar_asesores_extras(config=None, allowed_count=2):
+    """
+    Recorta la lista de asesores guardada en configuracion.asesores_json
+    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono)
+    que existan en la tabla y estén por encima del límite.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Leer row actual
+        cursor.execute("SELECT asesores_json FROM configuracion WHERE id = 1 LIMIT 1")
+        row = cursor.fetchone()
+        if not row:
+            cursor.close(); conn.close()
+            return
+
+        asesores_json = row.get('asesores_json') or ''
+        changed = False
+
+        # 1) Trim JSON list if needed
+        if asesores_json:
+            try:
+                parsed = json.loads(asesores_json)
+                if isinstance(parsed, list) and len(parsed) > allowed_count:
+                    trimmed = parsed[:allowed_count]
+                    cursor.execute("UPDATE configuracion SET asesores_json = %s WHERE id = 1", (json.dumps(trimmed, ensure_ascii=False),))
+                    conn.commit()
+                    app.logger.info(f"🔧 asesores_json recortado de {len(parsed)} a {allowed_count}")
+                    changed = True
+            except Exception as e:
+                app.logger.warning(f"⚠️ eliminar_asesores_extras: no se pudo parsear asesores_json: {e}")
+
+        # 2) Nullificar columnas legacy que queden fuera del límite (comprobar qué columnas existen)
+        try:
+            cursor.execute("SHOW COLUMNS FROM configuracion")
+            existing = [r[0] for r in cursor.fetchall()]
+        except Exception:
+            existing = []
+
+        cols_to_null = []
+        # consider up to 20 possible legacy columns (safe upper bound)
+        for i in range(1, 21):
+            if i > allowed_count:
+                name_col = f"asesor{i}_nombre"
+                phone_col = f"asesor{i}_telefono"
+                if name_col in existing:
+                    cols_to_null.append(f"{name_col} = NULL")
+                if phone_col in existing:
+                    cols_to_null.append(f"{phone_col} = NULL")
+
+        if cols_to_null:
+            try:
+                sql = f"UPDATE configuracion SET {', '.join(cols_to_null)} WHERE id = 1"
+                cursor.execute(sql)
+                conn.commit()
+                app.logger.info(f"🔧 Columnas legacy de asesores > {allowed_count} puestas a NULL")
+                changed = True
+            except Exception as e:
+                app.logger.warning(f"⚠️ eliminar_asesores_extras: no se pudieron nullificar columnas legacy: {e}")
+
+        cursor.close(); conn.close()
+        if not changed:
+            app.logger.debug("ℹ️ eliminar_asesores_extras: no se aplicó ningún cambio (no había asesores extras)")
+    except Exception as e:
+        app.logger.error(f"🔴 eliminar_asesores_extras error: {e}")
+
 def obtener_max_asesores_from_planes(default=2, cap=10):
     """
     Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
@@ -8263,13 +8332,21 @@ def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
     if tab not in SUBTABS:
         abort(404)
-
-    # Load current config (structured)
-    cfg = load_config(config)
     guardado = False
 
-    # Determine how many advisors allowed by plan (used for POST processing and rendering)
+    cfg = load_config(config)
     asesores_list = cfg.get('asesores_list', []) or []
+
+    # If DB still contains more advisors than the allowed plan limit, trim them now.
+    try:
+        if isinstance(asesores_list, list) and len(asesores_list) > asesor_count:
+            app.logger.info(f"⚠️ Plan reducido: {len(asesores_list)} -> {asesor_count}. Eliminando asesores extras en BD...")
+            eliminar_asesores_extras(config, asesor_count)
+            # Reload after trimming so template shows the trimmed list
+            cfg = load_config(config)
+            asesores_list = cfg.get('asesores_list', []) or []
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
 
     # Prefer plan-specific limit when user is authenticated; fallback to global max
     au = session.get('auth_user') or {}
