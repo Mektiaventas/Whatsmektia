@@ -3,7 +3,23 @@
 
 {% block content %}
 {% set host = request.host.split(':')[0] %}
-{% set subdomain = host.split('.')[0] if '.' in host else '' %}
+{% set parts = host.split('.') %}
+{% set subdomain = '' %}
+{% if parts|length > 2 %}
+    {% set first = parts[0].lower() %}
+    {% if first.startswith('www') %}
+        {% set subdomain = parts[1] %}
+    {% else %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% elif parts|length == 2 %}
+    {% set first = parts[0].lower() %}
+    {% if not first.startswith('www') %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% else %}
+    {% set subdomain = '' %}
+{% endif %}
 {% set negocio_nombre = subdomain|capitalize if subdomain else (tenant_config.negocio_nombre or 'Mektia') %}
 
 <div class="chat-list-header">
@@ -423,7 +439,7 @@ function crearNuevoChatHTML(chat) {
       </span>
       {% if is_admin%}
       <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
-      {% endif %}    
+      {% endif %}
      </div>
     <div class="card-meta-row">
       <span class="card-num">${chat.numero}</span>
