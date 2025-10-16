@@ -7398,13 +7398,18 @@ def ver_chats():
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
     cursor.close()
     conn.close()
-    
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
     return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
         IA_ESTADOS=IA_ESTADOS,
-        tenant_config=config
+        tenant_config=config,
+        is_admin=is_admin
     )
 
 @app.route('/chats/<numero>')
@@ -7463,13 +7468,18 @@ def ver_chat(numero):
         conn.close()
         
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
+
+        # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+        au = session.get('auth_user') or {}
+        is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
         return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
             IA_ESTADOS=IA_ESTADOS,
-            tenant_config=config
+            tenant_config=config,
+            is_admin=is_admin
         )
         
     except Exception as e:

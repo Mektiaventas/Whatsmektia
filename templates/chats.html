@@ -86,9 +86,11 @@
                         <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}"
                                data-num="{{ selected }}" maxlength="100">
                     </span>
+                    {% if is_admin %}
                     <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
                         ✏️
                     </button>
+                    {% endif %}
                 </div>
                 <span class="chat-number">{{ selected }}</span>
             </div>
@@ -234,11 +236,13 @@
         {% if selected %}
         <div class="sidebar-section">
             <h3>Acciones</h3>
+            {% if is_admin %}
             <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
                 <button type="submit" class="delete-btn">
                     🗑️ Eliminar Chat
                 </button>
             </form>
+            {% endif %}
         </div>
 
         <div class="sidebar-section">
