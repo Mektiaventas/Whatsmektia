@@ -4627,7 +4627,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
         'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
         '¿dónde están', 'dónde están', 'donde están', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto'
+        'información de contacto', 'contacto', 'ubicacion'
     ]
     # mensaje_usuario ya definido; text_lower ya existe arriba
     if any(k in text_lower for k in contact_queries):
