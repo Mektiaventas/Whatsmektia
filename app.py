@@ -2682,8 +2682,24 @@ def negocio_contact_block(negocio):
     telefono_display = telefono or 'No disponible'
     correo_display = correo or 'No disponible'
     direccion_display = direccion or 'No disponible'
-
+    prompt_comentario = f"""
+        Eres un asistente que esta a punto de recibir una visita, expresa
+        tu emocion acerca de eso.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt_comentario}],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
     block = (
+        f"{prompt_comentario}"
         "📍 DATOS DEL NEGOCIO:\n\n"
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
