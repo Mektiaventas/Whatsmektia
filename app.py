@@ -5658,14 +5658,35 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
 def obtener_siguiente_asesor(config=None):
     """
     Retorna el siguiente asesor disponible en forma round-robin.
-    Soporta:
-      - lista JSON en la columna `asesores_json`
-      - columnas legacy dinámicas `asesorN_nombre` / `asesorN_telefono`
-    Persiste/asegura la columna 'asesor_next_index' en la tabla configuracion.
+    Ahora también:
+      - Intenta inferir el usuario/cliente dueño del tenant (CLIENTES_DB) para obtener
+        el límite de asesores del plan y, si hay más asesores en la BD que los
+        permitidos por el plan, recorta automáticamente (eliminar_asesores_extras).
+      - Soporta lista JSON en `asesores_json` y columnas legacy `asesorN_nombre`/telefono.
     Devuelve dict {'nombre','telefono'} o None si no hay asesores configurados.
     """
     if config is None:
         config = obtener_configuracion_por_host()
+
+    def _infer_cliente_user_for_config(cfg):
+        """Intenta encontrar el `user` en CLIENTES_DB asociado al tenant (heurístico)."""
+        try:
+            conn_cli = get_clientes_conn()
+            cur = conn_cli.cursor(dictionary=True)
+            # Heurísticas: buscar por shema/db_name, por dominio (entorno) o por servicio
+            candidates = (cfg.get('db_name'), cfg.get('dominio'), cfg.get('dominio'))
+            cur.execute("""
+                SELECT `user`
+                  FROM cliente
+                 WHERE shema = %s OR entorno = %s OR servicio = %s
+                 LIMIT 1
+            """, candidates)
+            row = cur.fetchone()
+            cur.close(); conn_cli.close()
+            return row.get('user') if row and row.get('user') else None
+        except Exception:
+            return None
+
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -5679,46 +5700,73 @@ def obtener_siguiente_asesor(config=None):
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_next_index: {e}")
 
-        # Obtener toda la fila para poder leer asesores_json y columnas dinámicas
+        # Leer fila actual
         cursor.execute("SELECT * FROM configuracion WHERE id = 1 LIMIT 1")
         row = cursor.fetchone()
         if not row:
             cursor.close(); conn.close()
             return None
 
-        asesores = []
-
-        # 1) Intentar parsear asesores_json (preferido)
-        asesores_json = row.get('asesores_json')
-        if asesores_json:
-            try:
-                parsed = json.loads(asesores_json)
-                if isinstance(parsed, list):
-                    for a in parsed:
-                        nombre = (a.get('nombre') or '').strip() if isinstance(a, dict) else ''
-                        telefono = (a.get('telefono') or '').strip() if isinstance(a, dict) else ''
+        # Build advisors list (from JSON preferred, otherwise legacy columns)
+        def _build_asesores_from_row(r):
+            ases = []
+            ases_json = r.get('asesores_json')
+            if ases_json:
+                try:
+                    parsed = json.loads(ases_json)
+                    if isinstance(parsed, list):
+                        for a in parsed:
+                            if isinstance(a, dict):
+                                nombre = (a.get('nombre') or '').strip()
+                                telefono = (a.get('telefono') or '').strip()
+                                if nombre or telefono:
+                                    ases.append({'nombre': nombre, 'telefono': telefono})
+                except Exception:
+                    app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, fallback a columnas legacy")
+            if not ases:
+                # legacy dynamic columns
+                temp = {}
+                pattern = re.compile(r'^asesor(\d+)_nombre$')
+                for k, v in r.items():
+                    if not k:
+                        continue
+                    m = pattern.match(k)
+                    if m:
+                        idx = int(m.group(1))
+                        nombre = (v or '').strip()
+                        telefono = (r.get(f'asesor{idx}_telefono') or '').strip()
                         if nombre or telefono:
-                            asesores.append({'nombre': nombre, 'telefono': telefono})
-            except Exception:
-                app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, proceder a columns legacy")
-
-        # 2) Si no hay JSON válido, buscar columnas legacy dinámicas asesorN_nombre/asesorN_telefono
-        if not asesores:
-            temp = {}
-            pattern = re.compile(r'^asesor(\d+)_nombre$')
-            for k, v in row.items():
-                if not k:
-                    continue
-                m = pattern.match(k)
-                if m:
-                    idx = int(m.group(1))
-                    nombre = (v or '').strip()
-                    telefono = (row.get(f'asesor{idx}_telefono') or '').strip()
-                    if nombre or telefono:
-                        temp[idx] = {'nombre': nombre, 'telefono': telefono}
-            if temp:
+                            temp[idx] = {'nombre': nombre, 'telefono': telefono}
                 for idx in sorted(temp.keys()):
-                    asesores.append(temp[idx])
+                    ases.append(temp[idx])
+            return ases
+
+        asesores = _build_asesores_from_row(row)
+
+        # Infer allowed_count: try per-client plan (best effort); fallback to global max
+        allowed_count = None
+        try:
+            usuario_propietario = _infer_cliente_user_for_config(config)
+            if usuario_propietario:
+                allowed_count = obtener_asesores_por_user(usuario_propietario, default=1, cap=50)
+            else:
+                # fallback: use global max from planes (safe default 1)
+                allowed_count = obtener_max_asesores_from_planes(default=1, cap=50)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo inferir allowed_count para asesores: {e}")
+            allowed_count = obtener_max_asesores_from_planes(default=1, cap=50)
+
+        # If DB has more advisors than allowed by plan, trim them (and reload)
+        try:
+            if asesores and allowed_count is not None and len(asesores) > allowed_count:
+                app.logger.info(f"⚠️ Hay {len(asesores)} asesores en BD pero el plan permite {allowed_count}. Recortando...")
+                eliminar_asesores_extras(config, allowed_count)
+                # reload row and rebuild list
+                cursor.execute("SELECT * FROM configuracion WHERE id = 1 LIMIT 1")
+                row = cursor.fetchone()
+                asesores = _build_asesores_from_row(row)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo recortar asesores automáticamente: {e}")
 
         if not asesores:
             cursor.close(); conn.close()
@@ -5735,7 +5783,7 @@ def obtener_siguiente_asesor(config=None):
         elegido = asesores[elegido_index0]
 
         # Calcular siguiente índice 1-based y persistirlo
-        siguiente = (elegido_index0 + 1) + 1  # elegido_index0 + 1 => current 1-based, +1 => next
+        siguiente = (elegido_index0 + 1) + 1
         if siguiente > n:
             siguiente = 1
 
