@@ -4323,6 +4323,116 @@ def ver_citas(config=None):
     
     return render_template('citas.html', citas=citas)
 
+def load_config(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS configuracion (
+            id INT PRIMARY KEY DEFAULT 1,
+            ia_nombre VARCHAR(100),
+            negocio_nombre VARCHAR(100),
+            descripcion TEXT,
+            url VARCHAR(255),
+            direccion VARCHAR(255),
+            telefono VARCHAR(50),
+            correo VARCHAR(100),
+            que_hace TEXT,
+            tono VARCHAR(50),
+            lenguaje VARCHAR(50),
+            restricciones TEXT,
+            palabras_prohibidas TEXT,
+            max_mensajes INT DEFAULT 10,
+            tiempo_max_respuesta INT DEFAULT 30,
+            logo_url VARCHAR(255),
+            nombre_empresa VARCHAR(100),
+            app_logo VARCHAR(255),
+            calendar_email VARCHAR(255),
+            -- Asesores de ventas (columnas antiguas para compatibilidad)
+            asesor1_nombre VARCHAR(100),
+            asesor1_telefono VARCHAR(50),
+            asesor2_nombre VARCHAR(100),
+            asesor2_telefono VARCHAR(50),
+            -- Nueva columna JSON que puede contener lista arbitraria de asesores
+            asesores_json TEXT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not row:
+        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}, 'asesores_list': []}
+
+    negocio = {
+        'ia_nombre': row.get('ia_nombre'),
+        'negocio_nombre': row.get('negocio_nombre'),
+        'descripcion': row.get('descripcion'),
+        'url': row.get('url'),
+        'direccion': row.get('direccion'),
+        'telefono': row.get('telefono'),
+        'correo': row.get('correo'),
+        'que_hace': row.get('que_hace'),
+        'logo_url': row.get('logo_url', ''),
+        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
+        'app_logo': row.get('app_logo', ''),
+        'calendar_email': row.get('calendar_email', '')
+    }
+    personalizacion = {
+        'tono': row.get('tono'),
+        'lenguaje': row.get('lenguaje'),
+    }
+    restricciones = {
+        'restricciones': row.get('restricciones', ''),
+        'palabras_prohibidas': row.get('palabras_prohibidas', ''),
+        'max_mensajes': row.get('max_mensajes', 10),
+        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
+    }
+
+    # Manejo de asesores: preferir columna JSON si existe, si no usar columnas antiguas
+    asesores_list = []
+    asesores_map = {}
+    try:
+        asesores_json = row.get('asesores_json')
+        if asesores_json:
+            try:
+                parsed = json.loads(asesores_json)
+                if isinstance(parsed, list):
+                    asesores_list = parsed
+                    # Build map for backward compatibility (asesor1_nombre, etc.)
+                    for idx, a in enumerate(asesores_list, start=1):
+                        asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
+                        asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
+            except Exception:
+                app.logger.warning("⚠️ No se pudo parsear asesores_json, fallback a columnas individuales")
+        if not asesores_list:
+            # Fallback: legacy columns (asesor1, asesor2)
+            a1n = (row.get('asesor1_nombre') or '').strip()
+            a1t = (row.get('asesor1_telefono') or '').strip()
+            a2n = (row.get('asesor2_nombre') or '').strip()
+            a2t = (row.get('asesor2_telefono') or '').strip()
+            if a1n or a1t:
+                asesores_list.append({'nombre': a1n, 'telefono': a1t})
+                asesores_map['asesor1_nombre'] = a1n
+                asesores_map['asesor1_telefono'] = a1t
+            if a2n or a2t:
+                asesores_list.append({'nombre': a2n, 'telefono': a2t})
+                asesores_map['asesor2_nombre'] = a2n
+                asesores_map['asesor2_telefono'] = a2t
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error procesando asesores: {e}")
+
+    # Return both map (backward compat) and list (preferred)
+    return {
+        'negocio': negocio,
+        'personalizacion': personalizacion,
+        'restricciones': restricciones,
+        'asesores': asesores_map,
+        'asesores_list': asesores_list
+    }
+
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
