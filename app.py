@@ -2698,8 +2698,9 @@ def negocio_contact_block(negocio):
         "temperature": 0.3,
         "max_tokens": 500
     }
+    respuestita = payload.choices[0].message.content
     block = (
-        f"{payload}"
+        f"{respuestita}"
         "📍 DATOS DEL NEGOCIO:\n\n"
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
