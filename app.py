@@ -3978,7 +3978,7 @@ def get_plan_status_for_user(username, config=None):
         # Obtener cliente desde CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono, plan_id, mensajes_incluidos FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
         cliente = cur_cli.fetchone()
         cur_cli.close(); conn_cli.close()
         if not cliente:
@@ -3986,7 +3986,6 @@ def get_plan_status_for_user(username, config=None):
             return None
 
         plan_id = cliente.get('plan_id')
-        mensajes_incluidos = int(cliente.get('mensajes_incluidos') or 0)
         plan_name = None
 
         # Si hay plan_id, intentar leer la definición desde CLIENTES_DB.planes
