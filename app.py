@@ -2786,7 +2786,9 @@ def autorizar_manual():
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
-    """Crea un evento en Google Calendar para la cita con más detalles del servicio"""
+    """Crea un evento en Google Calendar; intenta crear el evento directamente en el calendar_email
+    si está configurado y, si falla por permisos, hace fallback al calendario 'primary' y añade
+    calendar_email como invitado. Usa sendUpdates='all' para notificar asistentes."""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2806,16 +2808,14 @@ def crear_evento_calendar(service, cita_info, config=None):
             start_time = now.isoformat()
             end_time = (now + timedelta(hours=1)).isoformat()
         
-        # Obtener detalles adicionales del servicio
+        # Detalles del servicio
         detalles_servicio = cita_info.get('detalles_servicio', {})
         descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
         categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
         precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
         
-        # Título del evento más descriptivo
         event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {cita_info.get('servicio_solicitado', 'Servicio')} - {cita_info.get('nombre_cliente', 'Cliente')}"
         
-        # Descripción más detallada del evento
         event_description = f"""
 📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
 
@@ -2837,7 +2837,6 @@ def crear_evento_calendar(service, cita_info, config=None):
 💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
         """.strip()
         
-        # Crear el evento con información ampliada
         event = {
             'summary': event_title,
             'location': config.get('direccion', ''),
@@ -2854,13 +2853,13 @@ def crear_evento_calendar(service, cita_info, config=None):
                 'useDefault': False,
                 'overrides': [
                     {'method': 'popup', 'minutes': 30},
-                    {'method': 'email', 'minutes': 24 * 60},  # 1 día antes
+                    {'method': 'email', 'minutes': 24 * 60},
                 ],
             },
-            'colorId': '4' if es_porfirianna else '1',  # Rojo para Porfirianna, Azul para otros
+            'colorId': '4' if es_porfirianna else '1',
         }
         
-        # Obtener el correo para notificaciones de Calendar
+        # Leer calendar_email desde la BD
         app.logger.info(f"📧 Intentando obtener calendar_email de la base de datos")
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -2871,18 +2870,39 @@ def crear_evento_calendar(service, cita_info, config=None):
         
         calendar_email = None
         if result and result.get('calendar_email'):
-            calendar_email = result['calendar_email']
-            
-        # Agregar el correo como asistente si está configurado
-        if calendar_email:
-            event['attendees'] = [{'email': calendar_email}]
-            app.logger.info(f"✉️ Notificación de Calendar configurada para: {calendar_email}")
+            calendar_email = result['calendar_email'].strip()
         
-        calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
-        event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
         
-        app.logger.info(f'Evento creado: {event.get("htmlLink")}')
-        return event.get('id')  # Retorna el ID del evento
+        # Si calendar_email está configurado, intentamos crear directamente en ese calendario primero
+        attempted_calendar = calendar_email if calendar_email else primary_calendar
+        
+        try:
+            app.logger.info(f"🌐 Intentando crear evento en calendarId='{attempted_calendar}' (sendUpdates=all)")
+            created = service.events().insert(calendarId=attempted_calendar, body=event, sendUpdates='all').execute()
+            app.logger.info(f'Evento creado en {attempted_calendar}: {created.get("htmlLink")}')
+            return created.get('id')
+        except HttpError as he:
+            # Permisos o calendario no encontrado -> fallback
+            app.logger.warning(f"⚠️ No se pudo crear evento en calendarId='{attempted_calendar}': {he}")
+            # Si intentamos en calendar_email y falló, fallback a primary y añadir calendar_email como attendee (si existe)
+            if attempted_calendar != primary_calendar:
+                if calendar_email:
+                    event['attendees'] = [{'email': calendar_email}]
+                try:
+                    app.logger.info(f"🔁 Intentando crear evento en calendarId='{primary_calendar}' y añadir attendees (sendUpdates=all)")
+                    created = service.events().insert(calendarId=primary_calendar, body=event, sendUpdates='all').execute()
+                    app.logger.info(f'Evento creado en {primary_calendar}: {created.get("htmlLink")} (attendees: {calendar_email})')
+                    return created.get('id')
+                except Exception as e2:
+                    app.logger.error(f'🔴 Fallback a primary falló: {e2}')
+                    return None
+            else:
+                app.logger.error("🔴 Error creando evento y no hay fallback disponible")
+                return None
+        except Exception as e:
+            app.logger.error(f'🔴 Error inesperado creando evento: {e}')
+            return None
         
     except Exception as e:
         app.logger.error(f'Error al crear evento: {e}')
