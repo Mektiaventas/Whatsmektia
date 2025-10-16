@@ -2687,8 +2687,7 @@ def negocio_contact_block(negocio):
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
         f"• Correo: {correo_display}\n\n"
-        "Nota: Estos datos provienen de la configuración del sistema. Si falta algún campo, "
-        "por favor complétalo en la sección __configuracion > negocio__."
+        "Visitanos pronto!"
     )
     return block
 
