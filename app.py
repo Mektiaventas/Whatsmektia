@@ -5589,6 +5589,9 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
 def obtener_siguiente_asesor(config=None):
     """
     Retorna el siguiente asesor disponible en forma round-robin.
+    Soporta:
+      - lista JSON en la columna `asesores_json`
+      - columnas legacy dinámicas `asesorN_nombre` / `asesorN_telefono`
     Persiste/asegura la columna 'asesor_next_index' en la tabla configuracion.
     Devuelve dict {'nombre','telefono'} o None si no hay asesores configurados.
     """
@@ -5607,39 +5610,63 @@ def obtener_siguiente_asesor(config=None):
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_next_index: {e}")
 
-        cursor.execute("""
-            SELECT asesor1_nombre, asesor1_telefono,
-                   asesor2_nombre, asesor2_telefono,
-                   COALESCE(asesor_next_index, 1) AS asesor_next_index
-            FROM configuracion WHERE id = 1 LIMIT 1
-        """)
+        # Obtener toda la fila para poder leer asesores_json y columnas dinámicas
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1 LIMIT 1")
         row = cursor.fetchone()
         if not row:
             cursor.close(); conn.close()
             return None
 
         asesores = []
-        if (row.get('asesor1_nombre') or row.get('asesor1_telefono')):
-            asesores.append({
-                'nombre': (row.get('asesor1_nombre') or '').strip(),
-                'telefono': (row.get('asesor1_telefono') or '').strip()
-            })
-        if (row.get('asesor2_nombre') or row.get('asesor2_telefono')):
-            asesores.append({
-                'nombre': (row.get('asesor2_nombre') or '').strip(),
-                'telefono': (row.get('asesor2_telefono') or '').strip()
-            })
+
+        # 1) Intentar parsear asesores_json (preferido)
+        asesores_json = row.get('asesores_json')
+        if asesores_json:
+            try:
+                parsed = json.loads(asesores_json)
+                if isinstance(parsed, list):
+                    for a in parsed:
+                        nombre = (a.get('nombre') or '').strip() if isinstance(a, dict) else ''
+                        telefono = (a.get('telefono') or '').strip() if isinstance(a, dict) else ''
+                        if nombre or telefono:
+                            asesores.append({'nombre': nombre, 'telefono': telefono})
+            except Exception:
+                app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, proceder a columns legacy")
+
+        # 2) Si no hay JSON válido, buscar columnas legacy dinámicas asesorN_nombre/asesorN_telefono
+        if not asesores:
+            temp = {}
+            pattern = re.compile(r'^asesor(\d+)_nombre$')
+            for k, v in row.items():
+                if not k:
+                    continue
+                m = pattern.match(k)
+                if m:
+                    idx = int(m.group(1))
+                    nombre = (v or '').strip()
+                    telefono = (row.get(f'asesor{idx}_telefono') or '').strip()
+                    if nombre or telefono:
+                        temp[idx] = {'nombre': nombre, 'telefono': telefono}
+            if temp:
+                for idx in sorted(temp.keys()):
+                    asesores.append(temp[idx])
 
         if not asesores:
             cursor.close(); conn.close()
             return None
 
-        idx = int(row.get('asesor_next_index') or 1)
-        n = len(asesores)
-        chosen_index = (idx - 1) % n
-        elegido = asesores[chosen_index]
+        # Índice actual (1-based). Si no existe en row, usar 1.
+        try:
+            idx_actual = int(row.get('asesor_next_index') or 1)
+        except Exception:
+            idx_actual = 1
 
-        siguiente = chosen_index + 2  # next index 1-based
+        n = len(asesores)
+        elegido_index0 = (idx_actual - 1) % n
+        elegido = asesores[elegido_index0]
+
+        # Calcular siguiente índice 1-based y persistirlo
+        siguiente = (elegido_index0 + 1) + 1  # elegido_index0 + 1 => current 1-based, +1 => next
         if siguiente > n:
             siguiente = 1
 
