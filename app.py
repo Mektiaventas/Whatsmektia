@@ -2683,9 +2683,9 @@ def negocio_contact_block(negocio):
     correo_display = correo or 'No disponible'
     direccion_display = direccion or 'No disponible'
     prompt_comentario = f"""
-        Eres un asistente a quien le acaban de preguntar por
-        la ubicacion de su negocio, devuelve un comentario agradable
-        sin dar ningun dato de la ubicacion.
+        Te acaban de hacer una solicitud de datos, 
+        no me des ningun dato, solo has un comentario agradable expresando
+        que estas a su servicio, algo parecido a decir claro que si.
         """
         
     headers = {
@@ -2705,7 +2705,7 @@ def negocio_contact_block(negocio):
     data = response.json()
     respuestita = data['choices'][0]['message']['content'].strip()
     block = (
-        f"{respuestita}\n"
+        f"{respuestita}\n\n"
         "📍 DATOS DEL NEGOCIO:\n\n"
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
