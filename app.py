@@ -15,6 +15,7 @@ import logging
 import json 
 import base64
 import argparse
+import math
 import mysql.connector
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
@@ -3317,78 +3318,26 @@ def sanitize_whatsapp_text(text):
         app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
         return text.strip() if isinstance(text, str) else text
 
-def load_config(config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS configuracion (
-            id INT PRIMARY KEY DEFAULT 1,
-            ia_nombre VARCHAR(100),
-            negocio_nombre VARCHAR(100),
-            descripcion TEXT,
-            url VARCHAR(255),
-            direccion VARCHAR(255),
-            telefono VARCHAR(50),
-            correo VARCHAR(100),
-            que_hace TEXT,
-            tono VARCHAR(50),
-            lenguaje VARCHAR(50),
-            restricciones TEXT,
-            palabras_prohibidas TEXT,
-            max_mensajes INT DEFAULT 10,
-            tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),
-            nombre_empresa VARCHAR(100),
-            app_logo VARCHAR(255),
-            calendar_email VARCHAR(255),
-            -- Asesores de ventas
-            asesor1_nombre VARCHAR(100),
-            asesor1_telefono VARCHAR(50),
-            asesor2_nombre VARCHAR(100),
-            asesor2_telefono VARCHAR(50)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
 
-    if not row:
-        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}}
-
-    negocio = {
-        'ia_nombre': row.get('ia_nombre'),
-        'negocio_nombre': row.get('negocio_nombre'),
-        'descripcion': row.get('descripcion'),
-        'url': row.get('url'),
-        'direccion': row.get('direccion'),
-        'telefono': row.get('telefono'),
-        'correo': row.get('correo'),
-        'que_hace': row.get('que_hace'),
-        'logo_url': row.get('logo_url', ''),
-        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
-        'app_logo': row.get('app_logo', ''),
-        'calendar_email': row.get('calendar_email', '')
-    }
-    personalizacion = {
-        'tono': row.get('tono'),
-        'lenguaje': row.get('lenguaje'),
-    }
-    restricciones = {
-        'restricciones': row.get('restricciones', ''),
-        'palabras_prohibidas': row.get('palabras_prohibidas', ''),
-        'max_mensajes': row.get('max_mensajes', 10),
-        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
-    }
-    asesores = {
-        'asesor1_nombre': row.get('asesor1_nombre', ''),
-        'asesor1_telefono': row.get('asesor1_telefono', ''),
-        'asesor2_nombre': row.get('asesor2_nombre', ''),
-        'asesor2_telefono': row.get('asesor2_telefono', '')
-    }
-    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones, 'asesores': asesores}
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -4380,7 +4329,8 @@ def save_config(cfg_all, config=None):
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
     res = cfg_all.get('restricciones', {})
-    ases = cfg_all.get('asesores', {})
+    ases = cfg_all.get('asesores', {})  # map for backward compat
+    ases_json = cfg_all.get('asesores_json', None)  # optional JSON string / structure
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
@@ -4406,6 +4356,8 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesores_json' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesores_json TEXT DEFAULT NULL")
 
     if alter_statements:
         try:
@@ -4441,11 +4393,42 @@ def save_config(cfg_all, config=None):
             'app_nombre': neg.get('ia_nombre', None),
             'nombre_empresa': neg.get('nombre_empresa', None),
             'calendar_email': neg.get('calendar_email', None),
+            # legacy asesor fields (if provided in ases map)
             'asesor1_nombre': ases.get('asesor1_nombre', None),
             'asesor1_telefono': ases.get('asesor1_telefono', None),
             'asesor2_nombre': ases.get('asesor2_nombre', None),
-            'asesor2_telefono': ases.get('asesor2_telefono', None)
+            'asesor2_telefono': ases.get('asesor2_telefono', None),
+            # new JSON column: accept either a JSON string or a Python list/dict
+            'asesores_json': None
         }
+
+        # if caller supplied structured advisors (list or json), normalize to JSON string
+        if ases_json is not None:
+            if isinstance(ases_json, (list, dict)):
+                candidate_map['asesores_json'] = json.dumps(ases_json, ensure_ascii=False)
+            else:
+                candidate_map['asesores_json'] = str(ases_json)
+        else:
+            # No explicit asesores_json provided; if ases map contains advisor keys build small JSON list
+            advisors_compiled = []
+            # look for asesorN in ases map
+            i = 1
+            while True:
+                name_key = f'asesor{i}_nombre'
+                phone_key = f'asesor{i}_telefono'
+                if name_key in ases or phone_key in ases:
+                    name = (ases.get(name_key) or '').strip()
+                    phone = (ases.get(phone_key) or '').strip()
+                    if name or phone:
+                        advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    i += 1
+                    # prevent infinite loop
+                    if i > 20:
+                        break
+                else:
+                    break
+            if advisors_compiled:
+                candidate_map['asesores_json'] = json.dumps(advisors_compiled, ensure_ascii=False)
 
         # Usar solo columnas que existen en la tabla
         cols_to_write = [col for col in candidate_map.keys() if col in existing_cols]
@@ -4477,6 +4460,27 @@ def save_config(cfg_all, config=None):
         except:
             pass
         raise
+
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
+
 
 def obtener_todos_los_precios(config):
     try:
@@ -4626,7 +4630,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     contact_queries = [
         'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
         'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
-        '¿dónde están', 'dónde están', 'donde están', 'cómo los contacto', 'como los contacto',
+        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
         'información de contacto', 'contacto', 'ubicacion'
     ]
     # mensaje_usuario ya definido; text_lower ya existe arriba
@@ -7200,18 +7204,41 @@ def format_asesores_block(cfg):
     """
     Devuelve un bloque de texto listo para inyectar en el system prompt
     con la información de los asesores (solo nombres, NO teléfonos) y una regla
-    clara: la IA NUNCA debe compartir números. El servidor decide y envía UN asesor.
+    clara: la IA NUNCA debe compartir números de teléfono ni datos de contacto directos.
+    Acepta configuración legacy (asesores en columnas) o nueva (asesores_json -> lista).
     """
     try:
-        ases = cfg.get('asesores', {}) if isinstance(cfg, dict) else {}
-        a1n = (ases.get('asesor1_nombre') or '').strip()
-        a2n = (ases.get('asesor2_nombre') or '').strip()
+        # cfg is the full config returned by load_config()
+        # prefer list if available
+        asesores_list = []
+        if isinstance(cfg, dict):
+            # load_config returns 'asesores_list' when available
+            if cfg.get('asesores_list'):
+                asesores_list = cfg.get('asesores_list') or []
+            else:
+                # fallback to mapping in cfg['asesores']
+                ases_map = cfg.get('asesores', {}) or {}
+                # build list from mapping keys asesor1_nombre, etc.
+                idx = 1
+                while True:
+                    name_key = f'asesor{idx}_nombre'
+                    phone_key = f'asesor{idx}_telefono'
+                    if name_key in ases_map or phone_key in ases_map:
+                        nombre = (ases_map.get(name_key) or '').strip()
+                        telefono = (ases_map.get(phone_key) or '').strip()
+                        if nombre or telefono:
+                            asesores_list.append({'nombre': nombre, 'telefono': telefono})
+                        idx += 1
+                        if idx > 20:
+                            break
+                    else:
+                        break
 
         lines = []
-        if a1n:
-            lines.append(f"• Asesor 1: {a1n}")
-        if a2n:
-            lines.append(f"• Asesor 2: {a2n}")
+        for i, a in enumerate(asesores_list, start=1):
+            nombre = (a.get('nombre') or '').strip()
+            if nombre:
+                lines.append(f"• Asesor {i}: {nombre}")
 
         if not lines:
             return ""
@@ -7227,7 +7254,6 @@ def format_asesores_block(cfg):
         return block
     except Exception:
         return ""
-
 
 
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada

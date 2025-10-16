@@ -18,6 +18,7 @@
         border-radius: 8px;
         background: #fff;
     }
+
     .longitud_desc {
         /* use flex so the textarea expands inside the row */
         flex: 1;
@@ -37,8 +38,9 @@
             min-width: 140px;
         }
     }
-    .PDF{
-        color:black;
+
+    .PDF {
+        color: black;
     }
 </style>
 <div class="config-header">
@@ -257,31 +259,25 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
 
     <button type="submit" class="btn-primary">Guardar Restricciones</button>
 </form>
+{# Reemplaza la sección de 'asesores' en templates/configuracion.html por esta versión dinámica #}
 {% elif active == 'asesores' %}
 <form class="config-form" method="POST">
     <div class="form-card">
         <h3>Asesores de Ventas</h3>
-        <p>Agrega hasta dos asesores con nombre y teléfono. Estos datos se usarán para notificaciones y contactos internos.</p>
+        <p>Agrega hasta {{ asesor_count }} asesores (según tu plan). Estos datos se usarán para notificaciones y contactos internos.</p>
     </div>
 
     <div class="asesores-grid">
+        {% for i in range(1, asesor_count + 1) %}
         <div class="asesor-card">
-            <label for="asesor1_nombre">Asesor 1 - Nombre</label>
-            <input type="text" id="asesor1_nombre" name="asesor1_nombre" class="input"
-                   value="{{ datos.asesor1_nombre or '' }}" placeholder="Ej: Juan Pérez">
-            <label for="asesor1_telefono" style="margin-top:8px;">Asesor 1 - Teléfono</label>
-            <input type="tel" id="asesor1_telefono" name="asesor1_telefono" class="input"
-                   value="{{ datos.asesor1_telefono or '' }}" placeholder="Ej: 521449XXXXXXX">
+            <label for="asesor{{ i }}_nombre">Asesor {{ i }} - Nombre</label>
+            <input type="text" id="asesor{{ i }}_nombre" name="asesor{{ i }}_nombre" class="input"
+                   value="{{ (asesores_list[i-1]['nombre'] if (asesores_list and (i-1) < (asesores_list|length) and 'nombre' in asesores_list[i-1] else '') ) }}" placeholder="Ej: Juan Pérez">
+            <label for="asesor{{ i }}_telefono" style="margin-top:8px;">Asesor {{ i }} - Teléfono</label>
+            <input type="tel" id="asesor{{ i }}_telefono" name="asesor{{ i }}_telefono" class="input"
+                   value="{{ (asesores_list[i-1]['telefono'] if (asesores_list and (i-1) < (asesores_list|length) and 'telefono' in asesores_list[i-1] else '') ) }}" placeholder="Ej: 521449XXXXXXX">
         </div>
-
-        <div class="asesor-card">
-            <label for="asesor2_nombre">Asesor 2 - Nombre</label>
-            <input type="text" id="asesor2_nombre" name="asesor2_nombre" class="input"
-                   value="{{ datos.asesor2_nombre or '' }}" placeholder="Ej: María López">
-            <label for="asesor2_telefono" style="margin-top:8px;">Asesor 2 - Teléfono</label>
-            <input type="tel" id="asesor2_telefono" name="asesor2_telefono" class="input"
-                   value="{{ datos.asesor2_telefono or '' }}" placeholder="Ej: 521449XXXXXXX">
-        </div>
+        {% endfor %}
     </div>
 
     <div style="margin-top:12px;">
