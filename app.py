@@ -2699,7 +2699,7 @@ def negocio_contact_block(negocio):
         "max_tokens": 500
     }
     block = (
-        f"{prompt_comentario}"
+        f"{payload}"
         "📍 DATOS DEL NEGOCIO:\n\n"
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
