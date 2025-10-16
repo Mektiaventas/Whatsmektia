@@ -2665,6 +2665,33 @@ def autenticar_google_calendar(config=None):
         app.logger.error(traceback.format_exc())
         return None
 
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
+
+    direccion = (negocio.get('direccion') or '').strip()
+    telefono = (negocio.get('telefono') or '').strip()
+    correo = (negocio.get('correo') or '').strip()
+
+    # Normalizar teléfono para mostrar (no modificar DB)
+    telefono_display = telefono or 'No disponible'
+    correo_display = correo or 'No disponible'
+    direccion_display = direccion or 'No disponible'
+
+    block = (
+        "📍 DATOS DEL NEGOCIO:\n\n"
+        f"• Dirección: {direccion_display}\n"
+        f"• Teléfono: {telefono_display}\n"
+        f"• Correo: {correo_display}\n\n"
+        "Nota: Estos datos provienen de la configuración del sistema. Si falta algún campo, "
+        "por favor complétalo en la sección __configuracion > negocio__."
+    )
+    return block
+
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
     """Obtener mensajes de un chat específico después de cierto ID"""
@@ -4596,7 +4623,19 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
-
+        # --- Interceptor: responder directamente consultas de contacto del negocio ---
+    contact_queries = [
+        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
+        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
+        '¿dónde están', 'dónde están', 'donde están', 'cómo los contacto', 'como los contacto',
+        'información de contacto', 'contacto'
+    ]
+    # mensaje_usuario ya definido; text_lower ya existe arriba
+    if any(k in text_lower for k in contact_queries):
+        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
+        # Responder inmediatamente desde el servidor (no IA)
+        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
+        return negocio_block
     # ... el resto de la función permanece igual ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
