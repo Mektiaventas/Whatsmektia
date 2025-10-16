@@ -535,5 +535,53 @@
     }
 
     function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
+    // === Edit alias helper (paste here) ===
+    function activarEdicionAlias(parent) {
+        const viewElement = parent.querySelector('.alias-view');
+        const editElement = parent.querySelector('.alias-edit');
+        if (!viewElement || !editElement) return;
+        viewElement.style.display = 'none';
+        editElement.style.display = 'flex';
+        const input = editElement.querySelector('input[type=text]');
+        if (!input) return;
+        input.focus(); input.select();
+
+        function terminar() {
+            fetch(`/contactos/${input.dataset.num}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({ alias: input.value }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            }).finally(() => {
+                editElement.style.display = 'none';
+                viewElement.textContent = input.value || input.dataset.num;
+                viewElement.style.display = '';
+            });
+        }
+
+        input.onblur = terminar;
+        input.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); terminar(); }
+            if (e.key === 'Escape') { editElement.style.display = 'none'; viewElement.style.display = ''; }
+        };
+    }
+
+    // Attach handlers to edit buttons that are already in DOM on load
+    document.addEventListener('DOMContentLoaded', () => {
+        // existing inits (they are already present earlier)
+        try {
+            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                // avoid double-binding
+                if (btn.dataset.boundAlias === '1') return;
+                btn.dataset.boundAlias = '1';
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault(); e.stopPropagation();
+                    const parent = this.closest('.card-title-row') || this.closest('.column-header') || this.parentElement;
+                    activarEdicionAlias(parent);
+                });
+            });
+        } catch (err) {
+            console.error('Error binding edit-alias-btn handlers:', err);
+        }
+    });
 </script>
 {% endblock %}
