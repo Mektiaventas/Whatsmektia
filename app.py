@@ -8193,27 +8193,34 @@ def borrar_pdf_configuracion(doc_id):
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
-    if tab not in SUBTABS:  # Asegúrate de que 'restricciones' esté en SUBTABS
+    if tab not in SUBTABS:
         abort(404)
 
+    # Load current config (structured)
     cfg = load_config(config)
     guardado = False
+
+    # Determine how many advisors allowed by plan (used for POST processing and rendering)
+    asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    asesores_list = cfg.get('asesores_list', []) or []
+
     if request.method == 'POST':
         if tab == 'negocio':
             cfg['negocio'] = {
-                'ia_nombre':      request.form['ia_nombre'],
-                'negocio_nombre': request.form['negocio_nombre'],
-                'descripcion':    request.form['descripcion'],
-                'url':            request.form['url'],
-                'direccion':      request.form['direccion'],
-                'telefono':       request.form['telefono'],
-                'correo':         request.form['correo'],
-                'que_hace':       request.form['que_hace']
+                'ia_nombre':      request.form.get('ia_nombre'),
+                'negocio_nombre': request.form.get('negocio_nombre'),
+                'descripcion':    request.form.get('descripcion'),
+                'url':            request.form.get('url'),
+                'direccion':      request.form.get('direccion'),
+                'telefono':       request.form.get('telefono'),
+                'correo':         request.form.get('correo'),
+                'que_hace':       request.form.get('que_hace'),
+                'calendar_email': request.form.get('calendar_email')
             }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
-                'tono':     request.form['tono'],
-                'lenguaje': request.form['lenguaje']
+                'tono':     request.form.get('tono'),
+                'lenguaje': request.form.get('lenguaje')
             }
         elif tab == 'restricciones':
             cfg['restricciones'] = {
@@ -8223,18 +8230,41 @@ def configuracion_tab(tab):
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
             }
         elif tab == 'asesores':
-            cfg['asesores'] = {
-                'asesor1_nombre': request.form.get('asesor1_nombre', '').strip(),
-                'asesor1_telefono': request.form.get('asesor1_telefono', '').strip(),
-                'asesor2_nombre': request.form.get('asesor2_nombre', '').strip(),
-                'asesor2_telefono': request.form.get('asesor2_telefono', '').strip()
-            }
-        save_config(cfg, config)
-        guardado = True
+            # Read dynamic number of advisors according to plan (asesor_count)
+            advisors_compiled = []
+            advisors_map = {}
+            for i in range(1, asesor_count + 1):
+                name_key = f'asesor{i}_nombre'
+                phone_key = f'asesor{i}_telefono'
+                name = request.form.get(name_key, '').strip()
+                phone = request.form.get(phone_key, '').strip()
+                # Build legacy map for first two as fallback
+                if i <= 2:
+                    advisors_map[f'asesor{i}_nombre'] = name
+                    advisors_map[f'asesor{i}_telefono'] = phone
+                if name or phone:
+                    advisors_compiled.append({'nombre': name, 'telefono': phone})
+
+            cfg['asesores'] = advisors_map  # legacy map
+            # supply structured list to be saved by save_config
+            cfg['asesores_json'] = advisors_compiled
+
+        # Persist configuration
+        try:
+            save_config(cfg, config)
+            guardado = True
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando configuración desde /configuracion/{tab}: {e}")
+            guardado = False
+
+        # Reload config and asesor list after save
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', []) or []
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     datos = cfg.get(tab, {})
 
-    # Si estamos en la pestaña 'negocio', obtener documentos_publicos para mostrarlos en la plantilla
+    # If showing 'negocio' tab, load published documents for the template (existing logic)
     documents_publicos = []
     if tab == 'negocio':
         try:
@@ -8243,7 +8273,7 @@ def configuracion_tab(tab):
             cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
             if cursor.fetchone():
                 cursor.execute("""
-                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
                     FROM documents_publicos
                     ORDER BY created_at DESC
                     LIMIT 50
@@ -8258,8 +8288,11 @@ def configuracion_tab(tab):
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
         datos=datos, guardado=guardado,
-        documents_publicos=documents_publicos
+        documents_publicos=documents_publicos,
+        asesor_count=asesor_count,
+        asesores_list=asesores_list
     )
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
