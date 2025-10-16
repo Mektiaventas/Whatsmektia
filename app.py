@@ -6121,6 +6121,47 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         guardar_conversacion(numero, mensaje, respuesta, config)
         return False
 
+def obtener_asesores_por_user(username, default=2, cap=20):
+    """
+    Retorna el número de asesores permitido para el cliente identificado por `username`.
+    - Lee cliente en CLIENTES_DB para obtener plan_id.
+    - Lee la fila correspondiente en `planes` y retorna el campo `asesores` si existe.
+    - Si falla, devuelve `default`. Aplica un cap por seguridad.
+    """
+    try:
+        if not username:
+            return default
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        # Obtener plan_id del cliente
+        cur.execute("SELECT plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        row = cur.fetchone()
+        plan_id = row.get('plan_id') if row else None
+        cur.close(); conn.close()
+
+        if not plan_id:
+            return default
+
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT asesores FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+        plan_row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if plan_row and plan_row.get('asesores') is not None:
+            try:
+                n = int(plan_row.get('asesores') or 0)
+                if n < 1:
+                    return default
+                return min(n, cap)
+            except Exception:
+                return default
+
+        return default
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
+        return default
+
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
@@ -8228,8 +8269,18 @@ def configuracion_tab(tab):
     guardado = False
 
     # Determine how many advisors allowed by plan (used for POST processing and rendering)
-    asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
     asesores_list = cfg.get('asesores_list', []) or []
+
+    # Prefer plan-specific limit when user is authenticated; fallback to global max
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     if request.method == 'POST':
         if tab == 'negocio':
@@ -8287,7 +8338,13 @@ def configuracion_tab(tab):
         # Reload config and asesor list after save
         cfg = load_config(config)
         asesores_list = cfg.get('asesores_list', []) or []
-        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+        try:
+            if au and au.get('user'):
+                asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+            else:
+                asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+        except Exception:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     datos = cfg.get(tab, {})
 
