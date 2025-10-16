@@ -2698,7 +2698,11 @@ def negocio_contact_block(negocio):
         "temperature": 0.3,
         "max_tokens": 500
     }
-    respuestita = payload.choices[0].message.content
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+        
+    data = response.json()
+    respuestita = data['choices'][0]['message']['content'].strip()
     block = (
         f"{respuestita}"
         "📍 DATOS DEL NEGOCIO:\n\n"
