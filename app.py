@@ -35,6 +35,7 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+
 try:
     # preferred location
     from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
@@ -49,7 +50,7 @@ except Exception:
             raise ValueError(f"Invalid coordinate: {coord}")
         return m.group(1), int(m.group(2))
 
-
+asesor = 0;
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -7040,6 +7041,7 @@ def format_asesores_block(cfg):
     para que la IA entregue/proponga el contacto cuando el usuario lo pida.
     """
     try:
+        asesor += 1
         ases = cfg.get('asesores', {}) if isinstance(cfg, dict) else {}
         a1n = (ases.get('asesor1_nombre') or '').strip()
         a1t = (ases.get('asesor1_telefono') or '').strip()
@@ -7047,11 +7049,11 @@ def format_asesores_block(cfg):
         a2t = (ases.get('asesor2_telefono') or '').strip()
 
         lines = []
-        if a1n or a1t:
+        if a1n or a1t and asesor == 1:
             lines.append(f"• Asesor 1: {a1n or 'Nombre no configurado'}{(' — ' + a1t) if a1t else ''}")
-        if a2n or a2t:
+        if a2n or a2t and asesor == 2:
             lines.append(f"• Asesor 2: {a2n or 'Nombre no configurado'}{(' — ' + a2t) if a2t else ''}")
-
+            asesor = 0;
         if not lines:
             return ""  # nada que agregar
 
@@ -7067,6 +7069,8 @@ def format_asesores_block(cfg):
         return block
     except Exception:
         return ""
+
+
 
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):

@@ -433,8 +433,10 @@
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
                                 <td>{{ precio.catalogo or '-' }}</td>-->
                                 <td>
+                                    {% if es_admin %}
                                     <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
                                        class="btn small primary">Editar</a>
+                                    {% endif %}
                                 </td>
                             </tr>
                             {% endfor %}
