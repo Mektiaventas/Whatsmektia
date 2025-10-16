@@ -32,12 +32,14 @@
             </div>
         </button>
 
+        {% if is_admin %}
         <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
             <div class="tab-icon">🔒</div>
             <div>
                 <span class="tab-title">Precios vista Admin</span>
             </div>
         </button>
+        {% endif %}
         <div class="spacer" aria-hidden="true"></div>
         <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
             <div class="tab-icon">📊</div>

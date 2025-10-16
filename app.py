@@ -7950,26 +7950,38 @@ def configuracion_tab(tab):
     )
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
-        config = obtener_configuracion_por_host()
-        precios = obtener_todos_los_precios(config)
-        return render_template('configuracion/precios.html',
-            tabs=SUBTABS, active='precios',
-            guardado=False,
-            precios=precios,
-            precio_edit=None
-        )
+    config = obtener_configuracion_por_host()
+    precios = obtener_todos_los_precios(config)
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
+    return render_template('configuracion/precios.html',
+        tabs=SUBTABS, active='precios',
+        guardado=False,
+        precios=precios,
+        precio_edit=None,
+        is_admin=is_admin
+    )
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-        config = obtener_configuracion_por_host()
-        precios     = obtener_todos_los_precios(config)
-        precio_edit = obtener_precio_por_id(pid, config)
-        return render_template('configuracion/precios.html',
-            tabs=SUBTABS, active='precios',
-            guardado=False,
-            precios=precios,
-            precio_edit=precio_edit
-        )
+    config = obtener_configuracion_por_host()
+    precios     = obtener_todos_los_precios(config)
+    precio_edit = obtener_precio_por_id(pid, config)
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
+    return render_template('configuracion/precios.html',
+        tabs=SUBTABS, active='precios',
+        guardado=False,
+        precios=precios,
+        precio_edit=precio_edit,
+        is_admin=is_admin
+    )
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
