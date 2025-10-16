@@ -4550,8 +4550,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
     info_cita = None  # Initialize to avoid UnboundLocalError
-      # Interceptar petición explícita de asesor (antes de llamar a la IA)
-    text_lower = (texto or "").lower()
+    # Interceptar petición explícita de asesor (antes de llamar a la IA)
+    text_lower = (mensaje_usuario or "").lower()
     advisor_keywords = [
         'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
         'pásame un asesor', 'pasame un asesor', 'quiero un asesor', 'asesor',
@@ -4562,11 +4562,11 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         if sent:
             app.logger.info(f"✅ Se envió contacto de asesor a {numero} por petición explícita")
             # Guardar conversacion que se le pasó el contacto (no duplicar datos)
-            guardar_conversacion(numero, texto, f"Se compartió contacto de asesor.", config)
+            guardar_conversacion(numero, mensaje_usuario, f"Se compartió contacto de asesor.", config)
         else:
             app.logger.info(f"ℹ️ No se envió asesor a {numero} (no configurado)")
             enviar_mensaje(numero, "Lo siento, no hay asesores configurados ahora. ¿Quieres que te comparta otra opción?", config)
-            guardar_conversacion(numero, texto, "No hay asesores configurados.", config)
+            guardar_conversacion(numero, mensaje_usuario, "No hay asesores configurados.", config)
         return
     # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
@@ -4597,7 +4597,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
 
-    # ... existing code continues ...
+    # ... el resto de la función permanece igual ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
 
@@ -4751,6 +4751,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 es_porfirianna = 'laporfirianna' in config.get('dominio', '')
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
+
+    # ... continúa el resto de la función sin cambios ...
 
     messages_chain = [{'role': 'system', 'content': system_prompt}]
     for entry in historial:
