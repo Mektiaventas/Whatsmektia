@@ -43,9 +43,11 @@
                         <span class="alias-edit" style="display:none;">
                             <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
                         </span>
+                        {% if is_admin%}
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
                             ✏️
                         </button>
+                        {% endif %}
                     </div>
                     <div class="card-meta-row">
                         <span class="card-num">{{ chat.numero }}</span>
@@ -419,8 +421,10 @@ function crearNuevoChatHTML(chat) {
       <span class="alias-edit" style="display:none;">
         <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width:110px;">
       </span>
+      {% if is_admin%}
       <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
-    </div>
+      {% endif %}    
+     </div>
     <div class="card-meta-row">
       <span class="card-num">${chat.numero}</span>
       <span class="card-time">
