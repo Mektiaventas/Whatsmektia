@@ -4832,7 +4832,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
         'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
         '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion'
+        'información de contacto', 'contacto', 'ubicacion', 'ubican'
     ]
     # mensaje_usuario ya definido; text_lower ya existe arriba
     if any(k in text_lower for k in contact_queries):
@@ -7588,37 +7588,33 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     if es_respuesta_a_pregunta(mensaje):
         return False
     
-    if es_porfirianna:
-        # Palabras clave específicas para pedidos de comida
-        palabras_clave = [
-            'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
-            'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
-        ]
-    else:
-        # Palabras clave para servicios digitales
-        palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
-            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
-
-        ]
-    
-    # Verificar si contiene palabras clave principales
-    contiene_palabras_clave = any(
-        palabra in mensaje_lower for palabra in palabras_clave
+    prompt = f"""
+    Eres un asesor de ventas el cual acaba de recibir un mensaje de un cliente.
+    Analiza si el siguiente mensaje {mensaje_lower} da a entender que el cliente quiere agendar una cita, 
+    o comprar un producto o ordenar algun servicio pueda ser comida muebles, etc..., solo si el cliente
+    esta dejando muy en claro que quiere agendar una cita o hacer un pedido. En caso de que el cliente de 
+    a entender que quiere agendar una cita o hacer un pedido, responde SOLO "True".
+    """
+        
+    # Configurar payload para GPT-4V
+    client = OpenAI(api_key=OPENAI_API_KEY)
+    messages = [{"role": "user", "content": []}]
+        
+    # Agregar texto del prompt
+    messages[0]["content"].append({"type": "text", "text": prompt})
+                
+    # Realizar la consulta
+    response = client.chat.completions.create(
+        model="gpt-4o",
+        messages=messages,
+        max_tokens=2000
     )
-    
-    # Detectar patrones específicos de solicitud
-    patrones_solicitud = [
-        'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
-        'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
-    ]
-    
-    contiene_patron = any(
-        patron in mensaje_lower for patron in patrones_solicitud
-    )
+        
+    # Procesar respuesta
+    text_response = response.choices[0].message.content
     
     # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = contiene_palabras_clave or contiene_patron
+    es_solicitud = text_response
     
     if es_solicitud:
         tipo = "pedido" if es_porfirianna else "cita"
