@@ -2984,10 +2984,9 @@ def validar_datos_cita_completos(info_cita, config=None):
         if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
             datos_faltantes.append("hora")
     
-    # El nombre es opcional pero útil
+    # El nombre ahora es obligatorio
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        # No lo añadimos a datos_faltantes porque es opcional
-        app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
+        datos_faltantes.append("nombre")
     
     if datos_faltantes:
         return False, datos_faltantes
