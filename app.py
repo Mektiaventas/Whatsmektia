@@ -8598,7 +8598,6 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
     return "¿Necesitas agregar algo más a tu pedido?"
 
 
-app.py
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
     """Confirma el pedido completo sin ofrecer contactar a un asesor proactivamente."""
     if config is None:
