@@ -4878,7 +4878,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
         # --- Interceptor: responder directamente consultas de contacto del negocio ---
     contact_queries = [
-        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
+        'cual es la dirección', 'cual es su direccion', 'teléfono', 'telefono', 'correo', 'email',
         'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
         '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
         'información de contacto', 'contacto', 'ubicacion'
