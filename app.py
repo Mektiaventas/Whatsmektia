@@ -7834,55 +7834,82 @@ def format_asesores_block(cfg):
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección mejorada por palabras clave de solicitud de cita/pedido
+    Detección mejorada por palabras clave de solicitud de cita/pedido.
+
+    Cambios principales:
+    - Requiere que además de palabras clave de solicitud exista una mención
+      explícita a un producto/servicio (SKU, modelo, servicio, categoría, línea)
+      o a alguna palabra de `servicios_clave` en el mensaje para considerarlo
+      una solicitud de cita/pedido.
+    - Excepción: si el usuario usa palabras explícitas de agendamiento
+      ('cita', 'agendar', 'reservar', etc.), la detección ocurre aunque no
+      se mencione un producto/servicio.
     """
     if config is None:
         config = obtener_configuracion_por_host()
-    
-    mensaje_lower = mensaje.lower().strip()
+
+    mensaje_lower = (mensaje or "").lower().strip()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
+
     # Evitar detectar respuestas a preguntas como nuevas solicitudes
     if es_respuesta_a_pregunta(mensaje):
         return False
-    
+
+    # Palabras clave base según tipo de negocio
     if es_porfirianna:
-        # Palabras clave específicas para pedidos de comida
         palabras_clave = [
             'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
             'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
         ]
     else:
-        # Palabras clave para servicios digitales
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
-
         ]
-    
-    # Verificar si contiene palabras clave principales
-    contiene_palabras_clave = any(
-        palabra in mensaje_lower for palabra in palabras_clave
-    )
-    
-    # Detectar patrones específicos de solicitud
+
     patrones_solicitud = [
         'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
         'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
     ]
-    
-    contiene_patron = any(
-        patron in mensaje_lower for patron in patrones_solicitud
-    )
-    
-    # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = contiene_palabras_clave or contiene_patron
-    
-    if es_solicitud:
-        tipo = "pedido" if es_porfirianna else "cita"
-        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
-    
-    return es_solicitud
+
+    contiene_palabras_clave = any(p in mensaje_lower for p in palabras_clave)
+    contiene_patron = any(p in mensaje_lower for p in patrones_solicitud)
+
+    # Si no contiene ninguna palabra clave ni patrón, no es solicitud
+    if not (contiene_palabras_clave or contiene_patron):
+        return False
+
+    # Si el usuario usa palabras explícitas de agendamiento, aceptar directamente
+    explicit_schedule_words = ['cita', 'agendar', 'agéndame', 'agendarme', 'programar', 'reservar', 'reservación', 'reservar una']
+    if any(w in mensaje_lower for w in explicit_schedule_words):
+        app.logger.info(f"✅ Detección por palabra explícita de agendamiento: '{mensaje_lower}'")
+        return True
+
+    # Requisito adicional: debe mencionar un producto/servicio conocido o una keyword de servicios_clave
+    try:
+        # 1) Revisar catálogo (sku, modelo, servicio, categoria, linea)
+        precios = obtener_todos_los_precios(config) or []
+        for p in precios:
+            for field in ('sku', 'modelo', 'servicio', 'categoria', 'linea'):
+                val = p.get(field) if isinstance(p, dict) else None
+                if val:
+                    v = str(val).lower().strip()
+                    if v and v in mensaje_lower:
+                        app.logger.info(f"✅ Detección válida: mensaje menciona producto/servicio DB ({field}='{v}')")
+                        return True
+
+        # 2) Revisar lista estática de servicios clave (servicios_clave global)
+        for s in servicios_clave:
+            if s and s.lower() in mensaje_lower:
+                app.logger.info(f"✅ Detección válida: mensaje menciona servicio clave '{s}'")
+                return True
+
+    except Exception as e:
+        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords: fallo comprobando catálogo/servicios ({e})")
+
+    # Si llegamos aquí, tenía keywords pero no mencionó ningún producto/servicio -> NO detectar
+    app.logger.info(f"⚠️ Palabras clave encontradas pero NO se detectó producto/servicio en el mensaje: '{mensaje_lower}' -> No es solicitud")
+    return False
 # ——— UI ———
 @app.route('/')
 def inicio():
