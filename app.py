@@ -5931,7 +5931,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             'qué precio', 'dime sobre', 'dime el precio', 'más info de', 'más información de',
             'ver producto', 'muestrame el producto', 'muéstrame el producto', 'muestra el producto'
         ]
-         # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
+        # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
         try:
             if any(k in text_lower for k in product_info_keywords):
                 # Obtener lista de precios rápida
@@ -6611,7 +6611,7 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
     except Exception as e:
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
-
+# REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6622,13 +6622,7 @@ def enviar_mensaje(numero, texto, config=None):
         return False
     
     texto_limpio = str(texto).strip()
-
-    # Sanitizar artefactos típicos antes de enviar (p.ej. excel_unzip_img_...)
-    try:
-        texto_limpio = sanitize_whatsapp_text(texto_limpio)
-    except Exception as e:
-        app.logger.warning(f"⚠️ sanitize_whatsapp_text falló en enviar_mensaje: {e}")
-
+    
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config["whatsapp_token"]}',
@@ -6646,7 +6640,7 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        app.logger.info(f"📤 Enviando: {texto_limpio[:120]}...")
+        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
         r = requests.post(url, headers=headers, json=payload, timeout=10)
         
         if r.status_code == 200:
@@ -8935,10 +8929,6 @@ def aplicar_restricciones(respuesta_ia, numero, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # Primero sanitizar artefactos comunes (p.ej. excel_unzip_img_...)
-        if respuesta_ia:
-            respuesta_ia = sanitize_whatsapp_text(respuesta_ia)
-
         cfg = load_config(config)
         restricciones = cfg.get('restricciones', {})
         
@@ -8948,7 +8938,7 @@ def aplicar_restricciones(respuesta_ia, numero, config=None):
         
         for palabra in palabras_prohibidas:
             if palabra and palabra in respuesta_ia.lower():
-                respuesta_ia = re.sub(re.escape(palabra), '[REDACTADO]', respuesta_ia, flags=re.IGNORECASE)
+                respuesta_ia = respuesta_ia.replace(palabra, '[REDACTADO]')
                 app.logger.info(f"🚫 Palabra prohibida detectada y redactada: {palabra}")
         
         # Verificar restricciones específicas
@@ -8969,21 +8959,13 @@ def aplicar_restricciones(respuesta_ia, numero, config=None):
         if len(historial) >= max_mensajes:
             respuesta_ia = "Hemos alcanzado el límite de esta conversación. Por favor, contacta con un agente humano para continuar."
             app.logger.info(f"📊 Límite de mensajes alcanzado para {numero}")
-
-        # Asegurar colapso de espacios y líneas sobrantes tras todas las transformaciones
-        try:
-            respuesta_ia = re.sub(r'\s+\n', '\n', respuesta_ia)
-            respuesta_ia = re.sub(r'\n{3,}', '\n\n', respuesta_ia)
-            respuesta_ia = re.sub(r'[ \t]{2,}', ' ', respuesta_ia)
-            respuesta_ia = respuesta_ia.strip()
-        except Exception:
-            pass
         
         return respuesta_ia
         
     except Exception as e:
         app.logger.error(f"Error aplicando restricciones: {e}")
         return respuesta_ia
+    # ——— Kanban ———
 
 def verificar_tablas_bd(config):
     """Verifica que todas las tablas necesarias existan en la base de datos"""
