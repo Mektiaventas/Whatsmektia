@@ -2331,7 +2331,7 @@ def crear_tablas_kanban(config=None):
     except Exception as e:
         app.logger.error(f"❌ Error creando tablas Kanban en {config['db_name']}: {e}")
 
-app.route('/inicializar-kanban', methods=['POST'])
+@app.route('/inicializar-kanban', methods=['POST'])
 def inicializar_kanban_multitenant():
     """Inicializa el sistema Kanban en todas las bases de datos configuradas"""
     app.logger.info("🔧 Inicializando Kanban para todos los tenants...")
@@ -2342,6 +2342,7 @@ def inicializar_kanban_multitenant():
             app.logger.info(f"✅ Kanban inicializado para {config['dominio']}")
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
+    return '', 204
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
@@ -4683,9 +4684,6 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
         
-    except Exception as e:
-        print(f"Error obteniendo precios: {str(e)}")
-        return []
 
 def obtener_producto_por_sku_o_nombre(query, config=None):
     """
@@ -7533,37 +7531,43 @@ def webhook():
             estado_actual = obtener_estado_conversacion(numero, config)
             if estado_actual and estado_actual.get('contexto') == 'OFRECIENDO_ASESOR':
                 respuesta_usuario = (texto or '').strip().lower()
-                # Normalizar algunas variantes
-                respuesta_usuario = re.sub(r'[^\wáéíóúüñ ]', '', respuesta_usuario, flags=re.IGNORECASE).strip()
+                # normalize simple variants
+                respuesta_usuario_norm = re.sub(r'[^\wáéíóúüñ ]', '', respuesta_usuario, flags=re.IGNORECASE).strip()
 
-                if respuesta_usuario in ('no', 'no gracias', 'nogracias', 'nop', 'nah'):
+                try:
                     datos_estado = estado_actual.get('datos') or {}
-                    pedido_prov = datos_estado.get('pedido_provisional') or {}
-                    if pedido_prov:
-                        # Guardar pedido definitivo ahora
-                        cita_id = guardar_cita(pedido_prov, config)
-                        if cita_id:
-                            enviar_confirmacion_cita(numero, pedido_prov, cita_id, config)
+
+                    # User explicitly declined connecting to an advisor -> confirm that the order is saved (if saved)
+                    if respuesta_usuario_norm in ('no', 'no gracias', 'nogracias', 'nop', 'nah', 'n'):
+                        # If a cita_id was stored when we offered, acknowledge it
+                        cita_guardada = datos_estado.get('cita_id') or datos_estado.get('pedido_id')
+                        if cita_guardada:
+                            enviar_confirmacion_cita(numero, {}, cita_guardada, config)
                             actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO_AUTOMATICO", "pedido_confirmado", {}, config)
-                            enviar_mensaje(numero, f"✅ Entendido. He agendado tu pedido automáticamente. ID: #{cita_id}\nTe enviaré la confirmación en breve.", config)
-                            guardar_conversacion(numero, texto, f"Pedido agendado automáticamente ID #{cita_id}", config)
+                            enviar_mensaje(numero, f"✅ Entendido. No te conectaré con un asesor. Tu pedido ya fue registrado. ID: #{cita_guardada}", config)
+                            guardar_conversacion(numero, texto, f"Usuario rechazó asesor; pedido registrado ID #{cita_guardada}", config)
                             return 'OK', 200
-                        else:
-                            enviar_mensaje(numero, "Hubo un error guardando tu pedido. ¿Quieres que te conecte con un asesor ahora?", config)
-                            return 'OK', 200
-                    else:
-                        enviar_mensaje(numero, "No encontré los datos provisionales del pedido. ¿Quieres que lo recabemos de nuevo o que te conecte con un asesor?", config)
+                        # If no cita saved by the offer state, just acknowledge and continue
+                        enviar_mensaje(numero, "Entendido, no te conectaré con un asesor. Si deseas algo más, dime.", config)
+                        guardar_conversacion(numero, texto, "Usuario rechazó conectar con asesor.", config)
                         return 'OK', 200
 
-                if respuesta_usuario in ('si', 'sí', 'si claro', 'sí por favor', 'ok', 'claro'):
-                    # Usuario quiere al asesor -> pasar contacto y limpiar estado
-                    sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-                    if sent:
-                        actualizar_estado_conversacion(numero, "EN_PEDIDO", "asesor_conectado", {}, config)
-                        enviar_mensaje(numero, "Perfecto. Te conecté con un asesor. Él te asistirá para completar el pago de forma segura.", config)
-                    else:
-                        enviar_mensaje(numero, "Lo siento, ahora mismo no hay asesores disponibles. ¿Quieres que intente agendar tu pedido mientras tanto?", config)
-                    return 'OK', 200
+                    # User explicitly accepted -> only now connect to an advisor
+                    if respuesta_usuario_norm in ('si', 'sí', 'si claro', 'sí por favor', 'ok', 'claro', 's'):
+                        sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                        if sent:
+                            actualizar_estado_conversacion(numero, "EN_PEDIDO", "asesor_conectado", {}, config)
+                            enviar_mensaje(numero, "Perfecto. Te conecté con un asesor. Él te asistirá para completar el proceso.", config)
+                            guardar_conversacion(numero, texto, "Usuario aceptó conectar con asesor; contacto enviado.", config)
+                        else:
+                            enviar_mensaje(numero, "Lo siento, ahora mismo no hay asesores disponibles. Si quieres, puedo ayudarte con otra opción.", config)
+                            guardar_conversacion(numero, texto, "Intento de pasar asesor fallido; no hay asesores.", config)
+                        return 'OK', 200
+
+                except Exception as _e:
+                    app.logger.warning(f"⚠️ Manejo oferta asesor (robusto) falló: {_e}")
+
+            # If neither yes/no, continue normal flow (user may have typed an explicit "quiero hablar con un asesor" which is handled elsewhere)
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
         # === fin manejo oferta asesor ===
@@ -8566,111 +8570,102 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
 
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo. 
-    - Si la forma de pago es tarjeta: NO guarda el pedido aún; ofrece conectar con asesor y guarda un pedido provisional en estado.
-    - Si es efectivo/transferencia: guarda inmediatamente y confirma.
+    """Confirma el pedido completo.
+    Behavior changes:
+    - Always persist the cita/pedido si los datos son completos.
+    - Do NOT contactar ni intentar conectar a un asesor automáticamente.
+    - Si la forma de pago es tarjeta, guardamos la cita y ofrecemos conectar solo si el usuario lo pide explícitamente.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Crear resumen del pedido
-        platillos = datos_pedido.get('platillos', [])
-        cantidades = datos_pedido.get('cantidades', [])
-        especificaciones = datos_pedido.get('especificaciones', [])
-        nombre_cliente = datos_pedido.get('nombre_cliente') or 'Cliente'
-        direccion = datos_pedido.get('direccion') or 'Por confirmar'
+        # Normalizar campos mínimos
+        platillos = datos_pedido.get('platillos', []) or []
+        cantidades = datos_pedido.get('cantidades', []) or []
+        especificaciones = datos_pedido.get('especificaciones', []) or []
+        nombre_cliente = datos_pedido.get('nombre_cliente') or datos_pedido.get('nombre') or 'Cliente'
+        direccion = datos_pedido.get('direccion') or datos_pedido.get('direccion_cliente') or 'Por confirmar'
 
         resumen_platillos = ""
         for i, platillo in enumerate(platillos):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
 
-        # Preparar estructura de pedido (reutilizable para guardar o provisional)
+        # Preparar estructura reutilizable para guardar como cita/pedido
         info_pedido = {
-            'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
+            'servicio_solicitado': f"Pedido: {', '.join(platillos)}" if platillos else datos_pedido.get('servicio_solicitado', 'Pedido sin especificar'),
             'nombre_cliente': nombre_cliente,
             'telefono': numero,
             'estado': 'pendiente',
             'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
 
-        # Añadir datos de pago al registro (si existen) para referencia
+        # Añadir datos de pago y detalles detectados si existen
         if datos_pedido.get('forma_pago'):
             info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
-        if datos_pedido.get('transferencia_numero'):
-            info_pedido['notas'] += f"\nTransferencia - CLABE/numero: {datos_pedido.get('transferencia_numero')}"
-        if datos_pedido.get('transferencia_nombre'):
-            info_pedido['notas'] += f"\nTitular: {datos_pedido.get('transferencia_nombre')}"
-        if datos_pedido.get('transferencia_banco'):
-            info_pedido['notas'] += f"\nBanco: {datos_pedido.get('transferencia_banco')}"
+            info_pedido['notas'] += f"\nForma de pago: {datos_pedido.get('forma_pago')}"
+
+        for k in ('transferencia_numero', 'transferencia_nombre', 'transferencia_banco'):
+            if datos_pedido.get(k):
+                info_pedido['notas'] += f"\n{k}: {datos_pedido.get(k)}"
+
+        # Ensure date/time fields exist for guardar_cita expectations
+        fecha = datos_pedido.get('fecha_sugerida') or datos_pedido.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+        hora = datos_pedido.get('hora_sugerida') or datos_pedido.get('hora') or '12:00'
+        info_pedido['fecha_sugerida'] = fecha
+        info_pedido['hora_sugerida'] = hora
+
+        # Save the cita/pedido regardless of payment method — DO NOT force routing to an advisor automatically
+        cita_id = guardar_cita(info_pedido, config)
+        if not cita_id:
+            app.logger.error("🔴 confirmar_pedido_completo: fallo al guardar cita/pedido")
+            return "❌ Hubo un problema guardando tu pedido. Por favor intenta de nuevo o contacta al negocio."
+
+        app.logger.info(f"✅ Pedido/Cita guardado con ID: {cita_id}")
 
         forma = str(datos_pedido.get('forma_pago', '')).lower()
 
-        # Caso: tarjeta -> no pedir tarjeta por chat. Ofrecer asesor y guardar en estado provisional.
-        if 'tarjeta' in forma:
-            # Guardar pedido provisional en estados_conversacion (no persistir aún en 'citas')
-            provisional = {
-                'pedido_provisional': info_pedido,
-                'timestamp': datetime.now().isoformat()
-            }
-            actualizar_estado_conversacion(numero, "OFRECIENDO_ASESOR", "ofrecer_asesor", provisional, config)
-
-            # Intentar obtener nombre de un asesor para la oferta (no incluir teléfonos)
-            cfg = load_config(config)
-            asesores = cfg.get('asesores_list') or []
-            asesor_name = asesores[0].get('nombre') if asesores and isinstance(asesores[0], dict) and asesores[0].get('nombre') else "nuestro asesor"
-
-            instrucciones = (
-                "Para procesar el pago con tarjeta, por seguridad no pedimos números por WhatsApp.\n\n"
-                f"Puedo conectarte con {asesor_name} para completar el pago de forma segura, o si prefieres que yo agende el pedido ahora mismo con los datos que ya tengo, responde 'no'.\n\n"
-                "Responde 'sí' para que te pase al asesor, o 'no' para que agende el pedido ahora."
+        # Build follow-up instructions depending on payment method but do NOT auto-connect
+        if 'tarjeta' in forma or 'card' in forma:
+            instrucciones_pago = (
+                "💳 Hemos registrado tu pedido. Por seguridad no pedimos datos de tarjeta por WhatsApp.\n"
+                "Si quieres que te conecte con un asesor para completar el pago con tarjeta, escríbenos claramente: 'quiero hablar con un asesor' o 'conectar con asesor'.\n"
+                "Si prefieres no conectar ahora, tu pedido ya está registrado y lo gestionaremos desde el negocio."
             )
-
-            mensaje_oferta = f"""🎉 *¡Pedido listo para pagar!*
-
-📋 *Resumen de tu pedido:*
-{resumen_platillos}
-
-🏠 *Dirección:* {direccion}
-👤 *Nombre:* {nombre_cliente}
-
-{instrucciones}
-"""
-            return mensaje_oferta
-
-        # Caso: transferencia -> guardar y pedir comprobante (se guarda ahora)
-        if 'transfer' in forma or 'transferencia' in forma:
-            pedido_id = guardar_cita(info_pedido, config)
-            instrucciones_pago = ("💳 Forma de pago: Transferencia bancaria.\n"
-                                  "Por favor realiza la transferencia y envía el comprobante por este chat.\n"
-                                  "Cuando recibamos el comprobante procederemos a preparar tu pedido.")
+            app.logger.info(f"ℹ️ Pedido guardado (tarjeta) ID: {cita_id} — oferta visible, no forzada")
+        elif 'transfer' in forma or 'transferencia' in forma:
+            instrucciones_pago = (
+                "💳 Hemos registrado tu pedido y la opción de pago es transferencia.\n"
+                "Por favor realiza la transferencia y envía el comprobante por este chat. Cuando lo validemos procederemos con tu pedido."
+            )
+            app.logger.info(f"✅ Pedido guardado (transferencia) ID: {cita_id}")
         else:
-            # Efectivo u otros -> guardar y confirmar
-            pedido_id = guardar_cita(info_pedido, config)
-            instrucciones_pago = "💵 Forma de pago: Efectivo. Pagarás al recibir el pedido."
+            instrucciones_pago = (
+                "💵 Hemos registrado tu pedido. Como elegiste pago en efectivo, lo pagarás al recibirlo.\n"
+                "Te avisaremos cuando esté en camino."
+            )
+            app.logger.info(f"✅ Pedido guardado (efectivo/otro) ID: {cita_id}")
 
-        # Si llegamos aquí, ya guardamos el pedido
-        confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
+        # Confirmación al usuario
+        confirmacion = f"""🎉 *Pedido registrado!* - ID: #{cita_id}
 
-📋 *Resumen de tu pedido:*
-{resumen_platillos}
+📋 *Resumen del pedido:*
+{resumen_platillos or '- No se especificaron platillos -'}
 
 🏠 *Dirección:* {direccion}
 👤 *Nombre:* {nombre_cliente}
 
 {instrucciones_pago}
 
-⏰ *Tiempo estimado:* 30-45 minutos
-Gracias por tu pedido. Te avisaremos cuando esté en camino.
+⏰ *Registrado:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 """
-        # Limpiar estado relacionado si existía
-        actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
         return confirmacion
 
     except Exception as e:
-        app.logger.error(f"Error confirmando pedido: {e}")
-        return "¡Pedido recibido! Pero hubo un error al procesarlo. Por favor, contacta directamente al negocio."
+        app.logger.error(f"🔴 Error confirmando pedido completo: {e}")
+        app.logger.error(traceback.format_exc())
+        return "❌ Ocurrió un error al procesar tu pedido. Por favor inténtalo de nuevo."
 
 @app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 @login_required
