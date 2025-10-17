@@ -8316,25 +8316,26 @@ def limpiar_estados_antiguos():
 
 # Ejecutar esta función periódicamente (puedes usar un scheduler)
 def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
-    """Continúa el proceso de pedido de manera inteligente"""
+    """Continúa el proceso de pedido de manera inteligente.
+    Añadido: detecta forma de pago y datos de transferencia en las respuestas del usuario.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     datos = estado_actual.get('datos', {})
     paso_actual = datos.get('paso', 1)
     analisis_inicial = datos.get('analisis_inicial', {})
-    
+
     app.logger.info(f"🔄 Continuando pedido paso {paso_actual} para {numero}")
-    
-    # Analizar el nuevo mensaje para extraer información
+
+    # Analizar el nuevo mensaje para extraer información de pedido
     nuevo_analisis = detectar_pedido_inteligente(mensaje, numero, config=config)
-    
+
+    # Merge de cualquier dato extraído automáticamente
     if nuevo_analisis and nuevo_analisis.get('es_pedido'):
-        # Actualizar datos obtenidos
         datos_obtenidos = datos.get('datos_obtenidos', {})
         nuevos_datos = nuevo_analisis.get('datos_obtenidos', {})
-        
-        # Combinar datos
+
         for clave, valor in nuevos_datos.items():
             if valor and valor != 'null':
                 if clave == 'platillos' and valor:
@@ -8345,108 +8346,195 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
                     datos_obtenidos.setdefault('especificaciones', []).extend(valor)
                 else:
                     datos_obtenidos[clave] = valor
-        
+
         datos['datos_obtenidos'] = datos_obtenidos
-        datos['paso'] += 1
-        
-        # Verificar si tenemos todos los datos necesarios
-        if verificar_pedido_completo(datos_obtenidos):
-            # Pedido completo, confirmar
-            return confirmar_pedido_completo(numero, datos_obtenidos, config)
-        else:
-            # Seguir preguntando por datos faltantes
-            siguiente_pregunta = nuevo_analisis.get('siguiente_pregunta')
-            if not siguiente_pregunta:
-                siguiente_pregunta = generar_pregunta_datos_faltantes(datos_obtenidos)
-            
-            actualizar_estado_conversacion(numero, "EN_PEDIDO", "solicitar_datos", datos, config)
-            return siguiente_pregunta
-    
-    # Si no se detecta información relevante, pedir clarificación
-    return "No entendí bien esa información. ¿Podrías ser más específico sobre tu pedido?"
+        datos['paso'] = datos.get('paso', 1) + 1
+
+    else:
+        # Si la IA no detectó estructura, intentamos extraer forma de pago y datos manualmente del texto
+        datos_obtenidos = datos.get('datos_obtenidos', {})
+
+        texto_lower = (mensaje or '').lower()
+
+        # Detectar forma de pago explícita
+        if not datos_obtenidos.get('forma_pago'):
+            if 'efectivo' in texto_lower or 'pago al entregar' in texto_lower or 'pago en efectivo' in texto_lower:
+                datos_obtenidos['forma_pago'] = 'efectivo'
+                app.logger.info(f"💳 Forma de pago detectada (efectivo) para {numero}")
+            elif 'transfer' in texto_lower or 'transferencia' in texto_lower or 'clabe' in texto_lower or 'clabe interbancaria' in texto_lower:
+                datos_obtenidos['forma_pago'] = 'transferencia'
+                app.logger.info(f"💳 Forma de pago detectada (transferencia) para {numero}")
+
+        # Si la forma de pago encontrada es transferencia, intentar extraer número/CLABE y nombre
+        if datos_obtenidos.get('forma_pago') and 'transfer' in datos_obtenidos.get('forma_pago'):
+            # Extraer secuencia de dígitos que podría ser CLABE o número de cuenta (10-22 dígitos)
+            clabe_match = re.search(r'(\d{10,22})', mensaje.replace(' ', ''))
+            if clabe_match and not datos_obtenidos.get('transferencia_numero'):
+                datos_obtenidos['transferencia_numero'] = clabe_match.group(1)
+                app.logger.info(f"🔢 CLABE/numero detectado para {numero}: {datos_obtenidos['transferencia_numero']}")
+
+            # Extraer banco por palabras clave comunes
+            bancos = ['bbva', 'banorte', 'banamex', 'santander', 'scotiabank', 'hsbc', 'inbursa', 'bajio', 'afirme']
+            for b in bancos:
+                if b in texto_lower and not datos_obtenidos.get('transferencia_banco'):
+                    datos_obtenidos['transferencia_banco'] = b.capitalize()
+                    app.logger.info(f"🏦 Banco detectado para {numero}: {datos_obtenidos['transferencia_banco']}")
+                    break
+
+            # Intentar extraer nombre del titular (heurística: detrás de 'a nombre de' o 'titular' o en la misma línea)
+            nombre_match = re.search(r'(a nombre de|titular)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ\s]{3,60})', mensaje, re.IGNORECASE)
+            if nombre_match and not datos_obtenidos.get('transferencia_nombre'):
+                datos_obtenidos['transferencia_nombre'] = nombre_match.group(2).strip()
+                app.logger.info(f"🧾 Titular detectado para {numero}: {datos_obtenidos['transferencia_nombre']}")
+
+        datos['datos_obtenidos'] = datos_obtenidos
+
+    # Persistir estado actualizado
+    actualizar_estado_conversacion(numero, "EN_PEDIDO", "actualizar", datos, config)
+
+    # Verificar si ahora el pedido está completo
+    if verificar_pedido_completo(datos.get('datos_obtenidos', {})):
+        # Pedido completo, confirmar y guardar
+        return confirmar_pedido_completo(numero, datos.get('datos_obtenidos', {}), config)
+
+    # Si no está completo, generar siguiente pregunta
+    siguiente_pregunta = generar_pregunta_datos_faltantes(datos.get('datos_obtenidos', {}))
+    return siguiente_pregunta
+
 
 def verificar_pedido_completo(datos_obtenidos):
-    """Verifica si el pedido tiene todos los datos necesarios"""
-    datos_requeridos = ['platillos', 'direccion']
-    for dato in datos_requeridos:
-        if not datos_obtenidos.get(dato):
+    """Verifica si el pedido tiene todos los datos necesarios.
+    Ahora exige: platillos, direccion y forma de pago.
+    Si la forma de pago es 'transferencia' también exige datos de transferencia básicos.
+    """
+    if not datos_obtenidos:
+        return False
+
+    # Campos siempre requeridos
+    required = ['platillos', 'direccion', 'forma_pago']
+    for campo in required:
+        if not datos_obtenidos.get(campo):
             return False
-    
+
     # Verificar que haya al menos un platillo con cantidad
     platillos = datos_obtenidos.get('platillos', [])
     cantidades = datos_obtenidos.get('cantidades', [])
-    
     if not platillos or len(platillos) != len(cantidades):
         return False
-    
+
+    # Si la forma de pago es transferencia, requerimos datos de transferencia
+    forma = str(datos_obtenidos.get('forma_pago', '')).lower()
+    if 'transfer' in forma or 'transferencia' in forma:
+        # aceptar tanto 'transferencia' como 'transfer'
+        # Requerir al menos número/CLABE y nombre del titular
+        if not datos_obtenidos.get('transferencia_numero') or not datos_obtenidos.get('transferencia_nombre'):
+            return False
+
     return True
 
 def generar_pregunta_datos_faltantes(datos_obtenidos):
-    """Genera preguntas inteligentes para datos faltantes"""
+    """Genera preguntas inteligentes para datos faltantes, incluyendo forma de pago."""
     if not datos_obtenidos.get('platillos'):
         return "¿Qué platillos te gustaría ordenar? Tenemos gorditas, tacos, quesadillas, sopes, etc."
-    
+
     if not datos_obtenidos.get('cantidades') or len(datos_obtenidos['platillos']) != len(datos_obtenidos.get('cantidades', [])):
-        platillos = datos_obtenidos['platillos']
+        platillos = datos_obtenidos.get('platillos', [])
         return f"¿Cuántas {', '.join(platillos)} deseas ordenar?"
-    
+
     if not datos_obtenidos.get('especificaciones'):
         return "¿Alguna especificación para tu pedido? Por ejemplo: 'con todo', 'sin cebolla', etc."
-    
+
     if not datos_obtenidos.get('direccion'):
         return "¿A qué dirección debemos llevar tu pedido?"
-    
+
+    # NUEVO: preguntar forma de pago si falta
+    if not datos_obtenidos.get('forma_pago'):
+        return "¿Cómo prefieres pagar? Responde 'efectivo' (pago al entregar) o 'transferencia' (te pediré los datos bancarios)."
+
+    # Si eligió transferencia pero faltan datos, pedirlos
+    forma = str(datos_obtenidos.get('forma_pago', '')).lower()
+    if 'transfer' in forma or 'transferencia' in forma:
+        if not datos_obtenidos.get('transferencia_numero'):
+            return "Por favor proporciona el número o CLABE para la transferencia."
+        if not datos_obtenidos.get('transferencia_nombre'):
+            return "Por favor indica el nombre del titular de la cuenta para la transferencia."
+        if not datos_obtenidos.get('transferencia_banco'):
+            return "Si puedes, indica también el banco (ej: BBVA, Banorte, Banamex)."
+
     if not datos_obtenidos.get('nombre_cliente'):
         return "¿Cuál es tu nombre para el pedido?"
-    
+
     return "¿Necesitas agregar algo más a tu pedido?"
 
+
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo y lo guarda"""
+    """Confirma el pedido completo y lo guarda, incluyendo forma de pago y detalles de transferencia si aplica."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
         # Crear resumen del pedido
         platillos = datos_pedido.get('platillos', [])
         cantidades = datos_pedido.get('cantidades', [])
         especificaciones = datos_pedido.get('especificaciones', [])
-        
+        nombre_cliente = datos_pedido.get('nombre_cliente') or 'Cliente'
+        direccion = datos_pedido.get('direccion') or 'Por confirmar'
+
         resumen_platillos = ""
         for i, platillo in enumerate(platillos):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
-        
-        # Guardar pedido en base de datos
+
+        # Guardar pedido en base de datos (reutiliza guardar_cita para persistencia)
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
-            'nombre_cliente': datos_pedido.get('nombre_cliente', 'Cliente'),
+            'nombre_cliente': nombre_cliente,
             'telefono': numero,
             'estado': 'pendiente',
-            'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {datos_pedido.get('direccion', 'Por confirmar')}"
+            'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
-        
+
+        # Añadir datos de pago al registro (si existen)
+        if datos_pedido.get('forma_pago'):
+            info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
+        if datos_pedido.get('transferencia_numero'):
+            info_pedido['notas'] += f"\nTransferencia - CLABE/numero: {datos_pedido.get('transferencia_numero')}"
+        if datos_pedido.get('transferencia_nombre'):
+            info_pedido['notas'] += f"\nTitular: {datos_pedido.get('transferencia_nombre')}"
+        if datos_pedido.get('transferencia_banco'):
+            info_pedido['notas'] += f"\nBanco: {datos_pedido.get('transferencia_banco')}"
+
         pedido_id = guardar_cita(info_pedido, config)
-        
-        # Mensaje de confirmación
+
+        # Mensaje de confirmación con instrucciones según forma de pago
+        forma = str(datos_pedido.get('forma_pago', '')).lower()
+        instrucciones_pago = ""
+        if 'transfer' in forma or 'transferencia' in forma:
+            instrucciones_pago = ("💳 Forma de pago: Transferencia bancaria.\n"
+                                  "Por favor realiza la transferencia a los datos que te proporcionamos y envía el comprobante por este chat.\n"
+                                  "Cuando recibamos el comprobante procederemos a preparar tu pedido.")
+        else:
+            instrucciones_pago = "💵 Forma de pago: Efectivo. Pagarás al recibir el pedido."
+
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
 
 📋 *Resumen de tu pedido:*
 {resumen_platillos}
 
-🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
-👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
+🏠 *Dirección:* {direccion}
+👤 *Nombre:* {nombre_cliente}
+
+{instrucciones_pago}
 
 ⏰ *Tiempo estimado:* 30-45 minutos
-💳 *Forma de pago:* Efectivo al entregar
+Gracias por tu pedido. Te avisaremos cuando esté en camino.
+"""
 
-¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
-        
         # Limpiar estado
         actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
-        
+
         return confirmacion
-        
+
     except Exception as e:
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
