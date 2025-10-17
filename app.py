@@ -2450,7 +2450,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    app.logger.info(f"🎯 Analizando mensaje para pedido inteligente: '{mensaje}'")
+    app.logger.info(f"🎯 Analizando mensaje para pedido inteligente: '{mensaje}' (tenant={config.get('dominio')})")
     
     # Primero verificar con detección básica
     deteccion_basica = detectar_solicitud_cita_keywords(mensaje, config)
@@ -2467,14 +2467,18 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         # Construir contexto del historial
         contexto_historial = ""
         for i, msg in enumerate(historial[-2:]):  # Últimos 2 mensajes
-            if msg['mensaje']:
+            if msg.get('mensaje'):
                 contexto_historial += f"Usuario: {msg['mensaje']}\n"
-            if msg['respuesta']:
+            if msg.get('respuesta'):
                 contexto_historial += f"Asistente: {msg['respuesta']}\n"
         
-        # Prompt mejorado para detección inteligente
+        # Determinar el tipo de negocio para el prompt
+        es_porfirianna = 'laporfirianna' in (config.get('dominio') or '')
+        negocio_nombre = "La Porfirianna (restaurante)" if es_porfirianna else (config.get('negocio_nombre') or config.get('dominio') or 'el negocio')
+        
+        # Prompt contextual (no forzar siempre La Porfirianna)
         prompt = f"""
-        Eres un asistente para La Porfirianna (restaurante). Analiza si el mensaje es un pedido y qué datos faltan.
+        Eres un asistente para {negocio_nombre}. Analiza si el mensaje es un pedido y qué datos faltan.
 
         HISTORIAL RECIENTE:
         {contexto_historial}
@@ -2486,7 +2490,8 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             "es_pedido": true/false,
             "confianza": 0.0-1.0,
             "datos_obtenidos": {{
-                "platillos": ["lista de platillos detectados"],
+                "platillos": ["lista de platillos detectados"],         # solo para restaurantes
+                "servicio": "servicio detectado (para otros negocios)",
                 "cantidades": ["cantidades especificadas"],
                 "especificaciones": ["con todo", "sin cebolla", etc.],
                 "nombre_cliente": "nombre si se menciona",
@@ -2496,28 +2501,9 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             "siguiente_pregunta": "pregunta natural para solicitar dato faltante"
         }}
 
-        Datos importantes para un pedido completo:
-        - Platillos específicos (gorditas, tacos, quesadillas, etc.)
-        - Cantidades de cada platillo
-        - Especificaciones (guisados, ingredientes, preparación)
-        - Dirección de entrega
-        - Forma de pago (efectivo, transferencia)
-        - Nombre del cliente
-
-        Ejemplo si dice "quiero 2 gorditas":
-        {{
-            "es_pedido": true,
-            "confianza": 0.9,
-            "datos_obtenidos": {{
-                "platillos": ["gorditas"],
-                "cantidades": ["2"],
-                "especificaciones": [],
-                "nombre_cliente": null,
-                "direccion": null
-            }},
-            "datos_faltantes": ["guisados para las gorditas", "dirección"],
-            "siguiente_pregunta": "¡Perfecto! ¿De qué guisado quieres las gorditas? Tenemos chicharrón, tinga, papa, etc."
-        }}
+        Datos importantes para un pedido/cita completo (ajusta según el tipo de negocio):
+        - Para restaurantes: platillos específicos, cantidades, especificaciones, dirección, forma de pago, nombre.
+        - Para mobiliario/servicios: producto/servicio exacto, fecha, hora (si aplica), nombre, teléfono, dirección (si aplica).
         """
         
         headers = {
@@ -2528,7 +2514,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         payload = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.3,
+            "temperature": 0.25,
             "max_tokens": 800
         }
         
@@ -2545,14 +2531,17 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             app.logger.info(f"🔍 Análisis inteligente: {json.dumps(analisis, indent=2)}")
             
             # Considerar pedido si confianza > 0.7
-            return analisis if analisis.get('es_pedido', False) and analisis.get('confianza', 0) > 0.7 else None
+            if analisis.get('es_pedido') and float(analisis.get('confianza', 0) or 0) > 0.7:
+                return analisis
+            return None
         else:
+            app.logger.warning("⚠️ detectar_pedido_inteligente: No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
         app.logger.error(f"Error en detección inteligente de pedido: {e}")
-        # Fallback a detección básica
-        return {"es_pedido": True, "confianza": 0.8, "datos_faltantes": ["todos"], "siguiente_pregunta": "¿Qué platillos deseas ordenar?"} if deteccion_basica else None
+        # Fallback a detección básica (más conservador)
+        return {"es_pedido": True, "confianza": 0.75, "datos_faltantes": ["detalles"], "siguiente_pregunta": "¿Qué quieres ordenar exactamente?"} if deteccion_basica else None
 
 def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
     """Maneja automáticamente el pedido detectado por la IA"""
