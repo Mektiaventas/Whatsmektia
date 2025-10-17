@@ -3657,6 +3657,7 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         """
         
         enviar_mensaje(numero, mensaje_confirmacion, config)
+
         app.logger.info(f"✅ Confirmación de {tipo_solicitud} enviada a {numero}, ID: {cita_id}")
         
     except Exception as e:
@@ -7637,6 +7638,27 @@ def webhook():
                             mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
                         mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
                         enviar_mensaje(numero, mensaje_faltantes, config)
+                         # Además notificar a un asesor de ventas (round-robin) con contexto
+                        try:
+                            asesor = obtener_siguiente_asesor(config)
+                            if asesor and asesor.get('telefono'):
+                                asesor_tel = asesor.get('telefono')
+                                asesor_nombre = asesor.get('nombre') or 'Asesor'
+                                cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config)
+                                mensaje_para_asesor = (
+                                    f"📣 *Nuevo prospecto / Solicitud de cita*\n\n"
+                                    f"👤 Cliente: {cliente_mostrado}\n"
+                                    f"📞 Teléfono: {numero}\n\n"
+                                    f"💬 Mensaje recibido:\n{texto[:400]}\n\n"
+                                    f"📝 Mensaje enviado al cliente pidiendo datos:\n{mensaje_faltantes[:800]}"
+                                )
+                                enviar_mensaje(asesor_tel, mensaje_para_asesor, config)
+                                app.logger.info(f"✅ Notificación enviada al asesor {asesor_nombre} ({asesor_tel}) para cliente {numero}")
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo notificar al asesor: {e}")
+
+                        guardar_conversacion(numero, texto, mensaje_faltantes, config)
+                        return 'OK', 200
                         guardar_conversacion(numero, texto, mensaje_faltantes, config)
                         return 'OK', 200
 
