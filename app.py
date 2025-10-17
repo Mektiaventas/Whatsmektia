@@ -7863,7 +7863,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         ]
     else:
         palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
+            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización', 'interesan', 'interesa'
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
         ]
 
