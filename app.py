@@ -7730,7 +7730,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         client = OpenAI(api_key=OPENAI_API_KEY)
         prompt = (
             "Responde SOLO con TRUE o FALSE.\n\n"
-            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido o comprar algo?\n\n"
+            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido?\n\n"
             f"Mensaje: \"{mensaje.strip()}\""
         )
         messages = [{"role": "user", "content": prompt}]
