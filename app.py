@@ -8704,8 +8704,6 @@ def negocio_transfer_block(negocio):
         parts.append(f"• Nombre: {nombre}")
     if banco:
         parts.append(f"• Banco: {banco}")
-    parts.append("\nSi quieres que te los reenvíe en otro formato, indícalo (ej. enviar PDF o confirmar).")
-
     return "\n".join(parts)
 
 @app.route('/configuracion/precios', methods=['GET'])
