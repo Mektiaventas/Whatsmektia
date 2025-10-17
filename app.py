@@ -7584,54 +7584,64 @@ def format_asesores_block(cfg):
     except Exception:
         return ""
 
-
-# REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección mejorada por palabras clave de solicitud de cita/pedido
+    Detección robusta y determinista de solicitud de cita/pedido.
+    - Evita interpretar frases de exploración (ej. "quiero ver productos") como pedido/cita.
+    - Usa heurísticas primero; sólo recurre a la IA en caso de ambigüedad y exige una respuesta boolean.
     """
     if config is None:
         config = obtener_configuracion_por_host()
-    
-    mensaje_lower = mensaje.lower().strip()
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
-    # Evitar detectar respuestas a preguntas como nuevas solicitudes
-    if es_respuesta_a_pregunta(mensaje):
+
+    if not mensaje:
         return False
-    
-    prompt = f"""
-    Eres un asesor de ventas el cual acaba de recibir un mensaje de un cliente.
-    Analiza si el siguiente mensaje {mensaje_lower} da a entender que el cliente quiere
-    comprar un producto/servicio (hacer un pedido). Devuelve True si es así, o False en caso contrario
-    o dice algo como "quiero ver tus productos".
-    """
-        
-    # Configurar payload para GPT-4V
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    messages = [{"role": "user", "content": []}]
-        
-    # Agregar texto del prompt
-    messages[0]["content"].append({"type": "text", "text": prompt})
-                
-    # Realizar la consulta
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=messages,
-        max_tokens=2000
-    )
-        
-    # Procesar respuesta
-    text_response = response.choices[0].message.content
-    
-    # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = text_response
-    
-    if es_solicitud:
-        tipo = "pedido" if es_porfirianna else "cita"
-        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
-    
-    return es_solicitud
+
+    texto = mensaje.lower().strip()
+
+    # Evitar detectar respuestas cortas / respuestas a preguntas previas
+    if es_respuesta_a_pregunta(texto):
+        return False
+
+    # Palabras/expresiones que claramente indican exploración o consulta de catálogo
+    exploracion_kw = [
+        'ver', 'ver qué', 'ver que', 'ver otros', 'catalogo', 'catálogo', 'productos',
+        'mostrar', 'muestrame', 'muéstrame', 'precios', 'qué tienes', 'qué otros', 'quiero ver'
+    ]
+    if any(k in texto for k in exploracion_kw):
+        return False
+
+    # Palabras que claramente indican intención de agendar/ordenar/pedir
+    cita_kw = [
+        'cita', 'agendar', 'reservar', 'reserva', 'horario', 'agenda', 'turno',
+        'pedido', 'ordenar', 'encargar', 'hacer un pedido', 'quiero pedir', 'comprar'
+    ]
+    if any(k in texto for k in cita_kw):
+        return True
+
+    # Si el usuario menciona fechas/tiempos explícitos -> probabilidad alta de cita/pedido
+    if re.search(r'\b(hoy|mañana|pasado mañana|a las|am|pm|\d{1,2}:\d{2}|\d{1,2}\s?(am|pm))\b', texto):
+        return True
+
+    # Ambiguo: fallback a IA pero exigir respuesta booleana explícita ("TRUE"/"FALSE"/"SI"/"NO")
+    try:
+        client = OpenAI(api_key=OPENAI_API_KEY)
+        prompt = (
+            "Responde SOLO con TRUE o FALSE.\n\n"
+            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido?\n\n"
+            f"Mensaje: \"{mensaje.strip()}\""
+        )
+        messages = [{"role": "user", "content": prompt}]
+        resp = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=5)
+        text_response = (resp.choices[0].message.content or "").strip().lower()
+        # Aceptar variaciones claras
+        if text_response.startswith('true') or text_response.startswith('t') or text_response.startswith('si') or text_response.startswith('sí'):
+            return True
+        return False
+    except Exception as e:
+        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords fallback IA falló: {e}")
+        # En caso de error con la IA, no asumir cita
+        return False
+
 # ——— UI ———
 @app.route('/')
 def inicio():
