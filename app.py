@@ -7603,7 +7603,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     prompt = f"""
     Eres un asesor de ventas el cual acaba de recibir un mensaje de un cliente.
     Analiza si el siguiente mensaje {mensaje_lower} da a entender que el cliente quiere agendar una cita, 
-    o comprar un producto/servicio (hacer un pedido). Devuelve True si es así, o False en caso contrario.
+    o comprar un producto/servicio (hacer un pedido). Devuelve True si es así, o False en caso contrario
+    o dice algo como "quiero ver tus productos".
     """
         
     # Configurar payload para GPT-4V
