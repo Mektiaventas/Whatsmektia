@@ -3006,6 +3006,7 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     # El nombre es opcional pero útil
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
+        datos_faltantes.append("nombre_cliente")
         # No lo añadimos a datos_faltantes porque es opcional
         app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
     
@@ -7715,7 +7716,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
 
     # Palabras que claramente indican intención de agendar/ordenar/pedir
     cita_kw = [
-        'cita', 'agendar', 'reservar', 'reserva', 'horario', 'agenda', 'turno', 'quiero comprar'
+        'cita', 'agendar','quiero ordenar','reservar', 'reserva', 'horario', 'agenda', 'turno', 'quiero comprar'
         'pedido', 'ordenar', 'encargar', 'hacer un pedido', 'quiero pedir', 'comprar', 'adquirir'
     ]
     if any(k in texto for k in cita_kw):
