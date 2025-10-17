@@ -7,12 +7,15 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
+from mysql.connector import pooling
+from flask import render_template_string
 import pytz
 import os
 import logging
 import json 
 import base64
 import argparse
+import math
 import mysql.connector
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
@@ -33,6 +36,7 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+
 try:
     # preferred location
     from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
@@ -46,8 +50,6 @@ except Exception:
         if not m:
             raise ValueError(f"Invalid coordinate: {coord}")
         return m.group(1), int(m.group(2))
-
-
 processed_messages = {}
 
 tz_mx = pytz.timezone('America/Mexico_City')
@@ -98,8 +100,8 @@ NUMEROS_CONFIG = {
         'dominio': 'smartwhats.mektia.com'
     },
     '123': {  # Número de Unilova
-        'phone_number_id': os.getenv("PORFIRIANNA_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("PORFIRIANNA_WHATSAPP_TOKEN"),
+        'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("UNILOVA_DB_HOST"),
         'db_user': os.getenv("UNILOVA_DB_USER"),
         'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
@@ -107,8 +109,8 @@ NUMEROS_CONFIG = {
         'dominio': 'unilova.mektia.com'
     },
     '524812372326': {  # Número de La Porfirianna
-        'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
+        'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("LAPORFIRIANNA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("PORFIRIANNA_DB_HOST"),
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
@@ -161,8 +163,11 @@ app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = ({'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'})
-
+ALLOWED_EXTENSIONS = {
+    'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
+}
 
 # --- Conexión a la BD de clientes (auth) ---
 def get_clientes_conn():
@@ -250,95 +255,109 @@ def proteger_rutas():
     # Si llega aquí, no está autorizado -> redirigir al login
     app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
     return redirect(url_for('login', next=request.path))
-def extraer_imagenes_embedded_excel(filepath, output_dir=None):
+
+def extraer_imagenes_embedded_excel(filepath, output_dir=None, config=None):
     """
     Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
-    Intenta recuperar fila/col (ancla) de varias maneras para maximizar compatibilidad.
+    Soporta multi-tenant: si no se pasa output_dir, usa get_productos_dir_for_config(config)
+    para guardar en uploads/productos/<tenant_slug>.
     Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
     """
-    
-
-    if output_dir is None:
-        output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-    os.makedirs(output_dir, exist_ok=True)
-
-    wb = openpyxl.load_workbook(filepath)
-    imagenes_extraidas = []
-
-    for sheet in wb.worksheets:
-        for idx, img in enumerate(getattr(sheet, '_images', [])):
+    try:
+        # Determine tenant-aware output dir when none provided
+        if output_dir is None:
             try:
-                img_obj = img.image
-                img_format = (img_obj.format or 'PNG').lower()
-                img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
-                img_path = os.path.join(output_dir, img_filename)
+                productos_dir, tenant_slug = get_productos_dir_for_config(config)
+                output_dir = productos_dir
+            except Exception as e:
+                # Fallback to legacy dir if tenant helper fails
+                app.logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy. Error: {e}")
+                output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
 
-                # Guardar imagen en disco
+        os.makedirs(output_dir, exist_ok=True)
+
+        wb = openpyxl.load_workbook(filepath)
+        imagenes_extraidas = []
+
+        for sheet in wb.worksheets:
+            for idx, img in enumerate(getattr(sheet, '_images', [])):
                 try:
-                    img_obj.save(img_path)
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
-                    continue
+                    img_obj = img.image
+                    img_format = (img_obj.format or 'PNG').lower()
+                    img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
+                    img_path = os.path.join(output_dir, img_filename)
 
-                # Intentar leer la ancla (fila/col) de varias formas
-                row = None
-                col = None
-                anchor = getattr(img, 'anchor', None)
-                try:
-                    marker = None
-                    # Common attribute names in different openpyxl versions
-                    for attr in ('_from', 'from', 'from_', 'anchor_from'):
-                        marker = getattr(anchor, attr, None)
-                        if marker:
-                            break
+                    # Guardar imagen en disco
+                    try:
+                        img_obj.save(img_path)
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
+                        continue
 
-                    if marker:
-                        # marker usually tiene row, col (0-based)
-                        row_candidate = getattr(marker, 'row', None)
-                        col_candidate = getattr(marker, 'col', None)
-                        # Algunas versiones devuelven atributos como tuples o listas
-                        if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
-                            # try tuple-like (col, row) or (row, col)
-                            try:
-                                maybe = list(marker)
-                                # buscar primer int
-                                ints = [m for m in maybe if isinstance(m, int)]
-                                if len(ints) >= 1:
-                                    row_candidate = ints[0]
-                            except Exception:
-                                pass
-
-                        if isinstance(row_candidate, int):
-                            row = int(row_candidate) + 1
-                        if isinstance(col_candidate, int):
-                            col = int(col_candidate) + 1
-
-                    # Si anchor es string con coordenada (ej. "A2"), parsearla
-                    if row is None and isinstance(anchor, str):
-                        try:
-                            col_letter, row_num = coordinate_from_string(anchor)
-                            col = column_index_from_string(col_letter)
-                            row = int(row_num)
-                        except Exception:
-                            pass
-                except Exception:
+                    # Intentar leer la ancla (fila/col) de varias formas
                     row = None
                     col = None
+                    anchor = getattr(img, 'anchor', None)
+                    try:
+                        marker = None
+                        # Common attribute names in different openpyxl versions
+                        for attr in ('_from', 'from', 'from_', 'anchor_from'):
+                            marker = getattr(anchor, attr, None)
+                            if marker:
+                                break
 
-                imagenes_extraidas.append({
-                    'filename': img_filename,
-                    'path': img_path,
-                    'sheet': sheet.title,
-                    'anchor': anchor,
-                    'row': row,
-                    'col': col
-                })
-                app.logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col})")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
-                continue
+                        if marker:
+                            # marker usually tiene row, col (0-based)
+                            row_candidate = getattr(marker, 'row', None)
+                            col_candidate = getattr(marker, 'col', None)
+                            # Algunas versiones devuelven atributos como tuples o listas
+                            if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
+                                # try tuple-like (col, row) or (row, col)
+                                try:
+                                    maybe = list(marker)
+                                    # buscar primer int
+                                    ints = [m for m in maybe if isinstance(m, int)]
+                                    if len(ints) >= 1:
+                                        row_candidate = ints[0]
+                                except Exception:
+                                    pass
 
-    return imagenes_extraidas
+                            if isinstance(row_candidate, int):
+                                row = int(row_candidate) + 1
+                            if isinstance(col_candidate, int):
+                                col = int(col_candidate) + 1
+
+                        # Si anchor es string con coordenada (ej. "A2"), parsearla
+                        if row is None and isinstance(anchor, str):
+                            try:
+                                col_letter, row_num = coordinate_from_string(anchor)
+                                col = column_index_from_string(col_letter)
+                                row = int(row_num)
+                            except Exception:
+                                pass
+                    except Exception:
+                        row = None
+                        col = None
+
+                    imagenes_extraidas.append({
+                        'filename': img_filename,
+                        'path': img_path,
+                        'sheet': sheet.title,
+                        'anchor': anchor,
+                        'row': row,
+                        'col': col
+                    })
+                    app.logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col}) tenant_dir={output_dir}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
+                    continue
+
+        return imagenes_extraidas
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en extraer_imagenes_embedded_excel: {e}")
+        app.logger.error(traceback.format_exc())
+        return []
 
 # Put below sesiones_activas helpers
 def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
@@ -744,8 +763,13 @@ def extraer_texto_e_imagenes_pdf(file_path):
         # Abrir el PDF con PyMuPDF
         doc = fitz.open(file_path)
         
-        # Crear directorio para imágenes si no existe
-        img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+        # Crear directorio para imágenes si no existe (tenant-aware fallback)
+        try:
+            productos_dir, tenant_slug = get_productos_dir_for_config()
+            img_dir = productos_dir
+        except Exception as e:
+            app.logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy uploads/productos. Error: {e}")
+            img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
         os.makedirs(img_dir, exist_ok=True)
         
         for page_num in range(len(doc)):
@@ -796,7 +820,7 @@ def extraer_texto_e_imagenes_pdf(file_path):
                             'rect': rect
                         })
                         
-                        app.logger.info(f"✅ Imagen extraída: {img_filename}")
+                        app.logger.info(f"✅ Imagen extraída: {img_filename} (tenant_dir={img_dir})")
                         
                     except Exception as e:
                         app.logger.warning(f"⚠️ Error extrayendo imagen específica {xref}: {e}")
@@ -911,6 +935,29 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
         app.logger.warning(f"⚠️ Error extrayendo imágenes desde zip: {e}")
     return imagenes
 
+def get_docs_dir_for_config(config=None):
+    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
+    if config is None:
+        try:
+            from flask import has_request_context
+            if has_request_context():
+                config = obtener_configuracion_por_host()
+            else:
+                config = NUMEROS_CONFIG['524495486142']
+        except Exception:
+            config = NUMEROS_CONFIG['524495486142']
+
+    dominio = (config.get('dominio') or '').strip().lower()
+    tenant_slug = dominio.split('.')[0] if dominio else 'default'
+    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug)
+    try:
+        os.makedirs(docs_dir, exist_ok=True)
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo crear docs_dir {docs_dir}: {e}")
+        # fallback to a shared docs dir
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        os.makedirs(docs_dir, exist_ok=True)
+    return docs_dir, tenant_slug
 
 def importar_productos_desde_excel(filepath, config=None):
     """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
@@ -964,13 +1011,17 @@ def importar_productos_desde_excel(filepath, config=None):
         imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
         app.logger.info(f"🖼️ Imágenes detectadas por openpyxl: {len(imagenes_embedded)}")
 
-        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media)
+        # 2) Fallback: si ninguna imagen detectada y .xlsx, extraer desde zip (xl/media) usando tenant dir
         if not imagenes_embedded and extension == '.xlsx':
-            output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
+            try:
+                output_dir, tenant_slug = get_productos_dir_for_config(config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ get_productos_dir_for_config falló para fallback ZIP, usando legacy. Error: {e}")
+                output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
             imagenes_zip = _extraer_imagenes_desde_zip_xlsx(filepath, output_dir)
             if imagenes_zip:
                 imagenes_embedded = imagenes_zip
-                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media: {len(imagenes_embedded)}")
+                app.logger.info(f"🖼️ Fallback ZIP: imágenes extraídas desde xl/media -> {len(imagenes_embedded)} (dir={output_dir})")
             else:
                 app.logger.info("⚠️ Fallback ZIP no encontró imágenes")
 
@@ -1214,9 +1265,35 @@ def obtener_imagenes_por_sku(sku, config=None):
 
 @app.route('/uploads/productos/<filename>')
 def serve_product_image(filename):
-    """Sirve imágenes de productos desde el directorio de uploads"""
-    productos_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-    return send_from_directory(productos_dir, filename)
+    """Sirve imágenes de productos desde la carpeta tenant-aware:
+       uploads/productos/<tenant_slug>/<filename>
+       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
+    try:
+        config = obtener_configuracion_por_host()
+        productos_dir, tenant_slug = get_productos_dir_for_config(config)
+
+        # 1) Intentar carpeta tenant específica
+        candidate = os.path.join(productos_dir, filename)
+        if os.path.isfile(candidate):
+            return send_from_directory(productos_dir, filename)
+
+        # 2) Fallback: carpeta legacy uploads/productos/
+        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+        candidate_legacy = os.path.join(legacy_dir, filename)
+        if os.path.isfile(candidate_legacy):
+            return send_from_directory(legacy_dir, filename)
+
+        # 3) Fallback adicional: raíz de uploads/
+        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+        if os.path.isfile(root_candidate):
+            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+
+        # No encontrado
+        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
+        abort(404)
+    except Exception as e:
+        app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
+        abort(500)
 
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
@@ -2010,7 +2087,21 @@ def subir_pdf_servicios():
             pass
         return redirect(url_for('configuracion_precios'))
 
+def get_productos_dir_for_config(config=None):
+    """Return (productos_dir, tenant_slug). Ensures uploads/productos/<tenant_slug> exists."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    dominio = (config.get('dominio') or '').strip().lower()
+    tenant_slug = dominio.split('.')[0] if dominio else 'default'
+    productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', tenant_slug)
+    os.makedirs(productos_dir, exist_ok=True)
+    return productos_dir, tenant_slug
+
 def get_db_connection(config=None):
+    """
+    Get a DB connection using a small MySQLConnectionPool per tenant (cached).
+    Falls back to direct mysql.connector.connect() if pooling fails.
+    """
     if config is None:
         try:
             from flask import has_request_context
@@ -2021,21 +2112,57 @@ def get_db_connection(config=None):
         except Exception as e:
             app.logger.error(f"Error obteniendo configuración: {e}")
             config = NUMEROS_CONFIG['524495486142']
-    
-    app.logger.info(f"🗄️ Conectando a BD: {config['db_name']} en {config['db_host']}")
-    
+
+    # pool size can be tuned via env var
+    POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
+    pool_key = f"{config.get('db_host')}|{config.get('db_user')}|{config.get('db_name')}"
+
+    # module-level cache for pools
+    global _MYSQL_POOLS
     try:
-        conn = mysql.connector.connect(
-            host=config['db_host'],
-            user=config['db_user'],
-            password=config['db_password'],
-            database=config['db_name']
-        )
-        app.logger.info(f"✅ Conexión exitosa a {config['db_name']}")
+        _MYSQL_POOLS
+    except NameError:
+        _MYSQL_POOLS = {}
+
+    try:
+        # create pool if not present
+        if pool_key not in _MYSQL_POOLS:
+            app.logger.info(f"🔧 Creating MySQL pool for {config.get('db_name')} (size={POOL_SIZE})")
+            _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
+                pool_name=f"pool_{config.get('db_name')}",
+                pool_size=POOL_SIZE,
+                host=config['db_host'],
+                user=config['db_user'],
+                password=config['db_password'],
+                database=config['db_name'],
+                charset='utf8mb4'
+            )
+        conn = _MYSQL_POOLS[pool_key].get_connection()
+        # ensure the connection is alive
+        try:
+            if not conn.is_connected():
+                conn.reconnect(attempts=2, delay=0.5)
+        except Exception:
+            pass
+        app.logger.info(f"🗄️ Borrowed connection from pool for {config.get('db_name')}")
         return conn
-    except Exception as e:
-        app.logger.error(f"❌ Error conectando a BD {config['db_name']}: {e}")
-        raise
+
+    except Exception as pool_err:
+        # Pooling might not be supported or failed: fallback to direct connect
+        app.logger.warning(f"⚠️ MySQL pool error (fallback to direct connect): {pool_err}")
+        try:
+            conn = mysql.connector.connect(
+                host=config['db_host'],
+                user=config['db_user'],
+                password=config['db_password'],
+                database=config['db_name'],
+                charset='utf8mb4'
+            )
+            app.logger.info(f"✅ Direct connection established to {config['db_name']}")
+            return conn
+        except Exception as e:
+            app.logger.error(f"❌ Error connectando a BD {config['db_name']}: {e}")
+            raise
 
 @app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
 def renombrar_columna_kanban(columna_id):
@@ -2218,69 +2345,112 @@ def inicializar_kanban_multitenant():
 
 # ——— Función para enviar mensajes de voz ———
 def enviar_mensaje_voz(numero, audio_url, config=None):
-    """Envía un mensaje de voz por WhatsApp"""
+    """Envía un mensaje de audio por WhatsApp; valida accesibilidad y registra respuesta detallada."""
     if config is None:
         config = obtener_configuracion_por_host()
     if config is None:
         config = obtener_configuracion_numero(numero)
-    
-    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-    headers = {
-        'Authorization': f'Bearer {config['whatsapp_token']}',
-        'Content-Type': 'application/json'
-    }
-    
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': numero,
-        'type': 'audio',
-        'audio': {
-            'link': audio_url
-        }
-    }
-    
+
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=15)
-        response.raise_for_status()
-        app.logger.info(f"✅ Audio enviado a {numero}")
-        return True
+        if not audio_url or not audio_url.startswith('http'):
+            app.logger.error(f"🔴 enviar_mensaje_voz: audio_url inválida: {audio_url}")
+            return False
+
+        # Verificar que Facebook pueda acceder al archivo (HEAD)
+        try:
+            head = requests.head(audio_url, timeout=8, allow_redirects=True)
+            if head.status_code >= 400:
+                app.logger.error(f"🔴 enviar_mensaje_voz: audio URL not reachable (HEAD {head.status_code}): {audio_url}")
+                return False
+            content_type = head.headers.get('content-type', '')
+            if not content_type.startswith('audio'):
+                app.logger.warning(f"⚠️ enviar_mensaje_voz: content-type no es audio: {content_type}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ enviar_mensaje_voz: HEAD check failed for {audio_url}: {e}")
+            # no short-circuit — intentaremos enviar pero lo registramos
+       
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            'Authorization': f'Bearer {config["whatsapp_token"]}',
+            'Content-Type': 'application/json'
+        }
+
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'audio',
+            'audio': {
+                'link': audio_url
+            }
+        }
+
+        app.logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero} -> {audio_url}")
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
+
+        if r.status_code in (200, 201, 202):
+            app.logger.info(f"✅ Audio enviado a {numero}")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text}")
+            return False
     except Exception as e:
-        app.logger.error(f"🔴 Error enviando audio: {e}")
+        app.logger.error(f"🔴 Exception en enviar_mensaje_voz: {e}")
         return False
     
 def texto_a_voz(texto, filename,config=None):
-    """Convierte texto a audio usando Google TTS"""
+    """Convierte texto a audio usando Google TTS y devuelve URL pública verificable."""
     if config is None:
         config = obtener_configuracion_por_host()
     try:
         from gtts import gTTS
         import os
-        
-        # ✅ Ruta ABSOLUTA para evitar problemas
+
         base_dir = os.path.dirname(os.path.abspath(__file__))
         audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-        
-        # Crear directorio si no existe
         os.makedirs(audio_dir, exist_ok=True)
-        
-        # Ruta completa del archivo
+
         filepath = os.path.join(audio_dir, f"{filename}.mp3")
-        
-        # Convertir texto a voz
+
+        # Generar y guardar MP3
         tts = gTTS(text=texto, lang='es', slow=False)
         tts.save(filepath)
-        
-        # ✅ URL PÚBLICA - Usa tu dominio real
-        MI_DOMINIO = os.getenv('MI_DOMINIO', 'https://tu-dominio.com')
-        audio_url = f"{MI_DOMINIO}/static/audio/respuestas/{filename}.mp3"
-        
-        app.logger.info(f"🎵 Audio guardado en: {filepath}")
-        app.logger.info(f"🌐 URL pública: {audio_url}")
-        
+
+        # Verificar que el archivo se creó
+        if not os.path.isfile(filepath):
+            app.logger.error(f"🔴 texto_a_voz: archivo no encontrado después de gTTS: {filepath}")
+            return None
+
+        # Construir URL pública robusta
+        dominio_conf = None
+        try:
+            if isinstance(config, dict):
+                dominio_conf = config.get('dominio')
+        except Exception:
+            dominio_conf = None
+
+        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
+        if not dominio.startswith('http'):
+            dominio = 'https://' + dominio
+
+        audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
+
+        # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
+        try:
+            resp = requests.head(audio_url, timeout=6, allow_redirects=True)
+            if resp.status_code >= 400:
+                app.logger.warning(f"⚠️ texto_a_voz: HEAD {audio_url} returned {resp.status_code}. The URL may not be publicly accessible.")
+            else:
+                ct = resp.headers.get('content-type', '')
+                app.logger.info(f"🎵 texto_a_voz: audio saved and reachable. HEAD status {resp.status_code} content-type={ct}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ texto_a_voz: unable to HEAD audio_url ({audio_url}): {e}")
+
+        app.logger.info(f"🌐 URL pública generada: {audio_url} (archivo: {filepath})")
         return audio_url
-        
+
     except Exception as e:
-        app.logger.error(f"Error en texto a voz: {e}")
+        app.logger.error(f"Error en texto_a_voz: {e}")
         return None
 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
@@ -2439,44 +2609,110 @@ def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
         return "¡Gracias por tu pedido! ¿Qué más deseas agregar?"
     
 def autenticar_google_calendar(config=None):
-    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas"""
+    """Autentica con OAuth usando client_secret.json con soporte para múltiples cuentas.
+    Busca tokens en ruta absoluta y hace fallback a token.json; refresca si es posible."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     SCOPES = ['https://www.googleapis.com/auth/calendar']
     creds = None
-    
+
     try:
-        # Usar un nombre de token específico para cada tenant/dominio
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        app.logger.info(f"🔐 Intentando autenticar con OAuth para {config['dominio']} usando {token_filename}")
-        
-        # 1. Verificar si ya tenemos token guardado para este tenant
-        if os.path.exists(token_filename):
-            try:
-                creds = Credentials.from_authorized_user_file(token_filename, SCOPES)
-                if creds and creds.valid:
-                    app.logger.info(f"✅ Token OAuth válido encontrado para {config['dominio']}")
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-                elif creds and creds.expired and creds.refresh_token:
-                    app.logger.info(f"🔄 Refrescando token expirado para {config['dominio']}...")
-                    creds.refresh(Request())
-                    with open(token_filename, 'w') as token:
-                        token.write(creds.to_json())
-                    service = build('calendar', 'v3', credentials=creds)
-                    return service
-            except Exception as e:
-                app.logger.error(f"❌ Error con token existente para {config['dominio']}: {e}")
-        
-        # 2. Si no hay token válido, necesitamos redirección OAuth
-        app.logger.info(f"⚠️ No hay token válido para {config['dominio']}, requiere autorización")
-        return None
-            
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        tenant_token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
+        tenant_token_path = os.path.join(BASE_DIR, tenant_token_filename)
+        generic_token_path = os.path.join(BASE_DIR, 'token.json')
+
+        app.logger.info(f"🔐 Intentando autenticar Google Calendar para {config.get('dominio')} (buscar: {tenant_token_path} then {generic_token_path})")
+
+        # Prefer tenant-specific token
+        token_path_to_use = None
+        if os.path.exists(tenant_token_path):
+            token_path_to_use = tenant_token_path
+            app.logger.info(f"✅ Usando token tenant-specific: {tenant_token_path}")
+        elif os.path.exists(generic_token_path):
+            token_path_to_use = generic_token_path
+            app.logger.warning(f"⚠️ No se encontró token tenant-specific, usando fallback: {generic_token_path}")
+        else:
+            app.logger.warning(f"⚠️ No se encontró ningún token OAuth para {config.get('dominio')} (esperado: {tenant_token_path})")
+            return None
+
+        try:
+            creds = Credentials.from_authorized_user_file(token_path_to_use, SCOPES)
+            if creds and creds.valid:
+                service = build('calendar', 'v3', credentials=creds)
+                app.logger.info(f"✅ Token válido cargado desde {token_path_to_use}")
+                return service
+            elif creds and creds.expired and creds.refresh_token:
+                app.logger.info("🔄 Token expirado, intentando refresh...")
+                creds.refresh(Request())
+                # Guardar en el archivo tenant-specific (intentar preservar tenant filename)
+                save_path = tenant_token_path if token_path_to_use != generic_token_path else generic_token_path
+                with open(save_path, 'w') as token_file:
+                    token_file.write(creds.to_json())
+                app.logger.info(f"✅ Token refrescado y guardado en {save_path}")
+                service = build('calendar', 'v3', credentials=creds)
+                return service
+            else:
+                app.logger.warning(f"⚠️ Token encontrado en {token_path_to_use} pero no es válido ni refrescable")
+                return None
+        except Exception as e:
+            app.logger.error(f"❌ Error leyendo/refresh token en {token_path_to_use}: {e}")
+            app.logger.error(traceback.format_exc())
+            return None
+
     except Exception as e:
-        app.logger.error(f'❌ Error inesperado: {e}')
+        app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
+
+    direccion = (negocio.get('direccion') or '').strip()
+    telefono = (negocio.get('telefono') or '').strip()
+    correo = (negocio.get('correo') or '').strip()
+
+    # Normalizar teléfono para mostrar (no modificar DB)
+    telefono_display = telefono or 'No disponible'
+    correo_display = correo or 'No disponible'
+    direccion_display = direccion or 'No disponible'
+    prompt_comentario = f"""
+        Te acaban de hacer una solicitud de datos, 
+        no me des ningun dato, solo has un comentario agradable expresando
+        que estas a su servicio, algo parecido a decir claro que si.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt_comentario}],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+        
+    data = response.json()
+    respuestita = data['choices'][0]['message']['content'].strip()
+    block = (
+        f"{respuestita}\n\n"
+        "📍 DATOS DEL NEGOCIO:\n\n"
+        f"• Dirección: {direccion_display}\n"
+        f"• Teléfono: {telefono_display}\n"
+        f"• Correo: {correo_display}\n\n"
+        "Visitanos pronto!"
+    )
+    return block
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -2598,7 +2834,9 @@ def autorizar_manual():
         return f"❌ Error: {str(e)}"
     
 def crear_evento_calendar(service, cita_info, config=None):
-    """Crea un evento en Google Calendar para la cita con más detalles del servicio"""
+    """Crea un evento en Google Calendar; intenta crear el evento directamente en el calendar_email
+    si está configurado y, si falla por permisos, hace fallback al calendario 'primary' y añade
+    calendar_email como invitado. Usa sendUpdates='all' para notificar asistentes."""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2618,16 +2856,14 @@ def crear_evento_calendar(service, cita_info, config=None):
             start_time = now.isoformat()
             end_time = (now + timedelta(hours=1)).isoformat()
         
-        # Obtener detalles adicionales del servicio
+        # Detalles del servicio
         detalles_servicio = cita_info.get('detalles_servicio', {})
         descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
         categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
         precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
         
-        # Título del evento más descriptivo
         event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {cita_info.get('servicio_solicitado', 'Servicio')} - {cita_info.get('nombre_cliente', 'Cliente')}"
         
-        # Descripción más detallada del evento
         event_description = f"""
 📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
 
@@ -2649,7 +2885,6 @@ def crear_evento_calendar(service, cita_info, config=None):
 💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
         """.strip()
         
-        # Crear el evento con información ampliada
         event = {
             'summary': event_title,
             'location': config.get('direccion', ''),
@@ -2666,13 +2901,13 @@ def crear_evento_calendar(service, cita_info, config=None):
                 'useDefault': False,
                 'overrides': [
                     {'method': 'popup', 'minutes': 30},
-                    {'method': 'email', 'minutes': 24 * 60},  # 1 día antes
+                    {'method': 'email', 'minutes': 24 * 60},
                 ],
             },
-            'colorId': '4' if es_porfirianna else '1',  # Rojo para Porfirianna, Azul para otros
+            'colorId': '4' if es_porfirianna else '1',
         }
         
-        # Obtener el correo para notificaciones de Calendar
+        # Leer calendar_email desde la BD
         app.logger.info(f"📧 Intentando obtener calendar_email de la base de datos")
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -2683,18 +2918,39 @@ def crear_evento_calendar(service, cita_info, config=None):
         
         calendar_email = None
         if result and result.get('calendar_email'):
-            calendar_email = result['calendar_email']
-            
-        # Agregar el correo como asistente si está configurado
-        if calendar_email:
-            event['attendees'] = [{'email': calendar_email}]
-            app.logger.info(f"✉️ Notificación de Calendar configurada para: {calendar_email}")
+            calendar_email = result['calendar_email'].strip()
         
-        calendar_id = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
-        event = service.events().insert(calendarId=calendar_id, body=event).execute()
+        primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
         
-        app.logger.info(f'Evento creado: {event.get("htmlLink")}')
-        return event.get('id')  # Retorna el ID del evento
+        # Si calendar_email está configurado, intentamos crear directamente en ese calendario primero
+        attempted_calendar = calendar_email if calendar_email else primary_calendar
+        
+        try:
+            app.logger.info(f"🌐 Intentando crear evento en calendarId='{attempted_calendar}' (sendUpdates=all)")
+            created = service.events().insert(calendarId=attempted_calendar, body=event, sendUpdates='all').execute()
+            app.logger.info(f'Evento creado en {attempted_calendar}: {created.get("htmlLink")}')
+            return created.get('id')
+        except HttpError as he:
+            # Permisos o calendario no encontrado -> fallback
+            app.logger.warning(f"⚠️ No se pudo crear evento en calendarId='{attempted_calendar}': {he}")
+            # Si intentamos en calendar_email y falló, fallback a primary y añadir calendar_email como attendee (si existe)
+            if attempted_calendar != primary_calendar:
+                if calendar_email:
+                    event['attendees'] = [{'email': calendar_email}]
+                try:
+                    app.logger.info(f"🔁 Intentando crear evento en calendarId='{primary_calendar}' y añadir attendees (sendUpdates=all)")
+                    created = service.events().insert(calendarId=primary_calendar, body=event, sendUpdates='all').execute()
+                    app.logger.info(f'Evento creado en {primary_calendar}: {created.get("htmlLink")} (attendees: {calendar_email})')
+                    return created.get('id')
+                except Exception as e2:
+                    app.logger.error(f'🔴 Fallback a primary falló: {e2}')
+                    return None
+            else:
+                app.logger.error("🔴 Error creando evento y no hay fallback disponible")
+                return None
+        except Exception as e:
+            app.logger.error(f'🔴 Error inesperado creando evento: {e}')
+            return None
         
     except Exception as e:
         app.logger.error(f'Error al crear evento: {e}')
@@ -2728,10 +2984,9 @@ def validar_datos_cita_completos(info_cita, config=None):
         if not info_cita.get('hora_sugerida') or info_cita.get('hora_sugerida') == 'null':
             datos_faltantes.append("hora")
     
-    # El nombre es opcional pero útil
+    # El nombre ahora es obligatorio
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        # No lo añadimos a datos_faltantes porque es opcional
-        app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
+        datos_faltantes.append("nombre")
     
     if datos_faltantes:
         return False, datos_faltantes
@@ -2739,117 +2994,67 @@ def validar_datos_cita_completos(info_cita, config=None):
 
 @app.route('/completar-autorizacion')
 def completar_autorizacion():
-    """Endpoint para completar la autorización con el código"""
+    """Endpoint para completar la autorización con el código — guarda token tenant-specific en BASE_DIR"""
     try:
-        # Obtener todos los parámetros de la URL
         code = request.args.get('code')
-        state = request.args.get('state')
+        state = request.args.get('state')  # intentamos usar state como tenant identifier
         scope = request.args.get('scope')
-        
-        # Obtener la configuración actual
-        config = obtener_configuracion_por_host()
-        token_filename = f"token_{config['dominio'].replace('.', '_')}.json"
-        
-        app.logger.info(f"🔐 Completando autorización para {config['dominio']}")
-        app.logger.info(f"🔐 Guardando en: {token_filename}")
-        
-        app.logger.info(f"🔐 Parámetros recibidos:")
-        app.logger.info(f"  - Code: {code[:10] if code else 'None'}...")
-        app.logger.info(f"  - State: {state}")
-        app.logger.info(f"  - Scope: {scope}")
-        
+
+        # Determinar tenant desde el state si viene, sino por host
+        tenant_domain = None
+        if state:
+            # state fue generado como tenant_id = dominio.replace('.', '_')
+            tenant_domain = state.replace('_', '.')
+            app.logger.info(f"🔍 Tenant desde state: {tenant_domain}")
+        else:
+            config_host = obtener_configuracion_por_host()
+            tenant_domain = config_host.get('dominio')
+
         if not code:
             app.logger.error("❌ No se proporcionó código de autorización")
             return "❌ Error: No se proporcionó código de autorización"
-        
-        # Definir rutas absolutas
+
         BASE_DIR = os.path.dirname(os.path.abspath(__file__))
         client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
-        token_path = os.path.join(BASE_DIR, 'token.json')
-        
-        # Verificar que el archivo client_secret.json existe
         if not os.path.exists(client_secret_path):
             app.logger.error(f"❌ No se encuentra {client_secret_path}")
-            return f"❌ Error: No se encuentra el archivo de configuración de Google"
-        
-        # Obtener el host actual de la solicitud
+            return f"❌ Error: No se encuentra el archivo client_secret.json en {BASE_DIR}"
+
+        # Construir redirect_uri basado en host actual (mantener compatibilidad)
         host = request.host
-        app.logger.info(f"🔍 Host actual: {host}")
-        
-        # Construir la URI de redirección basada en el host actual
         redirect_uri = f'https://{host}/completar-autorizacion'
-        app.logger.info(f"🔐 URI de redirección: {redirect_uri}")
-        
         SCOPES = ['https://www.googleapis.com/auth/calendar']
-        
-        # Crear el flujo de OAuth
+
         app.logger.info("🔄 Creando flujo de OAuth...")
-        flow = InstalledAppFlow.from_client_secrets_file(
-            client_secret_path, 
-            SCOPES,
-            redirect_uri=redirect_uri
-        )
-        
-        # Intercambiar código por token
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
+
         app.logger.info("🔄 Intercambiando código por token...")
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        app.logger.info("✅ Token obtenido correctamente")
-        
-        # Guardar token
-        app.logger.info(f"💾 Guardando token en: {token_path}")
-        
-        # Modificar esta parte para usar el nombre de archivo específico
-        with open(token_filename, 'w') as token:
+
+        # Guardar token en ruta absoluta tenant-specific
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
-        app.logger.info(f"✅ Autorización completada para {config['dominio']}")
-        
+        app.logger.info(f"✅ Token guardado en: {token_path} para tenant {tenant_domain}")
+
         return """
         <html>
-        <head>
-            <title>Autorización Completada</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
-                .success { color: green; font-size: 24px; }
-                .info { margin: 20px; }
-            </style>
-        </head>
+        <head><title>Autorización Completada</title></head>
         <body>
-            <h1 class="success">✅ Autorización completada correctamente</h1>
-            <div class="info">
-                <p>Ya puedes usar Google Calendar para agendar citas.</p>
-                <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
-            </div>
+            <h1>✅ Autorización completada correctamente</h1>
+            <p>Ya puedes usar Google Calendar para agendar citas.</p>
+            <p>Puedes cerrar esta ventana y volver a la aplicación.</p>
         </body>
         </html>
         """
-        
+
     except Exception as e:
-        app.logger.error(f"❌ Error en completar_autorizacion: {str(e)}")
+        app.logger.error(f"❌ Error en completar_autorizacion: {e}")
         app.logger.error(traceback.format_exc())
-        return f"""
-        <html>
-        <head>
-            <title>Error de Autorización</title>
-            <style>
-                body {{ font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }}
-                .error {{ color: red; font-size: 24px; }}
-                .info {{ margin: 20px; }}
-                pre {{ background: #f5f5f5; padding: 10px; text-align: left; margin: 20px auto; max-width: 80%; }}
-            </style>
-        </head>
-        <body>
-            <h1 class="error">❌ Error en la autorización</h1>
-            <div class="info">
-                <p>Ocurrió un error al procesar la autorización de Google:</p>
-                <pre>{str(e)}</pre>
-                <p>Por favor, contacta al administrador del sistema.</p>
-            </div>
-        </body>
-        </html>
-        """
+        return f"❌ Error: {str(e)}"
          
 def convertir_audio(audio_path):
     try:
@@ -2879,7 +3084,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             contexto_historial += f"Asistente: {msg['respuesta']}\n"
     
     # MEJORA: Detectar si este es un mensaje de confirmación/respuesta a una pregunta previa
-    mensaje_lower = mensaje.lower()
+    mensaje_lower = (mensaje or "").lower()
     es_confirmacion = False
     if mensaje_lower.startswith(('si', 'sí', 'claro', 'ok')) or 'a las' in mensaje_lower:
         es_confirmacion = True
@@ -2967,26 +3172,32 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         if json_match:
             info_cita = json.loads(json_match.group())
             
-            # MEJORA: Procesar fechas relativas como "hoy" y "mañana"
-            if info_cita.get('fecha_sugerida'):
-                if info_cita['fecha_sugerida'].lower() in ['hoy', 'today']:
-                    info_cita['fecha_sugerida'] = datetime.now().strftime('%Y-%m-%d')
-                elif info_cita['fecha_sugerida'].lower() in ['mañana', 'tomorrow']:
-                    info_cita['fecha_sugerida'] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+            # NORMALIZACIÓN ADICIONAL: si el mensaje original contiene palabras relativas, forzarlas
+            fecha_rel = extraer_fecha_del_mensaje(mensaje_lower)
+            if fecha_rel:
+                app.logger.info(f"🔁 Overriding IA fecha_sugerida con fecha relativa extraída del mensaje: {fecha_rel}")
+                info_cita['fecha_sugerida'] = fecha_rel
             
-            # Buscar información adicional del servicio
-            if info_cita.get('servicio_solicitado'):
-                servicio_nombre = info_cita['servicio_solicitado']
-                # Buscar detalles adicionales del servicio en la tabla precios
-                for producto in precios:
-                    if producto.get('servicio') and servicio_nombre.lower() in producto['servicio'].lower():
-                        info_cita['detalles_servicio'] = {
-                            'descripcion': producto.get('descripcion', ''),
-                            'categoria': producto.get('categoria', ''),
-                            'precio': str(producto.get('precio', '0')),
-                            'precio_menudeo': str(producto.get('precio_menudeo', '0')) if producto.get('precio_menudeo') else None
-                        }
-                        break
+            # Procesar fechas relativas ya reconocidas por la IA (hoy/mañana)
+            if info_cita.get('fecha_sugerida'):
+                fs = str(info_cita['fecha_sugerida']).strip().lower()
+                if fs in ['hoy', 'today']:
+                    info_cita['fecha_sugerida'] = datetime.now().strftime('%Y-%m-%d')
+                elif fs in ['mañana', 'manana', 'tomorrow']:
+                    info_cita['fecha_sugerida'] = (datetime.now() + timedelta(days=1)).strftime('%Y-%m-%d')
+                elif fs in ['pasado mañana', 'pasadomanana']:
+                    info_cita['fecha_sugerida'] = (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d')
+            
+            # Si IA no dio hora y el texto contiene una hora, extraerla
+            if not info_cita.get('hora_sugerida'):
+                hora_extraida = extraer_hora_del_mensaje(mensaje_lower)
+                if hora_extraida:
+                    app.logger.info(f"🔁 Hora extraída del mensaje y añadida: {hora_extraida}")
+                    info_cita['hora_sugerida'] = hora_extraida
+            
+            # Añadir teléfono si no viene
+            if not info_cita.get('telefono'):
+                info_cita['telefono'] = numero
             
             app.logger.info(f"📅 Información de cita extraída: {json.dumps(info_cita)}")
             return info_cita
@@ -3097,78 +3308,126 @@ def kanban_data(config=None):
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
 
-def load_config(config=None):
+def sanitize_whatsapp_text(text):
+    """
+    Limpia artefactos típicos de extracción desde Excel (p.ej. excel_unzip_img_...),
+    colapsa espacios y mantiene links intactos.
+    """
+    if not text:
+        return text
+
+    try:
+        # 1) Eliminar tokens generados por el unzip de .xlsx (con o sin extensión)
+        text = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
+
+        # 2) Eliminar repeticiones sobrantes de la misma cadena (por si quedó repetido)
+        text = re.sub(r'(\b\s){2,}', ' ', text)
+
+        # 3) Reemplazar múltiples saltos de línea/espacios por uno solo y limpiar espacios alrededor de saltos
+        text = re.sub(r'\s*\n\s*', '\n', text)
+        text = re.sub(r'[ \t]{2,}', ' ', text)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        # 4) Quitar espacios duplicados resultantes y trim
+        text = re.sub(r' {2,}', ' ', text).strip()
+
+        # 5) Si la línea contiene solo "Imagen:" o "Imagen: " repetido, normalizar
+        text = re.sub(r'(Imagen:\s*){2,}', 'Imagen: ', text, flags=re.IGNORECASE)
+
+        return text
+    except Exception as e:
+        app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
+        return text.strip() if isinstance(text, str) else text
+
+def eliminar_asesores_extras(config=None, allowed_count=2):
+    """
+    Recorta la lista de asesores guardada en configuracion.asesores_json
+    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono)
+    que existan en la tabla y estén por encima del límite.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS configuracion (
-            id INT PRIMARY KEY DEFAULT 1,
-            ia_nombre VARCHAR(100),
-            negocio_nombre VARCHAR(100),
-            descripcion TEXT,
-            url VARCHAR(255),
-            direccion VARCHAR(255),
-            telefono VARCHAR(50),
-            correo VARCHAR(100),
-            que_hace TEXT,
-            tono VARCHAR(50),
-            lenguaje VARCHAR(50),
-            restricciones TEXT,
-            palabras_prohibidas TEXT,
-            max_mensajes INT DEFAULT 10,
-            tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),
-            nombre_empresa VARCHAR(100),
-            app_logo VARCHAR(255),
-            calendar_email VARCHAR(255),
-            -- Asesores de ventas
-            asesor1_nombre VARCHAR(100),
-            asesor1_telefono VARCHAR(50),
-            asesor2_nombre VARCHAR(100),
-            asesor2_telefono VARCHAR(50)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
-    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
-    row = cursor.fetchone()
-    cursor.close()
-    conn.close()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
 
-    if not row:
-        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}}
+        # Leer row actual
+        cursor.execute("SELECT asesores_json FROM configuracion WHERE id = 1 LIMIT 1")
+        row = cursor.fetchone()
+        if not row:
+            cursor.close(); conn.close()
+            return
 
-    negocio = {
-        'ia_nombre': row.get('ia_nombre'),
-        'negocio_nombre': row.get('negocio_nombre'),
-        'descripcion': row.get('descripcion'),
-        'url': row.get('url'),
-        'direccion': row.get('direccion'),
-        'telefono': row.get('telefono'),
-        'correo': row.get('correo'),
-        'que_hace': row.get('que_hace'),
-        'logo_url': row.get('logo_url', ''),
-        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
-        'app_logo': row.get('app_logo', ''),
-        'calendar_email': row.get('calendar_email', '')
-    }
-    personalizacion = {
-        'tono': row.get('tono'),
-        'lenguaje': row.get('lenguaje'),
-    }
-    restricciones = {
-        'restricciones': row.get('restricciones', ''),
-        'palabras_prohibidas': row.get('palabras_prohibidas', ''),
-        'max_mensajes': row.get('max_mensajes', 10),
-        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
-    }
-    asesores = {
-        'asesor1_nombre': row.get('asesor1_nombre', ''),
-        'asesor1_telefono': row.get('asesor1_telefono', ''),
-        'asesor2_nombre': row.get('asesor2_nombre', ''),
-        'asesor2_telefono': row.get('asesor2_telefono', '')
-    }
-    return {'negocio': negocio, 'personalizacion': personalizacion, 'restricciones': restricciones, 'asesores': asesores}
+        asesores_json = row.get('asesores_json') or ''
+        changed = False
+
+        # 1) Trim JSON list if needed
+        if asesores_json:
+            try:
+                parsed = json.loads(asesores_json)
+                if isinstance(parsed, list) and len(parsed) > allowed_count:
+                    trimmed = parsed[:allowed_count]
+                    cursor.execute("UPDATE configuracion SET asesores_json = %s WHERE id = 1", (json.dumps(trimmed, ensure_ascii=False),))
+                    conn.commit()
+                    app.logger.info(f"🔧 asesores_json recortado de {len(parsed)} a {allowed_count}")
+                    changed = True
+            except Exception as e:
+                app.logger.warning(f"⚠️ eliminar_asesores_extras: no se pudo parsear asesores_json: {e}")
+
+        # 2) Nullificar columnas legacy que queden fuera del límite (comprobar qué columnas existen)
+        try:
+            cursor.execute("SHOW COLUMNS FROM configuracion")
+            existing = [r[0] for r in cursor.fetchall()]
+        except Exception:
+            existing = []
+
+        cols_to_null = []
+        # consider up to 20 possible legacy columns (safe upper bound)
+        for i in range(1, 21):
+            if i > allowed_count:
+                name_col = f"asesor{i}_nombre"
+                phone_col = f"asesor{i}_telefono"
+                if name_col in existing:
+                    cols_to_null.append(f"{name_col} = NULL")
+                if phone_col in existing:
+                    cols_to_null.append(f"{phone_col} = NULL")
+
+        if cols_to_null:
+            try:
+                sql = f"UPDATE configuracion SET {', '.join(cols_to_null)} WHERE id = 1"
+                cursor.execute(sql)
+                conn.commit()
+                app.logger.info(f"🔧 Columnas legacy de asesores > {allowed_count} puestas a NULL")
+                changed = True
+            except Exception as e:
+                app.logger.warning(f"⚠️ eliminar_asesores_extras: no se pudieron nullificar columnas legacy: {e}")
+
+        cursor.close(); conn.close()
+        if not changed:
+            app.logger.debug("ℹ️ eliminar_asesores_extras: no se aplicó ningún cambio (no había asesores extras)")
+    except Exception as e:
+        app.logger.error(f"🔴 eliminar_asesores_extras error: {e}")
+
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
+
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -3231,8 +3490,8 @@ def guardar_cita(info_cita, config=None):
                 tipo VARCHAR(20),
                 resumen TEXT,
                 estado VARCHAR(20) DEFAULT 'pendiente',
-                mensaje text,
-                evaluacion_ia json,
+                mensaje TEXT,
+                evaluacion_ia JSON,
                 timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
                 calendar_event_id VARCHAR(255),
                 INDEX idx_numero (numero),
@@ -3240,7 +3499,9 @@ def guardar_cita(info_cita, config=None):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
         conn.commit()
-        
+
+        # ... (omitir verificación de columnas por brevedad, se mantiene igual) ...
+
         # Guardar en tabla citas
         cursor.execute('''
             INSERT INTO citas (
@@ -3260,7 +3521,7 @@ def guardar_cita(info_cita, config=None):
         conn.commit()
         cita_id = cursor.lastrowid
         
-        # Determinar si la cita es para un día futuro (al menos 1 día después)
+        # Determinar si la cita es para un día futuro (o hoy)
         evento_id = None
         debe_agendar = False
         
@@ -3269,27 +3530,40 @@ def guardar_cita(info_cita, config=None):
                 fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
                 fecha_actual = datetime.now().date()
                 
-                # Solo agendar si la fecha es al menos un día después
-                if (fecha_cita - fecha_actual).days >= -30:
+                diff_days = (fecha_cita - fecha_actual).days
+                # Agendar si la fecha es hoy o futura (diff >= 0)
+                if diff_days >= 0:
                     debe_agendar = True
-                    app.logger.info(f"✅ Cita para fecha futura ({fecha_cita}), se agendará en Calendar")
+                    app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
                 else:
-                    app.logger.info(f"ℹ️ Cita para hoy o pasada ({fecha_cita}), no se agendará en Calendar")
+                    app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
             except Exception as e:
                 app.logger.error(f"Error procesando fecha: {e}")
         
-        # Agendar en Google Calendar solo si es para un día futuro
+        # Agendar en Google Calendar solo si es para hoy o futuro
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
                 evento_id = crear_evento_calendar(service, info_cita, config)
                 if evento_id:
-                    # Guardar el ID del evento en la base de datos
-                    cursor.execute('''
-                        UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                    ''', (evento_id, cita_id))
-                    conn.commit()
-                    app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    # Asegurarnos de que la columna exista antes de actualizar citas
+                    try:
+                        cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
+                        if cursor.fetchone() is None:
+                            cursor.execute("ALTER TABLE citas ADD COLUMN evento_calendar_id VARCHAR(255) DEFAULT NULL")
+                            conn.commit()
+                            app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
+
+                        cursor.execute('''
+                            UPDATE citas SET evento_calendar_id = %s WHERE id = %s
+                        ''', (evento_id, cita_id))
+                        conn.commit()
+                        app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                    except Exception as e:
+                        app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
+        
+        # (resto del guardado de notificaciones_ia y envíos se mantiene igual)
+        # ...
         
         # Guardar en notificaciones_ia
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -3303,7 +3577,6 @@ def guardar_cita(info_cita, config=None):
         resumen += f"Cliente: {info_cita.get('nombre_cliente')} - "
         resumen += f"Fecha: {info_cita.get('fecha_sugerida')} {info_cita.get('hora_sugerida')}"
         
-        # Construir evaluación IA en formato JSON
         evaluacion_ia = {
             'servicio_solicitado': info_cita.get('servicio_solicitado'),
             'detalles_servicio': detalles_servicio,
@@ -3326,13 +3599,10 @@ def guardar_cita(info_cita, config=None):
         💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
         """
 
-        # Enviar mensaje al número específico
         enviar_mensaje('5214493432744', mensaje_notificacion, config)
         enviar_mensaje('5214491182201', mensaje_notificacion, config)
         app.logger.info(f"✅ Notificación de cita enviada a 5214493432744, ID: {cita_id}")
         
-        
-        # Guardar en notificaciones_ia
         cursor.execute('''
             INSERT INTO notificaciones_ia (
                 numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
@@ -3342,7 +3612,7 @@ def guardar_cita(info_cita, config=None):
             tipo_solicitud,
             resumen,
             'pendiente',
-            json.dumps(info_cita),  # Guardar toda la info de la cita como mensaje
+            json.dumps(info_cita),
             json.dumps(evaluacion_ia),
             evento_id
         ))
@@ -3501,39 +3771,11 @@ def extraer_nombre_del_mensaje(mensaje):
         return mensaje.strip()
     
     return None
-
-def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
-    """
-    Solicita al usuario los datos faltantes para completar la cita/pedido
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Determinar el tipo de negocio
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
-    # Identificar qué datos faltan
-    datos_faltantes = []
-    
-    # Validar servicio solicitado (siempre requerido)
-    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if es_porfirianna:
-            datos_faltantes.append("qué platillo deseas ordenar")
-        else:
-            datos_faltantes.append("qué servicio necesitas")
-    
-    # Validar fecha (solo requerido para Mektia)
-    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_faltantes.append("fecha preferida")
-    
-    # Validar nombre del cliente (siempre requerido)
-    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_faltantes.append("tu nombre")
     
 @app.route('/configuracion/negocio/publicar-pdf', methods=['POST'])
 @login_required
 def publicar_pdf_configuracion():
-    """Recibe un PDF o imagen desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
+    """Recibe un PDF, imagen o video desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
     config = obtener_configuracion_por_host()
     try:
         if 'public_pdf' not in request.files or request.files['public_pdf'].filename == '':
@@ -3547,14 +3789,23 @@ def publicar_pdf_configuracion():
         if '.' in original_name:
             ext = original_name.rsplit('.', 1)[1].lower()
         if ext not in ALLOWED_EXTENSIONS:
-            flash('❌ Tipo de archivo no permitido. Usa PDF, imágenes o documentos permitidos.', 'error')
+            flash('❌ Tipo de archivo no permitido. Usa PDF, imágenes, videos o documentos permitidos.', 'error')
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
-        # Prefijos distintos para imagen/pdf (facilita depuración)
-        prefix = 'img' if ext in {'png','jpg','jpeg','gif','webp','svg'} else 'pdf'
+        # Prefijos distintos según tipo (imagen/pdf/video) — facilita depuración y lectura
+        image_exts = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'}
+        video_exts = {'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'}
+        if ext in image_exts:
+            prefix = 'img'
+        elif ext in video_exts:
+            prefix = 'video'
+        else:
+            prefix = 'pdf'  # pdf, docx, txt, xlsx, etc.
+
         filename = secure_filename(f"{prefix}_{int(time.time())}_{original_name}")
-        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        os.makedirs(docs_dir, exist_ok=True)
+
+        # Tenant-aware docs directory
+        docs_dir, tenant_slug = get_docs_dir_for_config(config)
         filepath = os.path.join(docs_dir, filename)
         file.save(filepath)
 
@@ -3571,14 +3822,29 @@ def publicar_pdf_configuracion():
                     filepath VARCHAR(512) NOT NULL,
                     descripcion TEXT,
                     uploaded_by VARCHAR(100),
-
+                    tenant_slug VARCHAR(128),
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE KEY uq_filename (filename)
+                    UNIQUE KEY uq_filename (filename, tenant_slug)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """)
             conn.commit()
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo asegurar tabla documents_publicos: {e}")
+            app.logger.warning(f"⚠️ No se pudo asegurar tabla documents_publicos (CREATE): {e}")
+
+        # Asegurarse de que la columna tenant_slug exista; si no, intentar añadirla.
+        try:
+            cursor.execute("SHOW COLUMNS FROM documents_publicos")
+            existing_cols = [row[0] for row in cursor.fetchall()]
+            if 'tenant_slug' not in existing_cols:
+                try:
+                    cursor.execute("ALTER TABLE documents_publicos ADD COLUMN tenant_slug VARCHAR(128) DEFAULT NULL AFTER uploaded_by")
+                    conn.commit()
+                    existing_cols.append('tenant_slug')
+                    app.logger.info("🔧 Columna 'tenant_slug' añadida a documents_publicos")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo añadir la columna tenant_slug a documents_publicos: {e}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo inspeccionar columns de documents_publicos: {e}")
 
         try:
             user = None
@@ -3586,14 +3852,26 @@ def publicar_pdf_configuracion():
             if au and isinstance(au, dict):
                 user = au.get('user') or str(au.get('id') or '')
 
-            cursor.execute("""
-                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by)
-                VALUES (%s, %s, %s, %s)
-                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
-            """, (filename, filepath, descripcion, user))
+            # Insert dinámico según columnas disponibles (robusto ante esquemas antiguos)
+            cursor.execute("SHOW COLUMNS FROM documents_publicos")
+            cols_info = cursor.fetchall()
+            cols = [row[0] for row in cols_info]
+
+            insert_cols = ['filename', 'filepath', 'descripcion', 'uploaded_by']
+            values = [filename, filepath, descripcion, user]
+
+            if 'tenant_slug' in cols:
+                insert_cols.append('tenant_slug')
+                values.append(tenant_slug)
+
+            placeholders = ', '.join(['%s'] * len(values))
+            cols_sql = ', '.join(insert_cols)
+
+            sql = f"INSERT INTO documents_publicos ({cols_sql}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP"
+            cursor.execute(sql, values)
             conn.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando metadatos archivo: {e}")
+            app.logger.error(f"🔴 Error insertando metadato archivo: {e}")
             conn.rollback()
             flash('❌ Error guardando metadatos en la base de datos', 'error')
             try:
@@ -3617,7 +3895,236 @@ def publicar_pdf_configuracion():
         app.logger.error(f"🔴 Error en publicar_pdf_configuracion: {e}")
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
-        return redirect(url_for('configuracion_tab', tab='negocio'))
+        return redirect(url_for('configuracion_tab', tab='negocio')) 
+
+
+# Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
+
+def _ensure_cliente_plan_columns():
+    """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        # Crear columnas si no existen
+        cur.execute("SHOW COLUMNS FROM cliente LIKE 'plan_id'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE cliente ADD COLUMN plan_id INT DEFAULT NULL")
+        cur.execute("SHOW COLUMNS FROM cliente LIKE 'mensajes_incluidos'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE cliente ADD COLUMN mensajes_incluidos INT DEFAULT 0")
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
+
+def _ensure_precios_subscription_columns(config=None):
+    """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'inscripcion'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN inscripcion DECIMAL(10,2) DEFAULT 0.00")
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensualidad'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN mensualidad DECIMAL(10,2) DEFAULT 0.00")
+        conn.commit()
+        cur.close()
+        conn.close()
+        app.logger.info("🔧 Columnas 'inscripcion' y 'mensualidad' aseguradas en tabla precios")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
+
+def _ensure_precios_plan_column(config=None):
+    """Asegura que la tabla `precios` del tenant tenga la columna mensajes_incluidos (opcional para definir planes)."""
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensajes_incluidos'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN mensajes_incluidos INT DEFAULT 0")
+            conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna mensajes_incluidos en precios: {e}")
+
+def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
+    """
+    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
+    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
+    """
+    try:
+        # asegurar columnas en cliente
+        _ensure_cliente_plan_columns()
+
+        # 1) Obtener cliente en CLIENTES_DB
+        conn_cli = get_clientes_conn()
+        cur_cli = conn_cli.cursor(dictionary=True)
+        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
+        if not cliente:
+            cur_cli.close(); conn_cli.close()
+            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
+            return False
+
+        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
+        mensajes_incluidos = 0
+        plan_name = None
+        try:
+            cur_pl = conn_cli.cursor(dictionary=True)
+            cur_pl.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+            plan_row = cur_pl.fetchone()
+            if plan_row:
+                mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
+                plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+            cur_pl.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
+
+        # 3) Actualizar cliente en CLIENTES_DB
+        try:
+            cur_cli.execute("""
+                UPDATE cliente
+                   SET plan_id = %s, mensajes_incluidos = %s
+                 WHERE id_cliente = %s
+            """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
+            conn_cli.commit()
+        except Exception as e:
+            app.logger.error(f"🔴 Error actualizando cliente con plan: {e}")
+            conn_cli.rollback()
+            cur_cli.close(); conn_cli.close()
+            return False
+
+        cur_cli.close(); conn_cli.close()
+        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
+        return False
+
+def get_plan_status_for_user(username, config=None):
+    """
+    Retorna el estado del plan para el cliente user:
+    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
+
+    Ahora lee metadata del plan desde la tabla `planes` en la BD de clientes (CLIENTES_DB).
+    Los mensajes consumidos se cuentan desde la BD tenant (conversaciones).
+    """
+    try:
+        # Obtener cliente desde CLIENTES_DB
+        conn_cli = get_clientes_conn()
+        cur_cli = conn_cli.cursor(dictionary=True)
+        cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
+        cur_cli.close(); conn_cli.close()
+        if not cliente:
+            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado para user={username}")
+            return None
+
+        plan_id = cliente.get('plan_id')
+        plan_name = None
+
+        # Si hay plan_id, intentar leer la definición desde CLIENTES_DB.planes
+        if plan_id:
+            try:
+                conn_cli = get_clientes_conn()
+                curp = conn_cli.cursor(dictionary=True)
+                curp.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, descripcion, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                plan_row = curp.fetchone()
+                curp.close(); conn_cli.close()
+                if plan_row:
+                    # Preferimos modelo como nombre representativo, sino categoria
+                    plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+                    # Si la tabla planes tiene mensajes_incluidos, usarlo (mantener coherencia)
+                    mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or mensajes_incluidos or 0)
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
+
+        telefono = (cliente.get('telefono') or '').strip()
+        app.logger.info(f"🔍 get_plan_status_for_user: user={username} telefono='{telefono}'")
+
+        mensajes_consumidos = 0
+        try:
+            if config is None:
+                config = obtener_configuracion_por_host()
+            conn_t = get_db_connection(config)
+            cur_t = conn_t.cursor()
+
+            # Helper: limpiar dígitos
+            def only_digits(s):
+                return re.sub(r'\D', '', s or '')
+
+            clean_tel = only_digits(telefono)
+
+            # 1) Intentar coincidencia exacta con varias variantes
+            variants = []
+            if telefono:
+                variants.append(telefono)
+            if clean_tel:
+                variants.append(clean_tel)
+                variants.append('+' + clean_tel)
+                if not clean_tel.startswith('52'):
+                    variants.append('52' + clean_tel)
+                    variants.append('521' + clean_tel)
+            # dedupe
+            variants = [v for i, v in enumerate(variants) if v and v not in variants[:i]]
+
+            for v in variants:
+                cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (v,))
+                row = cur_t.fetchone()
+                cnt = int(row[0]) if row and row[0] is not None else 0
+                app.logger.info(f"🔎 Conteo exact match numero='{v}' => {cnt}")
+                if cnt > 0:
+                    mensajes_consumidos = cnt
+                    break
+
+            # 2) Si sigue 0: intentar comparar solo los últimos dígitos
+            if mensajes_consumidos == 0 and clean_tel:
+                for n in (9, 8, 7):
+                    last_n = clean_tel[-n:]
+                    pattern = f"%{last_n}"
+                    sql = """
+                        SELECT COUNT(*) FROM conversaciones
+                        WHERE REPLACE(REPLACE(REPLACE(REPLACE(numero, '+', ''), '-', ''), ' ', ''), '(', '') LIKE %s
+                    """
+                    cur_t.execute(sql, (pattern,))
+                    row = cur_t.fetchone()
+                    cnt = int(row[0]) if row and row[0] is not None else 0
+                    app.logger.info(f"🔎 Conteo LIKE ...{last_n} => {cnt}")
+                    if cnt > 0:
+                        mensajes_consumidos = cnt
+                        break
+
+            # 3) último recurso: si telefono vacío, mantener 0
+            if mensajes_consumidos == 0 and not telefono:
+                mensajes_consumidos = 0
+
+            cur_t.close(); conn_t.close()
+            app.logger.info(f"✅ get_plan_status_for_user results: mensajes_consumidos={mensajes_consumidos}")
+
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
+            mensajes_consumidos = 0
+
+        mensajes_disponibles = None
+        if mensajes_incluidos is not None:
+            mensajes_disponibles = max(0, mensajes_incluidos - mensajes_consumidos)
+
+        return {
+            'plan_id': plan_id,
+            'plan_name': plan_name,
+            'mensajes_incluidos': mensajes_incluidos,
+            'mensajes_consumidos': mensajes_consumidos,
+            'mensajes_disponibles': mensajes_disponibles
+        }
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_plan_status_for_user: {e}")
+        return None
 
 # --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
 def enviar_documento(numero, file_url, filename, config=None):
@@ -3663,14 +4170,29 @@ def build_texto_catalogo(precios, limit=20):
     for p in precios[:limit]:
         sku = (p.get('sku') or '').strip()
         nombre = (p.get('servicio') or p.get('modelo') or '').strip()
+        # Preferencia en orden para precio mostrado
         precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or ''
+        inscripcion = p.get('inscripcion')
+        mensualidad = p.get('mensualidad')
         precio_str = ''
         try:
             if precio not in (None, ''):
                 precio_str = f" - ${float(precio):,.2f}"
         except Exception:
             precio_str = f" - {precio}"
-        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}")
+        extras = []
+        try:
+            if inscripcion not in (None, '', 0):
+                extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
+        except Exception:
+            extras.append(f"Inscripción: {inscripcion}")
+        try:
+            if mensualidad not in (None, '', 0):
+                extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
+        except Exception:
+            extras.append(f"Mensualidad: {mensualidad}")
+        extras_str = (f" ({', '.join(extras)})") if extras else ""
+        lines.append(f"{nombre or sku}{(' (SKU:'+sku+')') if sku else ''}{precio_str}{extras_str}")
     texto = "📚 Catálogo (resumen):\n" + "\n".join(lines)
     if len(precios) > limit:
         texto += f"\n\n... y {len(precios)-limit} productos más. Pide 'catálogo completo' para recibir el PDF si está publicado."
@@ -3757,7 +4279,7 @@ def enviar_catalogo(numero, original_text=None, config=None):
         cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
         if cursor.fetchone():
             cursor.execute("""
-                SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
                 FROM documents_publicos
                 ORDER BY created_at DESC
                 LIMIT 20
@@ -3777,7 +4299,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
             filename = mejor.get('filename')
             descripcion = mejor.get('descripcion') or ''
-            # Construir base preferente desde request (host real) para evitar URLs sin esquema
+
+            # Build tenant-aware file_url
             base = None
             try:
                 if has_request_context():
@@ -3789,7 +4312,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
                 base = dominio if dominio.startswith('http') else f"https://{dominio}"
 
-            file_url = f"{base}/uploads/docs/{filename}"
+            tenant_slug = mejor.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
+            file_url = f"{base}/uploads/docs/{tenant_slug}/{filename}"
             app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
 
             sent = enviar_documento(numero, file_url, filename, config)
@@ -3861,13 +4385,131 @@ def ver_citas(config=None):
     
     return render_template('citas.html', citas=citas)
 
+def load_config(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS configuracion (
+            id INT PRIMARY KEY DEFAULT 1,
+            ia_nombre VARCHAR(100),
+            negocio_nombre VARCHAR(100),
+            descripcion TEXT,
+            url VARCHAR(255),
+            direccion VARCHAR(255),
+            telefono VARCHAR(50),
+            correo VARCHAR(100),
+            que_hace TEXT,
+            tono VARCHAR(50),
+            lenguaje VARCHAR(50),
+            restricciones TEXT,
+            palabras_prohibidas TEXT,
+            max_mensajes INT DEFAULT 10,
+            tiempo_max_respuesta INT DEFAULT 30,
+            logo_url VARCHAR(255),
+            nombre_empresa VARCHAR(100),
+            app_logo VARCHAR(255),
+            calendar_email VARCHAR(255),
+            transferencia_numero VARCHAR(100),
+            transferencia_nombre VARCHAR(200),
+            transferencia_banco VARCHAR(100),
+            -- Asesores de ventas (columnas antiguas para compatibilidad)
+            asesor1_nombre VARCHAR(100),
+            asesor1_telefono VARCHAR(50),
+            asesor2_nombre VARCHAR(100),
+            asesor2_telefono VARCHAR(50),
+            -- Nueva columna JSON que puede contener lista arbitraria de asesores
+            asesores_json TEXT
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    ''')
+    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
+    row = cursor.fetchone()
+    cursor.close()
+    conn.close()
+
+    if not row:
+        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}, 'asesores_list': []}
+
+    negocio = {
+        'ia_nombre': row.get('ia_nombre'),
+        'negocio_nombre': row.get('negocio_nombre'),
+        'descripcion': row.get('descripcion'),
+        'url': row.get('url'),
+        'direccion': row.get('direccion'),
+        'telefono': row.get('telefono'),
+        'correo': row.get('correo'),
+        'que_hace': row.get('que_hace'),
+        'logo_url': row.get('logo_url', ''),
+        'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
+        'app_logo': row.get('app_logo', ''),
+        'calendar_email': row.get('calendar_email', ''),
+        'transferencia_numero': row.get('transferencia_numero', ''),
+        'transferencia_nombre': row.get('transferencia_nombre', ''),
+        'transferencia_banco': row.get('transferencia_banco', '')
+    }
+    personalizacion = {
+        'tono': row.get('tono'),
+        'lenguaje': row.get('lenguaje'),
+    }
+    restricciones = {
+        'restricciones': row.get('restricciones', ''),
+        'palabras_prohibidas': row.get('palabras_prohibidas', ''),
+        'max_mensajes': row.get('max_mensajes', 10),
+        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
+    }
+
+    # Manejo de asesores: preferir columna JSON si existe, si no usar columnas antiguas
+    asesores_list = []
+    asesores_map = {}
+    try:
+        asesores_json = row.get('asesores_json')
+        if asesores_json:
+            try:
+                parsed = json.loads(asesores_json)
+                if isinstance(parsed, list):
+                    asesores_list = parsed
+                    # Build map for backward compatibility (asesor1_nombre, etc.)
+                    for idx, a in enumerate(asesores_list, start=1):
+                        asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
+                        asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
+            except Exception:
+                app.logger.warning("⚠️ No se pudo parsear asesores_json, fallback a columnas individuales")
+        if not asesores_list:
+            # Fallback: legacy columns (asesor1, asesor2)
+            a1n = (row.get('asesor1_nombre') or '').strip()
+            a1t = (row.get('asesor1_telefono') or '').strip()
+            a2n = (row.get('asesor2_nombre') or '').strip()
+            a2t = (row.get('asesor2_telefono') or '').strip()
+            if a1n or a1t:
+                asesores_list.append({'nombre': a1n, 'telefono': a1t})
+                asesores_map['asesor1_nombre'] = a1n
+                asesores_map['asesor1_telefono'] = a1t
+            if a2n or a2t:
+                asesores_list.append({'nombre': a2n, 'telefono': a2t})
+                asesores_map['asesor2_nombre'] = a2n
+                asesores_map['asesor2_telefono'] = a2t
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error procesando asesores: {e}")
+
+    # Return both map (backward compat) and list (preferred)
+    return {
+        'negocio': negocio,
+        'personalizacion': personalizacion,
+        'restricciones': restricciones,
+        'asesores': asesores_map if 'asesores_map' in locals() else {},
+        'asesores_list': asesores_list if 'asesores_list' in locals() else []
+    }
+
+
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     neg = cfg_all.get('negocio', {})
     per = cfg_all.get('personalizacion', {})
     res = cfg_all.get('restricciones', {})
-    ases = cfg_all.get('asesores', {})
+    ases = cfg_all.get('asesores', {})  # map for backward compat
+    ases_json = cfg_all.get('asesores_json', None)  # optional JSON string / structure
 
     conn = get_db_connection(config)
     cursor = conn.cursor()
@@ -3885,6 +4527,12 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
     if 'calendar_email' not in existing_cols:
         alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
+    if 'transferencia_numero' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_numero VARCHAR(100) DEFAULT NULL")
+    if 'transferencia_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_nombre VARCHAR(200) DEFAULT NULL")
+    if 'transferencia_banco' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_banco VARCHAR(100) DEFAULT NULL")
     if 'asesor1_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor1_telefono' not in existing_cols:
@@ -3893,6 +4541,8 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesores_json' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesores_json TEXT DEFAULT NULL")
 
     if alter_statements:
         try:
@@ -3900,14 +4550,12 @@ def save_config(cfg_all, config=None):
             cursor.execute(sql)
             conn.commit()
             app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
-            # refresh existing_cols
             cursor.execute("SHOW COLUMNS FROM configuracion")
             existing_cols = {row[0] for row in cursor.fetchall()}
         except Exception as e:
             app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
 
     try:
-        # Mapear posibles campos a valores desde cfg_all
         candidate_map = {
             'ia_nombre': neg.get('ia_nombre'),
             'negocio_nombre': neg.get('negocio_nombre'),
@@ -3928,11 +4576,44 @@ def save_config(cfg_all, config=None):
             'app_nombre': neg.get('ia_nombre', None),
             'nombre_empresa': neg.get('nombre_empresa', None),
             'calendar_email': neg.get('calendar_email', None),
+            'transferencia_numero': neg.get('transferencia_numero', None),
+            'transferencia_nombre': neg.get('transferencia_nombre', None),
+            'transferencia_banco': neg.get('transferencia_banco', None),
+            # legacy asesor fields (if provided in ases map)
             'asesor1_nombre': ases.get('asesor1_nombre', None),
             'asesor1_telefono': ases.get('asesor1_telefono', None),
             'asesor2_nombre': ases.get('asesor2_nombre', None),
-            'asesor2_telefono': ases.get('asesor2_telefono', None)
+            'asesor2_telefono': ases.get('asesor2_telefono', None),
+            'asesores_json': None
         }
+
+        # if caller supplied structured advisors (list or json), normalize to JSON string
+        if ases_json is not None:
+            if isinstance(ases_json, (list, dict)):
+                candidate_map['asesores_json'] = json.dumps(ases_json, ensure_ascii=False)
+            else:
+                candidate_map['asesores_json'] = str(ases_json)
+        else:
+            # No explicit asesores_json provided; if ases map contains advisor keys build small JSON list
+            advisors_compiled = []
+            # look for asesorN in ases map
+            i = 1
+            while True:
+                name_key = f'asesor{i}_nombre'
+                phone_key = f'asesor{i}_telefono'
+                if name_key in ases or phone_key in ases:
+                    name = (ases.get(name_key) or '').strip()
+                    phone = (ases.get(phone_key) or '').strip()
+                    if name or phone:
+                        advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    i += 1
+                    # prevent infinite loop
+                    if i > 20:
+                        break
+                else:
+                    break
+            if advisors_compiled:
+                candidate_map['asesores_json'] = json.dumps(advisors_compiled, ensure_ascii=False)
 
         # Usar solo columnas que existen en la tabla
         cols_to_write = [col for col in candidate_map.keys() if col in existing_cols]
@@ -3965,6 +4646,27 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
+
+
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -3984,6 +4686,49 @@ def obtener_todos_los_precios(config):
     except Exception as e:
         print(f"Error obteniendo precios: {str(e)}")
         return []
+
+def obtener_producto_por_sku_o_nombre(query, config=None):
+    """
+    Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
+    Retorna la fila completa (dict) o None.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        q = (query or '').strip()
+        if not q:
+            cursor.close(); conn.close()
+            return None
+
+        # Intentos: SKU exacto -> modelo exacto -> servicio LIKE -> modelo LIKE -> sku LIKE
+        # Normalizar posibles formatos
+        candidates = [
+            ("SELECT * FROM precios WHERE sku = %s LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(modelo) = LOWER(%s) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(servicio) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(modelo) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(sku) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+        ]
+
+        for sql, params in candidates:
+            try:
+                cursor.execute(sql, params)
+                row = cursor.fetchone()
+                if row:
+                    cursor.close(); conn.close()
+                    return row
+            except Exception:
+                # ignora errores en cada intento y sigue con el siguiente
+                continue
+
+        cursor.close(); conn.close()
+        return None
+    except Exception as e:
+        app.logger.error(f"🔴 obtener_producto_por_sku_o_nombre error: {e}")
+        return None
 
 def obtener_precio_por_id(pid, config=None):
     if config is None:
@@ -4048,26 +4793,7 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-# ... existing code ...
-# Helper: limpiar valores que contengan el nombre/marker de la imagen
-def _clean_field(val, imagen_name):
-    if not val:
-        return ''
-    try:
-        s = str(val).strip()
-        if not imagen_name:
-            return s
-        img = str(imagen_name).strip()
-        # eliminar coincidencias exactas del nombre de la imagen
-        if img and img in s:
-            s = s.replace(img, '')
-        # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-        s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-        # limpiar espacios sobrantes
-        s = re.sub(r'\s{2,}', ' ', s).strip()
-        return s
-    except Exception:
-        return str(val).strip()
+
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
@@ -4082,67 +4808,135 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
     info_cita = None  # Initialize to avoid UnboundLocalError
-    
+    # Interceptar petición explícita de asesor (antes de llamar a la IA)
+    text_lower = (mensaje_usuario or "").lower()
+        # --- Interceptor: responder directamente consultas de contacto del negocio ---
+    transfer_keywords = [
+        'transferencia', 'datos para transferencia', 'datos de transferencia', 'clabe',
+        'clabe interbancaria', 'cuenta', 'numero de cuenta', 'número de cuenta',
+        'datos bancarios', 'pago por transferencia', 'pagar por transferencia',
+        'deposito', 'depósito', 'hacer transferencia'
+    ]
+    if any(k in text_lower for k in transfer_keywords):
+        transfer_block = negocio_transfer_block(cfg.get('negocio', {}))
+        app.logger.info(f"ℹ️ Respuesta de transferencia servida desde DB para {numero}")
+        return transfer_block
+
+    contact_queries = [
+        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
+        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
+        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
+        'información de contacto', 'contacto', 'ubicacion', 'ubican'
+    ]
+    if any(k in text_lower for k in contact_queries):
+        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
+        # Responder inmediatamente desde el servidor (no IA)
+        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
+        return negocio_block
+    advisor_keywords = [
+        'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
+        'pásame un asesor', 'pasame un asesor', 'quiero un asesor', 'asesor',
+        'conectar con asesor', 'contacto de asesor'
+    ]
+    if any(k in text_lower for k in advisor_keywords):
+        sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+        if sent:
+            app.logger.info(f"✅ Se envió contacto de asesor a {numero} por petición explícita")
+            # Guardar conversacion que se le pasó el contacto (no duplicar datos)
+            guardar_conversacion(numero, mensaje_usuario, f"Se compartió contacto de asesor.", config)
+        else:
+            app.logger.info(f"ℹ️ No se envió asesor a {numero} (no configurado)")
+            enviar_mensaje(numero, "Lo siento, no hay asesores configurados ahora. ¿Quieres que te comparta otra opción?", config)
+            guardar_conversacion(numero, mensaje_usuario, "No hay asesores configurados.", config)
+        return
     # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
     if detectar_solicitud_cita_keywords(mensaje_usuario, config):
         app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
-        
         info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
-        
         if info_cita and info_cita.get('servicio_solicitado'):
             datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            
             if datos_completos:
-                # Guardar cita completa
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
             else:
-                # Pedir datos faltantes de manera conversacional
                 mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                
                 if 'fecha' in faltantes:
                     mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
                 if 'hora' in faltantes:
                     mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
                 if 'nombre' in faltantes:
                     mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                
                 mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
                 return mensaje_faltantes
         else:
-            # No hay información específica, pedir general
             es_porfirianna = 'laporfirianna' in config.get('dominio', '')
             if es_porfirianna:
                 return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
             else:
                 return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
-    
-    # ... existing code continues ...
+        # --- Interceptor: responder directamente consultas de contacto del negocio ---
+    contact_queries = [
+        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
+        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
+        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
+        'información de contacto', 'contacto', 'ubicacion'
+    ]
+    # mensaje_usuario ya definido; text_lower ya existe arriba
+    if any(k in text_lower for k in contact_queries):
+        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
+        # Responder inmediatamente desde el servidor (no IA)
+        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
+        return negocio_block
+    # ... el resto de la función permanece igual ...
     # Fetch detailed products/services data from the precios table
     precios = obtener_todos_los_precios(config)
-    
+
     # Format products using the canonical DB fields ...
     productos_formateados = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+
+    # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
+    def _clean_field(val, imagen_name):
+        if not val:
+            return ''
+        try:
+            s = str(val).strip()
+            if not imagen_name:
+                return s
+            img = str(imagen_name).strip()
+            # eliminar coincidencias exactas del nombre de la imagen
+            if img and img in s:
+                s = s.replace(img, '')
+            # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
+            s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
+            # limpiar espacios sobrantes
+            s = re.sub(r'\s{2,}', ' ', s).strip()
+            return s
+        except Exception:
+            return str(val).strip()
+
     for p in precios[:1000]:
         try:
-             
-
-            sku = (p.get('sku') or '').strip()
-            modelo = (p.get('modelo') or '').strip()
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = (p.get('categoria') or '').strip()
-            subcategoria = (p.get('subcategoria') or '').strip()
-            linea = (p.get('linea') or '').strip()
-            descripcion_p = (p.get('descripcion') or '').strip()
-            medidas = (p.get('medidas') or '').strip()
-            proveedor = (p.get('proveedor') or '').strip()
-            status = (p.get('status_ws') or 'activo').strip()
-            catalogo = (p.get('catalogo') or '')
+            # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
             imagen = (p.get('imagen') or '').strip()
+
+            # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
+            sku = _clean_field(p.get('sku'), imagen)
+            modelo = _clean_field(p.get('modelo'), imagen)
+            titulo = modelo or sku or 'Sin identificador'
+            categoria = _clean_field(p.get('categoria'), imagen)
+            subcategoria = _clean_field(p.get('subcategoria'), imagen)
+            linea = _clean_field(p.get('linea'), imagen)
+            descripcion_p = _clean_field(p.get('descripcion'), imagen)
+            medidas = _clean_field(p.get('medidas'), imagen)
+            proveedor = _clean_field(p.get('proveedor'), imagen)
+            status = _clean_field(p.get('status_ws'), imagen) or 'activo'
+            catalogo = _clean_field(p.get('catalogo'), imagen)
+
+            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
             if imagen:
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
@@ -4154,13 +4948,31 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                     imagen_url = f"{base}/uploads/productos/{imagen}"
             else:
                 imagen_url = ''
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or None
+
+            # Precios y campos de suscripción
+            precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or None
+            inscripcion = p.get('inscripcion')
+            mensualidad = p.get('mensualidad')
+
             precio_str = ''
-            if precio_menudeo:
-                try:
+            try:
+                if precio_menudeo:
                     precio_str = f"${float(precio_menudeo):,.2f}"
-                except Exception:
-                    precio_str = str(precio_menudeo)
+            except Exception:
+                precio_str = str(precio_menudeo) if precio_menudeo is not None else ''
+
+            extras = []
+            try:
+                if inscripcion not in (None, '', 0):
+                    extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
+            except Exception:
+                extras.append(f"Inscripción: {inscripcion}")
+            try:
+                if mensualidad not in (None, '', 0):
+                    extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
+            except Exception:
+                extras.append(f"Mensualidad: {mensualidad}")
+
             parts = [f"{titulo}"]
             if sku:
                 parts.append(f"(SKU: {sku})")
@@ -4172,6 +4984,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Linea: {linea}")
             if precio_str:
                 parts.append(f"Precio: {precio_str}")
+            if extras:
+                parts.append(f"{', '.join(extras)}")
             if medidas:
                 parts.append(f"Medidas: {medidas}")
             if proveedor:
@@ -4186,40 +5000,35 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
             producto_line = " | ".join(parts)
             producto_line += f" | Status: {status}"
+
         except Exception:
             producto_line = "Sin datos legibles de producto"
         productos_formateados.append(f"- {producto_line}")
-         # Clean up image filenames from the formatted products text to prevent AI from including them in responses
-    productos_formateados = [re.sub(r'excel_unzip_img_\d+_\d+\.png', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\b\w+\.png\b', '', line) for line in productos_formateados]
-    productos_formateados = [re.sub(r'\s+', ' ', line).strip() for line in productos_formateados]  # Clean extra spaces
-    productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
 
     productos_texto = "\n".join(productos_formateados)
     if len(precios) > 40:
         productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-
+    asesores_block = format_asesores_block(cfg)
+    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT para considerar inscripcion/mensualidad
     system_prompt = f"""
     Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
     Descripción del negocio: {descripcion}
 
-    Dispones de la siguiente lista de productos/servicios (campos usados: sku, categoria, subcategoria, linea, modelo, descripcion, medidas, costo, precio_mayoreo, precio_menudeo, imagen, status_ws, catalogo*, proveedor):
+    Dispones de la siguiente lista de productos/servicios:
 
     {productos_texto}
 
-    Reglas:
-    - Cuando el usuario pregunte por un producto o SKU, responde usando exclusivamente los campos provistos arriba (sku, modelo, descripcion, medidas, precio_menudeo/precio_mayoreo/costo, proveedor, imagen si existe, catalogo y status_ws).
-    - Siempre indica si la información no está disponible en la base de datos.
-    - Si el usuario pide comparar precios o disponibilidad, usa precio_menudeo como precio de referencia cuando exista.
-    - No inventes descuentos, existencias ni detalles no presentes en los campos.
-    - Mantén las respuestas breves y prácticas, ofrece enlazar al SKU o indicar cómo el usuario puede ver la imagen si existe.
-    - Entrega al usuario un texto claro y conciso.
-    - No llenes el mensaje con basura.
-    Reglas adicionales: Si el usuario expresa intención de comprar un producto (usando palabras como 'comprar', 'adquirir', 'pedir'), no proporciones información de contacto. En su lugar, solicita sus datos personales (nombre, dirección, fecha preferida) para agendar una cita de entrega o consulta, y registra la cita automáticamente.
-    """
+    {asesores_block}
 
+    REGLAS IMPORTANTES:
+    1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
+    2. SI el producto tiene campos de Inscripción o Mensualidad, muéstralos claramente (ej: "Inscripción: $100.00, Mensualidad: $20.00").
+    3. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
+    4. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
+    5. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
+    6. Mantén las respuestas limpias, concisas y orientadas al cliente.
+    """
+    # ... el resto de tu función se mantiene igual ...
     historial = obtener_historial(numero, config=config)
 
     info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
@@ -4236,6 +5045,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
                 return confirmacion
 
+    # ... continúa el resto de la función sin cambios ...
+
     messages_chain = [{'role': 'system', 'content': system_prompt}]
     for entry in historial:
         if entry['mensaje'] and str(entry['mensaje']).strip() != '':
@@ -4249,7 +5060,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 'content': [
                     {"type": "text", "text": mensaje_usuario},
                     {
-                        "type": "image_url", 
+                        "type": "image_url",
                         "image_url": {
                             "url": imagen_base64,
                             "detail": "auto"
@@ -4258,9 +5069,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 ]
             })
         elif es_audio and transcripcion_audio:
-            # Avoid duplication when the transcription is identical to the message text.
-            # Prefer sending the transcription as the user content; if there is an extra caption/text (mensaje_usuario)
-            # and it differs from the transcription, append it as "[Mensaje adicional]".
             try:
                 tu = mensaje_usuario.strip() if mensaje_usuario else ""
                 ta = transcripcion_audio.strip() if transcripcion_audio else ""
@@ -4272,7 +5080,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
         elif es_audio and not transcripcion_audio and mensaje_usuario:
-            # If audio but no transcription, fall back to whatever text we have (caption)
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
@@ -4280,7 +5087,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     try:
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
-        
+
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -4294,13 +5101,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-                # Después de obtener respuesta de la IA
         respuesta = data['choices'][0]['message']['content'].strip()
-
-        # Limpieza mejorada
-        respuesta = re.sub(r'excel_unzip_img_\d+_\d+\.png', '[Imagen del producto]', respuesta)
-        respuesta = re.sub(r'\s+', ' ', respuesta).strip()
-        
         respuesta = aplicar_restricciones(respuesta, numero, config)
         return respuesta
 
@@ -4309,7 +5110,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         if hasattr(e, 'response') and e.response:
             app.logger.error(f"🔴 Response: {e.response.text}")
         return 'Lo siento, hubo un error con la IA.'
-    except Exception as e: 
+    except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
 
@@ -4721,38 +5522,46 @@ def obtener_imagen_whatsapp(image_id, config=None):
 
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
-    """Procesa el código de autorización manualmente"""
+    """Procesa el código de autorización manualmente y guarda token tenant-specific en BASE_DIR"""
     try:
         code = request.form.get('codigo')
         if not code:
             return "❌ Error: No se proporcionó código"
-        
-        # En app.py, la función autenticar_google_calendar()
-        SCOPES = ['https://www.googleapis.com/auth/calendar']  # Este scope está correcto
-        
-        flow = InstalledAppFlow.from_client_secrets_file(
-            'client_secret.json', 
-            SCOPES,
-            redirect_uri=f'https://{request.host}/completar-autorizacion'
-        )
-        
-        # Intercambiar código por token
+
+        # Determinar tenant por host actual (la autorización manual se inició desde el host correcto)
+        config = obtener_configuracion_por_host()
+        tenant_domain = config.get('dominio', 'default')
+
+        BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+        client_secret_path = os.path.join(BASE_DIR, 'client_secret.json')
+        if not os.path.exists(client_secret_path):
+            return f"❌ Error: No se encuentra client_secret.json en {BASE_DIR}"
+
+        SCOPES = ['https://www.googleapis.com/auth/calendar']
+        redirect_uri = f'https://{request.host}/completar-autorizacion'
+
+        flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES, redirect_uri=redirect_uri)
         flow.fetch_token(code=code)
         creds = flow.credentials
-        
-        # Guardar token
-        with open('token.json', 'w') as token:
+
+        token_filename = f"token_{tenant_domain.replace('.', '_')}.json"
+        token_path = os.path.join(BASE_DIR, token_filename)
+        with open(token_path, 'w') as token:
             token.write(creds.to_json())
-        
+
+        app.logger.info(f"✅ Token guardado en {token_path} para tenant {tenant_domain}")
+
         return '''
         <h1>✅ ¡Autorización completada!</h1>
-        <p>Google Calendar está ahora configurado correctamente.</p>
+        <p>Google Calendar está ahora configurado correctamente para este dominio.</p>
         <p>Puedes cerrar esta ventana y probar agendar una cita.</p>
         <a href="/">Volver al inicio</a>
         '''
-        
+
     except Exception as e:
-        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"  
+        app.logger.error(f"🔴 Error en procesar_codigo: {e}")
+        app.logger.error(traceback.format_exc())
+        return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
 
 def procesar_fecha_relativa(fecha_str):
     """
@@ -4918,6 +5727,188 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
+def obtener_siguiente_asesor(config=None):
+    """
+    Retorna el siguiente asesor disponible en forma round-robin.
+    Ahora también:
+      - Intenta inferir el usuario/cliente dueño del tenant (CLIENTES_DB) para obtener
+        el límite de asesores del plan y, si hay más asesores en la BD que los
+        permitidos por el plan, recorta automáticamente (eliminar_asesores_extras).
+      - Soporta lista JSON en `asesores_json` y columnas legacy `asesorN_nombre`/telefono.
+    Devuelve dict {'nombre','telefono'} o None si no hay asesores configurados.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    def _infer_cliente_user_for_config(cfg):
+        """Intenta encontrar el `user` en CLIENTES_DB asociado al tenant (heurístico)."""
+        try:
+            conn_cli = get_clientes_conn()
+            cur = conn_cli.cursor(dictionary=True)
+            # Heurísticas: buscar por shema/db_name, por dominio (entorno) o por servicio
+            candidates = (cfg.get('db_name'), cfg.get('dominio'), cfg.get('dominio'))
+            cur.execute("""
+                SELECT `user`
+                  FROM cliente
+                 WHERE shema = %s OR entorno = %s OR servicio = %s
+                 LIMIT 1
+            """, candidates)
+            row = cur.fetchone()
+            cur.close(); conn_cli.close()
+            return row.get('user') if row and row.get('user') else None
+        except Exception:
+            return None
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Asegurar columna asesor_next_index
+        try:
+            cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'asesor_next_index'")
+            if cursor.fetchone() is None:
+                cursor.execute("ALTER TABLE configuracion ADD COLUMN asesor_next_index INT DEFAULT 1")
+                conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_next_index: {e}")
+
+        # Leer fila actual
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1 LIMIT 1")
+        row = cursor.fetchone()
+        if not row:
+            cursor.close(); conn.close()
+            return None
+
+        # Build advisors list (from JSON preferred, otherwise legacy columns)
+        def _build_asesores_from_row(r):
+            ases = []
+            ases_json = r.get('asesores_json')
+            if ases_json:
+                try:
+                    parsed = json.loads(ases_json)
+                    if isinstance(parsed, list):
+                        for a in parsed:
+                            if isinstance(a, dict):
+                                nombre = (a.get('nombre') or '').strip()
+                                telefono = (a.get('telefono') or '').strip()
+                                if nombre or telefono:
+                                    ases.append({'nombre': nombre, 'telefono': telefono})
+                except Exception:
+                    app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, fallback a columnas legacy")
+            if not ases:
+                # legacy dynamic columns
+                temp = {}
+                pattern = re.compile(r'^asesor(\d+)_nombre$')
+                for k, v in r.items():
+                    if not k:
+                        continue
+                    m = pattern.match(k)
+                    if m:
+                        idx = int(m.group(1))
+                        nombre = (v or '').strip()
+                        telefono = (r.get(f'asesor{idx}_telefono') or '').strip()
+                        if nombre or telefono:
+                            temp[idx] = {'nombre': nombre, 'telefono': telefono}
+                for idx in sorted(temp.keys()):
+                    ases.append(temp[idx])
+            return ases
+
+        asesores = _build_asesores_from_row(row)
+
+        # Infer allowed_count: try per-client plan (best effort); fallback to global max
+        allowed_count = None
+        try:
+            usuario_propietario = _infer_cliente_user_for_config(config)
+            if usuario_propietario:
+                allowed_count = obtener_asesores_por_user(usuario_propietario, default=1, cap=50)
+            else:
+                # fallback: use global max from planes (safe default 1)
+                allowed_count = obtener_max_asesores_from_planes(default=1, cap=50)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo inferir allowed_count para asesores: {e}")
+            allowed_count = obtener_max_asesores_from_planes(default=1, cap=50)
+
+        # If DB has more advisors than allowed by plan, trim them (and reload)
+        try:
+            if asesores and allowed_count is not None and len(asesores) > allowed_count:
+                app.logger.info(f"⚠️ Hay {len(asesores)} asesores en BD pero el plan permite {allowed_count}. Recortando...")
+                eliminar_asesores_extras(config, allowed_count)
+                # reload row and rebuild list
+                cursor.execute("SELECT * FROM configuracion WHERE id = 1 LIMIT 1")
+                row = cursor.fetchone()
+                asesores = _build_asesores_from_row(row)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo recortar asesores automáticamente: {e}")
+
+        if not asesores:
+            cursor.close(); conn.close()
+            return None
+
+        # Índice actual (1-based). Si no existe en row, usar 1.
+        try:
+            idx_actual = int(row.get('asesor_next_index') or 1)
+        except Exception:
+            idx_actual = 1
+
+        n = len(asesores)
+        elegido_index0 = (idx_actual - 1) % n
+        elegido = asesores[elegido_index0]
+
+        # Calcular siguiente índice 1-based y persistirlo
+        siguiente = (elegido_index0 + 1) + 1
+        if siguiente > n:
+            siguiente = 1
+
+        try:
+            cursor.execute("UPDATE configuracion SET asesor_next_index = %s WHERE id = 1", (siguiente,))
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo actualizar asesor_next_index: {e}")
+
+        cursor.close(); conn.close()
+        return elegido
+
+    except Exception as e:
+        app.logger.error(f"🔴 obtener_siguiente_asesor error: {e}")
+        return None
+
+def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
+    """
+    Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
+    También notifica al asesor seleccionado (opcional).
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        asesor = obtener_siguiente_asesor(config)
+        if not asesor:
+            app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
+            return False
+
+        nombre = asesor.get('nombre') or 'Asesor'
+        telefono = asesor.get('telefono') or ''
+
+        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}\n\n¿Quieres que te conecte ahora?"
+        enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        if enviado:
+            guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
+            app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
+        else:
+            app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
+
+        if notificar_asesor and telefono:
+            try:
+                texto_asesor = f"ℹ️ Se compartió tu contacto con cliente {numero_cliente}. Por favor, estate atento para contactarlo si corresponde."
+                enviar_mensaje(telefono, texto_asesor, config)
+                app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo notificar al asesor {telefono}: {e}")
+
+        return enviado
+    except Exception as e:
+        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
+        return False
+
 # Replace the existing procesar_mensaje_normal function with this enhanced version
 def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
     """Procesa mensajes normales (no citas/intervenciones) — ahora envía imagen si el usuario la solicita y existe."""
@@ -4927,11 +5918,65 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             IA_ESTADOS[numero] = {'activa': True, 'prefiere_voz': False}
         elif 'prefiere_voz' not in IA_ESTADOS[numero]:
             IA_ESTADOS[numero]['prefiere_voz'] = False
+
         respuesta = ""
         responder_con_voz = False
+        # Normalizar texto
+        texto = (texto or "").strip()
+        text_lower = texto.lower() if texto else ""
+        # Detectar petición explícita de catálogo/producto (keywords)
+        product_info_keywords = [
+            'precio', 'descripcion', 'detalles', 'detalle', 'información del producto',
+            'informacion del producto', 'habla del producto', 'habla de', 'qué es', 'qué cuesta',
+            'qué precio', 'dime sobre', 'dime el precio', 'más info de', 'más información de',
+            'ver producto', 'muestrame el producto', 'muéstrame el producto', 'muestra el producto'
+        ]
+        # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
+        try:
+            if any(k in text_lower for k in product_info_keywords):
+                # Obtener lista de precios rápida
+                precios = obtener_todos_los_precios(config) or []
+
+                # Primero intentar detectar SKU/modelo en el propio mensaje
+                sku_detected = buscar_sku_en_texto(texto, precios)
+                producto = None
+                if sku_detected:
+                    producto = obtener_producto_por_sku_o_nombre(sku_detected, config)
+
+                # Si no encontramos por SKU, intentar buscar por nombre completo o fragmento
+                if not producto:
+                    # intentar búsqueda directa con la frase completa (el helper hará LIKE)
+                    producto = obtener_producto_por_sku_o_nombre(texto, config)
+
+                if producto:
+                    # Preferir campo descripcion; si no existe, usar modelo/servicio
+                    descripcion = producto.get('descripcion') or producto.get('modelo') or producto.get('servicio') or ''
+                    nombre_prod = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or 'Producto').strip()
+                    if descripcion and descripcion.strip():
+                        respuesta_text = f"🔎 Información de {nombre_prod}:\n\n{descripcion.strip()}"
+                        enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto, respuesta_text, config)
+                        app.logger.info(f"✅ Descripción enviada automáticamente para {nombre_prod} a {numero}")
+                        return
+                    else:
+                        # Producto existe pero sin descripción -> pedir confirmación si quiere que la IA la agregue
+                        pregunta = (f"He encontrado el producto *{nombre_prod}* pero no tiene descripción en la base de datos.\n"
+                                    "¿Quieres que te la describa igualmente (basándome en los datos disponibles)? Responde 'sí' para que la IA cree una descripción, o indica otro producto.")
+                        enviar_mensaje(numero, pregunta, config)
+                        guardar_conversacion(numero, texto, pregunta, config)
+                        return
+                else:
+                    # No encontramos el producto -> preguntar cuál producto (solo llenar si el usuario responde con un nombre/SKU específico)
+                    pregunta = "¿Cuál producto te interesa exactamente? Indica el nombre o SKU para que lo busque en nuestro catálogo."
+                    enviar_mensaje(numero, pregunta, config)
+                    guardar_conversacion(numero, texto, pregunta, config)
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error en chequeo rápido de producto: {e}")
+
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
-            if "envíame audio" in texto.lower() or "respuesta en audio" in texto.lower():
+            if "envíame audio" in (texto or "").lower() or "respuesta en audio" in (texto or "").lower():
                 IA_ESTADOS[numero]['prefiere_voz'] = True
                 app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
 
@@ -4952,7 +5997,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
                 'catálogo', 'catalogo', 'mostrar catálogo', 'mostrar catalogo',
                 'muestrame catálogo', 'muestrame catalogo', 'envíame catálogo', 'envia catálogo',
                 'manda catálogo', 'enviame catalogo', 'catalogo completo', 'catálogo completo',
-                'ver catálogo', 'ver catalogo', 'catalog'
+                'ver catálogo', 'ver catalogo', 'catalog', 'plan de estudios', 'plan'
             ]
             if any(k in text_lower for k in catalog_keywords):
                 app.logger.info(f"📚 Petición de catálogo detectada en mensaje: '{texto[:80]}'")
@@ -4980,7 +6025,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
             # 2) If user asked (keywords), try to find SKU and image
             keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
-            user_asked_image = any(k in texto.lower() for k in keywords_imagen)
+            user_asked_image = any(k in (texto or "").lower() for k in keywords_imagen)
 
             if user_asked_image and sku_encontrado:
                 # Buscar producto por SKU y obtener campo imagen
@@ -5108,27 +6153,75 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             return
 
         # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-        if responder_con_voz and not es_imagen:
-            # Intentar enviar respuesta de voz
-            audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-            audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
-            if audio_url_local:
-                # URL pública del audio (ajusta según tu configuración)
-                audio_url_publica = f"https://{config.get('dominio', 'smartwhats.mektia.com')}/static/audio/respuestas/{audio_filename}.mp3"
+        try:
+            # Normalize respuesta to string
+            if respuesta is None:
+                respuesta = ""
+            respuesta = str(respuesta).strip()
 
-                if enviar_mensaje_voz(numero, audio_url_publica, config):
-                    app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                else:
-                    # Fallback a texto
-                    enviar_mensaje(numero, respuesta, config)
+            if not respuesta:
+                app.logger.info(f"ℹ️ IA returned empty response for {numero}; nothing to send")
+                return
+
+            sent_ok = False
+
+            if responder_con_voz and not es_imagen:
+                # Try TTS first
+                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
+                if audio_url_local:
+                    # Build public URL robustly
+                    dominio = config.get('dominio', '').rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio or os.getenv('MI_DOMINIO', 'smartwhats.mektia.com')}"
+                    audio_url_publica = f"{dominio}/static/audio/respuestas/{audio_filename}.mp3"
+                    try:
+                        if enviar_mensaje_voz(numero, audio_url_publica, config):
+                            sent_ok = True
+                            app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
+                        else:
+                            app.logger.warning(f"⚠️ enviar_mensaje_voz falló para {numero}, intentando fallback texto")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Exception al enviar voz: {e}, intentando fallback texto")
+
+                # If TTS not available or sending failed, fallback to text
+                if not sent_ok:
+                    try:
+                        sent_ok = enviar_mensaje(numero, respuesta, config)
+                        if sent_ok:
+                            app.logger.info(f"✅ Respuesta (texto fallback) enviada a {numero}")
+                        else:
+                            app.logger.error(f"🔴 Fallback texto no pudo ser enviado a {numero}")
+                    except Exception as e:
+                        app.logger.error(f"🔴 Exception al enviar fallback texto a {numero}: {e}")
+                        sent_ok = False
+
+                # Update DB after delivery attempt
+                actualizar_respuesta(numero, texto, respuesta, config)
+                if not sent_ok:
+                    app.logger.error(f"🔴 No se pudo enviar la respuesta por voz ni por texto a {numero}. Response persisted in DB.")
+                return
+
             else:
-                # Fallback a texto
-                enviar_mensaje(numero, respuesta, config)
-        else:
-            # Respuesta normal de texto
-            enviar_mensaje(numero, respuesta, config)
-            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
+                # Send plain text
+                try:
+                    sent_ok = enviar_mensaje(numero, respuesta, config)
+                    if sent_ok:
+                        app.logger.info(f"✅ Respuesta enviada (texto) a {numero}")
+                    else:
+                        app.logger.error(f"🔴 Error enviando respuesta (texto) a {numero}")
+                except Exception as e:
+                    app.logger.error(f"🔴 Exception enviando respuesta (texto) a {numero}: {e}")
+                    sent_ok = False
+
+                # Update DB after attempting to send
+                actualizar_respuesta(numero, texto, respuesta, config)
+                if not sent_ok:
+                    app.logger.error(f"🔴 Respuesta guardada pero no enviada a {numero}")
+                return
+
+        except Exception as e:
+            app.logger.error(f"🔴 Error en el envío de la respuesta: {e}")
 
         # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
         if detectar_intervencion_humana_ia(texto, numero, config):
@@ -5146,6 +6239,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
 
     except Exception as e:
         app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
+
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
@@ -5194,11 +6288,32 @@ def obtener_datos_chat():
         'total_chats': len(chats)
     })
 
-@app.route('/uploads/docs/<filename>')
-def serve_public_docs(filename):
-    """Serve published PDFs from uploads/docs so Facebook can fetch them via HTTPS."""
-    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-    return send_from_directory(docs_dir, filename)
+@app.route('/uploads/docs/<path:relpath>')
+def serve_public_docs(relpath):
+    """Serve published files from uploads/docs/<tenant_slug>/<filename> (tenant-aware).
+    Accepts paths like 'tenant_slug/filename.pdf' so Facebook can fetch the file_url built by enviar_catalogo.
+    """
+    try:
+        # Base docs dir
+        docs_base = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        # Avoid path traversal attacks by normalizing
+        safe_relpath = os.path.normpath(relpath)
+        # If normalized path tries to go above docs_base, block it
+        if safe_relpath.startswith('..') or os.path.isabs(safe_relpath):
+            app.logger.warning(f"⚠️ Attempted path traversal in serve_public_docs: {relpath}")
+            abort(404)
+
+        full_path = os.path.join(docs_base, safe_relpath)
+        if not os.path.isfile(full_path):
+            app.logger.info(f"❌ Public doc not found: {full_path}")
+            abort(404)
+
+        directory = os.path.dirname(full_path)
+        filename = os.path.basename(full_path)
+        return send_from_directory(directory, filename)
+    except Exception as e:
+        app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
+        abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
@@ -5248,6 +6363,47 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         # Fallback a guardar conversación normal
         guardar_conversacion(numero, mensaje, respuesta, config)
         return False
+
+def obtener_asesores_por_user(username, default=2, cap=20):
+    """
+    Retorna el número de asesores permitido para el cliente identificado por `username`.
+    - Lee cliente en CLIENTES_DB para obtener plan_id.
+    - Lee la fila correspondiente en `planes` y retorna el campo `asesores` si existe.
+    - Si falla, devuelve `default`. Aplica un cap por seguridad.
+    """
+    try:
+        if not username:
+            return default
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        # Obtener plan_id del cliente
+        cur.execute("SELECT plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        row = cur.fetchone()
+        plan_id = row.get('plan_id') if row else None
+        cur.close(); conn.close()
+
+        if not plan_id:
+            return default
+
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT asesores FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+        plan_row = cur.fetchone()
+        cur.close(); conn.close()
+
+        if plan_row and plan_row.get('asesores') is not None:
+            try:
+                n = int(plan_row.get('asesores') or 0)
+                if n < 1:
+                    return default
+                return min(n, cap)
+            except Exception:
+                return default
+
+        return default
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
+        return default
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
@@ -5518,31 +6674,37 @@ def actualizar_contactos():
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
-    """Función compatible con la estructura actual de la base de datos"""
+    """Función compatible con la estructura actual de la base de datos.
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize inputs
+        mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
+        respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
+
         # Primero asegurar que el contacto existe con su información actualizada
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
-        """, (numero, mensaje, respuesta, imagen_url, es_imagen))
-        
+        """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
@@ -5755,7 +6917,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     
     # Palabras clave que indican solicitud de humano
     palabras_clave_humano = [
-        'humano', 'persona', 'asesor', 'agente', 'ejecutivo', 'representante',
+        'humano', 'persona', 'agente', 'ejecutivo', 'representante',
         'operador', 'atendedor', 'atender', 'hablar con alguien', 
         'no eres humano', 'no me entiendes', 'quiero hablar con una persona',
         'atención humana', 'servicio humano', 'ayuda humana', 'asistencia humana',
@@ -6393,36 +7555,40 @@ def webhook():
 
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta"""
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Sanitize incoming text
+        texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
+
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
+
         # Add detailed logging before saving the message
         app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
-        
+
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
-        """, (numero, texto, imagen_url, es_imagen))
-        
+        """, (numero, texto_limpio, imagen_url, es_imagen))
+
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         msg_id = cursor.fetchone()[0]
-        
+
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
         return True
-        
+
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
@@ -6455,6 +7621,62 @@ def extraer_nombre_desde_webhook(payload):
         app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
         return None
 
+def format_asesores_block(cfg):
+    """
+    Devuelve un bloque de texto listo para inyectar en el system prompt
+    con la información de los asesores (solo nombres, NO teléfonos) y una regla
+    clara: la IA NUNCA debe compartir números de teléfono ni datos de contacto directos.
+    Acepta configuración legacy (asesores en columnas) o nueva (asesores_json -> lista).
+    """
+    try:
+        # cfg is the full config returned by load_config()
+        # prefer list if available
+        asesores_list = []
+        if isinstance(cfg, dict):
+            # load_config returns 'asesores_list' when available
+            if cfg.get('asesores_list'):
+                asesores_list = cfg.get('asesores_list') or []
+            else:
+                # fallback to mapping in cfg['asesores']
+                ases_map = cfg.get('asesores', {}) or {}
+                # build list from mapping keys asesor1_nombre, etc.
+                idx = 1
+                while True:
+                    name_key = f'asesor{idx}_nombre'
+                    phone_key = f'asesor{idx}_telefono'
+                    if name_key in ases_map or phone_key in ases_map:
+                        nombre = (ases_map.get(name_key) or '').strip()
+                        telefono = (ases_map.get(phone_key) or '').strip()
+                        if nombre or telefono:
+                            asesores_list.append({'nombre': nombre, 'telefono': telefono})
+                        idx += 1
+                        if idx > 20:
+                            break
+                    else:
+                        break
+
+        lines = []
+        for i, a in enumerate(asesores_list, start=1):
+            nombre = (a.get('nombre') or '').strip()
+            if nombre:
+                lines.append(f"• Asesor {i}: {nombre}")
+
+        if not lines:
+            return ""
+
+        block = (
+            "ASESORES DISPONIBLES (solo nombres; teléfonos NO incluidos aquí):\n"
+            + "\n".join(lines) +
+            "\n\nREGLA IMPORTANTE: La IA NO debe compartir números de teléfono ni datos de contacto directos. "
+            "Si el usuario solicita explícitamente contactar a un asesor, la aplicación servidor (no la IA) enviará "
+            "UN SOLO asesor al cliente usando la política round-robin. La IA puede ofrecer describir el perfil del asesor "
+            "o preguntar si el usuario prefiere llamada o WhatsApp, pero NO debe revelar teléfonos."
+        )
+        return block
+    except Exception:
+        return ""
+
+
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
@@ -6480,8 +7702,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         # Palabras clave para servicios digitales
         palabras_clave = [
             'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
-            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar',
-            'necesito', 'requiero', 'me interesa', 'información', 'solicitar', 'comprar'
+            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
+
         ]
     
     # Verificar si contiene palabras clave principales
@@ -6685,6 +7907,9 @@ def diagnostico():
     except Exception as e:
         return jsonify({'error': str(e)})    
 
+# Modificar la función home para inyectar plan_info cuando el usuario está autenticado.
+# Reemplaza la parte final de home() donde haces render_template(...) por la versión que incluye plan_info.
+
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -6725,9 +7950,19 @@ def home():
     cursor.close()
     conn.close()
 
-    # 🔁 Construir labels con el nombre mostrado y values con el total
     labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
     values = [row[2] for row in messages_per_chat]  # total
+
+    # Obtener plan info para el usuario autenticado (si aplica)
+    plan_info = None
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            # obtener plan status
+            plan_info = get_plan_status_for_user(au.get('user'), config=config)
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
+        plan_info = None
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
@@ -6735,7 +7970,8 @@ def home():
         total_responded=total_responded,
         period=period,
         labels=labels,
-        values=values
+        values=values,
+        plan_info=plan_info
     )
 
 @app.route('/chats')
@@ -6775,13 +8011,18 @@ def ver_chats():
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
     cursor.close()
     conn.close()
-    
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
     return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
         IA_ESTADOS=IA_ESTADOS,
-        tenant_config=config
+        tenant_config=config,
+        is_admin=is_admin
     )
 
 @app.route('/chats/<numero>')
@@ -6797,14 +8038,12 @@ def ver_chat(numero):
         if numero not in IA_ESTADOS:
             cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
             result = cursor.fetchone()
-            ia_active = True if result is None or result['ia_activada'] is None else bool(result['ia_activada'])
+            ia_active = True if result is None or result.get('ia_activada') is None else bool(result.get('ia_activada'))
             IA_ESTADOS[numero] = {'activa': ia_active}
             app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
         else:
-            # IMPORTANT: Don't try to set IA_ESTADOS again - it's already set
             app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
         
-
         app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
         # Consulta para los datos del chat
         cursor.execute("""
@@ -6842,21 +8081,36 @@ def ver_chat(numero):
         conn.close()
         
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
+
+        # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+        au = session.get('auth_user') or {}
+        is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
         return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
             IA_ESTADOS=IA_ESTADOS,
-            tenant_config=config
+            tenant_config=config,
+            is_admin=is_admin
         )
         
     except Exception as e:
-        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return render_template('error.html', 
-                             error_message="Error al cargar el chat", 
-                             error_details=str(e)), 500
+        # Log full traceback and provide a safe inline error page (do not rely on error.html template)
+        import traceback as _tb, hashlib as _hash, time as _time
+        tb = _tb.format_exc()
+        err_id = _hash.md5(f"{_time.time()}_{numero}_{str(e)}".encode()).hexdigest()[:8]
+        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat (id={err_id}): {e}")
+        app.logger.error(tb)
+        # Avoid rendering a missing template — return a minimal safe page with error id
+        html = """
+        <html><head><title>Error</title></head><body>
+          <h1>Internal server error</h1>
+          <p>An internal error occurred while loading the chat. Error ID: <strong>{{ err_id }}</strong></p>
+          <p>Please check server logs for details (search for the same Error ID).</p>
+        </body></html>
+        """
+        return render_template_string(html, err_id=err_id), 500
        
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
@@ -7062,25 +8316,26 @@ def limpiar_estados_antiguos():
 
 # Ejecutar esta función periódicamente (puedes usar un scheduler)
 def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
-    """Continúa el proceso de pedido de manera inteligente"""
+    """Continúa el proceso de pedido de manera inteligente.
+    Añadido: detecta forma de pago y datos de transferencia en las respuestas del usuario.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     datos = estado_actual.get('datos', {})
     paso_actual = datos.get('paso', 1)
     analisis_inicial = datos.get('analisis_inicial', {})
-    
+
     app.logger.info(f"🔄 Continuando pedido paso {paso_actual} para {numero}")
-    
-    # Analizar el nuevo mensaje para extraer información
+
+    # Analizar el nuevo mensaje para extraer información de pedido
     nuevo_analisis = detectar_pedido_inteligente(mensaje, numero, config=config)
-    
+
+    # Merge de cualquier dato extraído automáticamente
     if nuevo_analisis and nuevo_analisis.get('es_pedido'):
-        # Actualizar datos obtenidos
         datos_obtenidos = datos.get('datos_obtenidos', {})
         nuevos_datos = nuevo_analisis.get('datos_obtenidos', {})
-        
-        # Combinar datos
+
         for clave, valor in nuevos_datos.items():
             if valor and valor != 'null':
                 if clave == 'platillos' and valor:
@@ -7091,108 +8346,195 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
                     datos_obtenidos.setdefault('especificaciones', []).extend(valor)
                 else:
                     datos_obtenidos[clave] = valor
-        
+
         datos['datos_obtenidos'] = datos_obtenidos
-        datos['paso'] += 1
-        
-        # Verificar si tenemos todos los datos necesarios
-        if verificar_pedido_completo(datos_obtenidos):
-            # Pedido completo, confirmar
-            return confirmar_pedido_completo(numero, datos_obtenidos, config)
-        else:
-            # Seguir preguntando por datos faltantes
-            siguiente_pregunta = nuevo_analisis.get('siguiente_pregunta')
-            if not siguiente_pregunta:
-                siguiente_pregunta = generar_pregunta_datos_faltantes(datos_obtenidos)
-            
-            actualizar_estado_conversacion(numero, "EN_PEDIDO", "solicitar_datos", datos, config)
-            return siguiente_pregunta
-    
-    # Si no se detecta información relevante, pedir clarificación
-    return "No entendí bien esa información. ¿Podrías ser más específico sobre tu pedido?"
+        datos['paso'] = datos.get('paso', 1) + 1
+
+    else:
+        # Si la IA no detectó estructura, intentamos extraer forma de pago y datos manualmente del texto
+        datos_obtenidos = datos.get('datos_obtenidos', {})
+
+        texto_lower = (mensaje or '').lower()
+
+        # Detectar forma de pago explícita
+        if not datos_obtenidos.get('forma_pago'):
+            if 'efectivo' in texto_lower or 'pago al entregar' in texto_lower or 'pago en efectivo' in texto_lower:
+                datos_obtenidos['forma_pago'] = 'efectivo'
+                app.logger.info(f"💳 Forma de pago detectada (efectivo) para {numero}")
+            elif 'transfer' in texto_lower or 'transferencia' in texto_lower or 'clabe' in texto_lower or 'clabe interbancaria' in texto_lower:
+                datos_obtenidos['forma_pago'] = 'transferencia'
+                app.logger.info(f"💳 Forma de pago detectada (transferencia) para {numero}")
+
+        # Si la forma de pago encontrada es transferencia, intentar extraer número/CLABE y nombre
+        if datos_obtenidos.get('forma_pago') and 'transfer' in datos_obtenidos.get('forma_pago'):
+            # Extraer secuencia de dígitos que podría ser CLABE o número de cuenta (10-22 dígitos)
+            clabe_match = re.search(r'(\d{10,22})', mensaje.replace(' ', ''))
+            if clabe_match and not datos_obtenidos.get('transferencia_numero'):
+                datos_obtenidos['transferencia_numero'] = clabe_match.group(1)
+                app.logger.info(f"🔢 CLABE/numero detectado para {numero}: {datos_obtenidos['transferencia_numero']}")
+
+            # Extraer banco por palabras clave comunes
+            bancos = ['bbva', 'banorte', 'banamex', 'santander', 'scotiabank', 'hsbc', 'inbursa', 'bajio', 'afirme']
+            for b in bancos:
+                if b in texto_lower and not datos_obtenidos.get('transferencia_banco'):
+                    datos_obtenidos['transferencia_banco'] = b.capitalize()
+                    app.logger.info(f"🏦 Banco detectado para {numero}: {datos_obtenidos['transferencia_banco']}")
+                    break
+
+            # Intentar extraer nombre del titular (heurística: detrás de 'a nombre de' o 'titular' o en la misma línea)
+            nombre_match = re.search(r'(a nombre de|titular)\s*[:\-]?\s*([A-Za-zÁÉÍÓÚÑáéíóúñ\s]{3,60})', mensaje, re.IGNORECASE)
+            if nombre_match and not datos_obtenidos.get('transferencia_nombre'):
+                datos_obtenidos['transferencia_nombre'] = nombre_match.group(2).strip()
+                app.logger.info(f"🧾 Titular detectado para {numero}: {datos_obtenidos['transferencia_nombre']}")
+
+        datos['datos_obtenidos'] = datos_obtenidos
+
+    # Persistir estado actualizado
+    actualizar_estado_conversacion(numero, "EN_PEDIDO", "actualizar", datos, config)
+
+    # Verificar si ahora el pedido está completo
+    if verificar_pedido_completo(datos.get('datos_obtenidos', {})):
+        # Pedido completo, confirmar y guardar
+        return confirmar_pedido_completo(numero, datos.get('datos_obtenidos', {}), config)
+
+    # Si no está completo, generar siguiente pregunta
+    siguiente_pregunta = generar_pregunta_datos_faltantes(datos.get('datos_obtenidos', {}))
+    return siguiente_pregunta
+
 
 def verificar_pedido_completo(datos_obtenidos):
-    """Verifica si el pedido tiene todos los datos necesarios"""
-    datos_requeridos = ['platillos', 'direccion']
-    for dato in datos_requeridos:
-        if not datos_obtenidos.get(dato):
+    """Verifica si el pedido tiene todos los datos necesarios.
+    Ahora exige: platillos, direccion y forma de pago.
+    Si la forma de pago es 'transferencia' también exige datos de transferencia básicos.
+    """
+    if not datos_obtenidos:
+        return False
+
+    # Campos siempre requeridos
+    required = ['platillos', 'direccion', 'forma_pago']
+    for campo in required:
+        if not datos_obtenidos.get(campo):
             return False
-    
+
     # Verificar que haya al menos un platillo con cantidad
     platillos = datos_obtenidos.get('platillos', [])
     cantidades = datos_obtenidos.get('cantidades', [])
-    
     if not platillos or len(platillos) != len(cantidades):
         return False
-    
+
+    # Si la forma de pago es transferencia, requerimos datos de transferencia
+    forma = str(datos_obtenidos.get('forma_pago', '')).lower()
+    if 'transfer' in forma or 'transferencia' in forma:
+        # aceptar tanto 'transferencia' como 'transfer'
+        # Requerir al menos número/CLABE y nombre del titular
+        if not datos_obtenidos.get('transferencia_numero') or not datos_obtenidos.get('transferencia_nombre'):
+            return False
+
     return True
 
 def generar_pregunta_datos_faltantes(datos_obtenidos):
-    """Genera preguntas inteligentes para datos faltantes"""
+    """Genera preguntas inteligentes para datos faltantes, incluyendo forma de pago."""
     if not datos_obtenidos.get('platillos'):
         return "¿Qué platillos te gustaría ordenar? Tenemos gorditas, tacos, quesadillas, sopes, etc."
-    
+
     if not datos_obtenidos.get('cantidades') or len(datos_obtenidos['platillos']) != len(datos_obtenidos.get('cantidades', [])):
-        platillos = datos_obtenidos['platillos']
+        platillos = datos_obtenidos.get('platillos', [])
         return f"¿Cuántas {', '.join(platillos)} deseas ordenar?"
-    
+
     if not datos_obtenidos.get('especificaciones'):
         return "¿Alguna especificación para tu pedido? Por ejemplo: 'con todo', 'sin cebolla', etc."
-    
+
     if not datos_obtenidos.get('direccion'):
         return "¿A qué dirección debemos llevar tu pedido?"
-    
+
+    # NUEVO: preguntar forma de pago si falta
+    if not datos_obtenidos.get('forma_pago'):
+        return "¿Cómo prefieres pagar? Responde 'efectivo' (pago al entregar) o 'transferencia' (te pediré los datos bancarios)."
+
+    # Si eligió transferencia pero faltan datos, pedirlos
+    forma = str(datos_obtenidos.get('forma_pago', '')).lower()
+    if 'transfer' in forma or 'transferencia' in forma:
+        if not datos_obtenidos.get('transferencia_numero'):
+            return "Por favor proporciona el número o CLABE para la transferencia."
+        if not datos_obtenidos.get('transferencia_nombre'):
+            return "Por favor indica el nombre del titular de la cuenta para la transferencia."
+        if not datos_obtenidos.get('transferencia_banco'):
+            return "Si puedes, indica también el banco (ej: BBVA, Banorte, Banamex)."
+
     if not datos_obtenidos.get('nombre_cliente'):
         return "¿Cuál es tu nombre para el pedido?"
-    
+
     return "¿Necesitas agregar algo más a tu pedido?"
 
+
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo y lo guarda"""
+    """Confirma el pedido completo y lo guarda, incluyendo forma de pago y detalles de transferencia si aplica."""
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
         # Crear resumen del pedido
         platillos = datos_pedido.get('platillos', [])
         cantidades = datos_pedido.get('cantidades', [])
         especificaciones = datos_pedido.get('especificaciones', [])
-        
+        nombre_cliente = datos_pedido.get('nombre_cliente') or 'Cliente'
+        direccion = datos_pedido.get('direccion') or 'Por confirmar'
+
         resumen_platillos = ""
         for i, platillo in enumerate(platillos):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
-        
-        # Guardar pedido en base de datos
+
+        # Guardar pedido en base de datos (reutiliza guardar_cita para persistencia)
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
-            'nombre_cliente': datos_pedido.get('nombre_cliente', 'Cliente'),
+            'nombre_cliente': nombre_cliente,
             'telefono': numero,
             'estado': 'pendiente',
-            'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {datos_pedido.get('direccion', 'Por confirmar')}"
+            'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
-        
+
+        # Añadir datos de pago al registro (si existen)
+        if datos_pedido.get('forma_pago'):
+            info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
+        if datos_pedido.get('transferencia_numero'):
+            info_pedido['notas'] += f"\nTransferencia - CLABE/numero: {datos_pedido.get('transferencia_numero')}"
+        if datos_pedido.get('transferencia_nombre'):
+            info_pedido['notas'] += f"\nTitular: {datos_pedido.get('transferencia_nombre')}"
+        if datos_pedido.get('transferencia_banco'):
+            info_pedido['notas'] += f"\nBanco: {datos_pedido.get('transferencia_banco')}"
+
         pedido_id = guardar_cita(info_pedido, config)
-        
-        # Mensaje de confirmación
+
+        # Mensaje de confirmación con instrucciones según forma de pago
+        forma = str(datos_pedido.get('forma_pago', '')).lower()
+        instrucciones_pago = ""
+        if 'transfer' in forma or 'transferencia' in forma:
+            instrucciones_pago = ("💳 Forma de pago: Transferencia bancaria.\n"
+                                  "Por favor realiza la transferencia a los datos que te proporcionamos y envía el comprobante por este chat.\n"
+                                  "Cuando recibamos el comprobante procederemos a preparar tu pedido.")
+        else:
+            instrucciones_pago = "💵 Forma de pago: Efectivo. Pagarás al recibir el pedido."
+
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
 
 📋 *Resumen de tu pedido:*
 {resumen_platillos}
 
-🏠 *Dirección:* {datos_pedido.get('direccion', 'Por confirmar')}
-👤 *Nombre:* {datos_pedido.get('nombre_cliente', 'Cliente')}
+🏠 *Dirección:* {direccion}
+👤 *Nombre:* {nombre_cliente}
+
+{instrucciones_pago}
 
 ⏰ *Tiempo estimado:* 30-45 minutos
-💳 *Forma de pago:* Efectivo al entregar
+Gracias por tu pedido. Te avisaremos cuando esté en camino.
+"""
 
-¡Gracias por tu pedido! Te avisaremos cuando salga para entrega."""
-        
         # Limpiar estado
         actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
-        
+
         return confirmacion
-        
+
     except Exception as e:
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
@@ -7250,27 +8592,55 @@ def borrar_pdf_configuracion(doc_id):
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
     config = obtener_configuracion_por_host()
-    if tab not in SUBTABS:  # Asegúrate de que 'restricciones' esté en SUBTABS
+    if tab not in SUBTABS:
         abort(404)
+    guardado = False
 
     cfg = load_config(config)
-    guardado = False
-    if request.method == 'POST':
-        if tab == 'negocio':
-            cfg['negocio'] = {
-                'ia_nombre':      request.form['ia_nombre'],
-                'negocio_nombre': request.form['negocio_nombre'],
-                'descripcion':    request.form['descripcion'],
-                'url':            request.form['url'],
-                'direccion':      request.form['direccion'],
-                'telefono':       request.form['telefono'],
-                'correo':         request.form['correo'],
-                'que_hace':       request.form['que_hace']
-            }
+    asesores_list = cfg.get('asesores_list', []) or []
+
+    # If DB still contains more advisors than the allowed plan limit, trim them now.
+    try:
+        if isinstance(asesores_list, list) and len(asesores_list) > asesor_count:
+            app.logger.info(f"⚠️ Plan reducido: {len(asesores_list)} -> {asesor_count}. Eliminando asesores extras en BD...")
+            eliminar_asesores_extras(config, asesor_count)
+            # Reload after trimming so template shows the trimmed list
+            cfg = load_config(config)
+            asesores_list = cfg.get('asesores_list', []) or []
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
+
+    # Prefer plan-specific limit when user is authenticated; fallback to global max
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+
+        if request.method == 'POST':
+            if tab == 'negocio':
+                cfg['negocio'] = {
+                    'ia_nombre':      request.form.get('ia_nombre'),
+                    'negocio_nombre': request.form.get('negocio_nombre'),
+                    'descripcion':    request.form.get('descripcion'),
+                    'url':            request.form.get('url'),
+                    'direccion':      request.form.get('direccion'),
+                    'telefono':       request.form.get('telefono'),
+                    'correo':         request.form.get('correo'),
+                    'que_hace':       request.form.get('que_hace'),
+                    'calendar_email': request.form.get('calendar_email'),
+                    'transferencia_numero': request.form.get('transferencia_numero'),
+                    'transferencia_nombre': request.form.get('transferencia_nombre'),
+                    'transferencia_banco': request.form.get('transferencia_banco')
+                }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
-                'tono':     request.form['tono'],
-                'lenguaje': request.form['lenguaje']
+                'tono':     request.form.get('tono'),
+                'lenguaje': request.form.get('lenguaje')
             }
         elif tab == 'restricciones':
             cfg['restricciones'] = {
@@ -7280,18 +8650,47 @@ def configuracion_tab(tab):
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
             }
         elif tab == 'asesores':
-            cfg['asesores'] = {
-                'asesor1_nombre': request.form.get('asesor1_nombre', '').strip(),
-                'asesor1_telefono': request.form.get('asesor1_telefono', '').strip(),
-                'asesor2_nombre': request.form.get('asesor2_nombre', '').strip(),
-                'asesor2_telefono': request.form.get('asesor2_telefono', '').strip()
-            }
-        save_config(cfg, config)
-        guardado = True
+            # Read dynamic number of advisors according to plan (asesor_count)
+            advisors_compiled = []
+            advisors_map = {}
+            for i in range(1, asesor_count + 1):
+                name_key = f'asesor{i}_nombre'
+                phone_key = f'asesor{i}_telefono'
+                name = request.form.get(name_key, '').strip()
+                phone = request.form.get(phone_key, '').strip()
+                # Build legacy map for first two as fallback
+                if i <= 2:
+                    advisors_map[f'asesor{i}_nombre'] = name
+                    advisors_map[f'asesor{i}_telefono'] = phone
+                if name or phone:
+                    advisors_compiled.append({'nombre': name, 'telefono': phone})
+
+            cfg['asesores'] = advisors_map  # legacy map
+            # supply structured list to be saved by save_config
+            cfg['asesores_json'] = advisors_compiled
+
+        # Persist configuration
+        try:
+            save_config(cfg, config)
+            guardado = True
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando configuración desde /configuracion/{tab}: {e}")
+            guardado = False
+
+        # Reload config and asesor list after save
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', []) or []
+        try:
+            if au and au.get('user'):
+                asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+            else:
+                asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+        except Exception:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     datos = cfg.get(tab, {})
 
-    # Si estamos en la pestaña 'negocio', obtener documentos_publicos para mostrarlos en la plantilla
+    # If showing 'negocio' tab, load published documents for the template (existing logic)
     documents_publicos = []
     if tab == 'negocio':
         try:
@@ -7300,7 +8699,7 @@ def configuracion_tab(tab):
             cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
             if cursor.fetchone():
                 cursor.execute("""
-                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
                     FROM documents_publicos
                     ORDER BY created_at DESC
                     LIMIT 50
@@ -7315,30 +8714,120 @@ def configuracion_tab(tab):
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
         datos=datos, guardado=guardado,
-        documents_publicos=documents_publicos
+        documents_publicos=documents_publicos,
+        asesor_count=asesor_count,
+        asesores_list=asesores_list
     )
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible'.
+    (Versión segura: no hace llamadas externas).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return ("DATOS DEL NEGOCIO:\n"
+                "Dirección: No disponible\n"
+                "Teléfono: No disponible\n"
+                "Correo: No disponible\n\n"
+                "Nota: Los datos no están configurados en el sistema.")
+    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
+    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
+    correo = (negocio.get('correo') or '').strip() or 'No disponible'
+
+    block = (
+        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
+        f"• Dirección: {direccion}\n"
+        f"• Teléfono: {telefono}\n"
+        f"• Correo: {correo}\n\n"
+        "Si necesitas otra cosa, dime."
+    )
+    return block
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible'.
+    (Versión segura: no hace llamadas externas).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return ("DATOS DEL NEGOCIO:\n"
+                "Dirección: No disponible\n"
+                "Teléfono: No disponible\n"
+                "Correo: No disponible\n\n"
+                "Nota: Los datos no están configurados en el sistema.")
+    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
+    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
+    correo = (negocio.get('correo') or '').strip() or 'No disponible'
+
+    block = (
+        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
+        f"• Dirección: {direccion}\n"
+        f"• Teléfono: {telefono}\n"
+        f"• Correo: {correo}\n\n"
+        "Si necesitas otra cosa, dime."
+    )
+    return block
+
+def negocio_transfer_block(negocio):
+    """
+    Devuelve un bloque con los datos para transferencia (número/CLABE, nombre y banco)
+    sacados directamente de la configuración 'negocio'.
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    numero = (negocio.get('transferencia_numero') or '').strip()
+    nombre = (negocio.get('transferencia_nombre') or '').strip()
+    banco = (negocio.get('transferencia_banco') or '').strip()
+
+    if not (numero or nombre or banco):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    # Presentación clara y breve
+    parts = ["Datos para transferencia:"]
+    if numero:
+        parts.append(f"• Número / CLABE: {numero}")
+    if nombre:
+        parts.append(f"• Nombre: {nombre}")
+    if banco:
+        parts.append(f"• Banco: {banco}")
+    return "\n".join(parts)
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
-        config = obtener_configuracion_por_host()
-        precios = obtener_todos_los_precios(config)
-        return render_template('configuracion/precios.html',
-            tabs=SUBTABS, active='precios',
-            guardado=False,
-            precios=precios,
-            precio_edit=None
-        )
+    config = obtener_configuracion_por_host()
+    precios = obtener_todos_los_precios(config)
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
+    return render_template('configuracion/precios.html',
+        tabs=SUBTABS, active='precios',
+        guardado=False,
+        precios=precios,
+        precio_edit=None,
+        is_admin=is_admin
+    )
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
-        config = obtener_configuracion_por_host()
-        precios     = obtener_todos_los_precios(config)
-        precio_edit = obtener_precio_por_id(pid, config)
-        return render_template('configuracion/precios.html',
-            tabs=SUBTABS, active='precios',
-            guardado=False,
-            precios=precios,
-            precio_edit=precio_edit
-        )
+    config = obtener_configuracion_por_host()
+    precios     = obtener_todos_los_precios(config)
+    precio_edit = obtener_precio_por_id(pid, config)
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
+
+    return render_template('configuracion/precios.html',
+        tabs=SUBTABS, active='precios',
+        guardado=False,
+        precios=precios,
+        precio_edit=precio_edit,
+        is_admin=is_admin
+    )
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
 def configuracion_precio_guardar():
@@ -7350,8 +8839,14 @@ def configuracion_precio_guardar():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
+        # Ensure subscription columns exist in precios table
+        try:
+            _ensure_precios_subscription_columns(config)
+        except Exception as _:
+            app.logger.warning("⚠️ _ensure_precios_subscription_columns falló (continuando)")
+
         # Process numeric price fields coming from form (empty -> None)
-        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo']:
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad']:
             if f in data and data.get(f, '').strip() == '':
                 data[f] = None
 
@@ -7373,7 +8868,8 @@ def configuracion_precio_guardar():
         # Candidate fields in expected order (prefer form names)
         candidate_fields = [
             'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
-            'descripcion', 'medidas', 'costo', 'precio', 'precio_mayoreo', 'precio_menudeo',
+            'descripcion', 'medidas', 'costo', 'inscripcion', 'mensualidad',
+            'precio', 'precio_mayoreo', 'precio_menudeo',
             'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
         ]
 
@@ -7647,8 +9143,11 @@ def ver_kanban(config=None):
 
     cursor.close()
     conn.close()
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    au = session.get('auth_user') or {}
+    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats)     
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():

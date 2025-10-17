@@ -6792,10 +6792,8 @@ def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
         app.logger.error(f"Error detectando intención: {e}")
         return {"intencion": "OTRO", "confianza": 0.0, "detalles": {}}
 
-def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
-    """
-    Manejo mejorado de solicitudes de cita con prevención de ciclos
-    """
+"""def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
+
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -6830,7 +6828,7 @@ def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
         return "¡Hola! 👋 Para tomar tu pedido, necesito que me digas:\n\n1. ¿Qué platillos deseas ordenar?\n2. ¿Para cuándo lo quieres?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
     else:
         return "¡Hola! 👋 Para agendar tu cita, necesito que me digas:\n\n1. ¿Qué servicio necesitas?\n2. ¿Qué fecha te viene bien?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
-    
+""" 
 def obtener_citas_pendientes(numero, config=None):
     """
     Obtiene las citas pendientes de un cliente
@@ -7409,6 +7407,7 @@ def webhook():
         actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
             texto = msg['text']['body'].strip()
+
         elif 'image' in msg:
             es_imagen = True
             image_id = msg['image']['id']
@@ -7469,6 +7468,44 @@ def webhook():
                 texto = "Error al procesar el audio"
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
+        try:
+            estado_actual = obtener_estado_conversacion(numero, config)
+            if estado_actual and estado_actual.get('contexto') == 'OFRECIENDO_ASESOR':
+                respuesta_usuario = (texto or '').strip().lower()
+                # Normalizar algunas variantes
+                respuesta_usuario = re.sub(r'[^\wáéíóúüñ ]', '', respuesta_usuario, flags=re.IGNORECASE).strip()
+
+                if respuesta_usuario in ('no', 'no gracias', 'nogracias', 'nop', 'nah'):
+                    datos_estado = estado_actual.get('datos') or {}
+                    pedido_prov = datos_estado.get('pedido_provisional') or {}
+                    if pedido_prov:
+                        # Guardar pedido definitivo ahora
+                        cita_id = guardar_cita(pedido_prov, config)
+                        if cita_id:
+                            enviar_confirmacion_cita(numero, pedido_prov, cita_id, config)
+                            actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO_AUTOMATICO", "pedido_confirmado", {}, config)
+                            enviar_mensaje(numero, f"✅ Entendido. He agendado tu pedido automáticamente. ID: #{cita_id}\nTe enviaré la confirmación en breve.", config)
+                            guardar_conversacion(numero, texto, f"Pedido agendado automáticamente ID #{cita_id}", config)
+                            return 'OK', 200
+                        else:
+                            enviar_mensaje(numero, "Hubo un error guardando tu pedido. ¿Quieres que te conecte con un asesor ahora?", config)
+                            return 'OK', 200
+                    else:
+                        enviar_mensaje(numero, "No encontré los datos provisionales del pedido. ¿Quieres que lo recabemos de nuevo o que te conecte con un asesor?", config)
+                        return 'OK', 200
+
+                if respuesta_usuario in ('si', 'sí', 'si claro', 'sí por favor', 'ok', 'claro'):
+                    # Usuario quiere al asesor -> pasar contacto y limpiar estado
+                    sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                    if sent:
+                        actualizar_estado_conversacion(numero, "EN_PEDIDO", "asesor_conectado", {}, config)
+                        enviar_mensaje(numero, "Perfecto. Te conecté con un asesor. Él te asistirá para completar el pago de forma segura.", config)
+                    else:
+                        enviar_mensaje(numero, "Lo siento, ahora mismo no hay asesores disponibles. ¿Quieres que intente agendar tu pedido mientras tanto?", config)
+                    return 'OK', 200
+        except Exception as _e:
+            app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
+        # === fin manejo oferta asesor ===
         guardar_mensaje_inmediato(numero, texto, config)
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
@@ -8468,7 +8505,10 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
 
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo y lo guarda, incluyendo forma de pago y detalles de transferencia si aplica."""
+    """Confirma el pedido completo. 
+    - Si la forma de pago es tarjeta: NO guarda el pedido aún; ofrece conectar con asesor y guarda un pedido provisional en estado.
+    - Si es efectivo/transferencia: guarda inmediatamente y confirma.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -8485,7 +8525,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
 
-        # Guardar pedido en base de datos (reutiliza guardar_cita para persistencia)
+        # Preparar estructura de pedido (reutilizable para guardar o provisional)
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
             'nombre_cliente': nombre_cliente,
@@ -8494,7 +8534,7 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
 
-        # Añadir datos de pago al registro (si existen)
+        # Añadir datos de pago al registro (si existen) para referencia
         if datos_pedido.get('forma_pago'):
             info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
         if datos_pedido.get('transferencia_numero'):
@@ -8504,18 +8544,52 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
         if datos_pedido.get('transferencia_banco'):
             info_pedido['notas'] += f"\nBanco: {datos_pedido.get('transferencia_banco')}"
 
-        pedido_id = guardar_cita(info_pedido, config)
-
-        # Mensaje de confirmación con instrucciones según forma de pago
         forma = str(datos_pedido.get('forma_pago', '')).lower()
-        instrucciones_pago = ""
+
+        # Caso: tarjeta -> no pedir tarjeta por chat. Ofrecer asesor y guardar en estado provisional.
+        if 'tarjeta' in forma:
+            # Guardar pedido provisional en estados_conversacion (no persistir aún en 'citas')
+            provisional = {
+                'pedido_provisional': info_pedido,
+                'timestamp': datetime.now().isoformat()
+            }
+            actualizar_estado_conversacion(numero, "OFRECIENDO_ASESOR", "ofrecer_asesor", provisional, config)
+
+            # Intentar obtener nombre de un asesor para la oferta (no incluir teléfonos)
+            cfg = load_config(config)
+            asesores = cfg.get('asesores_list') or []
+            asesor_name = asesores[0].get('nombre') if asesores and isinstance(asesores[0], dict) and asesores[0].get('nombre') else "nuestro asesor"
+
+            instrucciones = (
+                "Para procesar el pago con tarjeta, por seguridad no pedimos números por WhatsApp.\n\n"
+                f"Puedo conectarte con {asesor_name} para completar el pago de forma segura, o si prefieres que yo agende el pedido ahora mismo con los datos que ya tengo, responde 'no'.\n\n"
+                "Responde 'sí' para que te pase al asesor, o 'no' para que agende el pedido ahora."
+            )
+
+            mensaje_oferta = f"""🎉 *¡Pedido listo para pagar!*
+
+📋 *Resumen de tu pedido:*
+{resumen_platillos}
+
+🏠 *Dirección:* {direccion}
+👤 *Nombre:* {nombre_cliente}
+
+{instrucciones}
+"""
+            return mensaje_oferta
+
+        # Caso: transferencia -> guardar y pedir comprobante (se guarda ahora)
         if 'transfer' in forma or 'transferencia' in forma:
+            pedido_id = guardar_cita(info_pedido, config)
             instrucciones_pago = ("💳 Forma de pago: Transferencia bancaria.\n"
-                                  "Por favor realiza la transferencia a los datos que te proporcionamos y envía el comprobante por este chat.\n"
+                                  "Por favor realiza la transferencia y envía el comprobante por este chat.\n"
                                   "Cuando recibamos el comprobante procederemos a preparar tu pedido.")
         else:
+            # Efectivo u otros -> guardar y confirmar
+            pedido_id = guardar_cita(info_pedido, config)
             instrucciones_pago = "💵 Forma de pago: Efectivo. Pagarás al recibir el pedido."
 
+        # Si llegamos aquí, ya guardamos el pedido
         confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
 
 📋 *Resumen de tu pedido:*
@@ -8529,16 +8603,13 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
 ⏰ *Tiempo estimado:* 30-45 minutos
 Gracias por tu pedido. Te avisaremos cuando esté en camino.
 """
-
-        # Limpiar estado
+        # Limpiar estado relacionado si existía
         actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
-
         return confirmacion
 
     except Exception as e:
         app.logger.error(f"Error confirmando pedido: {e}")
-        return "¡Pedido recibido! Pero hubo un error al guardarlo. Por favor, contacta directamente al restaurante."
-
+        return "¡Pedido recibido! Pero hubo un error al procesarlo. Por favor, contacta directamente al negocio."
 
 @app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 @login_required
