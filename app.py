@@ -606,8 +606,8 @@ def guardar_configuracion_negocio():
     # Agregar logging para ver qué datos se reciben
     app.logger.info(f"📧 Formulario recibido: {request.form}")
     app.logger.info(f"📧 Calendar email recibido: {request.form.get('calendar_email')}")
-
-    # Recopilar todos los datos del formulario (incluye datos de transferencia)
+    
+    # Recopilar todos los datos del formulario
     datos = {
         'ia_nombre': request.form.get('ia_nombre'),
         'negocio_nombre': request.form.get('negocio_nombre'),
@@ -617,83 +617,91 @@ def guardar_configuracion_negocio():
         'telefono': request.form.get('telefono'),
         'correo': request.form.get('correo'),
         'que_hace': request.form.get('que_hace'),
-        'calendar_email': request.form.get('calendar_email'),
-        'transferencia_numero': request.form.get('transferencia_numero'),
-        'transferencia_nombre': request.form.get('transferencia_nombre'),
-        'transferencia_banco': request.form.get('transferencia_banco'),
+        'calendar_email': request.form.get('calendar_email')  # Nuevo campo para correo de notificaciones
     }
-
-    # Manejar la subida del logo (sin cambios)
+    
+    # Manejar la subida del logo
     if 'app_logo' in request.files and request.files['app_logo'].filename != '':
         logo = request.files['app_logo']
         filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
+        
+        # Asegúrate de que la carpeta existe
         os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+        
+        # Guardar el archivo
         logo.save(upload_path)
+        
+        # Guardar la ruta en la BD
         datos['app_logo'] = f"/static/uploads/logos/{filename}"
     elif request.form.get('app_logo_actual'):
+        # Mantener el logo existente
         datos['app_logo'] = request.form.get('app_logo_actual')
-
+    
     # Guardar en la base de datos
     conn = get_db_connection(config)
     cursor = conn.cursor()
-
-    # Verificar/crear columnas adicionales (calendar_email + transferencias)
+    
+    # Verificar si existe la columna calendar_email
     try:
-        for col, col_def in [
-            ('calendar_email', "VARCHAR(255)"),
-            ('transferencia_numero', "VARCHAR(100)"),
-            ('transferencia_nombre', "VARCHAR(200)"),
-            ('transferencia_banco', "VARCHAR(100)")
-        ]:
-            cursor.execute(f"SHOW COLUMNS FROM configuracion LIKE %s", (col,))
-            if cursor.fetchone() is None:
-                cursor.execute(f"ALTER TABLE configuracion ADD COLUMN {col} {col_def}")
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
+        calendar_email_existe = cursor.fetchone() is not None
+        
+        # Crear la columna si no existe
+        if not calendar_email_existe:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)")
+        
         conn.commit()
     except Exception as e:
-        app.logger.error(f"Error verificando/creando columnas extras en configuracion: {e}")
-
+        app.logger.error(f"Error verificando/creando columna calendar_email: {e}")
+    
     # Verificar si existe una configuración
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     count = cursor.fetchone()[0]
-
+    
     if count > 0:
-        # Actualizar configuración existente (robusto como antes)
+        # Actualizar configuración existente
         set_parts = []
         values = []
+        
         for key, value in datos.items():
-            if value is not None:
+            if value is not None:  # Solo incluir campos con valores
                 set_parts.append(f"{key} = %s")
                 values.append(value)
-        if set_parts:
-            sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-            try:
-                cursor.execute(sql, values)
-            except Exception as e:
-                app.logger.error(f"Error al actualizar configuración: {e}")
-                if "Unknown column" in str(e):
-                    cursor.execute("SHOW COLUMNS FROM configuracion")
-                    columnas_existentes = [col[0] for col in cursor.fetchall()]
-                    set_parts = []
-                    values = []
-                    for key, value in datos.items():
-                        if key in columnas_existentes and value is not None:
-                            set_parts.append(f"{key} = %s")
-                            values.append(value)
-                    if set_parts:
-                        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-                        cursor.execute(sql, values)
+        
+        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+        try:
+            cursor.execute(sql, values)
+        except Exception as e:
+            app.logger.error(f"Error al actualizar configuración: {e}")
+            # Filtrar columnas que causan problemas
+            if "Unknown column" in str(e):
+                # Obtener las columnas existentes
+                cursor.execute("SHOW COLUMNS FROM configuracion")
+                columnas_existentes = [col[0] for col in cursor.fetchall()]
+                
+                # Filtrar y volver a intentar
+                set_parts = []
+                values = []
+                for key, value in datos.items():
+                    if key in columnas_existentes and value is not None:
+                        set_parts.append(f"{key} = %s")
+                        values.append(value)
+                
+                if set_parts:
+                    sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+                    cursor.execute(sql, values)
     else:
         # Insertar nueva configuración
         fields = ', '.join(datos.keys())
         placeholders = ', '.join(['%s'] * len(datos))
         sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
         cursor.execute(sql, [1] + list(datos.values()))
-
+    
     conn.commit()
     cursor.close()
     conn.close()
-
+    
     flash("✅ Configuración guardada correctamente", "success")
     return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
 
@@ -2450,7 +2458,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    app.logger.info(f"🎯 Analizando mensaje para pedido inteligente: '{mensaje}' (tenant={config.get('dominio')})")
+    app.logger.info(f"🎯 Analizando mensaje para pedido inteligente: '{mensaje}'")
     
     # Primero verificar con detección básica
     deteccion_basica = detectar_solicitud_cita_keywords(mensaje, config)
@@ -2467,18 +2475,14 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         # Construir contexto del historial
         contexto_historial = ""
         for i, msg in enumerate(historial[-2:]):  # Últimos 2 mensajes
-            if msg.get('mensaje'):
+            if msg['mensaje']:
                 contexto_historial += f"Usuario: {msg['mensaje']}\n"
-            if msg.get('respuesta'):
+            if msg['respuesta']:
                 contexto_historial += f"Asistente: {msg['respuesta']}\n"
         
-        # Determinar el tipo de negocio para el prompt
-        es_porfirianna = 'laporfirianna' in (config.get('dominio') or '')
-        negocio_nombre = "La Porfirianna (restaurante)" if es_porfirianna else (config.get('negocio_nombre') or config.get('dominio') or 'el negocio')
-        
-        # Prompt contextual (no forzar siempre La Porfirianna)
+        # Prompt mejorado para detección inteligente
         prompt = f"""
-        Eres un asistente para {negocio_nombre}. Analiza si el mensaje es un pedido y qué datos faltan.
+        Eres un asistente para La Porfirianna (restaurante). Analiza si el mensaje es un pedido y qué datos faltan.
 
         HISTORIAL RECIENTE:
         {contexto_historial}
@@ -2490,8 +2494,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             "es_pedido": true/false,
             "confianza": 0.0-1.0,
             "datos_obtenidos": {{
-                "platillos": ["lista de platillos detectados"],         # solo para restaurantes
-                "servicio": "servicio detectado (para otros negocios)",
+                "platillos": ["lista de platillos detectados"],
                 "cantidades": ["cantidades especificadas"],
                 "especificaciones": ["con todo", "sin cebolla", etc.],
                 "nombre_cliente": "nombre si se menciona",
@@ -2501,9 +2504,28 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             "siguiente_pregunta": "pregunta natural para solicitar dato faltante"
         }}
 
-        Datos importantes para un pedido/cita completo (ajusta según el tipo de negocio):
-        - Para restaurantes: platillos específicos, cantidades, especificaciones, dirección, forma de pago, nombre.
-        - Para mobiliario/servicios: producto/servicio exacto, fecha, hora (si aplica), nombre, teléfono, dirección (si aplica).
+        Datos importantes para un pedido completo:
+        - Platillos específicos (gorditas, tacos, quesadillas, etc.)
+        - Cantidades de cada platillo
+        - Especificaciones (guisados, ingredientes, preparación)
+        - Dirección de entrega
+        - Forma de pago (efectivo, transferencia)
+        - Nombre del cliente
+
+        Ejemplo si dice "quiero 2 gorditas":
+        {{
+            "es_pedido": true,
+            "confianza": 0.9,
+            "datos_obtenidos": {{
+                "platillos": ["gorditas"],
+                "cantidades": ["2"],
+                "especificaciones": [],
+                "nombre_cliente": null,
+                "direccion": null
+            }},
+            "datos_faltantes": ["guisados para las gorditas", "dirección"],
+            "siguiente_pregunta": "¡Perfecto! ¿De qué guisado quieres las gorditas? Tenemos chicharrón, tinga, papa, etc."
+        }}
         """
         
         headers = {
@@ -2514,7 +2536,7 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         payload = {
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.25,
+            "temperature": 0.3,
             "max_tokens": 800
         }
         
@@ -2531,17 +2553,14 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             app.logger.info(f"🔍 Análisis inteligente: {json.dumps(analisis, indent=2)}")
             
             # Considerar pedido si confianza > 0.7
-            if analisis.get('es_pedido') and float(analisis.get('confianza', 0) or 0) > 0.7:
-                return analisis
-            return None
+            return analisis if analisis.get('es_pedido', False) and analisis.get('confianza', 0) > 0.7 else None
         else:
-            app.logger.warning("⚠️ detectar_pedido_inteligente: No se pudo extraer JSON de la respuesta IA")
             return None
             
     except Exception as e:
         app.logger.error(f"Error en detección inteligente de pedido: {e}")
-        # Fallback a detección básica (más conservador)
-        return {"es_pedido": True, "confianza": 0.75, "datos_faltantes": ["detalles"], "siguiente_pregunta": "¿Qué quieres ordenar exactamente?"} if deteccion_basica else None
+        # Fallback a detección básica
+        return {"es_pedido": True, "confianza": 0.8, "datos_faltantes": ["todos"], "siguiente_pregunta": "¿Qué platillos deseas ordenar?"} if deteccion_basica else None
 
 def manejar_pedido_automatico(numero, mensaje, analisis_pedido, config=None):
     """Maneja automáticamente el pedido detectado por la IA"""
@@ -2691,37 +2710,9 @@ def negocio_contact_block(negocio):
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
         f"• Correo: {correo_display}\n\n"
-        "Visitanos pronto!\n\n"
-        "Si necesitas otra cosa, dime."
+        "Visitanos pronto!"
     )
     return block
-
-def negocio_transfer_block(negocio):
-    """
-    Devuelve un bloque con los datos para transferencia (número/CLABE, nombre y banco)
-    sacados directamente de la configuración 'negocio'.
-    """
-    if not negocio or not isinstance(negocio, dict):
-        return "Lo siento, no hay datos de transferencia configurados."
-
-    numero = (negocio.get('transferencia_numero') or '').strip()
-    nombre = (negocio.get('transferencia_nombre') or '').strip()
-    banco = (negocio.get('transferencia_banco') or '').strip()
-
-    if not (numero or nombre or banco):
-        return "Lo siento, no hay datos de transferencia configurados."
-
-    # Presentación clara y breve
-    parts = ["Datos para transferencia:"]
-    if numero:
-        parts.append(f"• Número / CLABE: {numero}")
-    if nombre:
-        parts.append(f"• Nombre: {nombre}")
-    if banco:
-        parts.append(f"• Banco: {banco}")
-    parts.append("\nSi quieres que te los reenvíe en otro formato, indícalo (ej. enviar PDF o confirmar).")
-
-    return "\n".join(parts)
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -2995,7 +2986,6 @@ def validar_datos_cita_completos(info_cita, config=None):
     
     # El nombre es opcional pero útil
     if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_faltantes.append("nombre_cliente")
         # No lo añadimos a datos_faltantes porque es opcional
         app.logger.info("ℹ️ Nombre de cliente no proporcionado, pero no es obligatorio")
     
@@ -3109,13 +3099,11 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         
         # Determinar tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-        dominio_lower = (config.get('dominio') or '').lower()
-        es_ofitodo = 'ofitodo' in dominio_lower or 'ofitodo' in mensaje_lower
         
         # MEJORA: Ajustar prompt para mensajes de confirmación
         if es_confirmacion:
             prompt_cita = f"""
-            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios / OFITODO'}.
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
             Este parece ser un mensaje de CONFIRMACIÓN a una consulta previa sobre {es_porfirianna and 'un pedido' or 'una cita'}.
             
             HISTORIAL RECIENTE:
@@ -3139,7 +3127,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             """
         else:
             prompt_cita = f"""
-            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios / OFITODO'}.
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
             Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
             
             MENSAJE ACTUAL: "{mensaje}"
@@ -3151,7 +3139,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             {servicios_texto}
             
             Devuelve un JSON con estos campos:
-            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible; si es genérico como 'mueble' devuelve null)
+            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
             - fecha_sugerida (string formato YYYY-MM-DD o null)
             - hora_sugerida (string formato HH:MM o null)
             - nombre_cliente (string o null)
@@ -3211,18 +3199,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             # Añadir teléfono si no viene
             if not info_cita.get('telefono'):
                 info_cita['telefono'] = numero
-
-            # POST-PROCESADO: si el servicio detectado es demasiado genérico (p.ej. 'mueble', 'mobiliario', 'mueble para oficina'),
-            # forzamos servicio_solicitado = None para que el bot pida especificar tipo de mueble.
-            servicio_detectado = (info_cita.get('servicio_solicitado') or '') or ''
-            if servicio_detectado:
-                s_low = servicio_detectado.lower()
-                generic_tokens = ['mueble', 'mobiliario', 'muebles', 'mueble para', 'muebles para', 'mobiliario para', 'mueble oficina', 'mueble para oficina']
-                if any(tok in s_low for tok in generic_tokens):
-                    app.logger.info("ℹ️ Servicio detectado genérico ('mueble' / 'mobiliario'), marcando como no especificado para pedir detalle al usuario.")
-                    info_cita['servicio_solicitado'] = None
-                    info_cita['servicio_generico'] = True
-
+            
             app.logger.info(f"📅 Información de cita extraída: {json.dumps(info_cita)}")
             return info_cita
         else:
@@ -3641,18 +3618,6 @@ def guardar_cita(info_cita, config=None):
             evento_id
         ))
         conn.commit()
-         # ▶️ NOTIFICAR A UN ASESOR (round-robin) PARA QUE CONTACTE AL CLIENTE
-        try:
-            asesor = obtener_siguiente_asesor(config)
-            if asesor and asesor.get('telefono'):
-                # pasar_contacto_asesor envía el contacto al cliente y notifica al asesor seleccionado
-                pasar_contacto_asesor(info_cita.get('telefono'), config=config, notificar_asesor=True)
-                app.logger.info(f"✅ Asesor asignado y notificado: {asesor.get('nombre')} ({asesor.get('telefono')}) para cita ID={cita_id}")
-            else:
-                app.logger.info("ℹ️ No hay asesores configurados para notificar automáticamente")
-        except Exception as e:
-            app.logger.error(f"🔴 Error notificando asesor automáticamente: {e}")
-
         cursor.close()
         conn.close()
         
@@ -3755,39 +3720,22 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(os.path.join(UPLOAD_FOLDER, 'logos'), exist_ok=True)
 
 def extraer_servicio_del_mensaje(mensaje, config=None):
-    """Extrae el servicio del mensaje usando keywords simples, con soporte para OFITODO (muebles)."""
+    """Extrae el servicio del mensaje usando keywords simples"""
     if config is None:
         config = obtener_configuracion_por_host()
     
-    if not mensaje:
-        return None
-
     mensaje_lower = mensaje.lower()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    dominio_lower = (config.get('dominio') or '').lower()
-    es_ofitodo = 'ofitodo' in dominio_lower or 'ofitodo' in mensaje_lower
-
+    
     if es_porfirianna:
         # Palabras clave para La Porfirianna
         platillos = ['gordita', 'taco', 'quesadilla', 'sope', 'torta', 'comida', 'platillo']
         for platillo in platillos:
             if platillo in mensaje_lower:
-                return mensaje.strip()  # Devolver el mensaje completo como descripción
+                return mensaje  # Devolver el mensaje completo como descripción
         return None
     else:
-        # Si es OFITODO o el mensaje menciona muebles, buscar tipos de mobiliario
-        muebles = ['silla', 'sillas', 'mesa', 'mesas', 'banca', 'bancas', 'escritorio', 'escritorios',
-                   'archivo', 'estantería', 'estanterias', 'reclinable', 'operativa', 'ejecutiva', 'visita',
-                   'mueble', 'mobiliario', 'banqueta', 'banco', 'sofa', 'butaca']
-        for m in muebles:
-            if m in mensaje_lower:
-                # devolver la frase enfocada: si el usuario dice "quiero una silla ejecutiva" -> "silla ejecutiva"
-                # intentar extraer la subfrase que contiene la keyword y algunos adjetivos cercanos
-                match = re.search(r'([A-Za-záéíóúñÁÉÍÓÚÑ0-9\-\s]{0,40}\b' + re.escape(m) + r'\b[A-Za-záéíóúñÁÉÍÓÚÑ0-9\-\s]{0,40})', mensaje, flags=re.IGNORECASE)
-                if match:
-                    return match.group(1).strip()
-                return m
-        # Fallback: revisar servicios técnicos/otros (mektia)
+        # Palabras clave para Mektia
         servicios = ['página web', 'sitio web', 'app', 'aplicación', 'software', 
                     'marketing', 'diseño', 'hosting', 'ecommerce', 'tienda online']
         for servicio in servicios:
@@ -4582,6 +4530,7 @@ def load_config(config=None):
         'asesores_list': asesores_list if 'asesores_list' in locals() else []
     }
 
+
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4919,7 +4868,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
         'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
         '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion', 'ubican'
+        'información de contacto', 'contacto', 'ubicacion'
     ]
     # mensaje_usuario ya definido; text_lower ya existe arriba
     if any(k in text_lower for k in contact_queries):
@@ -5272,13 +5221,11 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
         config = obtener_configuracion_por_host()
     
     paso_actual = estado_actual.get('datos', {}).get('paso', 0)
-    datos_guardados = estado_actual.get('datos', {}) or {}
+    datos_guardados = estado_actual.get('datos', {})
     
     # Determinar tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    dominio_lower = (config.get('dominio') or '').lower()
-    es_ofitodo = 'ofitodo' in dominio_lower
-
+    
     app.logger.info(f"🔄 Procesando paso {paso_actual} para {numero}: '{mensaje}'")
     
     if paso_actual == 0:  # Inicio - Detectar si es solicitud de cita/pedido
@@ -5286,21 +5233,10 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             datos_guardados['paso'] = 1
             actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_servicio", datos_guardados, config)
             
-            # Si es La Porfirianna
             if es_porfirianna:
                 return "¡Hola! 👋 Veo que quieres hacer un pedido. ¿Qué platillos te gustaría ordenar?"
-            
-            # Si es Ofitodo (mobiliario), pedir que especifique tipo de mueble
-            if es_ofitodo:
-                return ("¡Perfecto! 👋 Veo que buscas mobiliario para oficina. "
-                        "¿Podrías especificar qué tipo de mueble necesitas? Por ejemplo: "
-                        "- 'Silla ejecutiva', 'Silla operativa', 'Silla de visita'\n"
-                        "- 'Escritorio' / 'Mesa de trabajo'\n"
-                        "- 'Banca' / 'Bancos' / 'Estantería'\n\n"
-                        "Indica también si tienes alguna preferencia (color, material, medidas).")
-            
-            # Por defecto para otros tenants
-            return "¡Hola! 👋 Veo que quieres agendar una cita. ¿Qué servicio necesitas?"
+            else:
+                return "¡Hola! 👋 Veo que quieres agendar una cita. ¿Qué servicio necesitas?"
         else:
             # No es una solicitud de cita, dejar que la IA normal responda
             return None
@@ -5315,18 +5251,13 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             if es_porfirianna:
                 return f"¡Perfecto! ¿Para cuándo quieres tu pedido de {servicio}? (puedes decir 'hoy', 'mañana' o una fecha específica)"
             else:
-                # Si cliente ya especificó un tipo de mueble/servicio, pedir fecha
-                return f"¡Excelente! ¿Qué fecha te viene bien para la cita/visita relacionada con {servicio}? (puedes decir 'mañana', 'próximo lunes', etc.)"
+                return f"¡Excelente! ¿Qué fecha te viene bien para la cita de {servicio}? (puedes decir 'mañana', 'próximo lunes', etc.)"
         else:
             if es_porfirianna:
                 return "No entendí qué platillo quieres ordenar. ¿Podrías ser más específico? Por ejemplo: 'Quiero 2 gorditas de chicharrón'"
-            if es_ofitodo:
-                return ("No entendí qué tipo de mueble necesitas. Por favor escribe el tipo de mueble concretamente, "
-                        "por ejemplo: 'Silla ejecutiva negra', 'Escritorio 120x60 metálico', 'Banco para comedor industrial'.")
             else:
                 return "No entendí qué servicio necesitas. ¿Podrías ser más específico? Por ejemplo: 'Necesito una página web'"
-
-    # (resto de pasos permanece igual que antes...)
+    
     elif paso_actual == 2:  # Paso 2: Fecha
         fecha = extraer_fecha_del_mensaje(mensaje)
         if fecha:
@@ -5369,8 +5300,8 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
                 confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
             else:
-                confirmacion = f"📋 *Resumen de tu cita/pedido:*\n\n"
-                confirmacion += f"🛠️ *Servicio / Producto:* {datos_guardados['servicio']}\n"
+                confirmacion = f"📋 *Resumen de tu cita:*\n\n"
+                confirmacion += f"🛠️ *Servicio:* {datos_guardados['servicio']}\n"
                 confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
                 confirmacion += f"⏰ *Hora:* {datos_guardados.get('hora', 'Por confirmar')}\n"
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
@@ -7515,45 +7446,33 @@ def webhook():
                     return 'OK', 200
                 
         # Fallback a la detección básica para compatibilidad
-        # Replace the existing block that handles `analisis_pedido = detectar_pedido_inteligente(...)`
-# in the webhook() function with the following safer logic.
-
-# --- BEGIN PATCH ---
-        # Fallback a la detección básica para compatibilidad
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
-            app.logger.info(f"📦 Pedido inteligente detectado para {numero} (confianza={analisis_pedido.get('confianza')})")
-
-            # Safeguard: only create backend notifications / registros automáticos
-            # when we have sufficient confidence AND either:
-            #  - the analysis reports no datos_faltantes, or
-            #  - it includes an explicit servicio/platillos (partial but actionable)
-            confianza = float(analisis_pedido.get('confianza', 0) or 0)
-            datos_obtenidos = analisis_pedido.get('datos_obtenidos', {}) or {}
-            datos_faltantes = analisis_pedido.get('datos_faltantes', []) or []
-
-            tiene_servicio = bool(datos_obtenidos.get('servicio') or datos_obtenidos.get('platillos'))
-            datos_completos_flag = (not datos_faltantes)
-
-            # Thresholds: adjust as needed (0.8 conservative)
-            if confianza >= 0.80 and (datos_completos_flag or tiene_servicio):
-                # Sufficient signal -> notify admins and start automatic handling (existing behavior)
-                app.logger.info(f"✅ Pedido con datos suficientes o alta confianza -> notificar y manejar automáticamente (user={numero})")
-                enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
-                respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-                enviar_mensaje(numero, respuesta, config)
-                guardar_conversacion(numero, texto, respuesta, config)
-                return 'OK', 200
+            app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
+            # Enviar notificación al administrador
+            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
+            # Manejar el pedido automáticamente
+            respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
+            return 'OK', 200
+            # Continuar con el procesamiento normal
+        # 2. DETECTAR INTERVENCIÓN HUMANA
+        if detectar_intervencion_humana_ia(texto, numero, config):
+            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
+            historial = obtener_historial(numero, limite=5, config=config)
+            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
+            if info_intervencion:
+                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
+                enviar_alerta_intervencion_humana(info_intervencion, config)
+                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
-                # Partial / low-confidence detection -> do NOT create admin notification yet.
-                # Instead, engage the user to clarify (use existing diálogo handler to ask for missing info)
-                app.logger.info(f"⚠️ Pedido detectado pero insuficiente (confianza={confianza}, faltantes={datos_faltantes}). Pidiendo clarificación al usuario.")
-                # This will set conversation state and return the next question without creating a backend "notificación"
-                respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-                enviar_mensaje(numero, respuesta, config)
-                guardar_conversacion(numero, texto, respuesta, config)
-                return 'OK', 200
-# --- END PATCH ---
+                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
+            actualizar_kanban(numero, columna_id=1, config=config)
+            return 'OK', 200
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
@@ -7689,64 +7608,59 @@ def format_asesores_block(cfg):
     except Exception:
         return ""
 
+
+# REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección robusta y determinista de solicitud de cita/pedido/comprar.
-    - Evita interpretar frases de exploración (ej. "quiero ver productos") como pedido/cita.
-    - Usa heurísticas primero; sólo recurre a la IA en caso de ambigüedad y exige una respuesta boolean.
+    Detección mejorada por palabras clave de solicitud de cita/pedido
     """
     if config is None:
         config = obtener_configuracion_por_host()
-
-    if not mensaje:
+    
+    mensaje_lower = mensaje.lower().strip()
+    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+    
+    # Evitar detectar respuestas a preguntas como nuevas solicitudes
+    if es_respuesta_a_pregunta(mensaje):
         return False
+    
+    if es_porfirianna:
+        # Palabras clave específicas para pedidos de comida
+        palabras_clave = [
+            'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
+            'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
+        ]
+    else:
+        # Palabras clave para servicios digitales
+        palabras_clave = [
+            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
+            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
 
-    texto = mensaje.lower().strip()
-
-    # Evitar detectar respuestas cortas / respuestas a preguntas previas
-    if es_respuesta_a_pregunta(texto):
-        return False
-
-    # Palabras/expresiones que claramente indican exploración o consulta de catálogo
-    exploracion_kw = [
-        'ver', 'ver qué', 'ver que', 'ver otros', 'catalogo', 'catálogo', 'productos',
-        'mostrar', 'muestrame', 'muéstrame', 'precios', 'qué tienes', 'qué otros', 'quiero ver'
+        ]
+    
+    # Verificar si contiene palabras clave principales
+    contiene_palabras_clave = any(
+        palabra in mensaje_lower for palabra in palabras_clave
+    )
+    
+    # Detectar patrones específicos de solicitud
+    patrones_solicitud = [
+        'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
+        'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
     ]
-    if any(k in texto for k in exploracion_kw):
-        return False
-
-    # Palabras que claramente indican intención de agendar/ordenar/pedir
-    cita_kw = [
-        'cita', 'agendar','quiero ordenar','reservar', 'reserva', 'horario', 'agenda', 'turno', 'quiero comprar'
-        'pedido', 'ordenar', 'encargar', 'hacer un pedido', 'quiero pedir', 'comprar', 'adquirir'
-    ]
-    if any(k in texto for k in cita_kw):
-        return True
-
-    # Si el usuario menciona fechas/tiempos explícitos -> probabilidad alta de cita/pedido
-    if re.search(r'\b(hoy|mañana|pasado mañana|a las|am|pm|\d{1,2}:\d{2}|\d{1,2}\s?(am|pm))\b', texto):
-        return True
-
-    # Ambiguo: fallback a IA pero exigir respuesta booleana explícita ("TRUE"/"FALSE"/"SI"/"NO")
-    """try:
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        prompt = (
-            "Responde SOLO con TRUE o FALSE.\n\n"
-            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido?\n\n"
-            f"Mensaje: \"{mensaje.strip()}\""
-        )
-        messages = [{"role": "user", "content": prompt}]
-        resp = client.chat.completions.create(model="gpt-4o", messages=messages, max_tokens=5)
-        text_response = (resp.choices[0].message.content or "").strip().lower()
-        # Aceptar variaciones claras
-        if text_response.startswith('true') or text_response.startswith('t') or text_response.startswith('si') or text_response.startswith('sí'):
-            return True
-        return False
-        except Exception as e:
-        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords fallback IA falló: {e}")
-        # En caso de error con la IA, no asumir cita
-        return False"""
-
+    
+    contiene_patron = any(
+        patron in mensaje_lower for patron in patrones_solicitud
+    )
+    
+    # Es una solicitud si contiene palabras clave O patrones específicos
+    es_solicitud = contiene_palabras_clave or contiene_patron
+    
+    if es_solicitud:
+        tipo = "pedido" if es_porfirianna else "cita"
+        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
+    
+    return es_solicitud
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -8551,19 +8465,22 @@ def configuracion_tab(tab):
         app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
         asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
-    if request.method == 'POST':
-        if tab == 'negocio':
-            cfg['negocio'] = {
-                'ia_nombre':      request.form.get('ia_nombre'),
-                'negocio_nombre': request.form.get('negocio_nombre'),
-                'descripcion':    request.form.get('descripcion'),
-                'url':            request.form.get('url'),
-                'direccion':      request.form.get('direccion'),
-                'telefono':       request.form.get('telefono'),
-                'correo':         request.form.get('correo'),
-                'que_hace':       request.form.get('que_hace'),
-                'calendar_email': request.form.get('calendar_email')
-            }
+        if request.method == 'POST':
+            if tab == 'negocio':
+                cfg['negocio'] = {
+                    'ia_nombre':      request.form.get('ia_nombre'),
+                    'negocio_nombre': request.form.get('negocio_nombre'),
+                    'descripcion':    request.form.get('descripcion'),
+                    'url':            request.form.get('url'),
+                    'direccion':      request.form.get('direccion'),
+                    'telefono':       request.form.get('telefono'),
+                    'correo':         request.form.get('correo'),
+                    'que_hace':       request.form.get('que_hace'),
+                    'calendar_email': request.form.get('calendar_email'),
+                    'transferencia_numero': request.form.get('transferencia_numero'),
+                    'transferencia_nombre': request.form.get('transferencia_nombre'),
+                    'transferencia_banco': request.form.get('transferencia_banco')
+                }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
@@ -8645,6 +8562,83 @@ def configuracion_tab(tab):
         asesor_count=asesor_count,
         asesores_list=asesores_list
     )
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible'.
+    (Versión segura: no hace llamadas externas).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return ("DATOS DEL NEGOCIO:\n"
+                "Dirección: No disponible\n"
+                "Teléfono: No disponible\n"
+                "Correo: No disponible\n\n"
+                "Nota: Los datos no están configurados en el sistema.")
+    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
+    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
+    correo = (negocio.get('correo') or '').strip() or 'No disponible'
+
+    block = (
+        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
+        f"• Dirección: {direccion}\n"
+        f"• Teléfono: {telefono}\n"
+        f"• Correo: {correo}\n\n"
+        "Si necesitas otra cosa, dime."
+    )
+    return block
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible'.
+    (Versión segura: no hace llamadas externas).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return ("DATOS DEL NEGOCIO:\n"
+                "Dirección: No disponible\n"
+                "Teléfono: No disponible\n"
+                "Correo: No disponible\n\n"
+                "Nota: Los datos no están configurados en el sistema.")
+    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
+    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
+    correo = (negocio.get('correo') or '').strip() or 'No disponible'
+
+    block = (
+        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
+        f"• Dirección: {direccion}\n"
+        f"• Teléfono: {telefono}\n"
+        f"• Correo: {correo}\n\n"
+        "Si necesitas otra cosa, dime."
+    )
+    return block
+
+def negocio_transfer_block(negocio):
+    """
+    Devuelve un bloque con los datos para transferencia (número/CLABE, nombre y banco)
+    sacados directamente de la configuración 'negocio'.
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    numero = (negocio.get('transferencia_numero') or '').strip()
+    nombre = (negocio.get('transferencia_nombre') or '').strip()
+    banco = (negocio.get('transferencia_banco') or '').strip()
+
+    if not (numero or nombre or banco):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    # Presentación clara y breve
+    parts = ["Datos para transferencia:"]
+    if numero:
+        parts.append(f"• Número / CLABE: {numero}")
+    if nombre:
+        parts.append(f"• Nombre: {nombre}")
+    if banco:
+        parts.append(f"• Banco: {banco}")
+    parts.append("\nSi quieres que te los reenvíe en otro formato, indícalo (ej. enviar PDF o confirmar).")
+
+    return "\n".join(parts)
 
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
