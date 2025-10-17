@@ -3652,6 +3652,18 @@ def guardar_cita(info_cita, config=None):
             evento_id
         ))
         conn.commit()
+         # ▶️ NOTIFICAR A UN ASESOR (round-robin) PARA QUE CONTACTE AL CLIENTE
+        try:
+            asesor = obtener_siguiente_asesor(config)
+            if asesor and asesor.get('telefono'):
+                # pasar_contacto_asesor envía el contacto al cliente y notifica al asesor seleccionado
+                pasar_contacto_asesor(info_cita.get('telefono'), config=config, notificar_asesor=True)
+                app.logger.info(f"✅ Asesor asignado y notificado: {asesor.get('nombre')} ({asesor.get('telefono')}) para cita ID={cita_id}")
+            else:
+                app.logger.info("ℹ️ No hay asesores configurados para notificar automáticamente")
+        except Exception as e:
+            app.logger.error(f"🔴 Error notificando asesor automáticamente: {e}")
+
         cursor.close()
         conn.close()
         
