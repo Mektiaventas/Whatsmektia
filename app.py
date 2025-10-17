@@ -7410,33 +7410,45 @@ def webhook():
                     return 'OK', 200
                 
         # Fallback a la detección básica para compatibilidad
+        # Replace the existing block that handles `analisis_pedido = detectar_pedido_inteligente(...)`
+# in the webhook() function with the following safer logic.
+
+# --- BEGIN PATCH ---
+        # Fallback a la detección básica para compatibilidad
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
-            app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
-            # Enviar notificación al administrador
-            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
-            # Manejar el pedido automáticamente
-            respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-            # Enviar respuesta y guardar conversación
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-            return 'OK', 200
-            # Continuar con el procesamiento normal
-        # 2. DETECTAR INTERVENCIÓN HUMANA
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            historial = obtener_historial(numero, limite=5, config=config)
-            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            if info_intervencion:
-                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                enviar_alerta_intervencion_humana(info_intervencion, config)
-                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
+            app.logger.info(f"📦 Pedido inteligente detectado para {numero} (confianza={analisis_pedido.get('confianza')})")
+
+            # Safeguard: only create backend notifications / registros automáticos
+            # when we have sufficient confidence AND either:
+            #  - the analysis reports no datos_faltantes, or
+            #  - it includes an explicit servicio/platillos (partial but actionable)
+            confianza = float(analisis_pedido.get('confianza', 0) or 0)
+            datos_obtenidos = analisis_pedido.get('datos_obtenidos', {}) or {}
+            datos_faltantes = analisis_pedido.get('datos_faltantes', []) or []
+
+            tiene_servicio = bool(datos_obtenidos.get('servicio') or datos_obtenidos.get('platillos'))
+            datos_completos_flag = (not datos_faltantes)
+
+            # Thresholds: adjust as needed (0.8 conservative)
+            if confianza >= 0.80 and (datos_completos_flag or tiene_servicio):
+                # Sufficient signal -> notify admins and start automatic handling (existing behavior)
+                app.logger.info(f"✅ Pedido con datos suficientes o alta confianza -> notificar y manejar automáticamente (user={numero})")
+                enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
+                respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
+                enviar_mensaje(numero, respuesta, config)
+                guardar_conversacion(numero, texto, respuesta, config)
+                return 'OK', 200
             else:
-                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-            actualizar_kanban(numero, columna_id=1, config=config)
-            return 'OK', 200
+                # Partial / low-confidence detection -> do NOT create admin notification yet.
+                # Instead, engage the user to clarify (use existing diálogo handler to ask for missing info)
+                app.logger.info(f"⚠️ Pedido detectado pero insuficiente (confianza={confianza}, faltantes={datos_faltantes}). Pidiendo clarificación al usuario.")
+                # This will set conversation state and return the next question without creating a backend "notificación"
+                respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
+                enviar_mensaje(numero, respuesta, config)
+                guardar_conversacion(numero, texto, respuesta, config)
+                return 'OK', 200
+# --- END PATCH ---
         
         # 3. PROCESAMIENTO NORMAL DEL MENSAJE
         procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
