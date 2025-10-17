@@ -7610,27 +7610,62 @@ def webhook():
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return 'OK', 200
                 
-        # Fallback a la detección básica para compatibilidad
+        # --- Reemplazo: Manejo unificado para el fallback de detección de pedido/cita ---
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
-            app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
-            # Enviar notificación al administrador
-            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
-            # Manejar el pedido automáticamente
-            respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-            # Enviar respuesta y guardar conversación
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-            return 'OK', 200
-            # Continuar con el procesamiento normal
+            # Si además parece una solicitud de cita por keywords, tratamos como cita (mantener flujo de citas)
+            if detectar_solicitud_cita_keywords(texto, config):
+                app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{texto}'")
+                info_cita = extraer_info_cita_mejorado(texto, numero, obtener_historial(numero, limite=5, config=config), config)
+                if info_cita and info_cita.get('servicio_solicitado'):
+                    datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                    if datos_completos:
+                        cita_id = guardar_cita(info_cita, config)
+                        if cita_id:
+                            enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                            guardar_conversacion(numero, texto, f"Cita/pedido guardado ID #{cita_id}", config)
+                            return 'OK', 200
+                    else:
+                        # Pedir datos faltantes al usuario (misma UX que antes)
+                        mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
+                        if 'fecha' in faltantes:
+                            mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
+                        if 'hora' in faltantes:
+                            mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
+                        if 'nombre' in faltantes:
+                            mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
+                        mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
+                        enviar_mensaje(numero, mensaje_faltantes, config)
+                        guardar_conversacion(numero, texto, mensaje_faltantes, config)
+                        return 'OK', 200
+
+            # Si NO es una solicitud de "cita" por keywords, tratar como pedido y continuar el flujo automático
+            else:
+                app.logger.info(f"📦 Pedido inteligente detectado para {numero} — entrando a manejar_pedido_automatico")
+                try:
+                    respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
+                    if respuesta:
+                        enviar_mensaje(numero, respuesta, config)
+                        guardar_conversacion(numero, texto, respuesta, config)
+                    return 'OK', 200
+                except Exception as e:
+                    app.logger.error(f"🔴 Error manejando pedido automático: {e}")
+                    # Fallback: no notificar administradores aquí; dejar que el flujo normal continúe
+                    return 'OK', 200
+        # --- fin reemplazo ---
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             historial = obtener_historial(numero, limite=5, config=config)
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
+            # Generar un resumen legible para los administradores
+            resumen = resumen_rafa(numero, config) if hasattr(globals().get('resumen_rafa'), '__call__') else None
+
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                enviar_alerta_intervencion_humana(info_intervencion, config)
+                # Llamada correcta: (numero_cliente, mensaje_clave, resumen, config)
+                enviar_alerta_humana(numero, texto, resumen, config)
                 respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
                 respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
