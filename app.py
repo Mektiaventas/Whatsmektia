@@ -4812,10 +4812,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     text_lower = (mensaje_usuario or "").lower()
         # --- Interceptor: responder directamente consultas de contacto del negocio ---
     transfer_keywords = [
-        'transferencia', 'datos para transferencia', 'datos de transferencia', 'clabe',
-        'clabe interbancaria', 'cuenta', 'numero de cuenta', 'número de cuenta',
+        'datos para transferencia', 'datos de transferencia',
+        'clabe interbancaria', 'datos de cuenta', 'numero de cuenta', 'número de cuenta',
         'datos bancarios', 'pago por transferencia', 'pagar por transferencia',
-        'deposito', 'depósito', 'hacer transferencia'
+        'datos para deposito', 'quiero hacer un depósito', 'hacer transferencia'
     ]
     if any(k in text_lower for k in transfer_keywords):
         transfer_block = negocio_transfer_block(cfg.get('negocio', {}))
@@ -4835,7 +4835,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         return negocio_block
     advisor_keywords = [
         'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
-        'pásame un asesor', 'pasame un asesor', 'quiero un asesor', 'asesor',
+        'pásame un asesor', 'pasame un asesor', 'quiero un asesor',
         'conectar con asesor', 'contacto de asesor'
     ]
     if any(k in text_lower for k in advisor_keywords):
