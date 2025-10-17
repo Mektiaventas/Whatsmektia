@@ -7715,8 +7715,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
 
     # Palabras que claramente indican intención de agendar/ordenar/pedir
     cita_kw = [
-        'cita', 'agendar', 'reservar', 'reserva', 'horario', 'agenda', 'turno',
-        'pedido', 'ordenar', 'encargar', 'hacer un pedido', 'quiero pedir', 'comprar'
+        'cita', 'agendar', 'reservar', 'reserva', 'horario', 'agenda', 'turno', 'quiero comprar'
+        'pedido', 'ordenar', 'encargar', 'hacer un pedido', 'quiero pedir', 'comprar', 'adquirir'
     ]
     if any(k in texto for k in cita_kw):
         return True
