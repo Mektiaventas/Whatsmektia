@@ -7803,7 +7803,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     else:
         # Palabras clave para servicios digitales
         palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización','interesan','interesa'
+            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización','interesan','interesa','me interesan'
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
 
         ]
@@ -7815,7 +7815,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     
     # Detectar patrones específicos de solicitud
     patrones_solicitud = [
-        'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
+        'quiero un', 'deseo un', 'necesito un', 'me gustaría un','me interesan','interesa'
         'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
     ]
     
