@@ -3119,11 +3119,13 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
         
         # Determinar tipo de negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+        dominio_lower = (config.get('dominio') or '').lower()
+        es_ofitodo = 'ofitodo' in dominio_lower or 'ofitodo' in mensaje_lower
         
         # MEJORA: Ajustar prompt para mensajes de confirmación
         if es_confirmacion:
             prompt_cita = f"""
-            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios / OFITODO'}.
             Este parece ser un mensaje de CONFIRMACIÓN a una consulta previa sobre {es_porfirianna and 'un pedido' or 'una cita'}.
             
             HISTORIAL RECIENTE:
@@ -3147,7 +3149,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             """
         else:
             prompt_cita = f"""
-            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios digitales'}.
+            Eres un asistente para {es_porfirianna and 'La Porfirianna (restaurante)' or 'servicios / OFITODO'}.
             Extrae la información de la {es_porfirianna and 'orden/pedido' or 'cita/servicio'} solicitado basándote en este mensaje y el historial.
             
             MENSAJE ACTUAL: "{mensaje}"
@@ -3159,7 +3161,7 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             {servicios_texto}
             
             Devuelve un JSON con estos campos:
-            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible)
+            - servicio_solicitado (string: nombre del servicio que desea, debe coincidir con alguno disponible; si es genérico como 'mueble' devuelve null)
             - fecha_sugerida (string formato YYYY-MM-DD o null)
             - hora_sugerida (string formato HH:MM o null)
             - nombre_cliente (string o null)
@@ -3219,7 +3221,18 @@ def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
             # Añadir teléfono si no viene
             if not info_cita.get('telefono'):
                 info_cita['telefono'] = numero
-            
+
+            # POST-PROCESADO: si el servicio detectado es demasiado genérico (p.ej. 'mueble', 'mobiliario', 'mueble para oficina'),
+            # forzamos servicio_solicitado = None para que el bot pida especificar tipo de mueble.
+            servicio_detectado = (info_cita.get('servicio_solicitado') or '') or ''
+            if servicio_detectado:
+                s_low = servicio_detectado.lower()
+                generic_tokens = ['mueble', 'mobiliario', 'muebles', 'mueble para', 'muebles para', 'mobiliario para', 'mueble oficina', 'mueble para oficina']
+                if any(tok in s_low for tok in generic_tokens):
+                    app.logger.info("ℹ️ Servicio detectado genérico ('mueble' / 'mobiliario'), marcando como no especificado para pedir detalle al usuario.")
+                    info_cita['servicio_solicitado'] = None
+                    info_cita['servicio_generico'] = True
+
             app.logger.info(f"📅 Información de cita extraída: {json.dumps(info_cita)}")
             return info_cita
         else:
@@ -3740,22 +3753,39 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 os.makedirs(os.path.join(UPLOAD_FOLDER, 'logos'), exist_ok=True)
 
 def extraer_servicio_del_mensaje(mensaje, config=None):
-    """Extrae el servicio del mensaje usando keywords simples"""
+    """Extrae el servicio del mensaje usando keywords simples, con soporte para OFITODO (muebles)."""
     if config is None:
         config = obtener_configuracion_por_host()
     
+    if not mensaje:
+        return None
+
     mensaje_lower = mensaje.lower()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
+    dominio_lower = (config.get('dominio') or '').lower()
+    es_ofitodo = 'ofitodo' in dominio_lower or 'ofitodo' in mensaje_lower
+
     if es_porfirianna:
         # Palabras clave para La Porfirianna
         platillos = ['gordita', 'taco', 'quesadilla', 'sope', 'torta', 'comida', 'platillo']
         for platillo in platillos:
             if platillo in mensaje_lower:
-                return mensaje  # Devolver el mensaje completo como descripción
+                return mensaje.strip()  # Devolver el mensaje completo como descripción
         return None
     else:
-        # Palabras clave para Mektia
+        # Si es OFITODO o el mensaje menciona muebles, buscar tipos de mobiliario
+        muebles = ['silla', 'sillas', 'mesa', 'mesas', 'banca', 'bancas', 'escritorio', 'escritorios',
+                   'archivo', 'estantería', 'estanterias', 'reclinable', 'operativa', 'ejecutiva', 'visita',
+                   'mueble', 'mobiliario', 'banqueta', 'banco', 'sofa', 'butaca']
+        for m in muebles:
+            if m in mensaje_lower:
+                # devolver la frase enfocada: si el usuario dice "quiero una silla ejecutiva" -> "silla ejecutiva"
+                # intentar extraer la subfrase que contiene la keyword y algunos adjetivos cercanos
+                match = re.search(r'([A-Za-záéíóúñÁÉÍÓÚÑ0-9\-\s]{0,40}\b' + re.escape(m) + r'\b[A-Za-záéíóúñÁÉÍÓÚÑ0-9\-\s]{0,40})', mensaje, flags=re.IGNORECASE)
+                if match:
+                    return match.group(1).strip()
+                return m
+        # Fallback: revisar servicios técnicos/otros (mektia)
         servicios = ['página web', 'sitio web', 'app', 'aplicación', 'software', 
                     'marketing', 'diseño', 'hosting', 'ecommerce', 'tienda online']
         for servicio in servicios:
@@ -5240,11 +5270,13 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
         config = obtener_configuracion_por_host()
     
     paso_actual = estado_actual.get('datos', {}).get('paso', 0)
-    datos_guardados = estado_actual.get('datos', {})
+    datos_guardados = estado_actual.get('datos', {}) or {}
     
     # Determinar tipo de negocio
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
+    dominio_lower = (config.get('dominio') or '').lower()
+    es_ofitodo = 'ofitodo' in dominio_lower
+
     app.logger.info(f"🔄 Procesando paso {paso_actual} para {numero}: '{mensaje}'")
     
     if paso_actual == 0:  # Inicio - Detectar si es solicitud de cita/pedido
@@ -5252,10 +5284,21 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             datos_guardados['paso'] = 1
             actualizar_estado_conversacion(numero, "SOLICITANDO_CITA", "solicitar_servicio", datos_guardados, config)
             
+            # Si es La Porfirianna
             if es_porfirianna:
                 return "¡Hola! 👋 Veo que quieres hacer un pedido. ¿Qué platillos te gustaría ordenar?"
-            else:
-                return "¡Hola! 👋 Veo que quieres agendar una cita. ¿Qué servicio necesitas?"
+            
+            # Si es Ofitodo (mobiliario), pedir que especifique tipo de mueble
+            if es_ofitodo:
+                return ("¡Perfecto! 👋 Veo que buscas mobiliario para oficina. "
+                        "¿Podrías especificar qué tipo de mueble necesitas? Por ejemplo: "
+                        "- 'Silla ejecutiva', 'Silla operativa', 'Silla de visita'\n"
+                        "- 'Escritorio' / 'Mesa de trabajo'\n"
+                        "- 'Banca' / 'Bancos' / 'Estantería'\n\n"
+                        "Indica también si tienes alguna preferencia (color, material, medidas).")
+            
+            # Por defecto para otros tenants
+            return "¡Hola! 👋 Veo que quieres agendar una cita. ¿Qué servicio necesitas?"
         else:
             # No es una solicitud de cita, dejar que la IA normal responda
             return None
@@ -5270,13 +5313,18 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
             if es_porfirianna:
                 return f"¡Perfecto! ¿Para cuándo quieres tu pedido de {servicio}? (puedes decir 'hoy', 'mañana' o una fecha específica)"
             else:
-                return f"¡Excelente! ¿Qué fecha te viene bien para la cita de {servicio}? (puedes decir 'mañana', 'próximo lunes', etc.)"
+                # Si cliente ya especificó un tipo de mueble/servicio, pedir fecha
+                return f"¡Excelente! ¿Qué fecha te viene bien para la cita/visita relacionada con {servicio}? (puedes decir 'mañana', 'próximo lunes', etc.)"
         else:
             if es_porfirianna:
                 return "No entendí qué platillo quieres ordenar. ¿Podrías ser más específico? Por ejemplo: 'Quiero 2 gorditas de chicharrón'"
+            if es_ofitodo:
+                return ("No entendí qué tipo de mueble necesitas. Por favor escribe el tipo de mueble concretamente, "
+                        "por ejemplo: 'Silla ejecutiva negra', 'Escritorio 120x60 metálico', 'Banco para comedor industrial'.")
             else:
                 return "No entendí qué servicio necesitas. ¿Podrías ser más específico? Por ejemplo: 'Necesito una página web'"
-    
+
+    # (resto de pasos permanece igual que antes...)
     elif paso_actual == 2:  # Paso 2: Fecha
         fecha = extraer_fecha_del_mensaje(mensaje)
         if fecha:
@@ -5319,8 +5367,8 @@ def manejar_secuencia_cita(mensaje, numero, estado_actual, config=None):
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
                 confirmacion += "¿Todo correcto? Responde 'sí' para confirmar o 'no' para modificar."
             else:
-                confirmacion = f"📋 *Resumen de tu cita:*\n\n"
-                confirmacion += f"🛠️ *Servicio:* {datos_guardados['servicio']}\n"
+                confirmacion = f"📋 *Resumen de tu cita/pedido:*\n\n"
+                confirmacion += f"🛠️ *Servicio / Producto:* {datos_guardados['servicio']}\n"
                 confirmacion += f"📅 *Fecha:* {datos_guardados['fecha']}\n"
                 confirmacion += f"⏰ *Hora:* {datos_guardados.get('hora', 'Por confirmar')}\n"
                 confirmacion += f"👤 *Nombre:* {nombre}\n\n"
