@@ -7586,7 +7586,7 @@ def format_asesores_block(cfg):
 
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección robusta y determinista de solicitud de cita/pedido.
+    Detección robusta y determinista de solicitud de cita/pedido/comprar.
     - Evita interpretar frases de exploración (ej. "quiero ver productos") como pedido/cita.
     - Usa heurísticas primero; sólo recurre a la IA en caso de ambigüedad y exige una respuesta boolean.
     """
@@ -7627,7 +7627,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         client = OpenAI(api_key=OPENAI_API_KEY)
         prompt = (
             "Responde SOLO con TRUE o FALSE.\n\n"
-            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido?\n\n"
+            "¿El siguiente mensaje implica que el cliente desea agendar una cita o realizar un pedido o comprar algo?\n\n"
             f"Mensaje: \"{mensaje.strip()}\""
         )
         messages = [{"role": "user", "content": prompt}]
