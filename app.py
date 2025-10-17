@@ -6538,20 +6538,47 @@ def obtener_imagen_perfil_alternativo(numero, config=None):
         return None
     finally:
         conn.close()
-# ——— Envío WhatsApp y guardado de conversación ———
+
+def obtener_nombre_mostrado_por_numero(numero, config=None):
+    """
+    Retorna el nombre a mostrar para un número de contacto.
+    Prioriza alias, luego nombre, y si no hay ninguno devuelve el propio número.
+    """
+    if not numero:
+        return numero or ''
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT alias, nombre
+            FROM contactos
+            WHERE numero_telefono = %s
+            LIMIT 1
+        """, (numero,))
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        if row:
+            return (row.get('alias') or row.get('nombre') or numero)
+    except Exception as e:
+        app.logger.debug(f"⚠️ obtener_nombre_mostrado_por_numero error: {e}")
+    return numero
+
+# Patch: use nombre mostrado en notificaciones de pedido/cita
 def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=None):
     """
-    Envía notificación al administrador cuando se detecta un pedido o cita
+    Envía notificación al administrador cuando se detecta un pedido o cita.
+    Ahora muestra nombre del cliente (si está disponible) en lugar del número.
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Determinar si es un pedido o una cita según el negocio
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         tipo_solicitud = "pedido" if es_porfirianna else "cita"
         
-        # Crear tabla notificaciones_ia si no existe
         conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute('''
@@ -6566,7 +6593,6 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         ''')
         conn.commit()
         
-        # Extraer información útil del análisis
         if analisis_pedido:
             datos = analisis_pedido.get('datos_obtenidos', {})
             resumen = f"Detalles: "
@@ -6578,7 +6604,6 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         else:
             resumen = f"Mensaje original: {mensaje[:100]}"
         
-        # Guardar en base de datos
         cursor.execute('''
             INSERT INTO notificaciones_ia (numero, tipo, resumen)
             VALUES (%s, %s, %s)
@@ -6588,10 +6613,12 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         cursor.close()
         conn.close()
         
-        # Construir mensaje de notificación para el administrador
+        # use display name instead of raw number
+        cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config)
+        
         mensaje_alerta = f"""🔔 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}*
 
-👤 *Cliente:* {numero}
+👤 *Cliente:* {cliente_mostrado}
 ⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 💬 *Mensaje:* {mensaje[:150]}{'...' if len(mensaje) > 150 else ''}
 
@@ -6600,17 +6627,82 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
 🔄 *Estado:* Pendiente de atención
 🆔 *ID Notificación:* {notificacion_id}
 """
-        
-        # Enviar notificación a los números de alerta
         enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
         enviar_mensaje('5214493432744', mensaje_alerta, config)
         
-        app.logger.info(f"✅ Notificación de {tipo_solicitud} enviada para {numero}")
+        app.logger.info(f"✅ Notificación de {tipo_solicitud} enviada para {numero} (mostrar: {cliente_mostrado})")
         return True
         
     except Exception as e:
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
+
+# Patch: enviar_alerta_humana mostrar nombre cuando esté disponible
+def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
+    if config is None:
+        app.logger.error("🔴 Configuración no disponible para enviar alerta")
+        return
+    
+    try:
+        cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config)
+    except Exception:
+        cliente_mostrado = numero_cliente
+
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    mensaje += f"👤 *Cliente:* {cliente_mostrado}\n"
+    mensaje += f"📞 *Número:* {numero_cliente}\n"
+    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
+    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
+    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
+    mensaje += f"{contexto_consulta}\n\n"
+    mensaje += f"_________________________________________\n"
+    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    
+    enviar_mensaje(ALERT_NUMBER, mensaje, config)
+    enviar_mensaje('5214493432744', mensaje, config)
+    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} (mostrar: {cliente_mostrado}) desde {config.get('dominio')}")
+
+# Patch: resumen_rafa usar nombre mostrado
+def resumen_rafa(numero, config=None):
+    """Resumen más completo y eficiente (muestra nombre si existe)"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute(
+            "SELECT mensaje, respuesta, timestamp FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 8;",
+            (numero,)
+        )
+        historial = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        
+        cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config)
+        
+        resumen = "🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+        resumen += f"📞 *Cliente:* {cliente_mostrado}\n"
+        resumen += f"🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        resumen += "📋 *Últimas interacciones:*\n"
+        
+        for i, msg in enumerate(historial):
+            hora = msg['timestamp'].strftime('%H:%M') if msg.get('timestamp') else 'N/A'
+            resumen += f"\n{i+1}. [{hora}] 👤: {msg['mensaje'][:80] if msg['mensaje'] else '[Sin mensaje]'}"
+            if msg['respuesta']:
+                resumen += f"\n   🤖: {msg['respuesta'][:80]}"
+        
+        return resumen
+        
+    except Exception as e:
+        app.logger.error(f"Error generando resumen: {e}")
+        return f"Error generando resumen para {numero}"
+
 # REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
@@ -6965,39 +7057,6 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     
     return False
          
-def resumen_rafa(numero, config=None):
-    """Resumen más completo y eficiente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        cursor.execute(
-            "SELECT mensaje, respuesta, timestamp FROM conversaciones WHERE numero=%s ORDER BY timestamp DESC LIMIT 8;",
-            (numero,)
-        )
-        historial = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        resumen = "🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-        resumen += f"📞 *Cliente:* {numero}\n"
-        resumen += f"🕒 *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
-        resumen += "📋 *Últimas interacciones:*\n"
-        
-        for i, msg in enumerate(historial):
-            hora = msg['timestamp'].strftime('%H:%M') if msg.get('timestamp') else 'N/A'
-            resumen += f"\n{i+1}. [{hora}] 👤: {msg['mensaje'][:80] if msg['mensaje'] else '[Sin mensaje]'}"
-            if msg['respuesta']:
-                resumen += f"\n   🤖: {msg['respuesta'][:80]}"
-        
-        return resumen
-        
-    except Exception as e:
-        app.logger.error(f"Error generando resumen: {e}")
-        return f"Error generando resumen para {numero}"
-
 def es_mensaje_repetido(numero, mensaje_actual, config=None):
     """Verifica si el mensaje actual es muy similar al anterior"""
     if config is None:
