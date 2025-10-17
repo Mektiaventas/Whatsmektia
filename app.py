@@ -4687,6 +4687,49 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
 
+def obtener_producto_por_sku_o_nombre(query, config=None):
+    """
+    Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
+    Retorna la fila completa (dict) o None.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        q = (query or '').strip()
+        if not q:
+            cursor.close(); conn.close()
+            return None
+
+        # Intentos: SKU exacto -> modelo exacto -> servicio LIKE -> modelo LIKE -> sku LIKE
+        # Normalizar posibles formatos
+        candidates = [
+            ("SELECT * FROM precios WHERE sku = %s LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(modelo) = LOWER(%s) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(servicio) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(modelo) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+            ("SELECT * FROM precios WHERE LOWER(sku) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
+        ]
+
+        for sql, params in candidates:
+            try:
+                cursor.execute(sql, params)
+                row = cursor.fetchone()
+                if row:
+                    cursor.close(); conn.close()
+                    return row
+            except Exception:
+                # ignora errores en cada intento y sigue con el siguiente
+                continue
+
+        cursor.close(); conn.close()
+        return None
+    except Exception as e:
+        app.logger.error(f"🔴 obtener_producto_por_sku_o_nombre error: {e}")
+        return None
+
 def obtener_precio_por_id(pid, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5875,8 +5918,62 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
             IA_ESTADOS[numero] = {'activa': True, 'prefiere_voz': False}
         elif 'prefiere_voz' not in IA_ESTADOS[numero]:
             IA_ESTADOS[numero]['prefiere_voz'] = False
+
         respuesta = ""
         responder_con_voz = False
+        # Normalizar texto
+        texto = (texto or "").strip()
+        text_lower = texto.lower() if texto else ""
+        # Detectar petición explícita de catálogo/producto (keywords)
+        product_info_keywords = [
+            'precio', 'descripcion', 'detalles', 'detalle', 'información del producto',
+            'informacion del producto', 'habla del producto', 'habla de', 'qué es', 'qué cuesta',
+            'qué precio', 'dime sobre', 'dime el precio', 'más info de', 'más información de',
+            'ver producto', 'muestrame el producto', 'muéstrame el producto', 'muestra el producto'
+        ]
+         # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
+        try:
+            if any(k in text_lower for k in product_info_keywords):
+                # Obtener lista de precios rápida
+                precios = obtener_todos_los_precios(config) or []
+
+                # Primero intentar detectar SKU/modelo en el propio mensaje
+                sku_detected = buscar_sku_en_texto(texto, precios)
+                producto = None
+                if sku_detected:
+                    producto = obtener_producto_por_sku_o_nombre(sku_detected, config)
+
+                # Si no encontramos por SKU, intentar buscar por nombre completo o fragmento
+                if not producto:
+                    # intentar búsqueda directa con la frase completa (el helper hará LIKE)
+                    producto = obtener_producto_por_sku_o_nombre(texto, config)
+
+                if producto:
+                    # Preferir campo descripcion; si no existe, usar modelo/servicio
+                    descripcion = producto.get('descripcion') or producto.get('modelo') or producto.get('servicio') or ''
+                    nombre_prod = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or 'Producto').strip()
+                    if descripcion and descripcion.strip():
+                        respuesta_text = f"🔎 Información de {nombre_prod}:\n\n{descripcion.strip()}"
+                        enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto, respuesta_text, config)
+                        app.logger.info(f"✅ Descripción enviada automáticamente para {nombre_prod} a {numero}")
+                        return
+                    else:
+                        # Producto existe pero sin descripción -> pedir confirmación si quiere que la IA la agregue
+                        pregunta = (f"He encontrado el producto *{nombre_prod}* pero no tiene descripción en la base de datos.\n"
+                                    "¿Quieres que te la describa igualmente (basándome en los datos disponibles)? Responde 'sí' para que la IA cree una descripción, o indica otro producto.")
+                        enviar_mensaje(numero, pregunta, config)
+                        guardar_conversacion(numero, texto, pregunta, config)
+                        return
+                else:
+                    # No encontramos el producto -> preguntar cuál producto (solo llenar si el usuario responde con un nombre/SKU específico)
+                    pregunta = "¿Cuál producto te interesa exactamente? Indica el nombre o SKU para que lo busque en nuestro catálogo."
+                    enviar_mensaje(numero, pregunta, config)
+                    guardar_conversacion(numero, texto, pregunta, config)
+                    return
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error en chequeo rápido de producto: {e}")
+
         if IA_ESTADOS[numero]['activa']:
             # 🆕 DETECTAR PREFERENCIA DE VOZ
             if "envíame audio" in (texto or "").lower() or "respuesta en audio" in (texto or "").lower():
