@@ -2702,9 +2702,37 @@ def negocio_contact_block(negocio):
         f"• Dirección: {direccion_display}\n"
         f"• Teléfono: {telefono_display}\n"
         f"• Correo: {correo_display}\n\n"
-        "Visitanos pronto!"
+        "Visitanos pronto!\n\n"
+        "Si necesitas otra cosa, dime."
     )
     return block
+
+def negocio_transfer_block(negocio):
+    """
+    Devuelve un bloque con los datos para transferencia (número/CLABE, nombre y banco)
+    sacados directamente de la configuración 'negocio'.
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    numero = (negocio.get('transferencia_numero') or '').strip()
+    nombre = (negocio.get('transferencia_nombre') or '').strip()
+    banco = (negocio.get('transferencia_banco') or '').strip()
+
+    if not (numero or nombre or banco):
+        return "Lo siento, no hay datos de transferencia configurados."
+
+    # Presentación clara y breve
+    parts = ["Datos para transferencia:"]
+    if numero:
+        parts.append(f"• Número / CLABE: {numero}")
+    if nombre:
+        parts.append(f"• Nombre: {nombre}")
+    if banco:
+        parts.append(f"• Banco: {banco}")
+    parts.append("\nSi quieres que te los reenvíe en otro formato, indícalo (ej. enviar PDF o confirmar).")
+
+    return "\n".join(parts)
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -4547,6 +4575,12 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
     if 'calendar_email' not in existing_cols:
         alter_statements.append("ADD COLUMN calendar_email VARCHAR(255) DEFAULT NULL")
+    if 'transferencia_numero' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_numero VARCHAR(100) DEFAULT NULL")
+    if 'transferencia_nombre' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_nombre VARCHAR(200) DEFAULT NULL")
+    if 'transferencia_banco' not in existing_cols:
+        alter_statements.append("ADD COLUMN transferencia_banco VARCHAR(100) DEFAULT NULL")
     if 'asesor1_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor1_telefono' not in existing_cols:
@@ -4564,14 +4598,12 @@ def save_config(cfg_all, config=None):
             cursor.execute(sql)
             conn.commit()
             app.logger.info(f"🔧 configuracion table altered: {alter_statements}")
-            # refresh existing_cols
             cursor.execute("SHOW COLUMNS FROM configuracion")
             existing_cols = {row[0] for row in cursor.fetchall()}
         except Exception as e:
             app.logger.warning(f"⚠️ Could not alter configuracion table: {e}")
 
     try:
-        # Mapear posibles campos a valores desde cfg_all
         candidate_map = {
             'ia_nombre': neg.get('ia_nombre'),
             'negocio_nombre': neg.get('negocio_nombre'),
@@ -4592,12 +4624,14 @@ def save_config(cfg_all, config=None):
             'app_nombre': neg.get('ia_nombre', None),
             'nombre_empresa': neg.get('nombre_empresa', None),
             'calendar_email': neg.get('calendar_email', None),
+            'transferencia_numero': neg.get('transferencia_numero', None),
+            'transferencia_nombre': neg.get('transferencia_nombre', None),
+            'transferencia_banco': neg.get('transferencia_banco', None),
             # legacy asesor fields (if provided in ases map)
             'asesor1_nombre': ases.get('asesor1_nombre', None),
             'asesor1_telefono': ases.get('asesor1_telefono', None),
             'asesor2_nombre': ases.get('asesor2_nombre', None),
             'asesor2_telefono': ases.get('asesor2_telefono', None),
-            # new JSON column: accept either a JSON string or a Python list/dict
             'asesores_json': None
         }
 
@@ -4781,6 +4815,29 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     info_cita = None  # Initialize to avoid UnboundLocalError
     # Interceptar petición explícita de asesor (antes de llamar a la IA)
     text_lower = (mensaje_usuario or "").lower()
+        # --- Interceptor: responder directamente consultas de contacto del negocio ---
+    transfer_keywords = [
+        'transferencia', 'datos para transferencia', 'datos de transferencia', 'clabe',
+        'clabe interbancaria', 'cuenta', 'numero de cuenta', 'número de cuenta',
+        'datos bancarios', 'pago por transferencia', 'pagar por transferencia',
+        'deposito', 'depósito', 'hacer transferencia'
+    ]
+    if any(k in text_lower for k in transfer_keywords):
+        transfer_block = negocio_transfer_block(cfg.get('negocio', {}))
+        app.logger.info(f"ℹ️ Respuesta de transferencia servida desde DB para {numero}")
+        return transfer_block
+
+    contact_queries = [
+        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
+        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
+        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
+        'información de contacto', 'contacto', 'ubicacion', 'ubican'
+    ]
+    if any(k in text_lower for k in contact_queries):
+        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
+        # Responder inmediatamente desde el servidor (no IA)
+        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
+        return negocio_block
     advisor_keywords = [
         'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
         'pásame un asesor', 'pasame un asesor', 'quiero un asesor', 'asesor',
