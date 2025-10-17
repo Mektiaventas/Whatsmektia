@@ -8814,6 +8814,17 @@ def configuracion_tab(tab):
     cfg = load_config(config)
     asesores_list = cfg.get('asesores_list', []) or []
 
+    # Determine advisor limit (asesor_count) up-front so it's available for trimming logic below
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count inicial: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+
     # If DB still contains more advisors than the allowed plan limit, trim them now.
     try:
         if isinstance(asesores_list, list) and len(asesores_list) > asesor_count:
@@ -8825,33 +8836,23 @@ def configuracion_tab(tab):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
 
-    # Prefer plan-specific limit when user is authenticated; fallback to global max
-    au = session.get('auth_user') or {}
-    try:
-        if au and au.get('user'):
-            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
-        else:
-            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
-        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-
-        if request.method == 'POST':
-            if tab == 'negocio':
-                cfg['negocio'] = {
-                    'ia_nombre':      request.form.get('ia_nombre'),
-                    'negocio_nombre': request.form.get('negocio_nombre'),
-                    'descripcion':    request.form.get('descripcion'),
-                    'url':            request.form.get('url'),
-                    'direccion':      request.form.get('direccion'),
-                    'telefono':       request.form.get('telefono'),
-                    'correo':         request.form.get('correo'),
-                    'que_hace':       request.form.get('que_hace'),
-                    'calendar_email': request.form.get('calendar_email'),
-                    'transferencia_numero': request.form.get('transferencia_numero'),
-                    'transferencia_nombre': request.form.get('transferencia_nombre'),
-                    'transferencia_banco': request.form.get('transferencia_banco')
-                }
+    # Handle incoming form submissions
+    if request.method == 'POST':
+        if tab == 'negocio':
+            cfg['negocio'] = {
+                'ia_nombre':      request.form.get('ia_nombre'),
+                'negocio_nombre': request.form.get('negocio_nombre'),
+                'descripcion':    request.form.get('descripcion'),
+                'url':            request.form.get('url'),
+                'direccion':      request.form.get('direccion'),
+                'telefono':       request.form.get('telefono'),
+                'correo':         request.form.get('correo'),
+                'que_hace':       request.form.get('que_hace'),
+                'calendar_email': request.form.get('calendar_email'),
+                'transferencia_numero': request.form.get('transferencia_numero'),
+                'transferencia_nombre': request.form.get('transferencia_nombre'),
+                'transferencia_banco': request.form.get('transferencia_banco')
+            }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
