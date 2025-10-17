@@ -3657,7 +3657,6 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
         """
         
         enviar_mensaje(numero, mensaje_confirmacion, config)
-
         app.logger.info(f"✅ Confirmación de {tipo_solicitud} enviada a {numero}, ID: {cita_id}")
         
     except Exception as e:
@@ -4859,6 +4858,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             if datos_completos:
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
+                    enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
@@ -7611,83 +7611,27 @@ def webhook():
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return 'OK', 200
                 
-        # --- Reemplazo: Manejo unificado para el fallback de detección de pedido/cita ---
+        # Fallback a la detección básica para compatibilidad
         analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
         if analisis_pedido and analisis_pedido.get('es_pedido'):
-            # Si además parece una solicitud de cita por keywords, tratamos como cita (mantener flujo de citas)
-            if detectar_solicitud_cita_keywords(texto, config):
-                app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{texto}'")
-                info_cita = extraer_info_cita_mejorado(texto, numero, obtener_historial(numero, limite=5, config=config), config)
-                if info_cita and info_cita.get('servicio_solicitado'):
-                    datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                    if datos_completos:
-                        cita_id = guardar_cita(info_cita, config)
-                        if cita_id:
-                            enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                            guardar_conversacion(numero, texto, f"Cita/pedido guardado ID #{cita_id}", config)
-                            return 'OK', 200
-                    else:
-                        # Pedir datos faltantes al usuario (misma UX que antes)
-                        mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                        if 'fecha' in faltantes:
-                            mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
-                        if 'hora' in faltantes:
-                            mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
-                        if 'nombre' in faltantes:
-                            mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                        mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
-                        enviar_mensaje(numero, mensaje_faltantes, config)
-                         # Además notificar a un asesor de ventas (round-robin) con contexto
-                        try:
-                            asesor = obtener_siguiente_asesor(config)
-                            if asesor and asesor.get('telefono'):
-                                asesor_tel = asesor.get('telefono')
-                                asesor_nombre = asesor.get('nombre') or 'Asesor'
-                                cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config)
-                                mensaje_para_asesor = (
-                                    f"📣 *Nuevo prospecto / Solicitud de cita*\n\n"
-                                    f"👤 Cliente: {cliente_mostrado}\n"
-                                    f"📞 Teléfono: {numero}\n\n"
-                                    f"💬 Mensaje recibido:\n{texto[:400]}\n\n"
-                                    f"📝 Mensaje enviado al cliente pidiendo datos:\n{mensaje_faltantes[:800]}"
-                                )
-                                enviar_mensaje(asesor_tel, mensaje_para_asesor, config)
-                                app.logger.info(f"✅ Notificación enviada al asesor {asesor_nombre} ({asesor_tel}) para cliente {numero}")
-                        except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo notificar al asesor: {e}")
-
-                        guardar_conversacion(numero, texto, mensaje_faltantes, config)
-                        return 'OK', 200
-                        guardar_conversacion(numero, texto, mensaje_faltantes, config)
-                        return 'OK', 200
-
-            # Si NO es una solicitud de "cita" por keywords, tratar como pedido y continuar el flujo automático
-            else:
-                app.logger.info(f"📦 Pedido inteligente detectado para {numero} — entrando a manejar_pedido_automatico")
-                try:
-                    respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-                    if respuesta:
-                        enviar_mensaje(numero, respuesta, config)
-                        guardar_conversacion(numero, texto, respuesta, config)
-                    return 'OK', 200
-                except Exception as e:
-                    app.logger.error(f"🔴 Error manejando pedido automático: {e}")
-                    # Fallback: no notificar administradores aquí; dejar que el flujo normal continúe
-                    return 'OK', 200
-        # --- fin reemplazo ---
+            app.logger.info(f"📦 Pedido inteligente detectado para {numero}")
+            # Enviar notificación al administrador
+            enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
+            # Manejar el pedido automáticamente
+            respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
+            # Enviar respuesta y guardar conversación
+            enviar_mensaje(numero, respuesta, config)
+            guardar_conversacion(numero, texto, respuesta, config)
+            return 'OK', 200
+            # Continuar con el procesamiento normal
         # 2. DETECTAR INTERVENCIÓN HUMANA
         if detectar_intervencion_humana_ia(texto, numero, config):
             app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
             historial = obtener_historial(numero, limite=5, config=config)
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            # Generar un resumen legible para los administradores
-            resumen = resumen_rafa(numero, config) if hasattr(globals().get('resumen_rafa'), '__call__') else None
-
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                # Llamada correcta: (numero_cliente, mensaje_clave, resumen, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
+                enviar_alerta_intervencion_humana(info_intervencion, config)
                 respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
                 respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
@@ -7834,82 +7778,55 @@ def format_asesores_block(cfg):
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección mejorada por palabras clave de solicitud de cita/pedido.
-
-    Cambios principales:
-    - Requiere que además de palabras clave de solicitud exista una mención
-      explícita a un producto/servicio (SKU, modelo, servicio, categoría, línea)
-      o a alguna palabra de `servicios_clave` en el mensaje para considerarlo
-      una solicitud de cita/pedido.
-    - Excepción: si el usuario usa palabras explícitas de agendamiento
-      ('cita', 'agendar', 'reservar', etc.), la detección ocurre aunque no
-      se mencione un producto/servicio.
+    Detección mejorada por palabras clave de solicitud de cita/pedido
     """
     if config is None:
         config = obtener_configuracion_por_host()
-
-    mensaje_lower = (mensaje or "").lower().strip()
+    
+    mensaje_lower = mensaje.lower().strip()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-
+    
     # Evitar detectar respuestas a preguntas como nuevas solicitudes
     if es_respuesta_a_pregunta(mensaje):
         return False
-
-    # Palabras clave base según tipo de negocio
+    
     if es_porfirianna:
+        # Palabras clave específicas para pedidos de comida
         palabras_clave = [
             'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
             'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
         ]
     else:
+        # Palabras clave para servicios digitales
         palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización', 'interesan', 'interesa'
+            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
             'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
-        ]
 
+        ]
+    
+    # Verificar si contiene palabras clave principales
+    contiene_palabras_clave = any(
+        palabra in mensaje_lower for palabra in palabras_clave
+    )
+    
+    # Detectar patrones específicos de solicitud
     patrones_solicitud = [
         'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
         'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
     ]
-
-    contiene_palabras_clave = any(p in mensaje_lower for p in palabras_clave)
-    contiene_patron = any(p in mensaje_lower for p in patrones_solicitud)
-
-    # Si no contiene ninguna palabra clave ni patrón, no es solicitud
-    if not (contiene_palabras_clave or contiene_patron):
-        return False
-
-    # Si el usuario usa palabras explícitas de agendamiento, aceptar directamente
-    explicit_schedule_words = ['cita', 'agendar', 'agéndame', 'agendarme', 'programar', 'reservar', 'reservación', 'reservar una']
-    if any(w in mensaje_lower for w in explicit_schedule_words):
-        app.logger.info(f"✅ Detección por palabra explícita de agendamiento: '{mensaje_lower}'")
-        return True
-
-    # Requisito adicional: debe mencionar un producto/servicio conocido o una keyword de servicios_clave
-    try:
-        # 1) Revisar catálogo (sku, modelo, servicio, categoria, linea)
-        precios = obtener_todos_los_precios(config) or []
-        for p in precios:
-            for field in ('sku', 'modelo', 'servicio', 'categoria', 'linea'):
-                val = p.get(field) if isinstance(p, dict) else None
-                if val:
-                    v = str(val).lower().strip()
-                    if v and v in mensaje_lower:
-                        app.logger.info(f"✅ Detección válida: mensaje menciona producto/servicio DB ({field}='{v}')")
-                        return True
-
-        # 2) Revisar lista estática de servicios clave (servicios_clave global)
-        for s in servicios_clave:
-            if s and s.lower() in mensaje_lower:
-                app.logger.info(f"✅ Detección válida: mensaje menciona servicio clave '{s}'")
-                return True
-
-    except Exception as e:
-        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords: fallo comprobando catálogo/servicios ({e})")
-
-    # Si llegamos aquí, tenía keywords pero no mencionó ningún producto/servicio -> NO detectar
-    app.logger.info(f"⚠️ Palabras clave encontradas pero NO se detectó producto/servicio en el mensaje: '{mensaje_lower}' -> No es solicitud")
-    return False
+    
+    contiene_patron = any(
+        patron in mensaje_lower for patron in patrones_solicitud
+    )
+    
+    # Es una solicitud si contiene palabras clave O patrones específicos
+    es_solicitud = contiene_palabras_clave or contiene_patron
+    
+    if es_solicitud:
+        tipo = "pedido" if es_porfirianna else "cita"
+        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
+    
+    return es_solicitud
 # ——— UI ———
 @app.route('/')
 def inicio():
@@ -8649,101 +8566,111 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
 
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo.
-    - Antes: si la forma de pago era 'tarjeta' ofrecía conectar con un asesor y guardaba solo provisional.
-    - Ahora: guarda la cita/pedido inmediatamente aunque la forma de pago sea tarjeta,
-      y solo ofrece (no fuerza) la opción de conectar con un asesor para procesar tarjeta.
-    - Devuelve el texto de confirmación para enviar al usuario.
+    """Confirma el pedido completo. 
+    - Si la forma de pago es tarjeta: NO guarda el pedido aún; ofrece conectar con asesor y guarda un pedido provisional en estado.
+    - Si es efectivo/transferencia: guarda inmediatamente y confirma.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Normalizar campos mínimos
-        platillos = datos_pedido.get('platillos', []) or []
-        cantidades = datos_pedido.get('cantidades', []) or []
-        especificaciones = datos_pedido.get('especificaciones', []) or []
-        nombre_cliente = datos_pedido.get('nombre_cliente') or datos_pedido.get('nombre') or 'Cliente'
-        direccion = datos_pedido.get('direccion') or datos_pedido.get('direccion_cliente') or 'Por confirmar'
+        # Crear resumen del pedido
+        platillos = datos_pedido.get('platillos', [])
+        cantidades = datos_pedido.get('cantidades', [])
+        especificaciones = datos_pedido.get('especificaciones', [])
+        nombre_cliente = datos_pedido.get('nombre_cliente') or 'Cliente'
+        direccion = datos_pedido.get('direccion') or 'Por confirmar'
 
         resumen_platillos = ""
         for i, platillo in enumerate(platillos):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
 
-        # Preparar estructura reutilizable para guardar como cita/pedido
+        # Preparar estructura de pedido (reutilizable para guardar o provisional)
         info_pedido = {
-            'servicio_solicitado': f"Pedido: {', '.join(platillos)}" if platillos else datos_pedido.get('servicio_solicitado', 'Pedido sin especificar'),
+            'servicio_solicitado': f"Pedido: {', '.join(platillos)}",
             'nombre_cliente': nombre_cliente,
             'telefono': numero,
             'estado': 'pendiente',
             'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
 
-        # Añadir datos de pago y detalles detectados si existen
+        # Añadir datos de pago al registro (si existen) para referencia
         if datos_pedido.get('forma_pago'):
             info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
-            info_pedido['notas'] += f"\nForma de pago: {datos_pedido.get('forma_pago')}"
-
-        for k in ('transferencia_numero', 'transferencia_nombre', 'transferencia_banco'):
-            if datos_pedido.get(k):
-                info_pedido['notas'] += f"\n{k}: {datos_pedido.get(k)}"
-
-        # Ensure date/time fields exist for guardar_cita expectations
-        fecha = datos_pedido.get('fecha_sugerida') or datos_pedido.get('fecha') or datetime.now().strftime('%Y-%m-%d')
-        hora = datos_pedido.get('hora_sugerida') or datos_pedido.get('hora') or '12:00'
-        info_pedido['fecha_sugerida'] = fecha
-        info_pedido['hora_sugerida'] = hora
+        if datos_pedido.get('transferencia_numero'):
+            info_pedido['notas'] += f"\nTransferencia - CLABE/numero: {datos_pedido.get('transferencia_numero')}"
+        if datos_pedido.get('transferencia_nombre'):
+            info_pedido['notas'] += f"\nTitular: {datos_pedido.get('transferencia_nombre')}"
+        if datos_pedido.get('transferencia_banco'):
+            info_pedido['notas'] += f"\nBanco: {datos_pedido.get('transferencia_banco')}"
 
         forma = str(datos_pedido.get('forma_pago', '')).lower()
 
-        # Save the cita/pedido regardless of payment method — do NOT force routing to an advisor
-        cita_id = guardar_cita(info_pedido, config)
-        if not cita_id:
-            app.logger.error("🔴 confirmar_pedido_completo: fallo al guardar cita/pedido")
-            return "❌ Hubo un problema guardando tu pedido. Por favor intenta de nuevo o contacta al negocio."
+        # Caso: tarjeta -> no pedir tarjeta por chat. Ofrecer asesor y guardar en estado provisional.
+        if 'tarjeta' in forma:
+            # Guardar pedido provisional en estados_conversacion (no persistir aún en 'citas')
+            provisional = {
+                'pedido_provisional': info_pedido,
+                'timestamp': datetime.now().isoformat()
+            }
+            actualizar_estado_conversacion(numero, "OFRECIENDO_ASESOR", "ofrecer_asesor", provisional, config)
 
-        # Build follow-up instructions depending on payment method
-        if 'tarjeta' in forma or 'card' in forma:
-            instrucciones_pago = (
-                "💳 Hemos registrado tu pedido. Para procesar el pago con tarjeta, por seguridad no pedimos datos por WhatsApp.\n"
-                "¿Quieres que te conecte con un asesor para completar el pago de forma segura? Responde 'sí' para que te conecte, o 'no' si prefieres pagar en otro momento."
+            # Intentar obtener nombre de un asesor para la oferta (no incluir teléfonos)
+            cfg = load_config(config)
+            asesores = cfg.get('asesores_list') or []
+            asesor_name = asesores[0].get('nombre') if asesores and isinstance(asesores[0], dict) and asesores[0].get('nombre') else "nuestro asesor"
+
+            instrucciones = (
+                "Para procesar el pago con tarjeta, por seguridad no pedimos números por WhatsApp.\n\n"
+                f"Puedo conectarte con {asesor_name} para completar el pago de forma segura, o si prefieres que yo agende el pedido ahora mismo con los datos que ya tengo, responde 'no'.\n\n"
+                "Responde 'sí' para que te pase al asesor, o 'no' para que agende el pedido ahora."
             )
-            # Do not change conversation state to OFRECIENDO_ASESOR automatically — offer is optional
-            app.logger.info(f"ℹ️ Pedido guardado (tarjeta) ID: {cita_id} — se ofrece asesor opcionalmente")
-        elif 'transfer' in forma or 'transferencia' in forma:
-            instrucciones_pago = (
-                "💳 Hemos registrado tu pedido y la opción de pago es transferencia.\n"
-                "Por favor realiza la transferencia y envía el comprobante por este chat. Cuando lo validemos procederemos con tu pedido."
-            )
-            app.logger.info(f"✅ Pedido guardado (transferencia) ID: {cita_id}")
+
+            mensaje_oferta = f"""🎉 *¡Pedido listo para pagar!*
+
+📋 *Resumen de tu pedido:*
+{resumen_platillos}
+
+🏠 *Dirección:* {direccion}
+👤 *Nombre:* {nombre_cliente}
+
+{instrucciones}
+"""
+            return mensaje_oferta
+
+        # Caso: transferencia -> guardar y pedir comprobante (se guarda ahora)
+        if 'transfer' in forma or 'transferencia' in forma:
+            pedido_id = guardar_cita(info_pedido, config)
+            instrucciones_pago = ("💳 Forma de pago: Transferencia bancaria.\n"
+                                  "Por favor realiza la transferencia y envía el comprobante por este chat.\n"
+                                  "Cuando recibamos el comprobante procederemos a preparar tu pedido.")
         else:
-            instrucciones_pago = (
-                "💵 Hemos registrado tu pedido. Como elegiste pago en efectivo, lo pagarás al recibirlo.\n"
-                "Te avisaremos cuando esté en camino."
-            )
-            app.logger.info(f"✅ Pedido guardado (efectivo/otro) ID: {cita_id}")
+            # Efectivo u otros -> guardar y confirmar
+            pedido_id = guardar_cita(info_pedido, config)
+            instrucciones_pago = "💵 Forma de pago: Efectivo. Pagarás al recibir el pedido."
 
-        # Notify admins and confirm to user (guardar_cita ya envía notificaciones internas en su flujo)
-        confirmacion = f"""🎉 *Pedido registrado!* - ID: #{cita_id}
+        # Si llegamos aquí, ya guardamos el pedido
+        confirmacion = f"""🎉 *¡Pedido Confirmado!* - ID: #{pedido_id}
 
-📋 *Resumen del pedido:*
-{resumen_platillos or '- No se especificaron platillos -'}
+📋 *Resumen de tu pedido:*
+{resumen_platillos}
 
 🏠 *Dirección:* {direccion}
 👤 *Nombre:* {nombre_cliente}
 
 {instrucciones_pago}
 
-⏰ *Registrado:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+⏰ *Tiempo estimado:* 30-45 minutos
+Gracias por tu pedido. Te avisaremos cuando esté en camino.
 """
-        # Return the text to be sent to the user
+        # Limpiar estado relacionado si existía
+        actualizar_estado_conversacion(numero, "PEDIDO_COMPLETO", "pedido_confirmado", {}, config)
         return confirmacion
 
     except Exception as e:
-        app.logger.error(f"🔴 Error confirmando pedido completo: {e}")
-        app.logger.error(traceback.format_exc())
-        return "❌ Ocurrió un error al procesar tu pedido. Por favor inténtalo de nuevo."
+        app.logger.error(f"Error confirmando pedido: {e}")
+        return "¡Pedido recibido! Pero hubo un error al procesarlo. Por favor, contacta directamente al negocio."
 
 @app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 @login_required
@@ -8804,17 +8731,6 @@ def configuracion_tab(tab):
     cfg = load_config(config)
     asesores_list = cfg.get('asesores_list', []) or []
 
-    # Determine advisor limit (asesor_count) up-front so it's available for trimming logic below
-    au = session.get('auth_user') or {}
-    try:
-        if au and au.get('user'):
-            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
-        else:
-            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error determinando asesor_count inicial: {e}")
-        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-
     # If DB still contains more advisors than the allowed plan limit, trim them now.
     try:
         if isinstance(asesores_list, list) and len(asesores_list) > asesor_count:
@@ -8826,23 +8742,33 @@ def configuracion_tab(tab):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
 
-    # Handle incoming form submissions
-    if request.method == 'POST':
-        if tab == 'negocio':
-            cfg['negocio'] = {
-                'ia_nombre':      request.form.get('ia_nombre'),
-                'negocio_nombre': request.form.get('negocio_nombre'),
-                'descripcion':    request.form.get('descripcion'),
-                'url':            request.form.get('url'),
-                'direccion':      request.form.get('direccion'),
-                'telefono':       request.form.get('telefono'),
-                'correo':         request.form.get('correo'),
-                'que_hace':       request.form.get('que_hace'),
-                'calendar_email': request.form.get('calendar_email'),
-                'transferencia_numero': request.form.get('transferencia_numero'),
-                'transferencia_nombre': request.form.get('transferencia_nombre'),
-                'transferencia_banco': request.form.get('transferencia_banco')
-            }
+    # Prefer plan-specific limit when user is authenticated; fallback to global max
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+
+        if request.method == 'POST':
+            if tab == 'negocio':
+                cfg['negocio'] = {
+                    'ia_nombre':      request.form.get('ia_nombre'),
+                    'negocio_nombre': request.form.get('negocio_nombre'),
+                    'descripcion':    request.form.get('descripcion'),
+                    'url':            request.form.get('url'),
+                    'direccion':      request.form.get('direccion'),
+                    'telefono':       request.form.get('telefono'),
+                    'correo':         request.form.get('correo'),
+                    'que_hace':       request.form.get('que_hace'),
+                    'calendar_email': request.form.get('calendar_email'),
+                    'transferencia_numero': request.form.get('transferencia_numero'),
+                    'transferencia_nombre': request.form.get('transferencia_nombre'),
+                    'transferencia_banco': request.form.get('transferencia_banco')
+                }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
