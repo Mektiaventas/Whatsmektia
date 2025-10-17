@@ -6619,6 +6619,7 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         mensaje_alerta = f"""🔔 *NUEVA SOLICITUD DE {tipo_solicitud.upper()}*
 
 👤 *Cliente:* {cliente_mostrado}
+📞 *Número:* {numero}
 ⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 💬 *Mensaje:* {mensaje[:150]}{'...' if len(mensaje) > 150 else ''}
 
