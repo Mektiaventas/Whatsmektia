@@ -7607,7 +7607,8 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     esta dejando muy en claro que quiere agendar una cita o hacer un pedido. En caso de que el cliente de 
     a entender que quiere agendar una cita o hacer un pedido, no detectes como solicitud si el cliente 
     solo quiere informacion de los productos o verlos, responde SOLO "True" si detectas que el cliente quiere
-    hacer una cita, orden, compra, etc....
+    hacer una cita, orden, compra, etc...., devuelve "False" en caso contrario o si el cliente solo quiere ver los 
+    productos o saber de ellos.
     """
         
     # Configurar payload para GPT-4V
