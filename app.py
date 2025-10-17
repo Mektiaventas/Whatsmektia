@@ -3056,7 +3056,36 @@ def completar_autorizacion():
         app.logger.error(f"❌ Error en completar_autorizacion: {e}")
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
-         
+ 
+def user_explicitly_requested_asesor_in_last_messages(numero, config=None, lookback=3):
+    """
+    Retorna True solo si en los últimos `lookback` mensajes el usuario pidió explícitamente
+    hablar con un asesor (por palabras clave). Esto evita ofertas proactivas.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        historial = obtener_historial(numero, limite=lookback, config=config) or []
+        advisor_keywords = [
+            'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
+            'pásame un asesor', 'pasame un asesor', 'quiero un asesor',
+            'conectar con asesor', 'contacto de asesor', 'conectame con un asesor',
+            'conéctame con un asesor', 'conectar con un agente', 'llamar a un asesor',
+            'quiero que me contacte un asesor', 'ponme con un asesor'
+        ]
+        # revisar los mensajes del usuario (orden cronológico: historial ya lo provee así)
+        for entry in reversed(historial):  # revisar desde el más reciente
+            texto = (entry.get('mensaje') or '').lower()
+            if not texto:
+                continue
+            for kw in advisor_keywords:
+                if kw in texto:
+                    return True
+        return False
+    except Exception as e:
+        app.logger.warning(f"⚠️ user_explicitly_requested_asesor_in_last_messages error: {e}")
+        return False    
+
 def convertir_audio(audio_path):
     try:
         output_path = audio_path.replace('.ogg', '.mp3')
@@ -8569,18 +8598,13 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
     return "¿Necesitas agregar algo más a tu pedido?"
 
 
+app.py
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo.
-    Behavior changes:
-    - Always persist the cita/pedido si los datos son completos.
-    - Do NOT contactar ni intentar conectar a un asesor automáticamente.
-    - Si la forma de pago es tarjeta, guardamos la cita y ofrecemos conectar solo si el usuario lo pide explícitamente.
-    """
+    """Confirma el pedido completo sin ofrecer contactar a un asesor proactivamente."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Normalizar campos mínimos
         platillos = datos_pedido.get('platillos', []) or []
         cantidades = datos_pedido.get('cantidades', []) or []
         especificaciones = datos_pedido.get('especificaciones', []) or []
@@ -8592,7 +8616,6 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             cantidad = cantidades[i] if i < len(cantidades) else "1"
             resumen_platillos += f"- {cantidad} {platillo}\n"
 
-        # Preparar estructura reutilizable para guardar como cita/pedido
         info_pedido = {
             'servicio_solicitado': f"Pedido: {', '.join(platillos)}" if platillos else datos_pedido.get('servicio_solicitado', 'Pedido sin especificar'),
             'nombre_cliente': nombre_cliente,
@@ -8601,7 +8624,6 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
         }
 
-        # Añadir datos de pago y detalles detectados si existen
         if datos_pedido.get('forma_pago'):
             info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
             info_pedido['notas'] += f"\nForma de pago: {datos_pedido.get('forma_pago')}"
@@ -8610,13 +8632,11 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
             if datos_pedido.get(k):
                 info_pedido['notas'] += f"\n{k}: {datos_pedido.get(k)}"
 
-        # Ensure date/time fields exist for guardar_cita expectations
         fecha = datos_pedido.get('fecha_sugerida') or datos_pedido.get('fecha') or datetime.now().strftime('%Y-%m-%d')
         hora = datos_pedido.get('hora_sugerida') or datos_pedido.get('hora') or '12:00'
         info_pedido['fecha_sugerida'] = fecha
         info_pedido['hora_sugerida'] = hora
 
-        # Save the cita/pedido regardless of payment method — DO NOT force routing to an advisor automatically
         cita_id = guardar_cita(info_pedido, config)
         if not cita_id:
             app.logger.error("🔴 confirmar_pedido_completo: fallo al guardar cita/pedido")
@@ -8626,28 +8646,23 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
 
         forma = str(datos_pedido.get('forma_pago', '')).lower()
 
-        # Build follow-up instructions depending on payment method but do NOT auto-connect
+        # No se ofrecen contactos de asesores proactivamente aquí: solo se explica el siguiente paso de pago.
         if 'tarjeta' in forma or 'card' in forma:
             instrucciones_pago = (
                 "💳 Hemos registrado tu pedido. Por seguridad no pedimos datos de tarjeta por WhatsApp.\n"
-                "Si quieres que te conecte con un asesor para completar el pago con tarjeta, escríbenos claramente: 'quiero hablar con un asesor' o 'conectar con asesor'.\n"
-                "Si prefieres no conectar ahora, tu pedido ya está registrado y lo gestionaremos desde el negocio."
+                "Tu pedido quedó registrado y el negocio te contactará para gestionar el pago de forma segura."
             )
-            app.logger.info(f"ℹ️ Pedido guardado (tarjeta) ID: {cita_id} — oferta visible, no forzada")
         elif 'transfer' in forma or 'transferencia' in forma:
             instrucciones_pago = (
                 "💳 Hemos registrado tu pedido y la opción de pago es transferencia.\n"
                 "Por favor realiza la transferencia y envía el comprobante por este chat. Cuando lo validemos procederemos con tu pedido."
             )
-            app.logger.info(f"✅ Pedido guardado (transferencia) ID: {cita_id}")
         else:
             instrucciones_pago = (
                 "💵 Hemos registrado tu pedido. Como elegiste pago en efectivo, lo pagarás al recibirlo.\n"
                 "Te avisaremos cuando esté en camino."
             )
-            app.logger.info(f"✅ Pedido guardado (efectivo/otro) ID: {cita_id}")
 
-        # Confirmación al usuario
         confirmacion = f"""🎉 *Pedido registrado!* - ID: #{cita_id}
 
 📋 *Resumen del pedido:*
