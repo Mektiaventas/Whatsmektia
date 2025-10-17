@@ -3771,34 +3771,6 @@ def extraer_nombre_del_mensaje(mensaje):
         return mensaje.strip()
     
     return None
-
-def solicitar_datos_faltantes_cita(numero, info_cita, config=None):
-    """
-    Solicita al usuario los datos faltantes para completar la cita/pedido
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Determinar el tipo de negocio
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
-    # Identificar qué datos faltan
-    datos_faltantes = []
-    
-    # Validar servicio solicitado (siempre requerido)
-    if not info_cita.get('servicio_solicitado') or info_cita.get('servicio_solicitado') == 'null':
-        if es_porfirianna:
-            datos_faltantes.append("qué platillo deseas ordenar")
-        else:
-            datos_faltantes.append("qué servicio necesitas")
-    
-    # Validar fecha (solo requerido para Mektia)
-    if not es_porfirianna and (not info_cita.get('fecha_sugerida') or info_cita.get('fecha_sugerida') == 'null'):
-        datos_faltantes.append("fecha preferida")
-    
-    # Validar nombre del cliente (siempre requerido)
-    if not info_cita.get('nombre_cliente') or info_cita.get('nombre_cliente') == 'null':
-        datos_faltantes.append("tu nombre")
     
 @app.route('/configuracion/negocio/publicar-pdf', methods=['POST'])
 @login_required
