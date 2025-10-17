@@ -606,8 +606,8 @@ def guardar_configuracion_negocio():
     # Agregar logging para ver qué datos se reciben
     app.logger.info(f"📧 Formulario recibido: {request.form}")
     app.logger.info(f"📧 Calendar email recibido: {request.form.get('calendar_email')}")
-    
-    # Recopilar todos los datos del formulario
+
+    # Recopilar todos los datos del formulario (incluye datos de transferencia)
     datos = {
         'ia_nombre': request.form.get('ia_nombre'),
         'negocio_nombre': request.form.get('negocio_nombre'),
@@ -617,91 +617,83 @@ def guardar_configuracion_negocio():
         'telefono': request.form.get('telefono'),
         'correo': request.form.get('correo'),
         'que_hace': request.form.get('que_hace'),
-        'calendar_email': request.form.get('calendar_email')  # Nuevo campo para correo de notificaciones
+        'calendar_email': request.form.get('calendar_email'),
+        'transferencia_numero': request.form.get('transferencia_numero'),
+        'transferencia_nombre': request.form.get('transferencia_nombre'),
+        'transferencia_banco': request.form.get('transferencia_banco'),
     }
-    
-    # Manejar la subida del logo
+
+    # Manejar la subida del logo (sin cambios)
     if 'app_logo' in request.files and request.files['app_logo'].filename != '':
         logo = request.files['app_logo']
         filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
         upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
-        
-        # Asegúrate de que la carpeta existe
         os.makedirs(os.path.dirname(upload_path), exist_ok=True)
-        
-        # Guardar el archivo
         logo.save(upload_path)
-        
-        # Guardar la ruta en la BD
         datos['app_logo'] = f"/static/uploads/logos/{filename}"
     elif request.form.get('app_logo_actual'):
-        # Mantener el logo existente
         datos['app_logo'] = request.form.get('app_logo_actual')
-    
+
     # Guardar en la base de datos
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    
-    # Verificar si existe la columna calendar_email
+
+    # Verificar/crear columnas adicionales (calendar_email + transferencias)
     try:
-        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
-        calendar_email_existe = cursor.fetchone() is not None
-        
-        # Crear la columna si no existe
-        if not calendar_email_existe:
-            cursor.execute("ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)")
-        
+        for col, col_def in [
+            ('calendar_email', "VARCHAR(255)"),
+            ('transferencia_numero', "VARCHAR(100)"),
+            ('transferencia_nombre', "VARCHAR(200)"),
+            ('transferencia_banco', "VARCHAR(100)")
+        ]:
+            cursor.execute(f"SHOW COLUMNS FROM configuracion LIKE %s", (col,))
+            if cursor.fetchone() is None:
+                cursor.execute(f"ALTER TABLE configuracion ADD COLUMN {col} {col_def}")
         conn.commit()
     except Exception as e:
-        app.logger.error(f"Error verificando/creando columna calendar_email: {e}")
-    
+        app.logger.error(f"Error verificando/creando columnas extras en configuracion: {e}")
+
     # Verificar si existe una configuración
     cursor.execute("SELECT COUNT(*) FROM configuracion")
     count = cursor.fetchone()[0]
-    
+
     if count > 0:
-        # Actualizar configuración existente
+        # Actualizar configuración existente (robusto como antes)
         set_parts = []
         values = []
-        
         for key, value in datos.items():
-            if value is not None:  # Solo incluir campos con valores
+            if value is not None:
                 set_parts.append(f"{key} = %s")
                 values.append(value)
-        
-        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-        try:
-            cursor.execute(sql, values)
-        except Exception as e:
-            app.logger.error(f"Error al actualizar configuración: {e}")
-            # Filtrar columnas que causan problemas
-            if "Unknown column" in str(e):
-                # Obtener las columnas existentes
-                cursor.execute("SHOW COLUMNS FROM configuracion")
-                columnas_existentes = [col[0] for col in cursor.fetchall()]
-                
-                # Filtrar y volver a intentar
-                set_parts = []
-                values = []
-                for key, value in datos.items():
-                    if key in columnas_existentes and value is not None:
-                        set_parts.append(f"{key} = %s")
-                        values.append(value)
-                
-                if set_parts:
-                    sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-                    cursor.execute(sql, values)
+        if set_parts:
+            sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+            try:
+                cursor.execute(sql, values)
+            except Exception as e:
+                app.logger.error(f"Error al actualizar configuración: {e}")
+                if "Unknown column" in str(e):
+                    cursor.execute("SHOW COLUMNS FROM configuracion")
+                    columnas_existentes = [col[0] for col in cursor.fetchall()]
+                    set_parts = []
+                    values = []
+                    for key, value in datos.items():
+                        if key in columnas_existentes and value is not None:
+                            set_parts.append(f"{key} = %s")
+                            values.append(value)
+                    if set_parts:
+                        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+                        cursor.execute(sql, values)
     else:
         # Insertar nueva configuración
         fields = ', '.join(datos.keys())
         placeholders = ', '.join(['%s'] * len(datos))
         sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
         cursor.execute(sql, [1] + list(datos.values()))
-    
+
     conn.commit()
     cursor.close()
     conn.close()
-    
+
     flash("✅ Configuración guardada correctamente", "success")
     return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
 
@@ -4440,6 +4432,9 @@ def load_config(config=None):
             nombre_empresa VARCHAR(100),
             app_logo VARCHAR(255),
             calendar_email VARCHAR(255),
+            transferencia_numero VARCHAR(100),
+            transferencia_nombre VARCHAR(200),
+            transferencia_banco VARCHAR(100),
             -- Asesores de ventas (columnas antiguas para compatibilidad)
             asesor1_nombre VARCHAR(100),
             asesor1_telefono VARCHAR(50),
@@ -4469,7 +4464,10 @@ def load_config(config=None):
         'logo_url': row.get('logo_url', ''),
         'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
         'app_logo': row.get('app_logo', ''),
-        'calendar_email': row.get('calendar_email', '')
+        'calendar_email': row.get('calendar_email', ''),
+        'transferencia_numero': row.get('transferencia_numero', ''),
+        'transferencia_nombre': row.get('transferencia_nombre', ''),
+        'transferencia_banco': row.get('transferencia_banco', '')
     }
     personalizacion = {
         'tono': row.get('tono'),
@@ -4520,8 +4518,8 @@ def load_config(config=None):
         'negocio': negocio,
         'personalizacion': personalizacion,
         'restricciones': restricciones,
-        'asesores': asesores_map,
-        'asesores_list': asesores_list
+        'asesores': asesores_map if 'asesores_map' in locals() else {},
+        'asesores_list': asesores_list if 'asesores_list' in locals() else []
     }
 
 def save_config(cfg_all, config=None):
