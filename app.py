@@ -7739,11 +7739,11 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         # Aceptar variaciones claras
         if text_response.startswith('true') or text_response.startswith('t') or text_response.startswith('si') or text_response.startswith('sí'):
             return True
-        return False"""
-    except Exception as e:
+        return False
+        except Exception as e:
         app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords fallback IA falló: {e}")
         # En caso de error con la IA, no asumir cita
-        return False
+        return False"""
 
 # ——— UI ———
 @app.route('/')
