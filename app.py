@@ -6698,17 +6698,22 @@ def format_asesores_block(cfg):
 
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección mejorada por palabras clave de solicitud de cita/pedido
+    Detección mejorada por palabras clave de solicitud de cita/pedido.
+    Retorna un booleano (True si parece solicitud, False si no).
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    mensaje_lower = mensaje.lower().strip()
+    mensaje_lower = (mensaje or "").lower().strip()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
     # Evitar detectar respuestas a preguntas como nuevas solicitudes
-    if es_respuesta_a_pregunta(mensaje):
-        return False
+    try:
+        if es_respuesta_a_pregunta(mensaje):
+            return False
+    except Exception:
+        # si la función falla, continuar con la detección por IA
+        pass
     
     prompt = f"""
         Eres un asistente que solo puede contestar con un valor booleano True o False.
@@ -6728,20 +6733,38 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         "temperature": 0.3,
         "max_tokens": 1500
     }
-        
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
-    response.raise_for_status()
-        
-    data = response.json()
-    analisis = data['choices'][0]['message']['content'].strip()
-    # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = analisis
     
-    if es_solicitud:
-        tipo = "pedido" if es_porfirianna else "cita"
-        app.logger.info(f"✅ @@@@@ el valor que devolvio la IA es {es_solicitud}")
-        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
+    try:
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        analisis = str(data['choices'][0]['message']['content']).strip()
+    except Exception as e:
+        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords: error llamando a IA: {e}")
+        # Fallback simple por palabras clave si la IA falla
+        fallback_kw = ['cita', 'agendar', 'reservar', 'pedido', 'ordenar', 'quiero agendar', 'quiero pedir', 'orden']
+        return any(kw in mensaje_lower for kw in fallback_kw)
     
+    analisis_norm = analisis.lower().strip()
+    es_solicitud = False
+
+    # Interpretación directa de respuestas booleanas típicas
+    if analisis_norm in ('true', 'true.', 'yes', 'si', 'sí', 'y', 's', '1'):
+        es_solicitud = True
+    elif analisis_norm in ('false', 'false.', 'no', 'n', '0'):
+        es_solicitud = False
+    else:
+        # Buscar tokens explícitos dentro del texto de la IA
+        if re.search(r'\b(true|yes|si|sí|affirmative|afirmativo)\b', analisis_norm):
+            es_solicitud = True
+        elif re.search(r'\b(false|no|negativo|neg)\b', analisis_norm):
+            es_solicitud = False
+        else:
+            # Último recurso: heurística por palabras clave en el mensaje original
+            heuristics = ['cita', 'agendar', 'reservar', 'pedido', 'ordenar', 'quiero agendar', 'quiero pedir']
+            es_solicitud = any(k in mensaje_lower for k in heuristics)
+
+    app.logger.info(f"✅ detectar_solicitud_cita_keywords -> raw IA: '{analisis[:200]}' -> interpreted: {es_solicitud}")
     return es_solicitud
 
 def decidir_accion_por_mensaje(mensaje, numero, msg_obj=None, config=None):
