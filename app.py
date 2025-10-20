@@ -6040,6 +6040,8 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
+
+
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6694,7 +6696,6 @@ def format_asesores_block(cfg):
     except Exception:
         return ""
 
-# REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
     Detección mejorada por palabras clave de solicitud de cita/pedido
@@ -6709,44 +6710,104 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     if es_respuesta_a_pregunta(mensaje):
         return False
     
-    if es_porfirianna:
-        # Palabras clave específicas para pedidos de comida
-        palabras_clave = [
-            'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
-            'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
-        ]
-    else:
-        # Palabras clave para servicios digitales
-        palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización','interesan','interesa','me interesan'
-            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
-
-        ]
-    
-    # Verificar si contiene palabras clave principales
-    contiene_palabras_clave = any(
-        palabra in mensaje_lower for palabra in palabras_clave
-    )
-    
-    # Detectar patrones específicos de solicitud
-    patrones_solicitud = [
-        'quiero un', 'deseo un', 'necesito un', 'me gustaría un','me interesan','interesa'
-        'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
-    ]
-    
-    contiene_patron = any(
-        patron in mensaje_lower for patron in patrones_solicitud
-    )
-    
+    prompt = f"""
+        Si detectas dentro del siguiente mensaje {mensaje_lower} que el cliente pide adquirir
+        o comprar un producto devuelve True. Si pide agendar una cita o servicio, devuelve True.
+        Si no hay ninguna de estas intenciones, devuelve False.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1500
+    }
+        
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
+    response.raise_for_status()
+        
+    data = response.json()
+    analisis = data['choices'][0]['message']['content'].strip()
     # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = contiene_palabras_clave or contiene_patron
+    es_solicitud = analisis
     
     if es_solicitud:
         tipo = "pedido" if es_porfirianna else "cita"
         app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
     
     return es_solicitud
-# ——— UI ———
+
+def decidir_accion_por_mensaje(mensaje, numero, msg_obj=None, config=None):
+    """
+    Pipeline central de decisión para un mensaje entrante.
+    Retorna (accion, payload) donde accion es uno de:
+      - 'IGNORE'               -> no procesar (mensajes de sistema)
+      - 'GUARDAR_CITA'         -> payload = info_cita completa para guardar
+      - 'INICIAR_SECUENCIA_CITA' -> payload = {'info': info_parcial_or_None, 'faltantes': [...] or None}
+      - 'PEDIDO_INTELIGENTE'   -> payload = analisis de detectar_pedido_inteligente
+      - 'ALERTA_HUMANA'        -> payload = None (usar resumen/extraccion para notificar)
+      - 'REQUEST_ADVISOR'      -> payload = None (usuario pidió asesor explícito)
+      - 'NORMAL'               -> payload = None (seguir flujo normal)
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    texto = (mensaje or "").strip()
+    if not texto:
+        return 'NORMAL', None
+
+    # 0) Ignorar mensajes del propio canal de alertas con marcas del sistema
+    system_tags = ["🚨 ALERTA:", "📋 INFORMACIÓN COMPLETA", "👤 Cliente:"]
+    if numero == ALERT_NUMBER or any(tag in texto for tag in system_tags):
+        return 'IGNORE', None
+
+    # 1) Si el usuario pidió explícitamente hablar con asesor recientemente
+    try:
+        if user_explicitly_requested_asesor_in_last_messages(numero, config=config):
+            return 'REQUEST_ADVISOR', None
+    except Exception:
+        pass
+
+    # 2) Detección de necesidad de intervención humana (prioritaria)
+    try:
+        if detectar_intervencion_humana_ia(texto, numero, config):
+            return 'ALERTA_HUMANA', None
+    except Exception:
+        pass
+
+    # 3) Detección por keywords / flujo de cita/pedido
+    try:
+        if detectar_solicitud_cita_keywords(texto, config):
+            # Intentar extraer info con el analizador mejorado
+            historial = obtener_historial(numero, limite=5, config=config)
+            info_cita = extraer_info_cita_mejorado(texto, numero, historial, config)
+            if info_cita and info_cita.get('servicio_solicitado'):
+                completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                if completos:
+                    return 'GUARDAR_CITA', info_cita
+                else:
+                    return 'INICIAR_SECUENCIA_CITA', {'info': info_cita, 'faltantes': faltantes}
+            # No pudo extraer: iniciar secuencia guiada
+            return 'INICIAR_SECUENCIA_CITA', {'info': None, 'faltantes': None}
+    except Exception:
+        pass
+
+    # 4) Intento AI de detectar pedido inteligente (fallback)
+    try:
+        analisis = detectar_pedido_inteligente(texto, numero, config=config)
+        if analisis and analisis.get('es_pedido'):
+            return 'PEDIDO_INTELIGENTE', analisis
+    except Exception:
+        pass
+
+    # 5) Por defecto, normal
+    return 'NORMAL', None
+
 @app.route('/')
 def inicio():
     config = obtener_configuracion_por_host()
@@ -6910,9 +6971,6 @@ def diagnostico():
         
     except Exception as e:
         return jsonify({'error': str(e)})    
-
-# Modificar la función home para inyectar plan_info cuando el usuario está autenticado.
-# Reemplaza la parte final de home() donde haces render_template(...) por la versión que incluye plan_info.
 
 @app.route('/home')
 def home():
