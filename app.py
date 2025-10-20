@@ -7421,7 +7421,8 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
                 app.logger.info(f"🔔 Alerta administrativa enviada para pedido ID {cita_id}")
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo enviar alerta administrativa para cita_id={cita_id}: {e}")
-
+        else:
+            enviar_alerta_cita_administrador(info_pedido, cita_id, config)
         # Construir confirmación textual para el usuario
         confirmacion = f"""🎉 *Pedido registrado!* - ID: #{cita_id}
 
