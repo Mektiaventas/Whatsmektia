@@ -8225,26 +8225,73 @@ def actualizar_info_contacto(numero, config=None):
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
-        if config is None:
-            config = obtener_configuracion_por_host()
-    
-        historial = obtener_historial(numero, limite=5, config=config)
-        
-        # Si es primer mensaje, mantener en "Nuevos"
-        if len(historial) <= 1:
-            return 1  # Nuevos
-        
-        # Si hay intervención humana, mover a "Esperando Respuesta"
-        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
-            return 3  # Esperando Respuesta
-        
-        # Si tiene más de 2 mensajes, mover a "En Conversación"
-        if len(historial) >= 2:
-            return 2  # En Conversación
-        
-        # Si no cumple nada, mantener donde está
-        meta = obtener_chat_meta(numero)
-        return meta['columna_id'] if meta else 1
+    """
+    Decide la columna Kanban basándose en el estado real de la conversación en BD:
+    - Si hay mensajes de usuario sin respuesta -> 3 (Esperando Respuesta)
+    - Si no hay historial -> 1 (Nuevos)
+    - Si hay historial >= 2 -> 2 (En Conversación)
+    - Si la última entrada sugiere intervención humana -> 3 (Esperando Respuesta)
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # 1) Último mensaje (más reciente)
+        cursor.execute("""
+            SELECT mensaje, respuesta, timestamp
+            FROM conversaciones
+            WHERE numero = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (numero,))
+        last = cursor.fetchone()
+
+        # 2) Contar mensajes de usuario sin respuesta (pendientes)
+        cursor.execute("""
+            SELECT COUNT(*) AS sin_respuesta
+            FROM conversaciones
+            WHERE numero = %s
+              AND mensaje IS NOT NULL
+              AND (respuesta IS NULL OR respuesta = '')
+        """, (numero,))
+        row = cursor.fetchone()
+        sin_respuesta = int(row['sin_respuesta']) if row and row.get('sin_respuesta') is not None else 0
+
+        # 3) Total de mensajes para decidir primer/continuación
+        cursor.execute("SELECT COUNT(*) AS total FROM conversaciones WHERE numero = %s", (numero,))
+        total_row = cursor.fetchone()
+        total = int(total_row['total']) if total_row and total_row.get('total') is not None else 0
+
+        cursor.close()
+        conn.close()
+
+        # Prioridad 1: hay mensajes de usuario sin respuesta -> Esperando Respuesta
+        if sin_respuesta > 0:
+            app.logger.info(f"📊 Kanban decision: {numero} tiene {sin_respuesta} mensajes sin respuesta -> columna 3")
+            return 3
+
+        # Prioridad 2: si la última entrada sugiere intervención humana -> Esperando Respuesta
+        last_msg_text = (last.get('mensaje') or '') if last else ''
+        if last_msg_text and detectar_intervencion_humana_ia(last_msg_text, numero, config):
+            app.logger.info(f"🚨 Kanban decision: intervención humana detectada para {numero} -> columna 3")
+            return 3
+
+        # Prioridad 3: primer mensaje -> Nuevos
+        if total <= 1:
+            app.logger.info(f"🆕 Kanban decision: {numero} total mensajes={total} -> columna 1 (Nuevos)")
+            return 1
+
+        # Prioridad 4: conversación en curso -> En Conversación
+        app.logger.info(f"💬 Kanban decision: {numero} total mensajes={total} -> columna 2 (En Conversación)")
+        return 2
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error evaluando movimiento Kanban para {numero}: {e}")
+        # Fallback conservador: mantener en 'Nuevos' para evitar esconder conversaciones
+        return 1
 
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
