@@ -6713,7 +6713,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     prompt = f"""
         Si detectas dentro del siguiente mensaje {mensaje_lower} que el cliente pide adquirir
         o comprar un producto devuelve True. Si pide agendar una cita o servicio, devuelve True.
-        Si no hay ninguna de estas intenciones, devuelve False.
+        Si no hay ninguna de estas intenciones, o si el cliente solo quiere informacion devuelve False.
         """
         
     headers = {
