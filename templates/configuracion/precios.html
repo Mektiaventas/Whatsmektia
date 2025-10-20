@@ -379,22 +379,22 @@
 
 <!-- Sección: Lista Usuario -->
 <div class="section" id="user-list" style="display:none;">
+    <!-- Modal (floating) to list hidden columns and allow un-hiding -->
+    <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <strong>Columnas ocultas</strong>
+            <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
+        </div>
+        <div id="hidden-columns-list">
+            <!-- dynamically populated -->
+        </div>
+        <div style="margin-top:10px; text-align:right;">
+            <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
+        </div>
+    </div>
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
             <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
-        </div>
-        <!-- Modal (floating) to list hidden columns and allow un-hiding -->
-        <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <strong>Columnas ocultas</strong>
-                <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
-            </div>
-            <div id="hidden-columns-list">
-                <!-- dynamically populated -->
-            </div>
-            <div style="margin-top:10px; text-align:right;">
-                <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
-            </div>
         </div>
         <div class="card-body">
             {% if precios %}
@@ -448,11 +448,11 @@
                                 </th>
                                 <!--<th>Mayoreo</th>-->
                                 <!--<th>Status</th>
-                            <th>Catálogo</th>-->
+                                <th>Catálogo</th>-->
                                 <!--</th><th>
-                                <span>Acciones</span>
-                                <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
-                            </th>-->
+                                    <span>Acciones</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
+                                </th>-->
                             </tr>
                         </thead>
                         <tbody>
@@ -483,13 +483,13 @@
                                 <td>{{precio.mensualidad}}</td>
                                 <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
-                            <td>{{ precio.catalogo or '-' }}</td>-->
+                                <td>{{ precio.catalogo or '-' }}</td>-->
                                 <!--<td>
-                                {% if es_admin %}
-                                <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
-                                   class="btn small primary">Editar</a>
-                                {% endif %}
-                            </td>-->
+                                    {% if es_admin %}
+                                    <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
+                                       class="btn small primary">Editar</a>
+                                    {% endif %}
+                                </td>-->
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -512,19 +512,7 @@
         <div class="card-header bg-blue-100">
             <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
         </div>
-        <!-- Modal (floating) to list hidden columns and allow un-hiding -->
-        <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <strong>Columnas ocultas</strong>
-                <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
-            </div>
-            <div id="hidden-columns-list">
-                <!-- dynamically populated -->
-            </div>
-            <div style="margin-top:10px; text-align:right;">
-                <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
-            </div>
-        </div>
+        
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
