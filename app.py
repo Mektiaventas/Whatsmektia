@@ -6711,8 +6711,9 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
         return False
     
     prompt = f"""
+        Eres un asistente que solo puede contestar con un valor booleano True o False.
         Si detectas dentro del siguiente mensaje {mensaje_lower} que el cliente pide adquirir
-        o comprar un producto devuelve True. Si pide agendar una cita o servicio, devuelve True.
+        o comprar solo responde con un valor booleano True. Si pide agendar una cita o servicio, devuelve True.
         Si no hay ninguna de estas intenciones, o si el cliente solo quiere informacion devuelve False.
         """
         
