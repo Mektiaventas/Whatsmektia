@@ -3985,6 +3985,100 @@ def obtener_precio(servicio_nombre: str, config):
         return Decimal(res[0]), res[1]
     return None
 
+@app.route('/configuracion/precios/hidden-columns', methods=['GET'])
+def get_precios_hidden_columns():
+    """
+    Devuelve el mapa de columnas ocultas guardado en la tabla `configuracion`.
+    Estructura almacenada (JSON) esperada:
+    {
+      "user": { "2": true, "5": true },   # indices de columna ocultas para vista cliente
+      "admin": { "3": true }              # indices para vista admin
+    }
+    """
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Asegurar columna en la tabla configuracion
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'precios_hidden_cols'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN precios_hidden_cols TEXT DEFAULT NULL")
+            conn.commit()
+
+        cursor.execute("SELECT precios_hidden_cols FROM configuracion WHERE id = 1 LIMIT 1")
+        row = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        hidden_map = {}
+        if row and row.get('precios_hidden_cols'):
+            try:
+                hidden_map = json.loads(row['precios_hidden_cols'])
+            except Exception:
+                hidden_map = {}
+        return jsonify({'hidden': hidden_map})
+    except Exception as e:
+        app.logger.error(f"🔴 Error obteniendo precios_hidden_cols: {e}")
+        return jsonify({'hidden': {}}), 500
+
+@app.route('/configuracion/precios/hidden-columns', methods=['POST'])
+def save_precios_hidden_columns():
+    """
+    Guarda el mapa de columnas ocultas en la tabla `configuracion`.
+    Espera JSON body { "table": "user"|"admin", "hidden": { "<colIndex>": true, ... } }
+    O bien puede aceptar el mapa completo { "hidden": { "user": {...}, "admin": {...} } }
+    """
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Asegurar columna
+        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'precios_hidden_cols'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE configuracion ADD COLUMN precios_hidden_cols TEXT DEFAULT NULL")
+            conn.commit()
+
+        # Obtener mapa actual
+        cursor.execute("SELECT precios_hidden_cols FROM configuracion WHERE id = 1 LIMIT 1")
+        row = cursor.fetchone()
+        current = {}
+        if row and row[0]:
+            try:
+                current = json.loads(row[0])
+            except Exception:
+                current = {}
+
+        # Merge/replace logic
+        if 'hidden' in data and isinstance(data['hidden'], dict):
+            # si llega el mapa completo lo reemplazamos
+            new_map = data['hidden']
+        elif 'table' in data and 'hidden' in data:
+            t = data.get('table')
+            hidden_part = data.get('hidden') or {}
+            new_map = current or {}
+            new_map[str(t)] = hidden_part
+        else:
+            return jsonify({'error': 'Invalid payload'}), 400
+
+        # Guardar (INSERT/UPDATE)
+        # Asegurar fila de configuracion existe
+        cursor.execute("SELECT COUNT(*) FROM configuracion")
+        cnt = cursor.fetchone()[0]
+        if cnt == 0:
+            cursor.execute("INSERT INTO configuracion (id, precios_hidden_cols) VALUES (1, %s)", (json.dumps(new_map, ensure_ascii=False),))
+        else:
+            cursor.execute("UPDATE configuracion SET precios_hidden_cols = %s WHERE id = 1", (json.dumps(new_map, ensure_ascii=False),))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'success': True, 'hidden': new_map})
+    except Exception as e:
+        app.logger.error(f"🔴 Error guardando precios_hidden_cols: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def obtener_historial(numero, limite=5, config=None):
     """Función compatible con la estructura actual de la base de datos"""
     if config is None:
@@ -7298,37 +7392,33 @@ def verificar_pedido_completo(datos_obtenidos):
 
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes, incluyendo forma de pago."""
-    if not datos_obtenidos.get('platillos'):
-        return "¿Qué platillos te gustaría ordenar? Tenemos gorditas, tacos, quesadillas, sopes, etc."
+    platillos = datos_obtenidos.get('platillos')
+    cantidad =  datos_obtenidos.get('cantidades')
+    direccion =  datos_obtenidos.get('direccion')
+    forma_pago = datos_obtenidos.get('forma_pago')
+    prompt = f"""
+    Eres un asistente de IA con la funcion de generar una pregunta que solicite un dato faltante, de manera entusiasta
+    basandote en lo siguiente: si no hay nada en {platillos} entonces pregunta acerca de que producto quiere el cliente
+    , si no, si no hay nada en {cantidad} pregunta acerca de cuantas unidades quiere el cliente, si no, si no encuentras
+    nada en {direccion} entonces pregunta acerca de la direccion del cliente, si no, si no hay nada en {forma_pago}
+    pregunta acerca de si el cliente va a pagar con transferencia o en efectivo"""
 
-    if not datos_obtenidos.get('cantidades') or len(datos_obtenidos['platillos']) != len(datos_obtenidos.get('cantidades', [])):
-        platillos = datos_obtenidos.get('platillos', [])
-        return f"¿Cuántas {', '.join(platillos)} deseas ordenar?"
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 120
+    }
 
-    if not datos_obtenidos.get('especificaciones'):
-        return "¿Alguna especificación para tu pedido? Por ejemplo: 'con todo', 'sin cebolla', etc."
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
+    response.raise_for_status()
+    siguiente_pregunta = response.json()
 
-    if not datos_obtenidos.get('direccion'):
-        return "¿A qué dirección debemos llevar tu pedido?"
-
-    # NUEVO: preguntar forma de pago si falta
-    if not datos_obtenidos.get('forma_pago'):
-        return "¿Cómo prefieres pagar? Responde 'efectivo' (pago al entregar) o 'transferencia' (te pediré los datos bancarios)."
-
-    # Si eligió transferencia pero faltan datos, pedirlos
-    forma = str(datos_obtenidos.get('forma_pago', '')).lower()
-    if 'transfer' in forma or 'transferencia' in forma:
-        if not datos_obtenidos.get('transferencia_numero'):
-            return "Por favor proporciona el número o CLABE para la transferencia."
-        if not datos_obtenidos.get('transferencia_nombre'):
-            return "Por favor indica el nombre del titular de la cuenta para la transferencia."
-        if not datos_obtenidos.get('transferencia_banco'):
-            return "Si puedes, indica también el banco (ej: BBVA, Banorte, Banamex)."
-
-    if not datos_obtenidos.get('nombre_cliente'):
-        return "¿Cuál es tu nombre para el pedido?"
-
-    return "¿Necesitas agregar algo más a tu pedido?"
+    return siguiente_pregunta
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
     """Confirma el pedido completo y devuelve el texto de confirmación.
