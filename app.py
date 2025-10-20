@@ -4015,93 +4015,149 @@ def obtener_historial(numero, limite=5, config=None):
         return []
     
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
+    """
+    Genera la respuesta textual de la IA (sin efectos secundarios).
+    Añadí la lógica para incluir URLs de imágenes de producto en el contexto
+    (y en el texto que se pasa a la IA) — igual que en tu `app - copia.py`.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    cfg = load_config(config)
-    neg = cfg['negocio']
-    ia_nombre = neg.get('ia_nombre', 'Asistente')
-    negocio_nombre = neg.get('negocio_nombre', '')
-    descripcion = neg.get('descripcion', '')
-    que_hace = neg.get('que_hace', '')
-    # Si estamos en una secuencia guiada de cita/pedido, delegar a la secuencia
-    estado_actual = obtener_estado_conversacion(numero, config)
-    if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
-        # manejar_secuencia_cita maneja el diálogo paso a paso y devuelve el texto que debe enviarse
-        return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
 
-    # A partir de aquí: responder_con_ia NO hace efectos secundarios (no enviar mensajes, no guardar citas,
-    # no pasar contacto a asesores). Solo genera una respuesta textual que el caller (webhook / procesador)
-    # podrá enviar/almacenar/actuar sobre ella.
+    # Cargar configuración de negocio para prompts
     try:
-        # Preparar catálogo reducido para contexto (limitado para tokens)
-        precios = obtener_todos_los_precios(config) or []
-        productos_lines = []
-        for p in precios[:200]:
+        cfg = load_config(config)
+        neg = cfg.get('negocio', {})
+        ia_nombre = neg.get('ia_nombre', 'Asistente')
+        negocio_nombre = neg.get('negocio_nombre', '')
+        descripcion = neg.get('descripcion', '')
+    except Exception:
+        ia_nombre = 'Asistente'
+        negocio_nombre = ''
+        descripcion = ''
+
+    # Si estamos en una secuencia guiada de cita/pedido, delegar
+    try:
+        estado_actual = obtener_estado_conversacion(numero, config)
+        if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
+            return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    except Exception:
+        # si falla al obtener estado, continuar con flujo normal
+        pass
+
+    # Preparar catálogo reducido para contexto con URLs de imagen públicas cuando existan
+    precios = obtener_todos_los_precios(config) or []
+    productos_lines = []
+    dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+    if not dominio_publico.startswith('http'):
+        dominio_publico = f"https://{dominio_publico}" if dominio_publico else ''
+
+    # Resolve product image URLs only when the file actually exists on disk (diagnóstico: evita "imagen no encontrada")
+    for p in precios[:200]:
+        try:
             nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
-            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}")
+            imagen = (p.get('imagen') or '').strip()
 
-        productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos registrados en el catálogo."
-
-        asesores_block = format_asesores_block(cfg)
-
-        # System prompt claro y restricción para que la IA no realice acciones por sí misma
-        system_prompt = f"""
-        Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-        Descripción del negocio: {descripcion}
-
-        Dispones de la siguiente lista de productos/servicios (resumida):
-        {productos_texto}
-
-        {asesores_block}
-
-        REGLAS IMPORTANTES:
-        - No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
-        - Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde con un mensaje
-          que confirme la petición (ej: "Entiendo, solicito la intervención de un asesor.") pero NO intentes contactar.
-        - Si detectas una intención de agendar una cita/pedido, extrae y devuelve los campos en texto pero NO guardes nada.
-        - Mantén las respuestas concisas, sin rutas de archivos ni nombres de imágenes crudas.
-        """
-
-        # Construir cadena de mensajes con historial para contexto
-        messages_chain = [{'role': 'system', 'content': system_prompt}]
-        historial = obtener_historial(numero, limite=6, config=config) or []
-        for entry in historial:
-            if entry.get('mensaje') and str(entry['mensaje']).strip() != '':
-                messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-            if entry.get('respuesta') and str(entry['respuesta']).strip() != '':
-                messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-
-        # Añadir mensaje actual (multimodal handling similar al original)
-        if mensaje_usuario and str(mensaje_usuario).strip() != '':
-            if es_imagen and imagen_base64:
-                messages_chain.append({
-                    'role': 'user',
-                    'content': [
-                        {"type": "text", "text": mensaje_usuario},
-                        {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
-                    ]
-                })
-            elif es_audio and transcripcion_audio:
-                try:
-                    tu = mensaje_usuario.strip() if mensaje_usuario else ""
-                    ta = transcripcion_audio.strip() if transcripcion_audio else ""
-                    if tu and ta and tu != ta:
-                        content = f"{ta}\n\n[Mensaje adicional]: {tu}"
+            imagen_url = ''
+            if imagen:
+                # If it's already an absolute URL, use it
+                if imagen.lower().startswith('http'):
+                    imagen_url = imagen
+                else:
+                    # Check tenant-aware producto dir and legacy locations for physical existence
+                    try:
+                        productos_dir, tenant_slug = get_productos_dir_for_config(config)
+                    except Exception:
+                        productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+                    candidate1 = os.path.join(productos_dir, imagen)
+                    candidate2 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', imagen)
+                    candidate3 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), imagen)
+                    if os.path.isfile(candidate1) or os.path.isfile(candidate2) or os.path.isfile(candidate3):
+                        if dominio_publico:
+                            imagen_url = f"{dominio_publico}/uploads/productos/{imagen}"
+                        else:
+                            imagen_url = f"/uploads/productos/{imagen}"
                     else:
-                        content = ta or tu
-                except Exception:
-                    content = transcripcion_audio or mensaje_usuario
-                messages_chain.append({'role': 'user', 'content': content})
-            else:
-                messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+                        # Imagen no encontrada en disco -> dejar campo vacío (evita que el bot mencione rutas inválidas)
+                        imagen_url = ''
 
-        # Seguridad: si no hay suficiente contexto, saluda
-        if len(messages_chain) <= 1:
-            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+            imagen_part = f" | Imagen:{imagen_url or imagen}" if (imagen_url or imagen) else ""
+            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}{imagen_part}")
+        except Exception:
+            # tolerate single product failure
+            continue
 
-        # Llamada a la IA (Deepseek/OpenAI)
+    productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos registrados en el catálogo."
+
+    # Asesores block helper (no efectos)
+    try:
+        asesores_block = format_asesores_block(cfg)
+    except Exception:
+        asesores_block = ""
+
+    # System prompt claro
+    system_prompt = f"""
+Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+Descripción del negocio: {descripcion}
+
+Dispones de la siguiente lista de productos/servicios (resumida):
+{productos_texto}
+
+{asesores_block}
+
+REGLAS IMPORTANTES:
+- No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
+- Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde confirmando la petición
+  (ej: "Entiendo, solicito la intervención de un asesor.") pero NO intentes contactar.
+- Si identificas un producto y hay una imagen disponible, puedes mencionar la URL pública (Imagen: https://...)
+  o el texto "Imagen: <filename>". No incluyas rutas locales de servidor.
+- Mantén las respuestas concisas y orientadas al usuario.
+""".strip()
+
+    # Construir historial para contexto
+    messages_chain = [{'role': 'system', 'content': system_prompt}]
+    try:
+        historial = obtener_historial(numero, limite=6, config=config) or []
+    except Exception:
+        historial = []
+
+    for entry in historial:
+        if entry.get('mensaje') and str(entry['mensaje']).strip() != '':
+            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
+        if entry.get('respuesta') and str(entry['respuesta']).strip() != '':
+            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+
+    # Añadir mensaje actual (multimodal handling)
+    if mensaje_usuario and str(mensaje_usuario).strip() != '':
+        if es_imagen and imagen_base64:
+            messages_chain.append({
+                'role': 'user',
+                'content': [
+                    {"type": "text", "text": mensaje_usuario},
+                    {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
+                ]
+            })
+        elif es_audio and transcripcion_audio:
+            try:
+                tu = mensaje_usuario.strip() if mensaje_usuario else ""
+                ta = transcripcion_audio.strip() if transcripcion_audio else ""
+                if tu and ta and tu != ta:
+                    content = f"{ta}\n\n[Mensaje adicional]: {tu}"
+                else:
+                    content = ta or tu
+            except Exception:
+                content = transcripcion_audio or mensaje_usuario
+            messages_chain.append({'role': 'user', 'content': content})
+        else:
+            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+
+    # Seguridad: saludo si no hay contexto
+    if len(messages_chain) <= 1:
+        return "¡Hola! ¿En qué puedo ayudarte hoy?"
+
+    # Llamada a la IA (Deepseek)
+    try:
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -4115,20 +4171,27 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        respuesta = data['choices'][0]['message']['content']
+        respuesta_raw = data['choices'][0]['message']['content']
 
-        # Normalizar respuesta multimodal (si viene como lista)
-        if isinstance(respuesta, list):
+        # Normalizar respuesta multimodal (lista -> texto)
+        if isinstance(respuesta_raw, list):
             parts = []
-            for item in respuesta:
+            for item in respuesta_raw:
                 if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
                     parts.append(item.get('text'))
                 elif isinstance(item, str):
                     parts.append(item)
-            respuesta = "\n".join(parts)
+            respuesta_text = "\n".join(parts)
+        else:
+            respuesta_text = str(respuesta_raw).strip()
 
-        respuesta = aplicar_restricciones(str(respuesta).strip(), numero, config)
-        return respuesta
+        # Aplicar restricciones/limpieza final (tu helper)
+        try:
+            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+        except Exception:
+            respuesta_text = respuesta_text
+
+        return respuesta_text
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 IA request error en responder_con_ia: {e}")
