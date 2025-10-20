@@ -6738,6 +6738,7 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     
     if es_solicitud:
         tipo = "pedido" if es_porfirianna else "cita"
+        app.logger.info(f"✅ @@@@@ el valor que devolvio la IA es {es_solicitud}")
         app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
     
     return es_solicitud
