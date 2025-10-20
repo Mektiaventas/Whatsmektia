@@ -151,6 +151,15 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
         'dominio': 'laporfirianna.mektia.com'
     },
+    '321': {  # Número de La Maindsteel
+        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),
+        'db_user': os.getenv("MAINDSTEEL_DB_USER"),
+        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),
+        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),
+        'dominio': 'maindsteel.mektia.com'
+    },
     '524495486324': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
@@ -6618,12 +6627,16 @@ def obtener_configuracion_por_host():
         host = request.headers.get('Host', '').lower()
         
         if 'unilova' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: Unilova")
             return NUMEROS_CONFIG['123']
+
+        if 'maindsteel' in host:
+            app.logger.info("✅ Configuración detectada: Maindsteel")
+            return NUMEROS_CONFIG['321']
         
         # DETECCIÓN PORFIRIANNA
         if 'laporfirianna' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: laporfiriannna")
             return NUMEROS_CONFIG['524812372326']
             
         # DETECCIÓN NUEVO SUBDOMINIO
