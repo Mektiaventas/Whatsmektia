@@ -346,55 +346,6 @@ def logout():
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
 
-def obtener_archivo_whatsapp(media_id, config=None):
-    """Obtiene archivos de WhatsApp y los guarda localmente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # 1. Obtener metadata del archivo
-        url_metadata = f"https://graph.facebook.com/v18.0/{media_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        
-        app.logger.info(f"📎 Obteniendo metadata de archivo: {url_metadata}")
-        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
-        response_metadata.raise_for_status()
-        
-        metadata = response_metadata.json()
-        download_url = metadata.get('url')
-        mime_type = metadata.get('mime_type', 'application/octet-stream')
-        filename = metadata.get('filename', f'archivo_{media_id}')
-        
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga: {metadata}")
-            return None, None, None
-            
-        app.logger.info(f"📎 Descargando archivo: {filename} ({mime_type})")
-        
-        # 2. Descargar el archivo
-        file_response = requests.get(download_url, headers=headers, timeout=60)
-        if file_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando archivo: {file_response.status_code}")
-            return None, None, None
-        
-        # 3. Determinar extensión y guardar
-        extension = determinar_extension(mime_type, filename)
-        safe_filename = secure_filename(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
-        filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(file_response.content)
-        
-        app.logger.info(f"✅ Archivo guardado: {filepath}")
-        return filepath, safe_filename, extension
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
-        return None, None, None
-
 # --- Sesiones activas (en BD de clientes) ---
 def _get_or_create_session_id():
     sid = session.get('sid')
@@ -1891,61 +1842,6 @@ def inicializar_kanban_multitenant():
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
     return '', 204
-
-# ——— Función para enviar mensajes de voz ———
-def enviar_mensaje_voz(numero, audio_url, config=None):
-    """Envía un mensaje de audio por WhatsApp; valida accesibilidad y registra respuesta detallada."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    if config is None:
-        config = obtener_configuracion_numero(numero)
-
-    try:
-        if not audio_url or not audio_url.startswith('http'):
-            app.logger.error(f"🔴 enviar_mensaje_voz: audio_url inválida: {audio_url}")
-            return False
-
-        # Verificar que Facebook pueda acceder al archivo (HEAD)
-        try:
-            head = requests.head(audio_url, timeout=8, allow_redirects=True)
-            if head.status_code >= 400:
-                app.logger.error(f"🔴 enviar_mensaje_voz: audio URL not reachable (HEAD {head.status_code}): {audio_url}")
-                return False
-            content_type = head.headers.get('content-type', '')
-            if not content_type.startswith('audio'):
-                app.logger.warning(f"⚠️ enviar_mensaje_voz: content-type no es audio: {content_type}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ enviar_mensaje_voz: HEAD check failed for {audio_url}: {e}")
-            # no short-circuit — intentaremos enviar pero lo registramos
-       
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'audio',
-            'audio': {
-                'link': audio_url
-            }
-        }
-
-        app.logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero} -> {audio_url}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
-
-        if r.status_code in (200, 201, 202):
-            app.logger.info(f"✅ Audio enviado a {numero}")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text}")
-            return False
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_mensaje_voz: {e}")
-        return False
     
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
@@ -3460,42 +3356,6 @@ def get_plan_status_for_user(username, config=None):
         app.logger.error(f"🔴 Error en get_plan_status_for_user: {e}")
         return None
 
-# --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
-def enviar_documento(numero, file_url, filename, config=None):
-    """
-    Envía un documento (PDF) por WhatsApp usando Graph API.
-    file_url debe ser una URL pública accesible (https://.../uploads/docs/filename).
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'document',
-            'document': {
-                'link': file_url,
-                'filename': filename
-            }
-        }
-        app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
-        if r.status_code in (200, 201, 202):
-            app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando documento ({r.status_code}): {r.text}")
-            return False
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_documento: {e}")
-        return False
-
 def build_texto_catalogo(precios, limit=20):
     """Construye un texto resumen del catálogo (hasta `limit` items)."""
     if not precios:
@@ -4439,61 +4299,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado: {e}")
         return 'Lo siento, hubo un error con la IA.'
-
-# New helpers: enviar_imagen and buscar_sku_en_texto
-def enviar_imagen(numero, imagen_ref, config=None):
-    """
-    Envía una imagen por WhatsApp usando la API de Graph.
-    imagen_ref puede ser:
-      - URL absoluta (empieza con http)
-      - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
-    Retorna True si la API respondió OK.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    try:
-        if not imagen_ref:
-            app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
-            return False
-
-        # Determinar URL pública
-        if str(imagen_ref).lower().startswith('http'):
-            image_url = imagen_ref
-        else:
-            dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
-            # fallback to host-based URL if dominio appears not to be a full domain
-            if not dominio.startswith('http'):
-                image_url = f"https://{dominio}/uploads/productos/{imagen_ref}"
-            else:
-                image_url = f"{dominio}/uploads/productos/{imagen_ref}"
-
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'image',
-            'image': {
-                'link': image_url
-            }
-        }
-
-        app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 200:
-            app.logger.info("✅ Imagen enviada correctamente")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando imagen ({r.status_code}): {r.text}")
-            return False
-
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
-        return False
 
 def buscar_sku_en_texto(texto, precios):
     """
