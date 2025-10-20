@@ -503,28 +503,28 @@
             {% if precios %}
             <div class="table-responsive">
                 <div class="table-scroll table-scroll-admin">
-                    <table class="table">
+                    <table class="table" data-table="admin">
                         <thead>
                             <tr>
-                                <th>SKU</th>
-                                <th>Categoría</th>
-                                <th>Subcategoría</th>
-                                <th>Línea</th>
-                                <th>Modelo</th>
-                                <th>Descripción</th>
+                                <th><span>SKU</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Categoría</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Subcategoría</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Línea</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Modelo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Descripción</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
                                 <!--<th>Medidas</th>-->
-                                <th>Costo</th>
-                                <th>Menudeo</th>
-                                <th>Inscripcion</th>
-                                <th>Mensualidad</th>
+                                <th><span>Costo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Menudeo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Inscripcion</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
+                                <th><span>Mensualidad</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
                                 <!--<th>Mayoreo</th>-->
-                                <th>Imagen</th>
+                                <th><span>Imagen</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
                                 <!--<th>Status</th>
                                 <th>Catálogo</th>
                                 <th>Catálogo 2</th>
                                 <th>Catálogo 3</th>
                                 <th>Proveedor</th>-->
-                                <th>Acciones</th>
+                                <th><span>Acciones</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button></th>
                             </tr>
                         </thead>
                         <tbody class="cuerpo_tabla">
@@ -589,6 +589,7 @@
         </div>
     </div>
 </div>
+
 
 <!-- Mensajes Flash -->
 <div class="mt-4">
@@ -976,7 +977,91 @@
             document.getElementById('imagen').value = '';
         }
     }
+    // Toggle a column based on the header button clicked
+    function toggleColumnBtn(btn) {
+        const th = btn.closest('th');
+        if (!th) return;
+        const table = th.closest('table');
+        if (!table) return;
+        const headerCells = th.parentNode.children;
+        let index = Array.prototype.indexOf.call(headerCells, th); // 0-based
+        // Toggle visibility for this column index across rows in the same table
+        toggleColumn(table, index);
+        // update button pressed state
+        const pressed = btn.getAttribute('aria-pressed') === 'true';
+        btn.setAttribute('aria-pressed', (!pressed).toString());
+    }
 
+    // Toggle column by table element and column index
+    function toggleColumn(table, colIndex) {
+        // Determine current state by looking at first body row cell
+        const firstRow = table.querySelector('tbody tr');
+        if (!firstRow) return;
+        const cell = firstRow.children[colIndex];
+        const isHidden = cell && (cell.style.display === 'none' || cell.classList.contains('hidden'));
+        const newDisplay = isHidden ? '' : 'none';
+
+        // Apply to all rows (thead, tbody)
+        const rows = table.querySelectorAll('thead tr, tbody tr');
+        rows.forEach(row => {
+            const c = row.children[colIndex];
+            if (c) c.style.display = newDisplay;
+        });
+
+        // Persist state to localStorage per table (user/admin)
+        const tableId = table.getAttribute('data-table') || 'table';
+        persistHiddenColumn(tableId, colIndex, !isHidden);
+    }
+
+    // Persist hidden columns set for a table in localStorage
+    function persistHiddenColumn(tableId, colIndex, hidden) {
+        try {
+            const key = `precios_hidden_cols_${tableId}`;
+            const raw = localStorage.getItem(key);
+            let map = raw ? JSON.parse(raw) : {};
+            // store as object of indices->true
+            if (hidden) {
+                map[colIndex] = true;
+            } else {
+                delete map[colIndex];
+            }
+            localStorage.setItem(key, JSON.stringify(map));
+        } catch (e) {
+            console.warn('No se pudo persistir estado de columnas: ', e);
+        }
+    }
+
+    // Apply stored hidden columns to all tables on load
+    function applyStoredHiddenColumns() {
+        try {
+            const tables = document.querySelectorAll('table[data-table]');
+            tables.forEach(table => {
+                const tableId = table.getAttribute('data-table');
+                const key = `precios_hidden_cols_${tableId}`;
+                const raw = localStorage.getItem(key);
+                const map = raw ? JSON.parse(raw) : {};
+                if (!map) return;
+                Object.keys(map).forEach(idxStr => {
+                    const idx = parseInt(idxStr, 10);
+                    if (isNaN(idx)) return;
+                    // hide column
+                    const rows = table.querySelectorAll('thead tr, tbody tr');
+                    rows.forEach(row => {
+                        const c = row.children[idx];
+                        if (c) c.style.display = 'none';
+                    });
+                    // set aria-pressed on header button if exists
+                    const headerCell = table.querySelector('thead tr').children[idx];
+                    if (headerCell) {
+                        const btn = headerCell.querySelector('.col-toggle');
+                        if (btn) btn.setAttribute('aria-pressed', 'true');
+                    }
+                });
+            });
+        } catch (e) {
+            console.warn('Error applying stored column visibility: ', e);
+        }
+    }
     // On document ready
     document.addEventListener('DOMContentLoaded', function () {
         console.log("DOM loaded - initializing tab navigation");
