@@ -378,8 +378,6 @@ def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_
     except Exception as e:
         app.logger.error(f"Error desactivando sesiones antiguas: {e}")
 
-
-
 # Replace your current /login handler with this version (same logic + session limit)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -1681,7 +1679,6 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
         app.logger.error(f"🔴 Error analizando archivo con IA: {e}")
         return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
 
-
 def extraer_texto_pdf(file_path):
     """Extrae texto de un archivo PDF"""
     try:
@@ -1712,7 +1709,6 @@ def extraer_texto_pdf(file_path):
     except Exception as e:
         app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
         return None
-
 
 def analizar_pdf_servicios(texto_pdf, config=None):
     """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
@@ -2667,54 +2663,6 @@ def autenticar_google_calendar(config=None):
         app.logger.error(traceback.format_exc())
         return None
 
-def negocio_contact_block(negocio):
-    """
-    Formatea los datos de contacto del negocio desde la configuración.
-    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
-    """
-    if not negocio or not isinstance(negocio, dict):
-        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
-
-    direccion = (negocio.get('direccion') or '').strip()
-    telefono = (negocio.get('telefono') or '').strip()
-    correo = (negocio.get('correo') or '').strip()
-
-    # Normalizar teléfono para mostrar (no modificar DB)
-    telefono_display = telefono or 'No disponible'
-    correo_display = correo or 'No disponible'
-    direccion_display = direccion or 'No disponible'
-    prompt_comentario = f"""
-        Te acaban de hacer una solicitud de datos, 
-        no me des ningun dato, solo has un comentario agradable expresando
-        que estas a su servicio, algo parecido a decir claro que si.
-        """
-        
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-        
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt_comentario}],
-        "temperature": 0.3,
-        "max_tokens": 500
-    }
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-    response.raise_for_status()
-        
-    data = response.json()
-    respuestita = data['choices'][0]['message']['content'].strip()
-    block = (
-        f"{respuestita}\n\n"
-        "📍 DATOS DEL NEGOCIO:\n\n"
-        f"• Dirección: {direccion_display}\n"
-        f"• Teléfono: {telefono_display}\n"
-        f"• Correo: {correo_display}\n\n"
-        "Visitanos pronto!"
-    )
-    return block
-
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
     """Obtener mensajes de un chat específico después de cierto ID"""
@@ -3086,17 +3034,6 @@ def user_explicitly_requested_asesor_in_last_messages(numero, config=None, lookb
         app.logger.warning(f"⚠️ user_explicitly_requested_asesor_in_last_messages error: {e}")
         return False    
 
-def convertir_audio(audio_path):
-    try:
-        output_path = audio_path.replace('.ogg', '.mp3')
-        audio = AudioSegment.from_file(audio_path, format='ogg')
-        audio.export(output_path, format='mp3')
-        app.logger.info(f"🔄 Audio convertido a: {output_path}")
-        return output_path
-    except Exception as e:
-        app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
-        return None
-
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
     if config is None:
@@ -3437,27 +3374,6 @@ def eliminar_asesores_extras(config=None, allowed_count=2):
             app.logger.debug("ℹ️ eliminar_asesores_extras: no se aplicó ningún cambio (no había asesores extras)")
     except Exception as e:
         app.logger.error(f"🔴 eliminar_asesores_extras error: {e}")
-
-def obtener_max_asesores_from_planes(default=2, cap=10):
-    """
-    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
-    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
-    """
-    try:
-        conn = get_clientes_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT MAX(asesores) FROM planes")
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        if row and row[0] is not None:
-            n = int(row[0])
-            if n < 1:
-                return default
-            return min(n, cap)
-    except Exception as e:
-        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
-    return default
-
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -3929,25 +3845,6 @@ def publicar_pdf_configuracion():
 
 
 # Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
-
-def _ensure_cliente_plan_columns():
-    """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
-    try:
-        conn = get_clientes_conn()
-        cur = conn.cursor()
-        # Crear columnas si no existen
-        cur.execute("SHOW COLUMNS FROM cliente LIKE 'plan_id'")
-        if cur.fetchone() is None:
-            cur.execute("ALTER TABLE cliente ADD COLUMN plan_id INT DEFAULT NULL")
-        cur.execute("SHOW COLUMNS FROM cliente LIKE 'mensajes_incluidos'")
-        if cur.fetchone() is None:
-            cur.execute("ALTER TABLE cliente ADD COLUMN mensajes_incluidos INT DEFAULT 0")
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
-
 def _ensure_precios_subscription_columns(config=None):
     """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
     try:
@@ -3965,76 +3862,6 @@ def _ensure_precios_subscription_columns(config=None):
         app.logger.info("🔧 Columnas 'inscripcion' y 'mensualidad' aseguradas en tabla precios")
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
-
-def _ensure_precios_plan_column(config=None):
-    """Asegura que la tabla `precios` del tenant tenga la columna mensajes_incluidos (opcional para definir planes)."""
-    try:
-        conn = get_db_connection(config)
-        cur = conn.cursor()
-        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensajes_incluidos'")
-        if cur.fetchone() is None:
-            cur.execute("ALTER TABLE precios ADD COLUMN mensajes_incluidos INT DEFAULT 0")
-            conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columna mensajes_incluidos en precios: {e}")
-
-def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
-    """
-    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
-    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
-    """
-    try:
-        # asegurar columnas en cliente
-        _ensure_cliente_plan_columns()
-
-        # 1) Obtener cliente en CLIENTES_DB
-        conn_cli = get_clientes_conn()
-        cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
-        cliente = cur_cli.fetchone()
-        if not cliente:
-            cur_cli.close(); conn_cli.close()
-            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
-            return False
-
-        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
-        mensajes_incluidos = 0
-        plan_name = None
-        try:
-            cur_pl = conn_cli.cursor(dictionary=True)
-            cur_pl.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
-            plan_row = cur_pl.fetchone()
-            if plan_row:
-                mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
-                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
-                plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
-            cur_pl.close()
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
-
-        # 3) Actualizar cliente en CLIENTES_DB
-        try:
-            cur_cli.execute("""
-                UPDATE cliente
-                   SET plan_id = %s, mensajes_incluidos = %s
-                 WHERE id_cliente = %s
-            """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
-            conn_cli.commit()
-        except Exception as e:
-            app.logger.error(f"🔴 Error actualizando cliente con plan: {e}")
-            conn_cli.rollback()
-            cur_cli.close(); conn_cli.close()
-            return False
-
-        cur_cli.close(); conn_cli.close()
-        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
-        return True
-
-    except Exception as e:
-        app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
-        return False
 
 def get_plan_status_for_user(username, config=None):
     """
@@ -4293,7 +4120,6 @@ def seleccionar_mejor_doc(docs, query):
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
 
-
 def enviar_catalogo(numero, original_text=None, config=None):
     """
     Intenta enviar el PDF público más relevante (documents_publicos),
@@ -4531,7 +4357,6 @@ def load_config(config=None):
         'asesores_list': asesores_list if 'asesores_list' in locals() else []
     }
 
-
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4696,7 +4521,6 @@ def obtener_max_asesores_from_planes(default=2, cap=10):
         app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
     return default
 
-
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -4713,7 +4537,6 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
         
-
 def obtener_producto_por_sku_o_nombre(query, config=None):
     """
     Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
@@ -4820,8 +4643,6 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-
-
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5196,7 +5017,6 @@ def enviar_imagen(numero, imagen_ref, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
         return False
-
 
 def buscar_sku_en_texto(texto, precios):
     """
@@ -5590,32 +5410,6 @@ def procesar_codigo():
         app.logger.error(f"🔴 Error en procesar_codigo: {e}")
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
-
-def procesar_fecha_relativa(fecha_str):
-    """
-    Función simple de procesamiento de fechas relativas
-    """
-    if not fecha_str or fecha_str == 'null':
-        return None
-    
-    # Si ya es formato YYYY-MM-DD, devolver tal cual
-    if re.match(r'\d{4}-\d{2}-\d{2}', fecha_str):
-        return fecha_str
-    
-    # Lógica básica de procesamiento
-    hoy = datetime.now()
-    mapping = {
-        'próximo lunes': hoy + timedelta(days=(7 - hoy.weekday()) % 7),
-        'mañana': hoy + timedelta(days=1),
-        'pasado mañana': hoy + timedelta(days=2),
-    }
-    
-    fecha_lower = fecha_str.lower()
-    for termino, fecha_calculada in mapping.items():
-        if termino in fecha_lower:
-            return fecha_calculada.strftime('%Y-%m-%d')
-    
-    return None
 
 def extraer_info_intervencion(mensaje, numero, historial, config=None):
     """Extrae información relevante para intervención humana"""
@@ -6531,42 +6325,6 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero, config=None):
-    """Método alternativo para obtener la imagen de perfil"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    try:
-        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
-        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
-        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
-        
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
-        
-        params = {
-            'fields': 'profile_picture_url',
-            'user_numbers': f'[{numero}]',
-            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and len(data['data']) > 0:
-                contacto = data['data'][0]
-                if 'profile_picture_url' in contacto:
-                    return contacto['profile_picture_url']
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en método alternativo: {e}")
-        return None
-    finally:
-        conn.close()
-
 def obtener_nombre_mostrado_por_numero(numero, config=None):
     """
     Retorna el nombre a mostrar para un número de contacto.
@@ -6665,36 +6423,6 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
     except Exception as e:
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
-
-# Patch: enviar_alerta_humana mostrar nombre cuando esté disponible
-def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
-    if config is None:
-        app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return
-    
-    try:
-        cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config)
-    except Exception:
-        cliente_mostrado = numero_cliente
-
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    mensaje += f"👤 *Cliente:* {cliente_mostrado}\n"
-    mensaje += f"📞 *Número:* {numero_cliente}\n"
-    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
-    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
-    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
-    mensaje += f"{contexto_consulta}\n\n"
-    mensaje += f"_________________________________________\n"
-    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
-    
-    enviar_mensaje(ALERT_NUMBER, mensaje, config)
-    enviar_mensaje('5214493432744', mensaje, config)
-    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} (mostrar: {cliente_mostrado}) desde {config.get('dominio')}")
 
 # Patch: resumen_rafa usar nombre mostrado
 def resumen_rafa(numero, config=None):
@@ -7684,7 +7412,6 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
-
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
     Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
@@ -7806,7 +7533,6 @@ def format_asesores_block(cfg):
         return block
     except Exception:
         return ""
-
 
 # REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
@@ -7938,19 +7664,6 @@ def test_calendar():
         <p>Ocurrió un error al intentar probar la integración con Google Calendar:</p>
         <pre>{str(e)}</pre>
         """
-
-@app.route('/test-contacto')
-def test_contacto(numero = '5214493432744'):
-    """Endpoint para probar la obtención de información de contacto"""
-    config = obtener_configuracion_por_host()
-    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
-    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
-    return jsonify({
-        'numero': numero,
-        'nombre': nombre,
-        'imagen': imagen,
-        'config': config.get('dominio')
-    })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -8532,7 +8245,6 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     siguiente_pregunta = generar_pregunta_datos_faltantes(datos.get('datos_obtenidos', {}))
     return siguiente_pregunta
 
-
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios.
     Ahora exige: platillos, direccion y forma de pago.
@@ -8596,7 +8308,6 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
         return "¿Cuál es tu nombre para el pedido?"
 
     return "¿Necesitas agregar algo más a tu pedido?"
-
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
     """Confirma el pedido completo sin ofrecer contactar a un asesor proactivamente."""
@@ -8860,31 +8571,6 @@ def configuracion_tab(tab):
         asesor_count=asesor_count,
         asesores_list=asesores_list
     )
-
-def negocio_contact_block(negocio):
-    """
-    Formatea los datos de contacto del negocio desde la configuración.
-    Si algún campo no está configurado muestra 'No disponible'.
-    (Versión segura: no hace llamadas externas).
-    """
-    if not negocio or not isinstance(negocio, dict):
-        return ("DATOS DEL NEGOCIO:\n"
-                "Dirección: No disponible\n"
-                "Teléfono: No disponible\n"
-                "Correo: No disponible\n\n"
-                "Nota: Los datos no están configurados en el sistema.")
-    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
-    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
-    correo = (negocio.get('correo') or '').strip() or 'No disponible'
-
-    block = (
-        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
-        f"• Dirección: {direccion}\n"
-        f"• Teléfono: {telefono}\n"
-        f"• Correo: {correo}\n\n"
-        "Si necesitas otra cosa, dime."
-    )
-    return block
 
 def negocio_contact_block(negocio):
     """
@@ -9305,8 +8991,6 @@ def kanban_mover():
         conn.commit(); cursor.close(); conn.close()
         return '', 204
     
-   
-
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
         config = obtener_configuracion_por_host()
