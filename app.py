@@ -694,6 +694,8 @@ def importar_productos_desde_excel(filepath, config=None):
             'costo': 'costo',
             'precio mayoreo': 'precio_mayoreo',
             'precio menudeo': 'precio_menudeo',
+            'inscripcion': 'inscripcion',
+            'mensualidad': 'mensualidad',
             'imagen': 'imagen',
             'status ws': 'status_ws',
             'catalogo': 'catalogo',
@@ -804,6 +806,7 @@ def importar_productos_desde_excel(filepath, config=None):
         campos_esperados = [
             'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
+            'inscripcion', 'mensualidad',
             'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
         ]
 
@@ -882,6 +885,8 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('costo', '0.00'),
                     producto.get('precio_mayoreo', '0.00'),
                     producto.get('precio_menudeo', '0.00'),
+                    producto.get('inscripcion', '0.00'),
+                    producto.get('mensualidad', '0.00'),
                     producto.get('imagen', ''),
                     producto.get('status_ws', 'activo'),
                     producto.get('catalogo', ''),
@@ -893,9 +898,10 @@ def importar_productos_desde_excel(filepath, config=None):
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
-                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                        descripcion, medidas, costo, precio_mayoreo, precio_menudeo,inscripcion,
+                        mensualidad,
                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    ) VALUES (%s,%s,s%,s%,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
@@ -903,6 +909,8 @@ def importar_productos_desde_excel(filepath, config=None):
                         costo=VALUES(costo),
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
+                        inscripcion=VALUES(inscripcion),
+                        mensualidad=VALUES(mensualidad),
                         status_ws=VALUES(status_ws),
                         imagen=VALUES(imagen)
                 """, values)
