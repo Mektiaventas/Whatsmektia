@@ -31,19 +31,7 @@
                 <span class="tab-title">Precios vista cliente</span>
             </div>
         </button>
-        <!-- Modal (floating) to list hidden columns and allow un-hiding -->
-        <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                <strong>Columnas ocultas</strong>
-                <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
-            </div>
-            <div id="hidden-columns-list">
-                <!-- dynamically populated -->
-            </div>
-            <div style="margin-top:10px; text-align:right;">
-                <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
-            </div>
-        </div>
+
         {% if is_admin %}
         <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
             <div class="tab-icon">🔒</div>
@@ -448,7 +436,7 @@
                                 <!--<th>Mayoreo</th>-->
                                 <!--<th>Status</th>
                                 <th>Catálogo</th>-->
-                                <!--</th><th>
+                                                            <!--</th><th>
                                     <span>Acciones</span>
                                     <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
                                 </th>-->
@@ -483,7 +471,7 @@
                                 <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
                                 <td>{{ precio.catalogo or '-' }}</td>-->
-                                <!--<td>
+                                                            <!--<td>
                                     {% if es_admin %}
                                     <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
                                        class="btn small primary">Editar</a>
@@ -511,7 +499,6 @@
         <div class="card-header bg-blue-100">
             <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
         </div>
-        
         <div class="card-body">
             {% if precios %}
             <div class="table-responsive">
@@ -533,10 +520,10 @@
                                 <!--<th>Mayoreo</th>-->
                                 <th><span>Imagen</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <!--<th>Status</th>
-                            <th>Catálogo</th>
-                            <th>Catálogo 2</th>
-                            <th>Catálogo 3</th>
-                            <th>Proveedor</th>-->
+                                <th>Catálogo</th>
+                                <th>Catálogo 2</th>
+                                <th>Catálogo 3</th>
+                                <th>Proveedor</th>-->
                                 <th><span>Acciones</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                             </tr>
                         </thead>
@@ -569,10 +556,10 @@
                                     {% endif %}
                                 </td>
                                 <!--<td>{{ precio.status_ws or '-' }}</td>
-                            <td>{{ precio.catalogo or '-' }}</td>
-                            <td>{{ precio.catalogo2 or '-' }}</td>
-                            <td>{{ precio.catalogo3 or '-' }}</td>
-                            <td>{{ precio.proveedor or '-' }}</td>-->
+                                <td>{{ precio.catalogo or '-' }}</td>
+                                <td>{{ precio.catalogo2 or '-' }}</td>
+                                <td>{{ precio.catalogo3 or '-' }}</td>
+                                <td>{{ precio.proveedor or '-' }}</td>-->
                                 <td>
                                     <div class="flex space-x-2">
                                         <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
@@ -942,213 +929,6 @@
     }
 </style>
 <script>
-    // Toggle column by index and persist on server
-    async function persistHiddenColumn(tableId, colIndex, hidden) {
-        try {
-            const map = await fetchHiddenMap();
-            map[tableId] = map[tableId] || {};
-            if (hidden) {
-                map[tableId][colIndex] = true;
-            } else {
-                if (map[tableId] && map[tableId][colIndex]) delete map[tableId][colIndex];
-            }
-            await saveHiddenMap(map);
-        } catch (e) {
-            console.warn('persistHiddenColumn error:', e);
-        }
-    }
-
-    // Toggle UI handler (header button)
-    function toggleColumnBtn(btn) {
-        const th = btn.closest('th');
-        if (!th) return;
-        const table = th.closest('table');
-        if (!table) return;
-        const headerCells = th.parentNode.children;
-        let index = Array.prototype.indexOf.call(headerCells, th); // 0-based
-        toggleColumn(table, index);
-        const pressed = btn.getAttribute('aria-pressed') === 'true';
-        btn.setAttribute('aria-pressed', (!pressed).toString());
-
-        // Persist change to server
-        const tableId = table.getAttribute('data-table') || 'table';
-        const nowHidden = !pressed;
-        persistHiddenColumn(tableId, index, nowHidden);
-    }
-
-    function toggleColumn(table, colIndex) {
-        const firstRow = table.querySelector('tbody tr');
-        if (!firstRow) return;
-        const cell = firstRow.children[colIndex];
-        const isHidden = cell && (cell.style.display === 'none' || cell.classList.contains('hidden'));
-        const newDisplay = isHidden ? '' : 'none';
-        const rows = table.querySelectorAll('thead tr, tbody tr');
-        rows.forEach(row => {
-            const c = row.children[colIndex];
-            if (c) c.style.display = newDisplay;
-        });
-    }
-
-    // Apply server stored hidden columns on page load
-    async function applyStoredHiddenColumns() {
-        try {
-            const map = await fetchHiddenMap();
-            const tables = document.querySelectorAll('table[data-table]');
-            tables.forEach(table => {
-                const tableId = table.getAttribute('data-table');
-                const hiddenForTable = map[tableId] || {};
-                Object.keys(hiddenForTable).forEach(idxStr => {
-                    const idx = parseInt(idxStr, 10);
-                    if (isNaN(idx)) return;
-                    const rows = table.querySelectorAll('thead tr, tbody tr');
-                    rows.forEach(row => {
-                        const c = row.children[idx];
-                        if (c) c.style.display = 'none';
-                    });
-                    // set aria pressed if header button exists
-                    const headerCell = table.querySelector('thead tr').children[idx];
-                    if (headerCell) {
-                        const btn = headerCell.querySelector('.col-toggle');
-                        if (btn) btn.setAttribute('aria-pressed', 'true');
-                    }
-                });
-            });
-        } catch (e) {
-            console.warn('Error applying stored hidden columns:', e);
-        }
-    }
-
-    // Modal functions to list hidden columns and let user unhide them
-    async function openHiddenColumnsModal(tableId) {
-        const map = await fetchHiddenMap();
-        const hiddenForTable = map[tableId] || {};
-        const modal = document.getElementById('hidden-columns-modal');
-        const list = document.getElementById('hidden-columns-list');
-        list.innerHTML = '';
-
-        // Find the table and header names
-        const table = document.querySelector(`table[data-table="${tableId}"]`);
-        if (!table) {
-            list.innerHTML = '<div>No table found</div>';
-            modal.style.display = 'block'; modal.classList.remove('hidden'); modal.setAttribute('aria-hidden', 'false');
-            return;
-        }
-        const headerCells = Array.from(table.querySelectorAll('thead tr th'));
-
-        // Populate list with hidden columns info
-        const indices = Object.keys(hiddenForTable).map(i => parseInt(i, 10)).sort((a, b) => a - b);
-        if (!indices.length) {
-            list.innerHTML = '<div>No hay columnas ocultas para esta tabla.</div>';
-        } else {
-            indices.forEach(idx => {
-                const th = headerCells[idx];
-                const title = th ? (th.querySelector('span') ? th.querySelector('span').innerText.trim() : th.innerText.trim()) : (`Columna ${idx + 1}`);
-                const row = document.createElement('div');
-                row.style.display = 'flex';
-                row.style.justifyContent = 'space-between';
-                row.style.alignItems = 'center';
-                row.style.padding = '6px 0';
-                row.innerHTML = `<div>${title}</div><div><button class="btn small" data-idx="${idx}" onclick="unhideColumnFromModal('${tableId}', ${idx})">Mostrar</button></div>`;
-                list.appendChild(row);
-            });
-        }
-
-        modal.style.display = 'block'; modal.classList.remove('hidden'); modal.setAttribute('aria-hidden', 'false');
-    }
-
-    function closeHiddenColumnsModal() {
-        const modal = document.getElementById('hidden-columns-modal');
-        modal.style.display = 'none'; modal.classList.add('hidden'); modal.setAttribute('aria-hidden', 'true');
-    }
-
-    async function unhideColumnFromModal(tableId, idx) {
-        // Find table and unhide
-        const table = document.querySelector(`table[data-table="${tableId}"]`);
-        if (!table) return;
-        const rows = table.querySelectorAll('thead tr, tbody tr');
-        rows.forEach(row => {
-            const c = row.children[idx];
-            if (c) c.style.display = '';
-        });
-        // Update header button state if exists
-        const headerCell = table.querySelector('thead tr').children[idx];
-        if (headerCell) {
-            const btn = headerCell.querySelector('.col-toggle');
-            if (btn) btn.setAttribute('aria-pressed', 'false');
-        }
-        // Persist removal
-        const map = await fetchHiddenMap();
-        if (map[tableId]) {
-            delete map[tableId][idx];
-            await saveHiddenMap(map);
-        }
-        // Refresh modal content
-        openHiddenColumnsModal(tableId);
-    }
-
-    // Unhide all columns for currently visible table
-    async function unhideAllColumns() {
-        // determine visible section (user or admin)
-        const visibleTable = document.querySelector('table[data-table]:not([style*="display: none"])');
-        if (!visibleTable) return;
-        const tableId = visibleTable.getAttribute('data-table');
-        const headers = visibleTable.querySelectorAll('thead tr th');
-        const map = await fetchHiddenMap();
-        if (map[tableId]) {
-            // remove all entries for this table
-            delete map[tableId];
-            await saveHiddenMap(map);
-        }
-        // show all columns in the UI
-        headers.forEach((th, idx) => {
-            const rows = visibleTable.querySelectorAll('thead tr, tbody tr');
-            rows.forEach(row => {
-                const c = row.children[idx];
-                if (c) c.style.display = '';
-            });
-            const btn = th.querySelector('.col-toggle');
-            if (btn) btn.setAttribute('aria-pressed', 'false');
-        });
-        // refresh modal
-        openHiddenColumnsModal(tableId);
-    }
-
-    // Apply server stored hidden columns on DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', function () {
-        // existing initialization...
-        // apply persisted hidden columns from server
-        applyStoredHiddenColumns();
-    });
-    // Server-backed hidden columns persistence
-    const HIDDEN_COLUMNS_API = "{{ url_for('get_precios_hidden_columns') }}";
-
-    async function fetchHiddenMap() {
-        try {
-            const res = await fetch(HIDDEN_COLUMNS_API, { credentials: 'same-origin' });
-            if (!res.ok) return {};
-            const data = await res.json();
-            return data.hidden || {};
-        } catch (e) {
-            console.warn('Error fetching hidden map:', e);
-            return {};
-        }
-    }
-
-    async function saveHiddenMap(map) {
-        try {
-            const res = await fetch(HIDDEN_COLUMNS_API, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ hidden: map })
-            });
-            if (!res.ok) {
-                console.warn('Save hidden map failed', await res.text());
-            }
-        } catch (e) {
-            console.warn('Error saving hidden map:', e);
-        }
-    }
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
         // Hide all sections
