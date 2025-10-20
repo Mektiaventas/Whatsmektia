@@ -387,24 +387,59 @@
             {% if precios %}
             <div class="table-responsive">
                 <div class="table-scroll table-scroll-client">
-                    <table class="table">
+                    <table class="table" data-table="user">
                         <thead>
                             <tr>
-                                <th>SKU</th>
-                                <th>Categoría</th>
-                                <th>Subcategoría</th>
-                                <th>Línea</th>
-                                <th>Modelo</th>
-                                <th>Descripción</th>
+                                <th>
+                                    <span>SKU</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">
+                                        👁️
+                                    </button>
+                                </th>
+                                <th>
+                                    <span>Categoría</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Subcategoría</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Línea</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Modelo</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Descripción</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
                                 <!--<th>Medidas</th>-->
-                                <th>Imagen</th>
-                                <th>Menudeo</th>
-                                <th>Inscripcion</th>
-                                <th>Mensualidad</th>
+                                <th>
+                                    <span>Imagen</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Menudeo</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Inscripcion</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
+                                <th>
+                                    <span>Mensualidad</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
                                 <!--<th>Mayoreo</th>-->
                                 <!--<th>Status</th>
                                 <th>Catálogo</th>-->
-                                <th>Acciones</th>
+                                <th>
+                                    <span>Acciones</span>
+                                    <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">👁️</button>
+                                </th>
                             </tr>
                         </thead>
                         <tbody>
@@ -745,13 +780,16 @@
         table-layout: fixed; /* columns share available width */
         font-size: 13px;
     }
-    .table td {
-        border: 1px solid black;
-        height: 8%;
-    }
-    .table th{
-        font-size: smaller;
-    }
+
+        .table td {
+            border: 1px solid black;
+            height: 8%;
+        }
+
+        .table th {
+            font-size: smaller;
+        }
+
         .table th,
         .table td {
             padding: 6px 8px;
@@ -816,6 +854,7 @@
         background: yellow;
         border-radius: 8px;
     }
+
     .desc-cell {
         font-size: xx-small;
     }
@@ -871,21 +910,22 @@
             width: 28px;
             height: 28px;
         }
+
         .floating-tooltip {
             max-width: 360px;
             font-size: 12px;
         }
     }
-    
+
     .btn small primary {
         width: 50%;
         height: 50%;
     }
+
     .btn small danger {
         width: 50%;
         height: 50%;
     }
-    
 </style>
 <script>
     // Function to show a specific section and highlight its button
@@ -944,7 +984,7 @@
         // Default to the user-list (client prices) section
         let initialSection = 'user-list';
 
-        {% if precio_edit %}
+        {%if precio_edit %}
         // If editing a product, go directly to manual upload
         initialSection = 'manual-upload';
         {% endif %}
