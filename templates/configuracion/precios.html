@@ -31,7 +31,19 @@
                 <span class="tab-title">Precios vista cliente</span>
             </div>
         </button>
-
+        <!-- Modal (floating) to list hidden columns and allow un-hiding -->
+        <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <strong>Columnas ocultas</strong>
+                <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
+            </div>
+            <div id="hidden-columns-list">
+                <!-- dynamically populated -->
+            </div>
+            <div style="margin-top:10px; text-align:right;">
+                <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
+            </div>
+        </div>
         {% if is_admin %}
         <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
             <div class="tab-icon">🔒</div>
@@ -379,19 +391,6 @@
 
 <!-- Sección: Lista Usuario -->
 <div class="section" id="user-list" style="display:none;">
-    <!-- Modal (floating) to list hidden columns and allow un-hiding -->
-    <div id="hidden-columns-modal" class="hidden floating-tooltip" role="dialog" aria-modal="true" aria-hidden="true" style="display:none;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-            <strong>Columnas ocultas</strong>
-            <button onclick="closeHiddenColumnsModal()" class="btn small">Cerrar</button>
-        </div>
-        <div id="hidden-columns-list">
-            <!-- dynamically populated -->
-        </div>
-        <div style="margin-top:10px; text-align:right;">
-            <button class="btn small" onclick="unhideAllColumns()">Mostrar todas</button>
-        </div>
-    </div>
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
             <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
