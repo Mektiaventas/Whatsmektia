@@ -7331,43 +7331,71 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
     return "¿Necesitas agregar algo más a tu pedido?"
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
-    """Confirma el pedido completo sin ofrecer contactar a un asesor proactivamente."""
+    """Confirma el pedido completo y devuelve el texto de confirmación.
+    - Construye info_pedido a partir de datos_pedido (robusto y con valores por defecto)
+    - Guarda la cita/pedido con guardar_cita(...)
+    - Notifica administradores según la forma de pago o flags explícitos en datos_pedido
+    - Retorna el texto de confirmación para enviar al usuario (no envía mensajes aquí)
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        platillos = datos_pedido.get('platillos', []) or []
-        cantidades = datos_pedido.get('cantidades', []) or []
-        especificaciones = datos_pedido.get('especificaciones', []) or []
+        if not isinstance(datos_pedido, dict):
+            app.logger.warning("confirmar_pedido_completo: datos_pedido no es dict; intentando convertir")
+            datos_pedido = datos_pedido or {}
+
+        # Normalizar campos comunes y proporcionar defaults seguros
+        platillos = datos_pedido.get('platillos') or datos_pedido.get('productos') or []
+        cantidades = datos_pedido.get('cantidades') or datos_pedido.get('quantities') or []
+        especificaciones = datos_pedido.get('especificaciones') or datos_pedido.get('notas') or []
         nombre_cliente = datos_pedido.get('nombre_cliente') or datos_pedido.get('nombre') or 'Cliente'
-        direccion = datos_pedido.get('direccion') or datos_pedido.get('direccion_cliente') or 'Por confirmar'
+        direccion = datos_pedido.get('direccion') or datos_pedido.get('direccion_cliente') or ''
+        forma_pago = (datos_pedido.get('forma_pago') or '').strip().lower()
+        fecha = datos_pedido.get('fecha_sugerida') or datos_pedido.get('fecha') or datetime.now().strftime('%Y-%m-%d')
+        hora = datos_pedido.get('hora_sugerida') or datos_pedido.get('hora') or '12:00'
 
-        resumen_platillos = ""
-        for i, platillo in enumerate(platillos):
-            cantidad = cantidades[i] if i < len(cantidades) else "1"
-            resumen_platillos += f"- {cantidad} {platillo}\n"
+        # Build notas incluyendo transferencia si aplica
+        notas_parts = []
+        if especificaciones:
+            if isinstance(especificaciones, (list, tuple)):
+                notas_parts.append("Especificaciones: " + ", ".join(map(str, especificaciones)))
+            else:
+                notas_parts.append("Especificaciones: " + str(especificaciones))
 
-        info_pedido = {
-            'servicio_solicitado': f"Pedido: {', '.join(platillos)}" if platillos else datos_pedido.get('servicio_solicitado', 'Pedido sin especificar'),
-            'nombre_cliente': nombre_cliente,
-            'telefono': numero,
-            'estado': 'pendiente',
-            'notas': f"Especificaciones: {', '.join(especificaciones)}\nDirección: {direccion}"
-        }
+        if direccion:
+            notas_parts.append("Dirección: " + direccion)
 
-        if datos_pedido.get('forma_pago'):
-            info_pedido['forma_pago'] = datos_pedido.get('forma_pago')
-            info_pedido['notas'] += f"\nForma de pago: {datos_pedido.get('forma_pago')}"
+        if forma_pago:
+            notas_parts.append("Forma de pago: " + forma_pago)
 
         for k in ('transferencia_numero', 'transferencia_nombre', 'transferencia_banco'):
             if datos_pedido.get(k):
-                info_pedido['notas'] += f"\n{k}: {datos_pedido.get(k)}"
+                notas_parts.append(f"{k}: {datos_pedido.get(k)}")
 
-        fecha = datos_pedido.get('fecha_sugerida') or datos_pedido.get('fecha') or datetime.now().strftime('%Y-%m-%d')
-        hora = datos_pedido.get('hora_sugerida') or datos_pedido.get('hora') or '12:00'
-        info_pedido['fecha_sugerida'] = fecha
-        info_pedido['hora_sugerida'] = hora
+        notas = "\n".join(notas_parts).strip()
 
+        resumen_platillos = ""
+        if platillos:
+            for i, platillo in enumerate(platillos):
+                cantidad = cantidades[i] if i < len(cantidades) else "1"
+                resumen_platillos += f"- {cantidad} {platillo}\n"
+        else:
+            # fallback: servicio_solicitado si no hay lista de platillos
+            servicio_label = datos_pedido.get('servicio_solicitado') or datos_pedido.get('servicio') or 'Pedido'
+            resumen_platillos = f"- {servicio_label}\n"
+
+        info_pedido = {
+            'servicio_solicitado': datos_pedido.get('servicio_solicitado') or f"Pedido: {', '.join(platillos)}" if platillos else datos_pedido.get('servicio_solicitado') or 'Pedido',
+            'nombre_cliente': nombre_cliente,
+            'telefono': numero,
+            'estado': 'pendiente',
+            'notas': notas,
+            'fecha_sugerida': fecha,
+            'hora_sugerida': hora
+        }
+
+        # Guardar cita/pedido
         cita_id = guardar_cita(info_pedido, config)
         if not cita_id:
             app.logger.error("🔴 confirmar_pedido_completo: fallo al guardar cita/pedido")
@@ -7375,37 +7403,53 @@ def confirmar_pedido_completo(numero, datos_pedido, config=None):
 
         app.logger.info(f"✅ Pedido/Cita guardado con ID: {cita_id}")
 
-        forma = str(datos_pedido.get('forma_pago', '')).lower()
+        # Decidir si notificar administradores:
+        # - notificar si forma de pago es 'efectivo' (requiere coordinación)
+        # - o si caller puso 'notify_admin': True en datos_pedido
+        notify_admin = False
+        try:
+            if datos_pedido.get('notify_admin') is True:
+                notify_admin = True
+            elif 'efectivo' in forma_pago or 'pago al entregar' in forma_pago or 'efectivo' in (datos_pedido.get('forma_pago') or '').lower():
+                notify_admin = True
+        except Exception:
+            notify_admin = False
 
-        # No se ofrecen contactos de asesores proactivamente aquí: solo se explica el siguiente paso de pago.
-        if 'tarjeta' in forma or 'card' in forma:
-            instrucciones_pago = (
-                "💳 Hemos registrado tu pedido. Por seguridad no pedimos datos de tarjeta por WhatsApp.\n"
-                "Tu pedido quedó registrado y el negocio te contactará para gestionar el pago de forma segura."
-            )
-        elif 'transfer' in forma or 'transferencia' in forma:
-            instrucciones_pago = (
-                "💳 Hemos registrado tu pedido y la opción de pago es transferencia.\n"
-                "Por favor realiza la transferencia y envía el comprobante por este chat. Cuando lo validemos procederemos con tu pedido."
-            )
-        else:
-            instrucciones_pago = (
-                "💵 Hemos registrado tu pedido. Como elegiste pago en efectivo, lo pagarás al recibirlo.\n"
-                "Te avisaremos cuando esté en camino."
-            )
+        if notify_admin:
+            try:
+                enviar_alerta_cita_administrador(info_pedido, cita_id, config)
+                app.logger.info(f"🔔 Alerta administrativa enviada para pedido ID {cita_id}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo enviar alerta administrativa para cita_id={cita_id}: {e}")
 
+        # Construir confirmación textual para el usuario
         confirmacion = f"""🎉 *Pedido registrado!* - ID: #{cita_id}
 
 📋 *Resumen del pedido:*
-{resumen_platillos or '- No se especificaron platillos -'}
+{resumen_platillos or '- No se especificaron artículos -'}
 
-🏠 *Dirección:* {direccion}
 👤 *Nombre:* {nombre_cliente}
+📞 *Teléfono:* {numero}
+📅 *Fecha sugerida:* {fecha}
+⏰ *Hora sugerida:* {hora}
 
-{instrucciones_pago}
+{('📍 Dirección: ' + direccion + '\n') if direccion else ''}
+{('💳 Forma de pago: ' + datos_pedido.get('forma_pago') + '\n') if datos_pedido.get('forma_pago') else ''}
 
 ⏰ *Registrado:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 """
+
+        # Instrucciones según forma de pago
+        if 'tarjeta' in forma_pago or 'card' in forma_pago:
+            confirmacion += ("\n💳 Hemos registrado tu pedido. Por seguridad no pedimos datos de tarjeta por WhatsApp.\n"
+                              "El negocio te contactará para gestionar el pago de forma segura.")
+        elif 'transfer' in forma_pago or 'transferencia' in forma_pago:
+            confirmacion += ("\n💳 Hemos registrado tu pedido y la opción de pago es transferencia.\n"
+                              "Por favor realiza la transferencia y envía el comprobante por este chat. Cuando lo validemos procederemos con tu pedido.")
+        else:
+            confirmacion += ("\n💵 Has elegido pago en efectivo. Pagarás al momento de la entrega. "
+                              "Te avisaremos cuando esté en camino.")
+
         return confirmacion
 
     except Exception as e:
