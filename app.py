@@ -3947,8 +3947,6 @@ def obtener_precio(servicio_nombre: str, config):
         return Decimal(res[0]), res[1]
     return None
 
-# ——— Memoria de conversación ———
-# REEMPLAZA la función obtener_historial con esta versión mejorada
 def obtener_historial(numero, limite=5, config=None):
     """Función compatible con la estructura actual de la base de datos"""
     if config is None:
@@ -3989,291 +3987,85 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     negocio_nombre = neg.get('negocio_nombre', '')
     descripcion = neg.get('descripcion', '')
     que_hace = neg.get('que_hace', '')
+    # Si estamos en una secuencia guiada de cita/pedido, delegar a la secuencia
     estado_actual = obtener_estado_conversacion(numero, config)
     if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
+        # manejar_secuencia_cita maneja el diálogo paso a paso y devuelve el texto que debe enviarse
         return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    info_cita = None  # Initialize to avoid UnboundLocalError
-    # Interceptar petición explícita de asesor (antes de llamar a la IA)
-    text_lower = (mensaje_usuario or "").lower()
-        # --- Interceptor: responder directamente consultas de contacto del negocio ---
-    transfer_keywords = [
-        'datos para transferencia', 'datos de transferencia',
-        'clabe interbancaria', 'datos de cuenta', 'numero de cuenta', 'número de cuenta',
-        'datos bancarios', 'pago por transferencia', 'pagar por transferencia',
-        'datos para deposito', 'quiero hacer un depósito', 'hacer transferencia'
-    ]
-    if any(k in text_lower for k in transfer_keywords):
-        transfer_block = negocio_transfer_block(cfg.get('negocio', {}))
-        app.logger.info(f"ℹ️ Respuesta de transferencia servida desde DB para {numero}")
-        return transfer_block
 
-    contact_queries = [
-        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
-        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
-        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion', 'ubican'
-    ]
-    if any(k in text_lower for k in contact_queries):
-        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
-        # Responder inmediatamente desde el servidor (no IA)
-        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
-        return negocio_block
-    advisor_keywords = [
-        'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
-        'pásame un asesor', 'pasame un asesor', 'quiero un asesor',
-        'conectar con asesor', 'contacto de asesor'
-    ]
-    if any(k in text_lower for k in advisor_keywords):
-        sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-        if sent:
-            app.logger.info(f"✅ Se envió contacto de asesor a {numero} por petición explícita")
-            # Guardar conversacion que se le pasó el contacto (no duplicar datos)
-            guardar_conversacion(numero, mensaje_usuario, f"Se compartió contacto de asesor.", config)
-        else:
-            app.logger.info(f"ℹ️ No se envió asesor a {numero} (no configurado)")
-            enviar_mensaje(numero, "Lo siento, no hay asesores configurados ahora. ¿Quieres que te comparta otra opción?", config)
-            guardar_conversacion(numero, mensaje_usuario, "No hay asesores configurados.", config)
-        return
-    # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
-    if detectar_solicitud_cita_keywords(mensaje_usuario, config):
-        app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
-        info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
-        if info_cita and info_cita.get('servicio_solicitado'):
-            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            if datos_completos:
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    enviar_notificacion_pedido_cita(numero, texto, analisis_pedido, config)
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                    return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
-            else:
-                mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                if 'fecha' in faltantes:
-                    mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
-                if 'hora' in faltantes:
-                    mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
-                if 'nombre' in faltantes:
-                    mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
-                return mensaje_faltantes
-        else:
-            es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-            if es_porfirianna:
-                return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
-            else:
-                return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
-        # --- Interceptor: responder directamente consultas de contacto del negocio ---
-    contact_queries = [
-        'cual es la dirección', 'cual es su direccion', 'teléfono', 'telefono', 'correo', 'email',
-        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
-        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion'
-    ]
-    # mensaje_usuario ya definido; text_lower ya existe arriba
-    if any(k in text_lower for k in contact_queries):
-        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
-        # Responder inmediatamente desde el servidor (no IA)
-        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
-        return negocio_block
-    # ... el resto de la función permanece igual ...
-    # Fetch detailed products/services data from the precios table
-    precios = obtener_todos_los_precios(config)
-
-    # Format products using the canonical DB fields ...
-    productos_formateados = []
-    dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-
-    # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
-    def _clean_field(val, imagen_name):
-        if not val:
-            return ''
-        try:
-            s = str(val).strip()
-            if not imagen_name:
-                return s
-            img = str(imagen_name).strip()
-            # eliminar coincidencias exactas del nombre de la imagen
-            if img and img in s:
-                s = s.replace(img, '')
-            # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-            s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-            # limpiar espacios sobrantes
-            s = re.sub(r'\s{2,}', ' ', s).strip()
-            return s
-        except Exception:
-            return str(val).strip()
-
-    for p in precios[:1000]:
-        try:
-            # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
-            imagen = (p.get('imagen') or '').strip()
-
-            # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
-            sku = _clean_field(p.get('sku'), imagen)
-            modelo = _clean_field(p.get('modelo'), imagen)
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = _clean_field(p.get('categoria'), imagen)
-            subcategoria = _clean_field(p.get('subcategoria'), imagen)
-            linea = _clean_field(p.get('linea'), imagen)
-            descripcion_p = _clean_field(p.get('descripcion'), imagen)
-            medidas = _clean_field(p.get('medidas'), imagen)
-            proveedor = _clean_field(p.get('proveedor'), imagen)
-            status = _clean_field(p.get('status_ws'), imagen) or 'activo'
-            catalogo = _clean_field(p.get('catalogo'), imagen)
-
-            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
-            if imagen:
-                if imagen.lower().startswith('http'):
-                    imagen_url = imagen
-                else:
-                    if dominio_publico.startswith('http'):
-                        base = dominio_publico.rstrip('/')
-                    else:
-                        base = f"https://{dominio_publico}"
-                    imagen_url = f"{base}/uploads/productos/{imagen}"
-            else:
-                imagen_url = ''
-
-            # Precios y campos de suscripción
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or None
-            inscripcion = p.get('inscripcion')
-            mensualidad = p.get('mensualidad')
-
-            precio_str = ''
-            try:
-                if precio_menudeo:
-                    precio_str = f"${float(precio_menudeo):,.2f}"
-            except Exception:
-                precio_str = str(precio_menudeo) if precio_menudeo is not None else ''
-
-            extras = []
-            try:
-                if inscripcion not in (None, '', 0):
-                    extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
-            except Exception:
-                extras.append(f"Inscripción: {inscripcion}")
-            try:
-                if mensualidad not in (None, '', 0):
-                    extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
-            except Exception:
-                extras.append(f"Mensualidad: {mensualidad}")
-
-            parts = [f"{titulo}"]
-            if sku:
-                parts.append(f"(SKU: {sku})")
-            if categoria:
-                parts.append(f"Categoria: {categoria}")
-            if subcategoria:
-                parts.append(f"Subcategoria: {subcategoria}")
-            if linea:
-                parts.append(f"Linea: {linea}")
-            if precio_str:
-                parts.append(f"Precio: {precio_str}")
-            if extras:
-                parts.append(f"{', '.join(extras)}")
-            if medidas:
-                parts.append(f"Medidas: {medidas}")
-            if proveedor:
-                parts.append(f"Proveedor: {proveedor}")
-            if catalogo:
-                parts.append(f"Catalogo: {catalogo}")
-            if imagen_url:
-                parts.append(f"Imagen: {imagen_url}")
-            elif imagen:
-                parts.append(f"Imagen: {imagen}")
-            if descripcion_p:
-                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-            producto_line = " | ".join(parts)
-            producto_line += f" | Status: {status}"
-
-        except Exception:
-            producto_line = "Sin datos legibles de producto"
-        productos_formateados.append(f"- {producto_line}")
-
-    productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-    asesores_block = format_asesores_block(cfg)
-    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT para considerar inscripcion/mensualidad
-    system_prompt = f"""
-    Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-    Descripción del negocio: {descripcion}
-
-    Dispones de la siguiente lista de productos/servicios:
-
-    {productos_texto}
-
-    {asesores_block}
-
-    REGLAS IMPORTANTES:
-    1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
-    2. SI el producto tiene campos de Inscripción o Mensualidad, muéstralos claramente (ej: "Inscripción: $100.00, Mensualidad: $20.00").
-    3. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
-    4. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
-    5. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
-    6. Mantén las respuestas limpias, concisas y orientadas al cliente.
-    """
-    # ... el resto de tu función se mantiene igual ...
-    historial = obtener_historial(numero, config=config)
-
-    info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
-    if info_cita and info_cita.get('servicio_solicitado'):
-        app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
-        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-        if datos_completos:
-            cita_id = guardar_cita(info_cita, config)
-            if cita_id:
-                app.logger.info(f"✅ Cita guardada con ID: {cita_id}")
-                enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-                confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
-                return confirmacion
-
-    # ... continúa el resto de la función sin cambios ...
-
-    messages_chain = [{'role': 'system', 'content': system_prompt}]
-    for entry in historial:
-        if entry['mensaje'] and str(entry['mensaje']).strip() != '':
-            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        if entry['respuesta'] and str(entry['respuesta']).strip() != '':
-            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-    if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        if es_imagen and imagen_base64:
-            messages_chain.append({
-                'role': 'user',
-                'content': [
-                    {"type": "text", "text": mensaje_usuario},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": imagen_base64,
-                            "detail": "auto"
-                        }
-                    }
-                ]
-            })
-        elif es_audio and transcripcion_audio:
-            try:
-                tu = mensaje_usuario.strip() if mensaje_usuario else ""
-                ta = transcripcion_audio.strip() if transcripcion_audio else ""
-                if tu and ta and tu != ta:
-                    content = f"{ta}\n\n[Mensaje adicional]: {tu}"
-                else:
-                    content = ta or tu
-            except Exception:
-                content = transcripcion_audio or mensaje_usuario
-            messages_chain.append({'role': 'user', 'content': content})
-        elif es_audio and not transcripcion_audio and mensaje_usuario:
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
-        else:
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
-
+    # A partir de aquí: responder_con_ia NO hace efectos secundarios (no enviar mensajes, no guardar citas,
+    # no pasar contacto a asesores). Solo genera una respuesta textual que el caller (webhook / procesador)
+    # podrá enviar/almacenar/actuar sobre ella.
     try:
+        # Preparar catálogo reducido para contexto (limitado para tokens)
+        precios = obtener_todos_los_precios(config) or []
+        productos_lines = []
+        for p in precios[:200]:
+            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
+            sku = (p.get('sku') or '').strip()
+            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
+            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}")
+
+        productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos registrados en el catálogo."
+
+        asesores_block = format_asesores_block(cfg)
+
+        # System prompt claro y restricción para que la IA no realice acciones por sí misma
+        system_prompt = f"""
+        Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+        Descripción del negocio: {descripcion}
+
+        Dispones de la siguiente lista de productos/servicios (resumida):
+        {productos_texto}
+
+        {asesores_block}
+
+        REGLAS IMPORTANTES:
+        - No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
+        - Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde con un mensaje
+          que confirme la petición (ej: "Entiendo, solicito la intervención de un asesor.") pero NO intentes contactar.
+        - Si detectas una intención de agendar una cita/pedido, extrae y devuelve los campos en texto pero NO guardes nada.
+        - Mantén las respuestas concisas, sin rutas de archivos ni nombres de imágenes crudas.
+        """
+
+        # Construir cadena de mensajes con historial para contexto
+        messages_chain = [{'role': 'system', 'content': system_prompt}]
+        historial = obtener_historial(numero, limite=6, config=config) or []
+        for entry in historial:
+            if entry.get('mensaje') and str(entry['mensaje']).strip() != '':
+                messages_chain.append({'role': 'user', 'content': entry['mensaje']})
+            if entry.get('respuesta') and str(entry['respuesta']).strip() != '':
+                messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+
+        # Añadir mensaje actual (multimodal handling similar al original)
+        if mensaje_usuario and str(mensaje_usuario).strip() != '':
+            if es_imagen and imagen_base64:
+                messages_chain.append({
+                    'role': 'user',
+                    'content': [
+                        {"type": "text", "text": mensaje_usuario},
+                        {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
+                    ]
+                })
+            elif es_audio and transcripcion_audio:
+                try:
+                    tu = mensaje_usuario.strip() if mensaje_usuario else ""
+                    ta = transcripcion_audio.strip() if transcripcion_audio else ""
+                    if tu and ta and tu != ta:
+                        content = f"{ta}\n\n[Mensaje adicional]: {tu}"
+                    else:
+                        content = ta or tu
+                except Exception:
+                    content = transcripcion_audio or mensaje_usuario
+                messages_chain.append({'role': 'user', 'content': content})
+            else:
+                messages_chain.append({'role': 'user', 'content': mensaje_usuario})
+
+        # Seguridad: si no hay suficiente contexto, saluda
         if len(messages_chain) <= 1:
             return "¡Hola! ¿En qué puedo ayudarte hoy?"
 
+        # Llamada a la IA (Deepseek/OpenAI)
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -4282,23 +4074,35 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             "model": "deepseek-chat",
             "messages": messages_chain,
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": 1200
         }
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        respuesta = data['choices'][0]['message']['content'].strip()
-        respuesta = aplicar_restricciones(respuesta, numero, config)
+        respuesta = data['choices'][0]['message']['content']
+
+        # Normalizar respuesta multimodal (si viene como lista)
+        if isinstance(respuesta, list):
+            parts = []
+            for item in respuesta:
+                if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
+                    parts.append(item.get('text'))
+                elif isinstance(item, str):
+                    parts.append(item)
+            respuesta = "\n".join(parts)
+
+        respuesta = aplicar_restricciones(str(respuesta).strip(), numero, config)
         return respuesta
 
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 API error: {e}")
+        app.logger.error(f"🔴 IA request error en responder_con_ia: {e}")
         if hasattr(e, 'response') and e.response:
-            app.logger.error(f"🔴 Response: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA.'
+            app.logger.error(f"🔴 IA response body: {e.response.text}")
+        return 'Lo siento, hubo un error con la IA. Intenta de nuevo más tarde.'
     except Exception as e:
-        app.logger.error(f"🔴 Error inesperado: {e}")
-        return 'Lo siento, hubo un error con la IA.'
+        app.logger.error(f"🔴 Error inesperado en responder_con_ia: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Lo siento, hubo un error interno procesando la respuesta.'
 
 def buscar_sku_en_texto(texto, precios):
     """
@@ -4319,7 +4123,6 @@ def buscar_sku_en_texto(texto, precios):
             return sku or modelo
     return None
 
-# Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
     Actualiza el estado de la conversación para mantener contexto
@@ -6554,7 +6357,16 @@ def webhook():
             info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
             if info_intervencion:
                 app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                enviar_alerta_intervencion_humana(info_intervencion, config)
+                # info_intervencion es un dict esperado con claves como 'resumen' y 'problema_principal'
+                try:
+                    resumen_intervencion = info_intervencion.get('resumen') if isinstance(info_intervencion, dict) else str(info_intervencion)
+                    problema_principal = info_intervencion.get('problema_principal') if isinstance(info_intervencion, dict) else None
+                    mensaje_clave_para_alerta = problema_principal or texto or "Solicitud de intervención humana"
+                    enviar_alerta_humana(numero, mensaje_clave_para_alerta, resumen_intervencion, config)
+                except Exception as e:
+                    app.logger.error(f"🔴 Error llamando a enviar_alerta_humana con info_intervencion: {e}")
+                    # Fallback: enviar con la info cruda
+                    enviar_alerta_humana(numero, texto, json.dumps(info_intervencion, ensure_ascii=False)[:1000], config)
                 respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
             else:
                 respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
@@ -6767,149 +6579,10 @@ def detectar_solicitud_cita_keywords(mensaje, config=None):
     app.logger.info(f"✅ detectar_solicitud_cita_keywords -> raw IA: '{analisis[:200]}' -> interpreted: {es_solicitud}")
     return es_solicitud
 
-def decidir_accion_por_mensaje(mensaje, numero, msg_obj=None, config=None):
-    """
-    Pipeline central de decisión para un mensaje entrante.
-    Retorna (accion, payload) donde accion es uno de:
-      - 'IGNORE'               -> no procesar (mensajes de sistema)
-      - 'GUARDAR_CITA'         -> payload = info_cita completa para guardar
-      - 'INICIAR_SECUENCIA_CITA' -> payload = {'info': info_parcial_or_None, 'faltantes': [...] or None}
-      - 'PEDIDO_INTELIGENTE'   -> payload = analisis de detectar_pedido_inteligente
-      - 'ALERTA_HUMANA'        -> payload = None (usar resumen/extraccion para notificar)
-      - 'REQUEST_ADVISOR'      -> payload = None (usuario pidió asesor explícito)
-      - 'NORMAL'               -> payload = None (seguir flujo normal)
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    texto = (mensaje or "").strip()
-    if not texto:
-        return 'NORMAL', None
-
-    # 0) Ignorar mensajes del propio canal de alertas con marcas del sistema
-    system_tags = ["🚨 ALERTA:", "📋 INFORMACIÓN COMPLETA", "👤 Cliente:"]
-    if numero == ALERT_NUMBER or any(tag in texto for tag in system_tags):
-        return 'IGNORE', None
-
-    # 1) Si el usuario pidió explícitamente hablar con asesor recientemente
-    try:
-        if user_explicitly_requested_asesor_in_last_messages(numero, config=config):
-            return 'REQUEST_ADVISOR', None
-    except Exception:
-        pass
-
-    # 2) Detección de necesidad de intervención humana (prioritaria)
-    try:
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            return 'ALERTA_HUMANA', None
-    except Exception:
-        pass
-
-    # 3) Detección por keywords / flujo de cita/pedido
-    try:
-        if detectar_solicitud_cita_keywords(texto, config):
-            # Intentar extraer info con el analizador mejorado
-            historial = obtener_historial(numero, limite=5, config=config)
-            info_cita = extraer_info_cita_mejorado(texto, numero, historial, config)
-            if info_cita and info_cita.get('servicio_solicitado'):
-                completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                if completos:
-                    return 'GUARDAR_CITA', info_cita
-                else:
-                    return 'INICIAR_SECUENCIA_CITA', {'info': info_cita, 'faltantes': faltantes}
-            # No pudo extraer: iniciar secuencia guiada
-            return 'INICIAR_SECUENCIA_CITA', {'info': None, 'faltantes': None}
-    except Exception:
-        pass
-
-    # 4) Intento AI de detectar pedido inteligente (fallback)
-    try:
-        analisis = detectar_pedido_inteligente(texto, numero, config=config)
-        if analisis and analisis.get('es_pedido'):
-            return 'PEDIDO_INTELIGENTE', analisis
-    except Exception:
-        pass
-
-    # 5) Por defecto, normal
-    return 'NORMAL', None
-
 @app.route('/')
 def inicio():
     config = obtener_configuracion_por_host()
     return redirect(url_for('home', config=config))
-
-@app.route('/test-calendar')
-def test_calendar():
-    """Prueba el agendamiento de citas en Google Calendar"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        # Crear información de cita de prueba
-        info_cita = {
-            'servicio_solicitado': 'Servicio de Prueba',
-            'fecha_sugerida': (datetime.now() + timedelta(days=2)).strftime('%Y-%m-%d'),
-            'hora_sugerida': '10:00',
-            'nombre_cliente': 'Cliente de Prueba',
-            'telefono': '5214495486142',
-            'detalles_servicio': {
-                'descripcion': 'Esta es una cita de prueba para verificar la integración con Google Calendar',
-                'categoria': 'Prueba',
-                'precio': '100.00',
-                'precio_menudeo': '100.00'
-            }
-        }
-        
-        # Intentar autenticar con Google Calendar
-        service = autenticar_google_calendar(config)
-        
-        if not service:
-            return """
-            <h1>❌ Error de Autenticación</h1>
-            <p>No se pudo autenticar con Google Calendar. Por favor verifica:</p>
-            <ul>
-                <li>Que hayas autorizado la aplicación con Google Calendar</li>
-                <li>Que el archivo token.json exista y sea válido</li>
-                <li>Que el archivo client_secret.json esté correctamente configurado</li>
-            </ul>
-            <p><a href="/autorizar_manual" class="btn btn-primary">Intentar Autorizar de Nuevo</a></p>
-            """
-        
-        # Intentar crear evento
-        evento_id = crear_evento_calendar(service, info_cita, config)
-        
-        if evento_id:
-            # Mostrar información del correo configurado
-            conn = get_db_connection(config)
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SELECT calendar_email FROM configuracion WHERE id = 1")
-            result = cursor.fetchone()
-            calendar_email = result.get('calendar_email') if result else 'No configurado'
-            cursor.close()
-            conn.close()
-            
-            return f"""
-            <h1>✅ Evento Creado Exitosamente</h1>
-            <p>Se ha creado un evento de prueba en Google Calendar.</p>
-            <p><strong>ID del Evento:</strong> {evento_id}</p>
-            <p><strong>Servicio:</strong> {info_cita['servicio_solicitado']}</p>
-            <p><strong>Fecha:</strong> {info_cita['fecha_sugerida']} a las {info_cita['hora_sugerida']}</p>
-            <p><strong>Cliente:</strong> {info_cita['nombre_cliente']}</p>
-            <p><strong>Correo para notificaciones:</strong> {calendar_email}</p>
-            <p>Verifica tu calendario de Google para confirmar que el evento se haya creado correctamente.</p>
-            """
-        else:
-            return """
-            <h1>❌ Error al Crear el Evento</h1>
-            <p>La autenticación fue exitosa, pero no se pudo crear el evento en el calendario.</p>
-            <p>Revisa los logs del servidor para más información sobre el error.</p>
-            """
-            
-    except Exception as e:
-        return f"""
-        <h1>❌ Error durante la prueba</h1>
-        <p>Ocurrió un error al intentar probar la integración con Google Calendar:</p>
-        <pre>{str(e)}</pre>
-        """
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -8260,24 +7933,6 @@ def proxy_audio(audio_url):
     except Exception as e:
         return str(e), 500
 
-@app.route('/privacy-policy')
-def privacy_policy():
-        return render_template('privacy_policy.html')
-
-@app.route('/terms-of-service')
-def terms_of_service():
-        return render_template('terms_of_service.html')
-
-@app.route('/data-deletion')
-def data_deletion():
-        return render_template('data_deletion.html')
-
-@app.route('/test-alerta')
-def test_alerta():
-    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
-    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
-    return "🚀 Test alerta disparada."
-
 def obtener_chat_meta(numero, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
@@ -8289,7 +7944,6 @@ def obtener_chat_meta(numero, config=None):
         conn.close()
         return meta
 
-# ——— Modificar la función inicializar_chat_meta para ser más robusta ———
 def inicializar_chat_meta(numero, config=None):
     """Inicializa el chat meta usando información existente del contacto"""
     if config is None:
@@ -8333,67 +7987,6 @@ def inicializar_chat_meta(numero, config=None):
         cursor.close()
         conn.close()
 
-# ——— Agregar ruta para reparar Kanban específico ———
-@app.route('/reparar-kanban-porfirianna')
-def reparar_kanban_porfirianna():
-    """Repara específicamente el Kanban de La Porfirianna"""
-    config = NUMEROS_CONFIG['524812372326']  # Config de La Porfirianna
-    
-    try:
-        # 1. Crear tablas Kanban
-        crear_tablas_kanban(config)
-        
-        # 2. Reparar contactos
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        cursor.execute("""
-            SELECT c.numero_telefono 
-            FROM contactos c 
-            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
-            WHERE cm.numero IS NULL
-        """)
-        
-        contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
-        
-        for numero in contactos_sin_meta:
-            inicializar_chat_meta(numero, config)
-        
-        cursor.close()
-        conn.close()
-        
-        return f"✅ Kanban de La Porfirianna reparado: {len(contactos_sin_meta)} contactos actualizados"
-        
-    except Exception as e:
-        return f"❌ Error reparando Kanban: {str(e)}"
-
-@app.route('/reparar-contactos')
-def reparar_contactos():
-    """Repara todos los contactos que no están en chat_meta"""
-    config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # Encontrar contactos que no están en chat_meta
-    cursor.execute("""
-        SELECT c.numero_telefono 
-        FROM contactos c 
-        LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
-        WHERE cm.numero IS NULL
-    """)
-    
-    contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
-    
-    for numero in contactos_sin_meta:
-        app.logger.info(f"🔧 Reparando contacto: {numero}")
-        inicializar_chat_meta(numero, config)
-    
-    cursor.close()
-    conn.close()
-    
-    return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
-
 def actualizar_kanban(numero=None, columna_id=None, config=None):
     # Actualiza la base de datos si se pasan parámetros
     if numero and columna_id:
@@ -8410,7 +8003,6 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
         conn.close()
     # No emitas ningún evento aquí
 
-# Add this new function that updates chat_meta immediately when receiving a message
 def actualizar_kanban_inmediato(numero, config=None):
     """Updates the Kanban board immediately when a message is received"""
     if config is None:
@@ -8604,6 +8196,19 @@ def obtener_contexto_consulta(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
+
+#LOS ARCHIVOS LEGALES DE HTML
+@app.route('/privacy-policy')
+def privacy_policy():
+        return render_template('privacy_policy.html')
+
+@app.route('/terms-of-service')
+def terms_of_service():
+        return render_template('terms_of_service.html')
+
+@app.route('/data-deletion')
+def data_deletion():
+        return render_template('data_deletion.html')
 
 # ——— Inicialización al arrancar la aplicación ———
 with app.app_context():
