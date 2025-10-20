@@ -480,6 +480,8 @@
                                 <!--<th>Medidas</th>-->
                                 <th>Costo</th>
                                 <th>Menudeo</th>
+                                <th>Inscripcion</th>
+                                <th>Mensualidad</th>
                                 <!--<th>Mayoreo</th>-->
                                 <th>Imagen</th>
                                 <!--<th>Status</th>
@@ -504,6 +506,8 @@
                                 <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
+                                <td>{{precio.inscripcion}}</td>
+                                <td>{{precio.mensualidad}}</td>
                                 <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <td>
                                     {% if precio.imagen %}
