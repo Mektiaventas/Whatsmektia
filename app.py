@@ -36,7 +36,13 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
-
+# replace the long DB helpers in app.py by importing the new module
+from services import (
+    get_clientes_conn,
+    get_db_connection,
+    _ensure_precios_subscription_columns,
+    obtener_conexion_db
+)
 try:
     # preferred location
     from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
@@ -168,15 +174,6 @@ ALLOWED_EXTENSIONS = {
     'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
     'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
 }
-
-# --- Conexión a la BD de clientes (auth) ---
-def get_clientes_conn():
-    return mysql.connector.connect(
-        host=os.getenv("CLIENTES_DB_HOST"),
-        user=os.getenv("CLIENTES_DB_USER"),
-        password=os.getenv("CLIENTES_DB_PASSWORD"),
-        database=os.getenv("CLIENTES_DB_NAME")
-    )
 
 def obtener_cliente_por_user(username):
     conn = get_clientes_conn()
@@ -2093,73 +2090,6 @@ def get_productos_dir_for_config(config=None):
     os.makedirs(productos_dir, exist_ok=True)
     return productos_dir, tenant_slug
 
-def get_db_connection(config=None):
-    """
-    Get a DB connection using a small MySQLConnectionPool per tenant (cached).
-    Falls back to direct mysql.connector.connect() if pooling fails.
-    """
-    if config is None:
-        try:
-            from flask import has_request_context
-            if has_request_context():
-                config = obtener_configuracion_por_host()
-            else:
-                config = NUMEROS_CONFIG['524495486142']
-        except Exception as e:
-            app.logger.error(f"Error obteniendo configuración: {e}")
-            config = NUMEROS_CONFIG['524495486142']
-
-    # pool size can be tuned via env var
-    POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
-    pool_key = f"{config.get('db_host')}|{config.get('db_user')}|{config.get('db_name')}"
-
-    # module-level cache for pools
-    global _MYSQL_POOLS
-    try:
-        _MYSQL_POOLS
-    except NameError:
-        _MYSQL_POOLS = {}
-
-    try:
-        # create pool if not present
-        if pool_key not in _MYSQL_POOLS:
-            app.logger.info(f"🔧 Creating MySQL pool for {config.get('db_name')} (size={POOL_SIZE})")
-            _MYSQL_POOLS[pool_key] = pooling.MySQLConnectionPool(
-                pool_name=f"pool_{config.get('db_name')}",
-                pool_size=POOL_SIZE,
-                host=config['db_host'],
-                user=config['db_user'],
-                password=config['db_password'],
-                database=config['db_name'],
-                charset='utf8mb4'
-            )
-        conn = _MYSQL_POOLS[pool_key].get_connection()
-        # ensure the connection is alive
-        try:
-            if not conn.is_connected():
-                conn.reconnect(attempts=2, delay=0.5)
-        except Exception:
-            pass
-        app.logger.info(f"🗄️ Borrowed connection from pool for {config.get('db_name')}")
-        return conn
-
-    except Exception as pool_err:
-        # Pooling might not be supported or failed: fallback to direct connect
-        app.logger.warning(f"⚠️ MySQL pool error (fallback to direct connect): {pool_err}")
-        try:
-            conn = mysql.connector.connect(
-                host=config['db_host'],
-                user=config['db_user'],
-                password=config['db_password'],
-                database=config['db_name'],
-                charset='utf8mb4'
-            )
-            app.logger.info(f"✅ Direct connection established to {config['db_name']}")
-            return conn
-        except Exception as e:
-            app.logger.error(f"❌ Error connectando a BD {config['db_name']}: {e}")
-            raise
-
 @app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
 def renombrar_columna_kanban(columna_id):
     config = obtener_configuracion_por_host()
@@ -3842,26 +3772,6 @@ def publicar_pdf_configuracion():
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio')) 
-
-
-# Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
-def _ensure_precios_subscription_columns(config=None):
-    """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
-    try:
-        conn = get_db_connection(config)
-        cur = conn.cursor()
-        cur.execute("SHOW COLUMNS FROM precios LIKE 'inscripcion'")
-        if cur.fetchone() is None:
-            cur.execute("ALTER TABLE precios ADD COLUMN inscripcion DECIMAL(10,2) DEFAULT 0.00")
-        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensualidad'")
-        if cur.fetchone() is None:
-            cur.execute("ALTER TABLE precios ADD COLUMN mensualidad DECIMAL(10,2) DEFAULT 0.00")
-        conn.commit()
-        cur.close()
-        conn.close()
-        app.logger.info("🔧 Columnas 'inscripcion' y 'mensualidad' aseguradas en tabla precios")
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
 
 def get_plan_status_for_user(username, config=None):
     """
@@ -6288,33 +6198,6 @@ def transcribir_audio_con_openai(audio_path):
                 app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
         return None
     
-# AGREGAR esta función para gestionar conexiones a BD
-def obtener_conexion_db(config):
-    """Obtiene conexión a la base de datos correcta según la configuración"""
-    try:
-        if 'porfirianna' in config.get('dominio', ''):
-            # Conectar a base de datos de La Porfirianna
-            conn = mysql.connector.connect(
-                host=config.get('db_host', 'localhost'),
-                user=config.get('db_user', 'root'),
-                password=config.get('db_password', ''),
-                database=config.get('db_name', 'laporfirianna_db')
-            )
-        else:
-            # Conectar a base de datos de Mektia (por defecto)
-            conn = mysql.connector.connect(
-                host=config.get('db_host', 'localhost'),
-                user=config.get('db_user', 'root'),
-                password=config.get('db_password', ''),
-                database=config.get('db_name', 'mektia_db')
-            )
-        
-        return conn
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error conectando a BD {config.get('db_name')}: {e}")
-        raise
-
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
     # Buscar en la configuración multi-tenant
