@@ -161,12 +161,12 @@ NUMEROS_CONFIG = {
         'dominio': 'maindsteel.mektia.com'
     },
     '524495486324': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("FITO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
+        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("FITO_DB_HOST"),              
+        'db_user': os.getenv("FITO_DB_USER"),                 
+        'db_password': os.getenv("FITO_DB_PASSWORD"),        
+        'db_name': os.getenv("FITO_DB_NAME"),                  
         'dominio': 'ofitodo.mektia.com'
     }
 }
@@ -965,34 +965,61 @@ def obtener_imagenes_por_sku(sku, config=None):
         app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
         return []
 
-@app.route('/uploads/productos/<filename>')
+@app.route('/uploads/productos/<path:filename>')
 def serve_product_image(filename):
-    """Sirve imágenes de productos desde la carpeta tenant-aware:
-       uploads/productos/<tenant_slug>/<filename>
-       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
+    """Serve product images from tenant-aware dir, legacy uploads/productos or static fallbacks.
+    More robust: accepts filenames, relative paths and absolute URLs (redirects)."""
     try:
         config = obtener_configuracion_por_host()
-        productos_dir, tenant_slug = get_productos_dir_for_config(config)
 
-        # 1) Intentar carpeta tenant específica
-        candidate = os.path.join(productos_dir, filename)
-        if os.path.isfile(candidate):
-            return send_from_directory(productos_dir, filename)
+        if not filename:
+            app.logger.info("⚠️ serve_product_image: filename vacío")
+            abort(404)
 
-        # 2) Fallback: carpeta legacy uploads/productos/
-        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-        candidate_legacy = os.path.join(legacy_dir, filename)
-        if os.path.isfile(candidate_legacy):
-            return send_from_directory(legacy_dir, filename)
+        # If it's an absolute URL, redirect to it
+        if filename.lower().startswith(('http://', 'https://')):
+            app.logger.info(f"🔀 serve_product_image: redirecting to external URL: {filename}")
+            return redirect(filename)
 
-        # 3) Fallback adicional: raíz de uploads/
-        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-        if os.path.isfile(root_candidate):
-            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+        # Normalize: keep basename for file lookup but preserve original for extra checks
+        original = filename
+        fname = os.path.basename(filename)
 
-        # No encontrado
-        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
+        # Tenant-aware products dir (may be outside UPLOAD_FOLDER)
+        try:
+            productos_dir, tenant_slug = get_productos_dir_for_config(config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ get_productos_dir_for_config falló: {e}")
+            productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+            tenant_slug = os.path.basename(productos_dir)
+
+        # Candidate paths to check (ordered)
+        candidates = []
+
+        # If original was a relative path starting with 'uploads', try resolving from app root
+        if original.startswith('/') or original.startswith('uploads/'):
+            candidates.append(os.path.join(app.root_path, original.lstrip('/')))
+
+        candidates.extend([
+            os.path.join(productos_dir, fname),
+            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', fname),
+            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), fname),
+            os.path.join(app.static_folder, 'images', fname),
+            os.path.join(app.static_folder, 'images', 'whatsapp', fname)
+        ])
+
+        # Check each candidate and serve the first that exists
+        for path in candidates:
+            app.logger.debug(f"🔍 serve_product_image checking: {path}")
+            if os.path.isfile(path):
+                directory = os.path.dirname(path)
+                filebase = os.path.basename(path)
+                app.logger.info(f"✅ serve_product_image found: {path}")
+                return send_from_directory(directory, filebase)
+
+        app.logger.info(f"❌ serve_product_image: Imagen no encontrada '{filename}' (tenant={tenant_slug if 'tenant_slug' in locals() else 'unknown'})")
         abort(404)
+
     except Exception as e:
         app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
         abort(500)
@@ -6636,7 +6663,7 @@ def obtener_configuracion_por_host():
         
         # DETECCIÓN PORFIRIANNA
         if 'laporfirianna' in host:
-            app.logger.info("✅ Configuración detectada: laporfiriannna")
+            app.logger.info("✅ Configuración detectada: Laporfiriannna")
             return NUMEROS_CONFIG['524812372326']
             
         # DETECCIÓN NUEVO SUBDOMINIO
