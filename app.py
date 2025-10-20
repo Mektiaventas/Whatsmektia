@@ -1,48 +1,68 @@
+import os
+import time
 import traceback
+import hashlib
+import logging
+import json
+import base64
+import argparse
+import math
+import re
+import io
+
+from datetime import datetime, timedelta
+from functools import wraps
+
+import pytz
+import requests
+import pandas as pd
+import openpyxl
+import PyPDF2
+import fitz
+from docx import Document
+from PIL import Image
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
-import hashlib
-import time
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
-from mysql.connector import pooling
-from flask import render_template_string
-import pytz
-import os
-import logging
-import json 
-import base64
-import argparse
-import math
-import mysql.connector
-from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
-import requests
+
+from flask import (
+    Flask, render_template, render_template_string, send_from_directory, Response,
+    request, redirect, url_for, abort, flash, jsonify, current_app, session, g
+)
+from werkzeug.utils import secure_filename
+
 from dotenv import load_dotenv
-import pandas as pd
-import openpyxl
-from docx import Document
-from datetime import datetime, timedelta
-from decimal import Decimal
-import re
-import io
-from werkzeug.utils import secure_filename
-from PIL import Image
 from openai import OpenAI
-import PyPDF2
-import fitz 
-from werkzeug.utils import secure_filename
-import bcrypt
-from functools import wraps
-from flask import session, g
-# replace the long DB helpers in app.py by importing the new module
+
+# Local modules (moved helpers)
 from services import (
     get_clientes_conn,
     get_db_connection,
     _ensure_precios_subscription_columns,
     obtener_conexion_db
 )
+from files import (
+    allowed_file,
+    determinar_extension,
+    extraer_imagenes_embedded_excel,
+    _extraer_imagenes_desde_zip_xlsx,
+    extraer_texto_e_imagenes_pdf,
+    extraer_texto_pdf,
+    extraer_texto_excel,
+    extraer_texto_csv,
+    extraer_texto_docx,
+    extraer_texto_archivo,
+    obtener_imagen_whatsapp,
+    obtener_audio_whatsapp,
+    texto_a_voz,
+    get_docs_dir_for_config,
+    get_productos_dir_for_config
+)
+
 try:
     # preferred location
     from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
@@ -253,109 +273,6 @@ def proteger_rutas():
     app.logger.info(f"🔒 proteger_rutas: redirect to login for path={request.path} endpoint={request.endpoint}")
     return redirect(url_for('login', next=request.path))
 
-def extraer_imagenes_embedded_excel(filepath, output_dir=None, config=None):
-    """
-    Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
-    Soporta multi-tenant: si no se pasa output_dir, usa get_productos_dir_for_config(config)
-    para guardar en uploads/productos/<tenant_slug>.
-    Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
-    """
-    try:
-        # Determine tenant-aware output dir when none provided
-        if output_dir is None:
-            try:
-                productos_dir, tenant_slug = get_productos_dir_for_config(config)
-                output_dir = productos_dir
-            except Exception as e:
-                # Fallback to legacy dir if tenant helper fails
-                app.logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy. Error: {e}")
-                output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-
-        os.makedirs(output_dir, exist_ok=True)
-
-        wb = openpyxl.load_workbook(filepath)
-        imagenes_extraidas = []
-
-        for sheet in wb.worksheets:
-            for idx, img in enumerate(getattr(sheet, '_images', [])):
-                try:
-                    img_obj = img.image
-                    img_format = (img_obj.format or 'PNG').lower()
-                    img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
-                    img_path = os.path.join(output_dir, img_filename)
-
-                    # Guardar imagen en disco
-                    try:
-                        img_obj.save(img_path)
-                    except Exception as e:
-                        app.logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
-                        continue
-
-                    # Intentar leer la ancla (fila/col) de varias formas
-                    row = None
-                    col = None
-                    anchor = getattr(img, 'anchor', None)
-                    try:
-                        marker = None
-                        # Common attribute names in different openpyxl versions
-                        for attr in ('_from', 'from', 'from_', 'anchor_from'):
-                            marker = getattr(anchor, attr, None)
-                            if marker:
-                                break
-
-                        if marker:
-                            # marker usually tiene row, col (0-based)
-                            row_candidate = getattr(marker, 'row', None)
-                            col_candidate = getattr(marker, 'col', None)
-                            # Algunas versiones devuelven atributos como tuples o listas
-                            if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
-                                # try tuple-like (col, row) or (row, col)
-                                try:
-                                    maybe = list(marker)
-                                    # buscar primer int
-                                    ints = [m for m in maybe if isinstance(m, int)]
-                                    if len(ints) >= 1:
-                                        row_candidate = ints[0]
-                                except Exception:
-                                    pass
-
-                            if isinstance(row_candidate, int):
-                                row = int(row_candidate) + 1
-                            if isinstance(col_candidate, int):
-                                col = int(col_candidate) + 1
-
-                        # Si anchor es string con coordenada (ej. "A2"), parsearla
-                        if row is None and isinstance(anchor, str):
-                            try:
-                                col_letter, row_num = coordinate_from_string(anchor)
-                                col = column_index_from_string(col_letter)
-                                row = int(row_num)
-                            except Exception:
-                                pass
-                    except Exception:
-                        row = None
-                        col = None
-
-                    imagenes_extraidas.append({
-                        'filename': img_filename,
-                        'path': img_path,
-                        'sheet': sheet.title,
-                        'anchor': anchor,
-                        'row': row,
-                        'col': col
-                    })
-                    app.logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col}) tenant_dir={output_dir}")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
-                    continue
-
-        return imagenes_extraidas
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en extraer_imagenes_embedded_excel: {e}")
-        app.logger.error(traceback.format_exc())
-        return []
-
 # Put below sesiones_activas helpers
 def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_MINUTES):
     """Marks old sessions as inactive to avoid blocking new logins by stale entries."""
@@ -420,9 +337,6 @@ def logout():
     session.pop('auth_user', None)
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
-
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
 def obtener_archivo_whatsapp(media_id, config=None):
     """Obtiene archivos de WhatsApp y los guarda localmente"""
@@ -729,121 +643,6 @@ def inject_app_config():
         'app_logo': None
     }
 
-def determinar_extension(mime_type, filename):
-    """Determina la extensión del archivo basado en MIME type y nombre"""
-    mime_to_extension = {
-        'application/pdf': 'pdf',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-        'application/vnd.ms-excel': 'xls',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-        'text/csv': 'csv',
-        'text/plain': 'txt'
-    }
-    
-    # Primero intentar por MIME type
-    extension = mime_to_extension.get(mime_type)
-    
-    # Si no se encuentra, intentar por extensión del nombre de archivo
-    if not extension and '.' in filename:
-        extension = filename.split('.')[-1].lower()
-    
-    return extension or 'bin'
-
-def extraer_texto_e_imagenes_pdf(file_path):
-    """Extrae texto e imágenes de un archivo PDF"""
-    try:
-        texto = ""
-        imagenes = []
-        
-        # Abrir el PDF con PyMuPDF
-        doc = fitz.open(file_path)
-        
-        # Crear directorio para imágenes si no existe (tenant-aware fallback)
-        try:
-            productos_dir, tenant_slug = get_productos_dir_for_config()
-            img_dir = productos_dir
-        except Exception as e:
-            app.logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy uploads/productos. Error: {e}")
-            img_dir = os.path.join(UPLOAD_FOLDER, 'productos')
-        os.makedirs(img_dir, exist_ok=True)
-        
-        for page_num in range(len(doc)):
-            page = doc.load_page(page_num)
-            
-            # Extraer texto
-            texto += page.get_text()
-            
-            # Extraer imágenes
-            image_list = page.get_images(full=True)
-            for img_idx, img_info in enumerate(image_list):
-                try:
-                    xref = img_info[0]
-                    
-                    # Verificar si la imagen es válida antes de procesarla
-                    try:
-                        base_img = doc.extract_image(xref)
-                        
-                        # Obtener la imagen en bytes
-                        imagen_bytes = base_img["image"]
-                        
-                        # Determinar formato de imagen
-                        extension = base_img["ext"]
-                        
-                        # Crear nombre único para la imagen
-                        img_filename = f"producto_{page_num+1}_{img_idx+1}_{int(time.time())}.{extension}"
-                        img_path = os.path.join(img_dir, img_filename)
-                        
-                        # Guardar la imagen
-                        with open(img_path, "wb") as img_file:
-                            img_file.write(imagen_bytes)
-                        
-                        # Intentar obtener el rectángulo de la imagen de manera segura
-                        try:
-                            rect = page.get_image_bbox(xref)
-                        except ValueError:
-                            # Si falla, usar un rectángulo vacío
-                            rect = fitz.Rect(0, 0, 0, 0)
-                        
-                        # Agregar a la lista de imágenes con metadatos útiles
-                        imagenes.append({
-                            'filename': img_filename,
-                            'path': img_path,
-                            'page': page_num,
-                            'size': len(imagen_bytes),
-                            'position': img_info[1:],  # Info de posición para asociar con texto
-                            'xref': xref,
-                            'rect': rect
-                        })
-                        
-                        app.logger.info(f"✅ Imagen extraída: {img_filename} (tenant_dir={img_dir})")
-                        
-                    except Exception as e:
-                        app.logger.warning(f"⚠️ Error extrayendo imagen específica {xref}: {e}")
-                        continue
-                        
-                except Exception as e:
-                    app.logger.warning(f"⚠️ Error procesando imagen {img_idx} en página {page_num+1}: {e}")
-                    continue
-        
-        doc.close()
-        
-        app.logger.info(f"✅ Texto extraído: {len(texto)} caracteres")
-        app.logger.info(f"🖼️ Imágenes extraídas: {len(imagenes)}")
-        
-        return texto.strip(), imagenes
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error extrayendo contenido PDF: {e}")
-        app.logger.error(traceback.format_exc())
-        
-        # Intenta al menos extraer el texto usando el método anterior
-        try:
-            texto = extraer_texto_pdf(file_path)
-            app.logger.info(f"✅ Se pudo extraer texto con método alternativo: {len(texto)} caracteres")
-            return texto, []  # Devolver texto pero sin imágenes
-        except:
-            return None, []
-
 @app.route('/configuracion/precios/importar-excel', methods=['POST'])
 def importar_excel_directo():
     """Importa datos directamente desde Excel sin análisis de IA"""
@@ -893,66 +692,6 @@ def importar_excel_directo():
         app.logger.error(traceback.format_exc())
         flash(f'❌ Error procesando el archivo: {str(e)}', 'error')
         return redirect(url_for('configuracion_precios'))
-
-def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
-    """
-    Fallback: extrae imágenes desde el ZIP de un .xlsx leyendo xl/media/.
-    Retorna lista de dicts compatible con extraer_imagenes_embedded_excel.
-    """
-    import zipfile, shutil
-    os.makedirs(output_dir, exist_ok=True)
-    imagenes = []
-    try:
-        with zipfile.ZipFile(filepath, 'r') as z:
-            media_files = [f for f in z.namelist() if f.startswith('xl/media/')]
-            for idx, media_path in enumerate(media_files):
-                try:
-                    ext = os.path.splitext(media_path)[1].lstrip('.').lower() or 'bin'
-                    timestamp = int(time.time())
-                    filename = f"excel_unzip_img_{idx+1}_{timestamp}.{ext}"
-                    dest_path = os.path.join(output_dir, filename)
-                    with z.open(media_path) as src, open(dest_path, 'wb') as dst:
-                        shutil.copyfileobj(src, dst)
-                    imagenes.append({
-                        'filename': filename,
-                        'path': dest_path,
-                        'sheet': None,
-                        'anchor': None,
-                        'row': None,
-                        'col': None
-                    })
-                    app.logger.info(f"✅ Imagen (zip) extraída: {filename} from {media_path}")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo extraer {media_path} desde zip: {e}")
-    except zipfile.BadZipFile:
-        app.logger.warning("⚠️ Archivo no es un .xlsx válido o está corrupto; zip fallback falló")
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error extrayendo imágenes desde zip: {e}")
-    return imagenes
-
-def get_docs_dir_for_config(config=None):
-    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
-    if config is None:
-        try:
-            from flask import has_request_context
-            if has_request_context():
-                config = obtener_configuracion_por_host()
-            else:
-                config = NUMEROS_CONFIG['524495486142']
-        except Exception:
-            config = NUMEROS_CONFIG['524495486142']
-
-    dominio = (config.get('dominio') or '').strip().lower()
-    tenant_slug = dominio.split('.')[0] if dominio else 'default'
-    docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug)
-    try:
-        os.makedirs(docs_dir, exist_ok=True)
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo crear docs_dir {docs_dir}: {e}")
-        # fallback to a shared docs dir
-        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        os.makedirs(docs_dir, exist_ok=True)
-    return docs_dir, tenant_slug
 
 def importar_productos_desde_excel(filepath, config=None):
     """Importa productos desde Excel; guarda metadatos de imágenes y usa fallback unzip si openpyxl no encuentra imágenes."""
@@ -1510,92 +1249,6 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         app.logger.error(traceback.format_exc())
         return None
 
-def extraer_texto_archivo(filepath, extension):
-    """Extrae texto de diferentes tipos de archivos"""
-    try:
-        if extension == 'pdf':
-            return extraer_texto_pdf(filepath)
-        
-        elif extension in ['xlsx', 'xls']:
-            return extraer_texto_excel(filepath)
-        
-        elif extension == 'csv':
-            return extraer_texto_csv(filepath)
-        
-        elif extension == 'docx':
-            return extraer_texto_docx(filepath)
-        
-        elif extension == 'txt':
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return f.read()
-        
-        else:
-            app.logger.warning(f"⚠️ Formato no soportado: {extension}")
-            return None
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Error extrayendo texto de {extension}: {e}")
-        return None
-
-def extraer_texto_excel(filepath):
-    """Extrae texto de archivos Excel"""
-    try:
-        texto = ""
-        
-        # Leer todas las hojas
-        if filepath.endswith('.xlsx'):
-            workbook = openpyxl.load_workbook(filepath)
-            for sheet_name in workbook.sheetnames:
-                sheet = workbook[sheet_name]
-                texto += f"\n--- Hoja: {sheet_name} ---\n"
-                
-                for row in sheet.iter_rows(values_only=True):
-                    fila_texto = " | ".join(str(cell) for cell in row if cell is not None)
-                    if fila_texto.strip():
-                        texto += fila_texto + "\n"
-        
-        # Alternativa con pandas para mejor compatibilidad
-        try:
-            excel_file = pd.ExcelFile(filepath)
-            for sheet_name in excel_file.sheet_names:
-                df = pd.read_excel(filepath, sheet_name=sheet_name)
-                texto += f"\n--- Hoja: {sheet_name} (Pandas) ---\n"
-                texto += df.to_string() + "\n"
-        except Exception as e:
-            app.logger.warning(f"⚠️ Pandas falló: {e}")
-        
-        return texto.strip() if texto.strip() else None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error procesando Excel: {e}")
-        return None
-
-def extraer_texto_csv(filepath):
-    """Extrae texto de archivos CSV"""
-    try:
-        df = pd.read_csv(filepath)
-        return df.to_string()
-    except Exception as e:
-        app.logger.error(f"🔴 Error leyendo CSV: {e}")
-        # Intentar lectura simple
-        try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                return f.read()
-        except:
-            return None
-
-def extraer_texto_docx(filepath):
-    """Extrae texto de archivos Word"""
-    try:
-        doc = Document(filepath)
-        texto = ""
-        for paragraph in doc.paragraphs:
-            texto += paragraph.text + "\n"
-        return texto.strip() if texto.strip() else None
-    except Exception as e:
-        app.logger.error(f"🔴 Error leyendo DOCX: {e}")
-        return None
-
 def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
     """Analiza el contenido del archivo usando IA"""
     if config is None:
@@ -1675,37 +1328,6 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error analizando archivo con IA: {e}")
         return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
-
-def extraer_texto_pdf(file_path):
-    """Extrae texto de un archivo PDF"""
-    try:
-        texto = ""
-        
-        # Intentar con PyMuPDF primero (más robusto)
-        try:
-            doc = fitz.open(file_path)
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                texto += page.get_text()
-            doc.close()
-            app.logger.info(f"✅ Texto extraído con PyMuPDF: {len(texto)} caracteres")
-            return texto.strip()
-        except Exception as e:
-            app.logger.warning(f"⚠️ PyMuPDF falló, intentando con PyPDF2: {e}")
-        
-        # Fallback a PyPDF2
-        with open(file_path, 'rb') as file:
-            pdf_reader = PyPDF2.PdfReader(file)
-            for page_num in range(len(pdf_reader.pages)):
-                page = pdf_reader.pages[page_num]
-                texto += page.extract_text()
-        
-        app.logger.info(f"✅ Texto extraído con PyPDF2: {len(texto)} caracteres")
-        return texto.strip()
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error extrayendo texto PDF: {e}")
-        return None
 
 def analizar_pdf_servicios(texto_pdf, config=None):
     """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
@@ -1824,6 +1446,7 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
     try:
@@ -2080,16 +1703,6 @@ def subir_pdf_servicios():
             pass
         return redirect(url_for('configuracion_precios'))
 
-def get_productos_dir_for_config(config=None):
-    """Return (productos_dir, tenant_slug). Ensures uploads/productos/<tenant_slug> exists."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    dominio = (config.get('dominio') or '').strip().lower()
-    tenant_slug = dominio.split('.')[0] if dominio else 'default'
-    productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', tenant_slug)
-    os.makedirs(productos_dir, exist_ok=True)
-    return productos_dir, tenant_slug
-
 @app.route('/kanban/columna/<int:columna_id>/renombrar', methods=['POST'])
 def renombrar_columna_kanban(columna_id):
     config = obtener_configuracion_por_host()
@@ -2203,6 +1816,7 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2325,61 +1939,6 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
         app.logger.error(f"🔴 Exception en enviar_mensaje_voz: {e}")
         return False
     
-def texto_a_voz(texto, filename,config=None):
-    """Convierte texto a audio usando Google TTS y devuelve URL pública verificable."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        from gtts import gTTS
-        import os
-
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-        os.makedirs(audio_dir, exist_ok=True)
-
-        filepath = os.path.join(audio_dir, f"{filename}.mp3")
-
-        # Generar y guardar MP3
-        tts = gTTS(text=texto, lang='es', slow=False)
-        tts.save(filepath)
-
-        # Verificar que el archivo se creó
-        if not os.path.isfile(filepath):
-            app.logger.error(f"🔴 texto_a_voz: archivo no encontrado después de gTTS: {filepath}")
-            return None
-
-        # Construir URL pública robusta
-        dominio_conf = None
-        try:
-            if isinstance(config, dict):
-                dominio_conf = config.get('dominio')
-        except Exception:
-            dominio_conf = None
-
-        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
-        if not dominio.startswith('http'):
-            dominio = 'https://' + dominio
-
-        audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
-
-        # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
-        try:
-            resp = requests.head(audio_url, timeout=6, allow_redirects=True)
-            if resp.status_code >= 400:
-                app.logger.warning(f"⚠️ texto_a_voz: HEAD {audio_url} returned {resp.status_code}. The URL may not be publicly accessible.")
-            else:
-                ct = resp.headers.get('content-type', '')
-                app.logger.info(f"🎵 texto_a_voz: audio saved and reachable. HEAD status {resp.status_code} content-type={ct}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ texto_a_voz: unable to HEAD audio_url ({audio_url}): {e}")
-
-        app.logger.info(f"🌐 URL pública generada: {audio_url} (archivo: {filepath})")
-        return audio_url
-
-    except Exception as e:
-        app.logger.error(f"Error en texto_a_voz: {e}")
-        return None
-
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
     if config is None:
@@ -5182,6 +4741,7 @@ def extraer_hora_del_mensaje(mensaje):
         return "19:00"
     
     return None
+
 def obtener_estado_conversacion(numero, config=None):
     """Obtiene el estado actual de la conversación"""
     if config is None:
@@ -5215,68 +4775,6 @@ def obtener_estado_conversacion(numero, config=None):
             return None
     
     return estado
-
-def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # 1. Obtener metadata de la imagen
-        url_metadata = f"https://graph.facebook.com/v18.0/{image_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        
-        app.logger.info(f"🖼️ Obteniendo metadata de imagen WhatsApp: {url_metadata}")
-        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
-        response_metadata.raise_for_status()
-        
-        metadata = response_metadata.json()
-        download_url = metadata.get('url')
-        mime_type = metadata.get('mime_type', 'image/jpeg')
-        
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {metadata}")
-            return None, None
-            
-        app.logger.info(f"🖼️ URL de descarga: {download_url}")
-        
-        # 2. Descargar la imagen
-        image_response = requests.get(download_url, headers=headers, timeout=30)
-        if image_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
-            return None, None
-        
-        # 3. Guardar la imagen en directorio estático para mostrarla en web
-        static_images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images', 'whatsapp')
-        os.makedirs(static_images_dir, exist_ok=True)
-        
-        # Nombre seguro para el archivo
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
-        filepath = os.path.join(static_images_dir, filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(image_response.content)
-        
-        # 4. Convertir a base64 para OpenAI (si es necesario)
-        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        base64_string = f"data:{mime_type};base64,{image_base64}"
-        
-        # 5. URL pública para mostrar en web
-        public_url = f"/static/images/whatsapp/{filename}"
-        
-        app.logger.info(f"✅ Imagen guardada: {filepath}")
-        app.logger.info(f"🌐 URL web: {public_url}")
-        
-        return base64_string, public_url
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return None, None
 
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
@@ -6136,40 +5634,6 @@ def obtener_asesores_por_user(username, default=2, cap=20):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
-
-def obtener_audio_whatsapp(audio_id, config=None):
-    try:
-        url = f"https://graph.facebook.com/v18.0/{audio_id}"
-        headers = {'Authorization': f'Bearer {config["whatsapp_token"]}'}
-        app.logger.info(f"📥 Solicitando metadata de audio: {url}")
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        metadata = response.json()
-        download_url = metadata.get('url')
-        app.logger.info(f"🔗 URL de descarga: {download_url}")
-        
-        audio_response = requests.get(download_url, headers=headers, timeout=30)
-        audio_response.raise_for_status()
-        
-        # Verificar tipo de contenido
-        content_type = audio_response.headers.get('content-type')
-        app.logger.info(f"🎧 Tipo de contenido: {content_type}")
-        if 'audio' not in content_type:
-            app.logger.error(f"🔴 Archivo no es audio: {content_type}")
-            return None, None
-        
-        # Guardar archivo
-        audio_path = os.path.join(UPLOAD_FOLDER, f"audio_{audio_id}.ogg")
-        with open(audio_path, 'wb') as f:
-            f.write(audio_response.content)
-        app.logger.info(f"💾 Audio guardado en: {audio_path}")
-        
-        # Generar URL pública
-        audio_url = f"https://{config['dominio']}/uploads/audio_{audio_id}.ogg"
-        return audio_path, audio_url
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {str(e)}")
-        return None, None
       
 def transcribir_audio_con_openai(audio_path):
     try:
