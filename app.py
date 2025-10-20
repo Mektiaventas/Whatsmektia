@@ -62,7 +62,15 @@ from files import (
     get_docs_dir_for_config,
     get_productos_dir_for_config
 )
-
+from whatsapp import (
+    obtener_archivo_whatsapp,
+    obtener_imagen_whatsapp,
+    obtener_audio_whatsapp,
+    enviar_mensaje,
+    enviar_imagen,
+    enviar_documento,
+    enviar_mensaje_voz
+)
 try:
     # preferred location
     from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
