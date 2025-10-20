@@ -1908,7 +1908,9 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         
         # Prompt mejorado para detección inteligente
         prompt = f"""
-        Eres un asistente para La Porfirianna (restaurante). Analiza si el mensaje es un pedido y qué datos faltan.
+        Eres un asistente para un negocio. Analiza si el mensaje es un pedido y qué datos faltan.
+        Recuerda que algunos datos pueden variar encuento a si es un negocio de comida o servicios digitales.
+        Dependiendo del negocio, algunos datos pueden ser innesesarios.
 
         HISTORIAL RECIENTE:
         {contexto_historial}
@@ -1920,9 +1922,9 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
             "es_pedido": true/false,
             "confianza": 0.0-1.0,
             "datos_obtenidos": {{
-                "platillos": ["lista de platillos detectados"],
+                "producto": ["lista de platillos detectados"],
                 "cantidades": ["cantidades especificadas"],
-                "especificaciones": ["con todo", "sin cebolla", etc.],
+                "especificaciones": ["con todo", "sin cebolla", "rojo" etc.],
                 "nombre_cliente": "nombre si se menciona",
                 "direccion": "dirección si se menciona"
             }},
@@ -1931,9 +1933,9 @@ def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
         }}
 
         Datos importantes para un pedido completo:
-        - Platillos específicos (gorditas, tacos, quesadillas, etc.)
-        - Cantidades de cada platillo
-        - Especificaciones (guisados, ingredientes, preparación)
+        - Platillos específicos (gorditas, tacos, quesadillas, etc.) o producto/servicio especifico
+        - Cantidades de cada platillo/producto/servicio
+        - Especificaciones (guisados, ingredientes, detalles)
         - Dirección de entrega
         - Forma de pago (efectivo, transferencia)
         - Nombre del cliente
