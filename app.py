@@ -5482,20 +5482,55 @@ def obtener_asesores_por_user(username, default=2, cap=20):
 def transcribir_audio_con_openai(audio_path):
     try:
         app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
-        
-        # Usar el cliente OpenAI correctamente (nueva versión)
+
+        # Helper local: guess extension from file magic bytes (simple)
+        def _guess_ext_from_magic(path):
+            try:
+                with open(path, 'rb') as f:
+                    header = f.read(16)
+                if header.startswith(b'OggS'):
+                    return 'ogg'
+                if header[:3] == b'ID3' or header.startswith(b'\xff\xfb'):
+                    return 'mp3'
+                if header.startswith(b'RIFF') and b'WAVE' in header[8:12]:
+                    return 'wav'
+                if len(header) >= 8 and header[4:8] == b'ftyp':
+                    return 'mp4'
+                if header.startswith(b'\x1a\x45\xdf\xa3'):
+                    return 'webm'
+                return None
+            except Exception:
+                return None
+
+        # Ensure a filename with extension exists for OpenAI client
+        base, ext = os.path.splitext(audio_path)
+        audio_for_request = audio_path
+        created_temp_copy = False
+
+        if not ext:
+            guessed = _guess_ext_from_magic(audio_path)
+            if guessed:
+                import shutil
+                audio_for_request = f"{audio_path}.{guessed}"
+                shutil.copyfile(audio_path, audio_for_request)
+                created_temp_copy = True
+                app.logger.info(f"ℹ️ Guessed audio format '.{guessed}', created temp copy: {audio_for_request}")
+            else:
+                app.logger.error("🔴 Could not guess audio format (no extension and magic detection failed). Aborting transcription.")
+                return None
+
+        # Use OpenAI client
         client = OpenAI(api_key=OPENAI_API_KEY)
-        
-        with open(audio_path, 'rb') as audio_file:
+        with open(audio_for_request, 'rb') as audio_file:
             transcription = client.audio.transcriptions.create(
                 model="whisper-1",
                 file=audio_file,
                 language="es"
             )
-            
+
         app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
         return transcription.text
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error en transcripción: {str(e)}")
         if hasattr(e, 'response'):
@@ -5503,8 +5538,19 @@ def transcribir_audio_con_openai(audio_path):
                 error_response = e.response.json()
                 app.logger.error(f"🔴 Respuesta de OpenAI: {error_response}")
             except:
-                app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
+                try:
+                    app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
+                except:
+                    pass
         return None
+    finally:
+        # cleanup temp copy if created
+        try:
+            if 'created_temp_copy' in locals() and created_temp_copy and os.path.isfile(audio_for_request) and audio_for_request != audio_path:
+                os.remove(audio_for_request)
+                app.logger.debug(f"🧹 Temp copy removed: {audio_for_request}")
+        except Exception:
+            pass
     
 def obtener_configuracion_numero(numero_whatsapp):
     """Obtiene la configuración específica para un número de WhatsApp"""
@@ -6071,7 +6117,6 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
-
 
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:

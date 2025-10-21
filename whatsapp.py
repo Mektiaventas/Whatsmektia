@@ -1,4 +1,4 @@
-import os
+﻿import os
 import time
 import logging
 import base64
@@ -72,16 +72,73 @@ def obtener_imagen_whatsapp(media_id, config):
         logger.error(f"Error encoding image {filepath}: {e}")
         return None, None
 
-def obtener_audio_whatsapp(media_id, config):
-    """Descarga audio y devuelve (audio_path, public_url)"""
-    filepath, filename, ext = obtener_archivo_whatsapp(media_id, config)
-    if not filepath:
+def obtener_audio_whatsapp(audio_id, config=None):
+    """
+    Descarga audio desde Graph API y guarda en uploads; retorna (audio_path, public_url)
+    """
+    try:
+        token = config.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+        if not token:
+            logger.error("🔴 obtener_audio_whatsapp: no whatsapp token configured")
+            return None, None
+
+        meta_url = f"https://graph.facebook.com/v18.0/{audio_id}"
+        headers = {'Authorization': f'Bearer {token}'}
+        r = requests.get(meta_url, headers=headers, timeout=30)
+        r.raise_for_status()
+        meta = r.json()
+        download_url = meta.get('url')
+        if not download_url:
+            logger.error(f"🔴 No download url for audio: {meta}")
+            return None, None
+
+        audio_r = requests.get(download_url, headers=headers, timeout=30)
+        audio_r.raise_for_status()
+        content = audio_r.content
+
+        # Determine extension from response Content-Type
+        content_type = audio_r.headers.get('Content-Type', '')
+        # map minimal set
+        ct_map = {
+            'audio/ogg': 'ogg',
+            'audio/webm': 'webm',
+            'audio/mpeg': 'mp3',
+            'audio/mp3': 'mp3',
+            'audio/wav': 'wav',
+            'audio/x-wav': 'wav',
+            'audio/mp4': 'mp4',
+            'audio/m4a': 'm4a',
+            'audio/opus': 'ogg'
+        }
+        ext = None
+        for k, v in ct_map.items():
+            if content_type.startswith(k):
+                ext = v
+                break
+        # fallback: try to parse filename from URL
+        if not ext:
+            parsed = download_url.split('?')[0].split('/')[-1]
+            if '.' in parsed:
+                ext = parsed.rsplit('.', 1)[1].lower()
+        if not ext:
+            ext = 'ogg'  # safe default if unsure
+
+        uploads = get_upload_base()
+        os.makedirs(uploads, exist_ok=True)
+        filename = secure_filename(f"audio_{audio_id}.{ext}")
+        audio_path = os.path.join(uploads, filename)
+        with open(audio_path, 'wb') as f:
+            f.write(content)
+
+        dominio = (config.get('dominio') or os.getenv('MI_DOMINIO') or 'http://localhost:5000').rstrip('/')
+        if not dominio.startswith('http'):
+            dominio = f"https://{dominio}"
+        audio_url = f"{dominio}/uploads/{os.path.basename(audio_path)}"
+        logger.info(f"✅ Saved whatsapp audio: {audio_path} (Content-Type: {content_type})")
+        return audio_path, audio_url
+    except Exception as e:
+        logger.error(f"🔴 obtener_audio_whatsapp error: {e}")
         return None, None
-    dominio = config.get('dominio') or os.getenv('MI_DOMINIO', 'http://localhost:5000')
-    if not dominio.startswith('http'):
-        dominio = f"https://{dominio}"
-    public_url = f"{dominio}/uploads/{filename}"
-    return filepath, public_url
 
 def enviar_mensaje(numero, texto, config):
     """Enviar texto por Graph API. Retorna True/False"""
