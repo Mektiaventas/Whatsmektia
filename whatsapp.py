@@ -148,49 +148,157 @@ def obtener_audio_whatsapp(audio_id, config=None):
         return None, None
 
 def enviar_mensaje(numero, texto, config):
-    """Enviar texto por Graph API. Retorna True/False"""
+    """Enviar texto por Graph API. Retorna True/False con logging diagnóstico."""
     try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {'Authorization': f"Bearer {config['whatsapp_token']}", 'Content-Type': 'application/json'}
+        cfg = config or {}
+        phone_id = cfg.get('phone_number_id') or os.getenv('MEKTIA_PHONE_NUMBER_ID') or os.getenv('PHONE_NUMBER_ID')
+        token = cfg.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+
+        if not phone_id or not token:
+            logger.error("🔴 enviar_mensaje: falta phone_number_id o whatsapp_token (config/ENV)")
+            logger.debug(f"🔍 config keys: {list(cfg.keys()) if isinstance(cfg, dict) else type(cfg)}")
+            return False
+
+        url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+        headers = {'Authorization': f"Bearer {token}", 'Content-Type': 'application/json'}
         payload = {'messaging_product': 'whatsapp', 'to': numero, 'type': 'text', 'text': {'body': str(texto)}}
+
+        logger.info(f"📤 enviar_mensaje -> to={numero} phone_number_id={phone_id} text_preview={str(texto)[:120]}")
         r = requests.post(url, headers=headers, json=payload, timeout=12)
-        if r.status_code in (200,201,202):
+
+        status = getattr(r, 'status_code', 'n/a')
+        body_preview = ''
+        try:
+            body_txt = r.text or ''
+            body_preview = body_txt[:1000] + ('...' if len(body_txt) > 1000 else '')
+        except Exception:
+            body_preview = '<unreadable-response-body>'
+
+        if status in (200, 201, 202):
+            logger.info(f"✅ enviar_mensaje OK (status={status}) - resp_preview: {body_preview}")
             return True
-        logger.error(f"Error sending text {r.status_code}: {r.text}")
+
+        # fallo
+        err_info = None
+        try:
+            err_json = r.json()
+            err_info = err_json.get('error') or err_json
+        except Exception:
+            err_info = body_preview
+
+        logger.error(f"🔴 enviar_mensaje FAILED status={status} -> {err_info}")
         return False
     except Exception as e:
         logger.error(f"Exception enviar_mensaje: {e}")
         return False
 
 def enviar_imagen(numero, image_url, config):
+    """Enviar imagen por link con logging diagnóstico."""
     try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {'Authorization': f"Bearer {config['whatsapp_token']}", 'Content-Type': 'application/json'}
+        cfg = config or {}
+        phone_id = cfg.get('phone_number_id') or os.getenv('MEKTIA_PHONE_NUMBER_ID') or os.getenv('PHONE_NUMBER_ID')
+        token = cfg.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+
+        if not phone_id or not token:
+            logger.error("🔴 enviar_imagen: falta phone_number_id o whatsapp_token (config/ENV)")
+            return False
+
+        url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+        headers = {'Authorization': f"Bearer {token}", 'Content-Type': 'application/json'}
         payload = {'messaging_product':'whatsapp','to':numero,'type':'image','image':{'link': image_url}}
+
+        logger.info(f"📤 enviar_imagen -> to={numero} phone_number_id={phone_id} image_url={image_url[:200]}")
         r = requests.post(url, headers=headers, json=payload, timeout=12)
-        return r.status_code in (200,201,202)
+
+        status = getattr(r, 'status_code', 'n/a')
+        try:
+            body_preview = (r.text or '')[:1000]
+        except Exception:
+            body_preview = '<unreadable-response-body>'
+
+        if status in (200, 201, 202):
+            logger.info(f"✅ enviar_imagen OK (status={status}) - resp_preview: {body_preview}")
+            return True
+
+        logger.error(f"🔴 enviar_imagen FAILED status={status} - resp_preview: {body_preview}")
+        return False
     except Exception as e:
         logger.error(f"Exception enviar_imagen: {e}")
         return False
 
 def enviar_documento(numero, file_url, filename, config):
+    """Enviar documento por link con logging diagnóstico."""
     try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {'Authorization': f"Bearer {config['whatsapp_token']}", 'Content-Type': 'application/json'}
+        cfg = config or {}
+        phone_id = cfg.get('phone_number_id') or os.getenv('MEKTIA_PHONE_NUMBER_ID') or os.getenv('PHONE_NUMBER_ID')
+        token = cfg.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+
+        if not phone_id or not token:
+            logger.error("🔴 enviar_documento: falta phone_number_id o whatsapp_token (config/ENV)")
+            return False
+
+        url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+        headers = {'Authorization': f"Bearer {token}", 'Content-Type': 'application/json'}
         payload = {'messaging_product':'whatsapp','to':numero,'type':'document','document':{'link': file_url,'filename': filename}}
+
+        logger.info(f"📤 enviar_documento -> to={numero} phone_number_id={phone_id} file_url={file_url[:200]} filename={filename}")
         r = requests.post(url, headers=headers, json=payload, timeout=20)
-        return r.status_code in (200,201,202)
+
+        status = getattr(r, 'status_code', 'n/a')
+        try:
+            body_preview = (r.text or '')[:1000]
+        except Exception:
+            body_preview = '<unreadable-response-body>'
+
+        if status in (200, 201, 202):
+            logger.info(f"✅ enviar_documento OK (status={status}) - resp_preview: {body_preview}")
+            return True
+
+        logger.error(f"🔴 enviar_documento FAILED status={status} - resp_preview: {body_preview}")
+        return False
     except Exception as e:
         logger.error(f"Exception enviar_documento: {e}")
         return False
 
 def enviar_mensaje_voz(numero, audio_url, config):
+    """Enviar audio (voice message) por link con validaciones y logging diagnóstico."""
     try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {'Authorization': f"Bearer {config['whatsapp_token']}", 'Content-Type': 'application/json'}
+        cfg = config or {}
+        phone_id = cfg.get('phone_number_id') or os.getenv('MEKTIA_PHONE_NUMBER_ID') or os.getenv('PHONE_NUMBER_ID')
+        token = cfg.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+
+        if not phone_id or not token:
+            logger.error("🔴 enviar_mensaje_voz: falta phone_number_id o whatsapp_token (config/ENV)")
+            return False
+
+        url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+        headers = {'Authorization': f"Bearer {token}", 'Content-Type': 'application/json'}
         payload = {'messaging_product':'whatsapp','to':numero,'type':'audio','audio':{'link': audio_url}}
+
+        logger.info(f"📤 enviar_mensaje_voz -> to={numero} phone_number_id={phone_id} audio_url={audio_url}")
         r = requests.post(url, headers=headers, json=payload, timeout=15)
-        return r.status_code in (200,201,202)
+
+        status = getattr(r, 'status_code', 'n/a')
+        try:
+            body_preview = (r.text or '')[:1000]
+        except Exception:
+            body_preview = '<unreadable-response-body>'
+
+        if status in (200, 201, 202):
+            logger.info(f"✅ enviar_mensaje_voz OK (status={status}) - resp_preview: {body_preview}")
+            return True
+
+        # If failed, try to parse JSON error for better message
+        err_info = None
+        try:
+            err_json = r.json()
+            err_info = err_json.get('error') or err_json
+        except Exception:
+            err_info = body_preview
+
+        logger.error(f"🔴 enviar_mensaje_voz FAILED status={status} -> {err_info}")
+        return False
     except Exception as e:
         logger.error(f"Exception enviar_mensaje_voz: {e}")
         return False
+
