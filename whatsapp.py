@@ -6,6 +6,13 @@ import requests
 from datetime import datetime
 from werkzeug.utils import secure_filename
 
+# Import helper from files.py (fallback if import fails)
+try:
+    from files import get_upload_base
+except Exception:
+    def get_upload_base():
+        return os.getenv('UPLOAD_FOLDER') or os.path.join(os.path.dirname(__file__), '..', 'uploads')
+
 logger = logging.getLogger(__name__)
 
 def _ensure_static_dir(subpath):
