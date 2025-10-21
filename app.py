@@ -5701,21 +5701,26 @@ def resumen_rafa(numero, config=None):
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
-    
-    # Validar texto
+
+    # Validate input
     if not texto or str(texto).strip() == '':
         app.logger.error("🔴 ERROR: Texto de mensaje vacío")
         return False
-    
+
     texto_limpio = str(texto).strip()
-    
-    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+
+    phone_id = config.get('phone_number_id')
+    token = config.get('whatsapp_token')
+    if not phone_id or not token:
+        app.logger.error("🔴 enviar_mensaje: missing phone_number_id or whatsapp_token (config or env)")
+        return False
+
+    url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
     headers = {
-        'Authorization': f'Bearer {config["whatsapp_token"]}',
+        'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json'
     }
-    
-    # ✅ PAYLOAD CORRECTO
+
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
@@ -5726,18 +5731,23 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
-        r = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        if r.status_code == 200:
+        app.logger.info(f"📤 Sending text to {numero}: {texto_limpio[:120]}")
+        r = requests.post(url, headers=headers, json=payload, timeout=12)
+
+        # Accept common 2xx success codes from Graph API
+        if r.status_code in (200, 201, 202):
             app.logger.info("✅ Mensaje enviado")
+            try:
+                app.logger.debug(f"📬 Response preview: {r.text[:800]}{'...' if len(r.text) > 800 else ''}")
+            except Exception:
+                pass
             return True
-        else:
-            app.logger.error(f"🔴 Error {r.status_code}: {r.text}")
-            return False
-            
+
+        app.logger.error(f"🔴 Error sending text {r.status_code}: {r.text}")
+        return False
+
     except Exception as e:
-        app.logger.error(f"🔴 Exception: {e}")
+        app.logger.error(f"🔴 Exception sending text: {e}")
         return False
 
 @app.route('/actualizar-contactos')
