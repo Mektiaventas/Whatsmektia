@@ -5699,20 +5699,27 @@ def resumen_rafa(numero, config=None):
 
 # REEMPLAZA tu función enviar_mensaje con esta versión corregida
 def enviar_mensaje(numero, texto, config=None):
+    """
+    Enviar texto por Graph API con logging diagnóstico mejorado.
+    Retorna True si se recibe 200/201/202, False en otro caso.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
-    # Validate input
+    # Validaciones básicas
     if not texto or str(texto).strip() == '':
-        app.logger.error("🔴 ERROR: Texto de mensaje vacío")
+        app.logger.error("🔴 enviar_mensaje: texto vacío, no se envía")
         return False
 
     texto_limpio = str(texto).strip()
 
-    phone_id = config.get('phone_number_id')
-    token = config.get('whatsapp_token')
+    # Obtener phone_number_id / token desde config con fallbacks a env
+    phone_id = config.get('phone_number_id') or os.getenv('MEKTIA_PHONE_NUMBER_ID') or os.getenv('PHONE_NUMBER_ID')
+    token = config.get('whatsapp_token') or os.getenv('MEKTIA_WHATSAPP_TOKEN') or os.getenv('WHATSAPP_TOKEN')
+
     if not phone_id or not token:
-        app.logger.error("🔴 enviar_mensaje: missing phone_number_id or whatsapp_token (config or env)")
+        app.logger.error("🔴 enviar_mensaje: falta phone_number_id o whatsapp_token en config/entorno")
+        app.logger.debug(f"🔍 config keys: {list(config.keys()) if isinstance(config, dict) else type(config)}")
         return False
 
     url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
@@ -5720,35 +5727,46 @@ def enviar_mensaje(numero, texto, config=None):
         'Authorization': f'Bearer {token}',
         'Content-Type': 'application/json'
     }
-
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
         'type': 'text',
-        'text': {
-            'body': texto_limpio
-        }
+        'text': {'body': texto_limpio}
     }
 
+    # Log seguro (no imprimir token completo)
+    masked_token = token[:8] + '...' if token else None
+    app.logger.info(f"📤 enviar_mensaje -> to={numero} phone_number_id={phone_id} token={masked_token} text_preview={texto_limpio[:120]}")
+
     try:
-        app.logger.info(f"📤 Sending text to {numero}: {texto_limpio[:120]}")
         r = requests.post(url, headers=headers, json=payload, timeout=12)
-
-        # Accept common 2xx success codes from Graph API
-        if r.status_code in (200, 201, 202):
-            app.logger.info("✅ Mensaje enviado")
-            try:
-                app.logger.debug(f"📬 Response preview: {r.text[:800]}{'...' if len(r.text) > 800 else ''}")
-            except Exception:
-                pass
-            return True
-
-        app.logger.error(f"🔴 Error sending text {r.status_code}: {r.text}")
-        return False
-
     except Exception as e:
-        app.logger.error(f"🔴 Exception sending text: {e}")
+        app.logger.error(f"🔴 enviar_mensaje: exception POST a Graph API: {e}")
         return False
+
+    # Siempre loguear status + preview body para diagnóstico
+    status = getattr(r, 'status_code', 'n/a')
+    body_preview = None
+    try:
+        body_text = r.text or ''
+        body_preview = body_text[:1000] + ('...' if len(body_text) > 1000 else '')
+    except Exception:
+        body_preview = '<unreadable-response-body>'
+
+    if status in (200, 201, 202):
+        app.logger.info(f"✅ enviar_mensaje OK (status={status}) - response_preview: {body_preview}")
+        return True
+
+    # En caso de fallo, intentar parsear JSON error y loguearlo
+    err_info = None
+    try:
+        err_json = r.json()
+        err_info = err_json.get('error') or err_json
+    except Exception:
+        err_info = body_preview
+
+    app.logger.error(f"🔴 enviar_mensaje FAILED status={status} -> {err_info}")
+    return False
 
 @app.route('/actualizar-contactos')
 def actualizar_contactos():
