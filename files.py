@@ -18,8 +18,8 @@ from werkzeug.utils import secure_filename
 logger = logging.getLogger(__name__)
 
 def _base_dir():
-    # Base folder: APP_BASE_DIR env or parent of this file
-    return os.getenv('APP_BASE_DIR') or os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    # Base folder: prefer explicit APP_BASE_DIR env; fallback to directory of this file (project root)
+    return os.getenv('APP_BASE_DIR') or os.path.abspath(os.path.dirname(__file__))
 
 def get_upload_base():
     return os.getenv('UPLOAD_FOLDER') or os.path.join(_base_dir(), 'uploads')

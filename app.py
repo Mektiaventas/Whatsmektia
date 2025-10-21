@@ -5347,21 +5347,46 @@ def serve_public_docs(relpath):
         docs_base = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
         # Avoid path traversal attacks by normalizing
         safe_relpath = os.path.normpath(relpath)
+
+        # Debug logs to help diagnose issues like the one you reported
+        app.logger.debug(f"serve_public_docs: requested relpath={relpath} safe_relpath={safe_relpath}")
+        app.logger.debug(f"serve_public_docs: docs_base={docs_base}")
+
         # If normalized path tries to go above docs_base, block it
         if safe_relpath.startswith('..') or os.path.isabs(safe_relpath):
             app.logger.warning(f"⚠️ Attempted path traversal in serve_public_docs: {relpath}")
-            abort(404)
+            return abort(404)
 
         full_path = os.path.join(docs_base, safe_relpath)
+        full_path = os.path.abspath(full_path)
+        docs_base_abs = os.path.abspath(docs_base)
+
+        # Ensure the final path is inside docs_base (extra safety)
+        if not full_path.startswith(docs_base_abs + os.sep) and full_path != docs_base_abs:
+            app.logger.warning(f"⚠️ serve_public_docs: computed path outside docs_base: {full_path}")
+            return abort(404)
+
+        # Check docs_base exists
+        if not os.path.isdir(docs_base_abs):
+            app.logger.info(f"❌ serve_public_docs: docs_base does not exist: {docs_base_abs}")
+            return abort(404)
+
+        # Check file existence
         if not os.path.isfile(full_path):
             app.logger.info(f"❌ Public doc not found: {full_path}")
-            abort(404)
+            return abort(404)
 
         directory = os.path.dirname(full_path)
         filename = os.path.basename(full_path)
+        app.logger.info(f"✅ Serving public doc: {full_path}")
         return send_from_directory(directory, filename)
+    except werkzeug.exceptions.NotFound as nf:
+        # send_from_directory can raise NotFound; map it to 404
+        app.logger.info(f"❌ NotFound when serving public doc {relpath}: {nf}")
+        return abort(404)
     except Exception as e:
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
+        app.logger.error(traceback.format_exc())
         abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
