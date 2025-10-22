@@ -3635,7 +3635,7 @@ def build_texto_catalogo(precios, limit=20):
         sku = (p.get('sku') or '').strip()
         nombre = (p.get('servicio') or p.get('modelo') or '').strip()
         # Preferencia en orden para precio mostrado
-        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or p.get('inscripcion') or p.get('mensualidad')
+        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') 
         inscripcion = p.get('inscripcion')
         mensualidad = p.get('mensualidad')
         precio_str = ''
