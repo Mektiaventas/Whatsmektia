@@ -6239,20 +6239,18 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante:
-    - Construye un prompt rico (catálogo resumido, precios, asesores, historial).
-    - Llama al modelo (DEEPSEEK_API) para que DECIDA la intención y genere:
-        { intent, respuesta_text, image_filename_or_url, document_url,
-          save_cita: {...}, notify_asesor: bool, followups: [...], confidence }
+    - Construye un prompt rico (catálogo estructurado, historial, asesores).
+    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
+    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
     - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
     - Guarda la conversación/resultados en BD.
     - Retorna True si procesado OK, False en fallo.
     """
     try:
-        # --- Preparar config y contexto ---
         if config is None:
             config = obtener_configuracion_por_host()
 
-        # 1) Historial reciente
+        # Historial reciente
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -6261,77 +6259,92 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
-        # 2) Catálogo / precios (resumido)
+        # Catálogo / precios (resumido y estructurado)
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
-        # 3) Bloque de asesores (sólo nombres)
+        # Build structured catalog list to send to the model (reduce hallucination)
+        catalog_list = []
+        for p in precios:
+            try:
+                catalog_list.append({
+                    "sku": (p.get('sku') or '').strip(),
+                    "servicio": (p.get('servicio') or p.get('modelo') or '').strip(),
+                    "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
+                    "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
+                    "inscripcion": str(p.get('inscripcion') or ""),
+                    "mensualidad": str(p.get('mensualidad') or "")
+                })
+            except Exception:
+                continue
+
+        # Bloque de asesores (sólo nombres)
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
-        # 4) Información multimodal si viene imagen/audio
+        # Información multimodal si viene imagen/audio
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
             if imagen_base64:
                 multimodal_info += "Se proporciona la imagen codificada en base64 para análisis.\n"
-            if msg.get('image', {}).get('caption'):
+            if isinstance(msg, dict) and msg.get('image', {}).get('caption'):
                 multimodal_info += f"Caption: {msg['image'].get('caption')}\n"
         if es_audio:
             multimodal_info += "El mensaje incluye audio y se ha provisto transcripción.\n"
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # 5) Construir system prompt potente
+        # System prompt con reglas estrictas para evitar invenciones
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
-- Catálogo / precios (resumen):\n{texto_catalogo}
+- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 
-Reglas estrictas:
-1) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-2) El JSON debe tener al menos estas claves:
+Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
+1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
+2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
+3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
+4) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+5) El JSON debe tener estas claves mínimas:
    - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío si intent no necesita texto)
+   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
    - image: filename_or_url_or_null
    - document: url_or_null
-   - save_cita: object|null  (si se debe guardar cita, incluye campos: servicio_solicitado, fecha_sugerida, hora_sugerida, nombre_cliente, telefono, detalles_servicio)
+   - save_cita: object|null
    - notify_asesor: boolean
-   - followups: [ "pregunta corta 1", ... ]  (preguntas a hacer al usuario)
+   - followups: [ "pregunta corta 1", ... ]
    - confidence: 0.0-1.0
+   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
 
-3) Usa la información del catálogo/precios/asesores solo si es relevante. No inventes precios ni SKUs inexistentes.
-4) Si decides GUARDAR_CITA, asegúrate de llenar los campos mínimos: servicio_solicitado, nombre_cliente (si disponible), telefono (usa el número del chat si no viene).
-5) Si decides PASAR_ASESOR, set notify_asesor=true y devuelve respuesta_text confirmando al usuario.
-6) Si envías imagen/documento, devuelve image/document con URL absoluta o filename conocido.
-7) No incluyas teléfonos, tokens, ni instrucciones de servidor dentro del campo respuesta_text.
-8) Sé conciso en respuesta_text (1-6 líneas).
-9) Si no estás seguro de la intención, usa NO_ACTION con confidence baja (<0.4).
-10) Siempre incluye un valor de confidence realista (0.0-1.0) basado en tu certeza.
-11) No inventes nada del catalogo o precios que no esté en el resumen proporcionado.
-
+6) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+7) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 Ejemplo de salida JSON:
 {{
  "intent":"RESPONDER_TEXTO",
- "respuesta_text":"Hola, te explico... ",
+ "respuesta_text":"Hola, tenemos estos programas: ...",
  "image": null,
  "document": null,
  "save_cita": null,
  "notify_asesor": false,
  "followups":[],
- "confidence":0.87
+ "confidence":0.87,
+ "source":"catalog"
 }}
 """
-        # 6) Mensaje de usuario (payload)
+
+        # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
         user_content = {
             "mensaje_actual": texto or "",
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
+            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
+            "catalogo_texto_resumen": texto_catalogo
         }
 
         payload_messages = [
@@ -6339,7 +6352,7 @@ Ejemplo de salida JSON:
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ]
 
-        # 7) Llamada al modelo (Deepseek, como en tu repo)
+        # Llamada al modelo (Deepseek)
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
 
@@ -6351,11 +6364,10 @@ Ejemplo de salida JSON:
             raw = "".join([ (r.get('text') if isinstance(r, dict) else str(r)) for r in raw ])
         raw = str(raw).strip()
 
-        # 8) Extraer JSON con regex y parsear
+        # Extraer JSON con regex y parsear
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
-            # Fallback: enviar texto simple producido por IA si existe
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
@@ -6369,7 +6381,7 @@ Ejemplo de salida JSON:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
 
-        # 9) Ejecutar acciones según decisión
+        # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
@@ -6377,12 +6389,27 @@ Ejemplo de salida JSON:
         save_cita = decision.get('save_cita')
         notify_asesor = bool(decision.get('notify_asesor'))
         followups = decision.get('followups') or []
+        source = decision.get('source') or "none"
+
+        # Si la IA intenta usar catálogo, validarlo contra catalog_list (seguridad extra)
+        if source == "catalog" and decision.get('save_cita'):
+            svc = decision['save_cita'].get('servicio_solicitado') or ""
+            svc_lower = svc.strip().lower()
+            found = False
+            for item in catalog_list:
+                if item.get('sku', '').strip().lower() == svc_lower or item.get('servicio', '').strip().lower() == svc_lower:
+                    found = True
+                    break
+            if not found:
+                app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
+                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
+                guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
+                return True
 
         # If save_cita requested: ensure phone and minimal fields
         if save_cita:
             try:
                 save_cita.setdefault('telefono', numero)
-                # normalize fecha/hora keys names to match guardar_cita expectation
                 info_cita = {
                     'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
                     'fecha_sugerida': save_cita.get('fecha_sugerida'),
@@ -6394,7 +6421,6 @@ Ejemplo de salida JSON:
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
-                    # enviar confirmación si IA lo sugirió (usamos respuesta_text precedentemente)
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
                         guardar_conversacion(numero, texto, respuesta_text, config)
@@ -6404,13 +6430,11 @@ Ejemplo de salida JSON:
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
 
-            # If saved, we consider work done
             return True
 
-        # If send image
+        # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                # image_field can be URL or filename; enviar_imagen en tu repo acepta filename o url
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
@@ -6419,7 +6443,7 @@ Ejemplo de salida JSON:
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
 
-        # If send document
+        # ENVIAR DOCUMENTO
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 enviar_documento(numero, document_field, os.path.basename(document_field), config)
@@ -6430,7 +6454,7 @@ Ejemplo de salida JSON:
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
 
-        # If pass to advisor
+        # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
@@ -6438,13 +6462,14 @@ Ejemplo de salida JSON:
             guardar_conversacion(numero, texto, respuesta_text, config)
             return True
 
-        # Default: send texto respuesta (RESPONDER_TEXTO / SOLICITAR_DATOS / NO_ACTION)
+        # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
+            # Aplicar restricciones antes de enviar
+            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
             return True
 
-        # Nothing actionable
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
         return False
 
