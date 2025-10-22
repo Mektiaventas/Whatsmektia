@@ -4287,7 +4287,8 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
             imagen = (p.get('imagen') or '').strip()
-
+            inscripcion = (p.get('inscripcion') or '').strip()
+            menusalidad = (p.get('mensualidad') or '').strip()
             imagen_url = ''
             if imagen:
                 # If it's already an absolute URL, use it
@@ -4334,7 +4335,9 @@ Dispones de la siguiente lista de productos/servicios (resumida):
 {productos_texto}
 Tambien de los datos de contacto de los asesores de ventas:
 {asesores_block}
-
+Si te preguntan por productos o servicios, responde usando la información del catálogo.
+Si te preguntan por precios, puedes responder con: {inscripcion} o {menusalidad} si aplica.
+Tambien puedes responder a precios con {precio} si aplica.
 REGLAS IMPORTANTES:
 - No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
 - Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde confirmando la petición
