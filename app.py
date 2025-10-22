@@ -2186,36 +2186,29 @@ def negocio_contact_block(negocio):
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID (usa la tabla 'conversaciones')."""
+    """Obtener mensajes de un chat específico después de cierto ID"""
     after_id = request.args.get('after', 0, type=int)
     config = obtener_configuracion_por_host()
-
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-
-        # Traer filas desde la tabla 'conversaciones' (estructurada con mensaje/respuesta/timestamp)
-        cursor.execute("""
-            SELECT id, mensaje, respuesta, timestamp, imagen_url, es_imagen
-            FROM conversaciones
-            WHERE numero = %s AND id > %s
-            ORDER BY timestamp ASC
-        """, (telefono, after_id))
-
-        messages = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        # Devolver tal cual; el cliente normaliza keys (id, mensaje, respuesta, etc.)
-        return jsonify({
-            'messages': messages,
-            'timestamp': int(time.time() * 1000)
-        })
-    except Exception as e:
-        app.logger.error(f"🔴 Error en get_chat_messages para {telefono}: {e}")
-        app.logger.debug(traceback.format_exc())
-        # Devolver respuesta vacía en vez de 500 para que el frontend pueda seguir funcionando
-        return jsonify({'messages': [], 'timestamp': int(time.time() * 1000)})
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Consultar solo mensajes más recientes que el ID proporcionado
+    cursor.execute("""
+        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
+        FROM mensajes 
+        WHERE telefono = %s AND id > %s
+        ORDER BY fecha ASC
+    """, (telefono, after_id))
+    
+    messages = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'messages': messages,
+        'timestamp': int(time.time() * 1000)
+    })
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
