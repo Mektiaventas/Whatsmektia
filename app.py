@@ -6269,7 +6269,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             try:
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('servicio') or p.get('modelo') or '').strip(),
+                    "servicio": (p.get('subcategoria') or p.get('categoria') or '').strip(),
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
