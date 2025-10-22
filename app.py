@@ -4204,205 +4204,6 @@ def obtener_historial(numero, limite=5, config=None):
     except Exception as e:
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
-    
-def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
-    """
-    Genera la respuesta textual de la IA (sin efectos secundarios).
-    Añadí la lógica para incluir URLs de imágenes de producto en el contexto
-    (y en el texto que se pasa a la IA) — igual que en tu `app - copia.py`.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    # Cargar configuración de negocio para prompts
-    try:
-        cfg = load_config(config)
-        neg = cfg.get('negocio', {})
-        ia_nombre = neg.get('ia_nombre', 'Asistente')
-        negocio_nombre = neg.get('negocio_nombre', '')
-        descripcion = neg.get('descripcion', '')
-    except Exception:
-        ia_nombre = 'Asistente'
-        negocio_nombre = ''
-        descripcion = ''
-
-    # Si estamos en una secuencia guiada de cita/pedido, delegar
-    try:
-        estado_actual = obtener_estado_conversacion(numero, config)
-        if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
-            return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    except Exception:
-        # si falla al obtener estado, continuar con flujo normal
-        pass
-
-    # Preparar catálogo reducido para contexto con URLs de imagen públicas cuando existan
-    precios = obtener_todos_los_precios(config) or []
-    productos_lines = []
-    dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-    if not dominio_publico.startswith('http'):
-        dominio_publico = f"https://{dominio_publico}" if dominio_publico else ''
-
-    # Initialize example price fields to safe defaults so they are always available for the prompt
-    inscripcion = ""
-    mensualidad = ""
-    precio_example = ""
-
-    # Resolve product image URLs only when the file actually exists on disk (diagnóstico: evita "imagen no encontrada")
-    for p in precios[:200]:
-        try:
-            nombre = (p.get('subcategoria') or p.get('modelo') or p.get('sku') or '')[:120]
-            sku = (p.get('sku') or '').strip()
-            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
-            imagen = (p.get('imagen') or '').strip()
-            # Safely extract subscription fields
-            inscripcion = str(p.get('inscripcion') or '').strip() or inscripcion
-            mensualidad = str(p.get('mensualidad') or '').strip() or mensualidad
-            precio_example = str(precio) or precio_example
-            imagen_url = ''
-            if imagen:
-                # If it's already an absolute URL, use it
-                if imagen.lower().startswith('http'):
-                    imagen_url = imagen
-                else:
-                    # Check tenant-aware producto dir and legacy locations for physical existence
-                    try:
-                        productos_dir, tenant_slug = get_productos_dir_for_config(config)
-                    except Exception:
-                        productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-                    candidate1 = os.path.join(productos_dir, imagen)
-                    candidate2 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', imagen)
-                    candidate3 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), imagen)
-                    if os.path.isfile(candidate1) or os.path.isfile(candidate2) or os.path.isfile(candidate3):
-                        if dominio_publico:
-                            imagen_url = f"{dominio_publico}/uploads/productos/{imagen}"
-                        else:
-                            imagen_url = f"/uploads/productos/{imagen}"
-                    else:
-                        imagen_url = ''
-
-            imagen_part = f" | Imagen:{imagen_url or imagen}" if (imagen_url or imagen) else ""
-            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}{imagen_part}")
-        except Exception:
-            # tolerate single product failure
-            continue
-
-    productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos registrados en el catálogo."
-
-    # Asesores block helper (no efectos)
-    try:
-        asesores_block = format_asesores_block(cfg)
-    except Exception:
-        asesores_block = ""
-
-    # System prompt claro
-    system_prompt = f"""
-Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-Descripción del negocio: {descripcion}
-
-Dispones de la siguiente lista de productos/servicios (resumida):
-{productos_texto}
-Tambien de los datos de contacto de los asesores de ventas:
-{asesores_block}
-Si te preguntan por productos o servicios, responde usando la información del catálogo.
-Si te preguntan por precios, puedes responder con: {inscripcion or 'Inscripción (si aplica)'} o {mensualidad or 'Mensualidad (si aplica)'} si aplica.
-Tambien puedes responder a precios con {precio_example or 'precio'} si aplica.
-REGLAS IMPORTANTES:
-- No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
-- Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde confirmando la petición
-  (ej: "Entiendo, solicito la intervención de un asesor.") pero NO intentes contactar.
-- Si identificas un producto y hay una imagen disponible, puedes mencionar la URL pública (Imagen: https://...)
-  o el texto "Imagen: <filename>". No incluyas rutas locales de servidor.
-- Mantén las respuestas concisas y orientadas al usuario.
-- No inventes productos, precios o servicios que no existen en el catálogo.
-""".strip()
-
-    # Construir historial para contexto
-    messages_chain = [{'role': 'system', 'content': system_prompt}]
-    try:
-        historial = obtener_historial(numero, limite=6, config=config) or []
-    except Exception:
-        historial = []
-
-    for entry in historial:
-        if entry.get('mensaje') and str(entry['mensaje']).strip() != '':
-            messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        if entry.get('respuesta') and str(entry['respuesta']).strip() != '':
-            messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
-
-    # Añadir mensaje actual (multimodal handling)
-    if mensaje_usuario and str(mensaje_usuario).strip() != '':
-        if es_imagen and imagen_base64:
-            messages_chain.append({
-                'role': 'user',
-                'content': [
-                    {"type": "text", "text": mensaje_usuario},
-                    {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
-                ]
-            })
-        elif es_audio and transcripcion_audio:
-            try:
-                tu = mensaje_usuario.strip() if mensaje_usuario else ""
-                ta = transcripcion_audio.strip() if transcripcion_audio else ""
-                if tu and ta and tu != ta:
-                    content = f"{ta}\n\n[Mensaje adicional]: {tu}"
-                else:
-                    content = ta or tu
-            except Exception:
-                content = transcripcion_audio or mensaje_usuario
-            messages_chain.append({'role': 'user', 'content': content})
-        else:
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
-
-    # Seguridad: saludo si no hay contexto
-    if len(messages_chain) <= 1:
-        return "¡Hola! ¿En qué puedo ayudarte hoy?"
-
-    # Llamada a la IA (Deepseek)
-    try:
-        headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-            "Content-Type": "application/json"
-        }
-        payload = {
-            "model": "deepseek-chat",
-            "messages": messages_chain,
-            "temperature": 0.7,
-            "max_tokens": 1200
-        }
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        response.raise_for_status()
-        data = response.json()
-        respuesta_raw = data['choices'][0]['message']['content']
-
-        # Normalizar respuesta multimodal (lista -> texto)
-        if isinstance(respuesta_raw, list):
-            parts = []
-            for item in respuesta_raw:
-                if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
-                    parts.append(item.get('text'))
-                elif isinstance(item, str):
-                    parts.append(item)
-            respuesta_text = "\n".join(parts)
-        else:
-            respuesta_text = str(respuesta_raw).strip()
-
-        # Aplicar restricciones/limpieza final (tu helper)
-        try:
-            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-        except Exception:
-            respuesta_text = respuesta_text
-
-        return respuesta_text
-
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 IA request error en responder_con_ia: {e}")
-        if hasattr(e, 'response') and e.response:
-            app.logger.error(f"🔴 IA response body: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA. Intenta de nuevo más tarde.'
-    except Exception as e:
-        app.logger.error(f"🔴 Error inesperado en responder_con_ia: {e}")
-        app.logger.error(traceback.format_exc())
-        return 'Lo siento, hubo un error interno procesando la respuesta.'
 
 def buscar_sku_en_texto(texto, precios):
     """
@@ -5080,337 +4881,6 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
     except Exception as e:
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
         return False
-
-# Replace the existing procesar_mensaje_normal function with this enhanced version
-def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64=None, transcripcion=None, es_mi_numero=False, es_archivo=False):
-    """Procesa mensajes normales (no citas/intervenciones) — ahora envía imagen si el usuario la solicita y existe."""
-    try:
-        # IA normal
-        if numero not in IA_ESTADOS:
-            IA_ESTADOS[numero] = {'activa': True, 'prefiere_voz': False}
-        elif 'prefiere_voz' not in IA_ESTADOS[numero]:
-            IA_ESTADOS[numero]['prefiere_voz'] = False
-
-        respuesta = ""
-        responder_con_voz = False
-        # Normalizar texto
-        texto = (texto or "").strip()
-        text_lower = texto.lower() if texto else ""
-        # Detectar petición explícita de catálogo/producto (keywords)
-        product_info_keywords = [
-            'precio', 'descripcion', 'detalles', 'detalle', 'información del producto',
-            'informacion del producto', 'habla del producto', 'habla de', 'qué es', 'qué cuesta',
-            'qué precio', 'dime sobre', 'dime el precio', 'más info de', 'más información de',
-            'ver producto', 'muestrame el producto', 'muéstrame el producto', 'muestra el producto'
-        ]
-        # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
-        try:
-            if any(k in text_lower for k in product_info_keywords):
-                # Obtener lista de precios rápida
-                precios = obtener_todos_los_precios(config) or []
-
-                # Primero intentar detectar SKU/modelo en el propio mensaje
-                sku_detected = buscar_sku_en_texto(texto, precios)
-                producto = None
-                if sku_detected:
-                    producto = obtener_producto_por_sku_o_nombre(sku_detected, config)
-
-                # Si no encontramos por SKU, intentar buscar por nombre completo o fragmento
-                if not producto:
-                    # intentar búsqueda directa con la frase completa (el helper hará LIKE)
-                    producto = obtener_producto_por_sku_o_nombre(texto, config)
-
-                if producto:
-                    # Preferir campo descripcion; si no existe, usar modelo/servicio
-                    descripcion = producto.get('descripcion') or producto.get('modelo') or producto.get('servicio') or ''
-                    nombre_prod = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or 'Producto').strip()
-                    if descripcion and descripcion.strip():
-                        respuesta_text = f"🔎 Información de {nombre_prod}:\n\n{descripcion.strip()}"
-                        enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto, respuesta_text, config)
-                        app.logger.info(f"✅ Descripción enviada automáticamente para {nombre_prod} a {numero}")
-                        return
-                    else:
-                        # Producto existe pero sin descripción -> pedir confirmación si quiere que la IA la agregue
-                        pregunta = (f"He encontrado el producto *{nombre_prod}* pero no tiene descripción en la base de datos.\n"
-                                    "¿Quieres que te la describa igualmente (basándome en los datos disponibles)? Responde 'sí' para que la IA cree una descripción, o indica otro producto.")
-                        enviar_mensaje(numero, pregunta, config)
-                        guardar_conversacion(numero, texto, pregunta, config)
-                        return
-                else:
-                    # No encontramos el producto -> preguntar cuál producto (solo llenar si el usuario responde con un nombre/SKU específico)
-                    pregunta = "¿Cuál producto te interesa exactamente? Indica el nombre o SKU para que lo busque en nuestro catálogo."
-                    enviar_mensaje(numero, pregunta, config)
-                    guardar_conversacion(numero, texto, pregunta, config)
-                    return
-        except Exception as e:
-            app.logger.warning(f"⚠️ Error en chequeo rápido de producto: {e}")
-
-        if IA_ESTADOS[numero]['activa']:
-            # 🆕 DETECTAR PREFERENCIA DE VOZ
-            if "envíame audio" in (texto or "").lower() or "respuesta en audio" in (texto or "").lower():
-                IA_ESTADOS[numero]['prefiere_voz'] = True
-                app.logger.info(f"🎵 Usuario {numero} prefiere respuestas de voz")
-
-            responder_con_voz = IA_ESTADOS[numero]['prefiere_voz'] or es_audio
-
-            # Obtener respuesta de IA
-            respuesta = responder_con_ia(texto, numero, es_imagen, imagen_base64, es_audio, transcripcion, config)
-
-        # If user asked explicitly for an image (keywords) or IA returned an image markdown/link, try to send the product image
-        # --- INSERT: quick catalog request detection in procesar_mensaje_normal ---
-        # Localiza la función procesar_mensaje_normal(...) y, cerca del inicio (después de obtener/normalizar 'texto'),
-        # agrega este bloque para interceptar peticiones de catálogo antes de llamar a la IA.
-
-        # QUICK CHECK: user asked for the catalog/PDF -> send it and stop (no IA)
-        try:
-            text_lower = (texto or "").lower()
-            catalog_keywords = [
-                'catálogo', 'catalogo', 'mostrar catálogo', 'mostrar catalogo',
-                'muestrame catálogo', 'muestrame catalogo', 'envíame catálogo', 'envia catálogo',
-                'manda catálogo', 'enviame catalogo', 'catalogo completo', 'catálogo completo',
-                'ver catálogo', 'ver catalogo', 'catalog', 'plan de estudios', 'plan'
-            ]
-            if any(k in text_lower for k in catalog_keywords):
-                app.logger.info(f"📚 Petición de catálogo detectada en mensaje: '{texto[:80]}'")
-                enviado = enviar_catalogo(numero, original_text=texto, config=config)
-                if enviado:
-                    # ya guardado dentro de enviar_catalogo -> terminar aquí
-                    return
-                else:
-                    # si no se pudo enviar como documento, se intentó enviar el resumen; terminar
-                    return
-        except Exception as e:
-            app.logger.warning(f"⚠️ Error detectando/enviando catálogo: {e}")
-        try:
-            precios = obtener_todos_los_precios(config)
-            sku_encontrado = buscar_sku_en_texto(texto, precios)
-            imagen_encontrada = None
-
-            # 1) Detect markdown image syntax in IA response: ![alt](file_or_url)
-            md_match = None
-            if isinstance(respuesta, str):
-                md = re.search(r'!\[.*?\]\(([^)]+)\)', respuesta)
-                if md:
-                    md_match = md.group(1).strip()
-                    app.logger.info(f"🔍 Markdown image detected in IA response: {md_match}")
-
-            # 2) If user asked (keywords), try to find SKU and image
-            keywords_imagen = ['imagen', 'foto', 'foto del', 'muestra', 'muestrame', 'muestra la', 'muéstrame', 'envía la imagen', 'envia la imagen', 'mostrar imagen', 'mostrar foto']
-            user_asked_image = any(k in (texto or "").lower() for k in keywords_imagen)
-
-            if user_asked_image and sku_encontrado:
-                # Buscar producto por SKU y obtener campo imagen
-                for p in precios:
-                    if (p.get('sku') or '').strip().lower() == sku_encontrado.lower():
-                        imagen_encontrada = p.get('imagen')
-                        break
-
-            # 3) Prefer the markdown/image returned by IA (it may include filename or URL)
-            if md_match:
-                imagen_encontrada = md_match
-
-            # 4) If IA response contains "Imagen: filename" pattern
-            if not imagen_encontrada and isinstance(respuesta, str):
-                m = re.search(r'Imagen[:\s]*([^\s,;\)\]]+)', respuesta, re.IGNORECASE)
-                if m:
-                    imagen_encontrada = m.group(1).strip()
-
-            if imagen_encontrada:
-                # Normalize: if it's a relative path like /uploads/productos/..., extract filename
-                if imagen_encontrada.startswith('/uploads/productos/'):
-                    imagen_encontrada = os.path.basename(imagen_encontrada)
-
-                # Confirm file exists locally or it's an absolute URL
-                file_path_local = os.path.join(UPLOAD_FOLDER, 'productos', imagen_encontrada)
-                file_path_root = os.path.join(UPLOAD_FOLDER, imagen_encontrada)
-
-                sent = False
-                if os.path.isfile(file_path_local) or os.path.isfile(file_path_root):
-                    # send image by WhatsApp (Graph API image message with link)
-                    sent = enviar_imagen(numero, imagen_encontrada, config)
-                    if sent:
-                        public_path = f"/uploads/productos/{imagen_encontrada}" if os.path.isfile(file_path_local) else f"/uploads/{imagen_encontrada}"
-                        # Save as a BOT response (no longer as a user message)
-                        guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {imagen_encontrada} ]")
-                        app.logger.info(f"✅ Imagen {imagen_encontrada} enviada a {numero} automáticamente")
-                        # Remove image reference from textual response to avoid sending path
-                        if isinstance(respuesta, str):
-                            respuesta = re.sub(r'!\[.*?\]\([^\)]+\)', '', respuesta)  # remove markdown
-                            respuesta = re.sub(re.escape(imagen_encontrada), '', respuesta)
-                    else:
-                        # fallback: send text with public URL and record as BOT response
-                        dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
-                        if not dominio.startswith('http'):
-                            dominio = f"https://{dominio}"
-                        image_url = f"{dominio}/uploads/productos/{imagen_encontrada}"
-                        enviar_mensaje(numero, f"No pude enviar la imagen directamente. Puedes verla aquí: {image_url}", config)
-                        guardar_respuesta_imagen(numero, image_url, config, nota=f"[Imagen (URL) enviada: {image_url}]")
-                else:
-                    # If imagen_encontrada is an absolute URL, try sending it
-                    if imagen_encontrada.lower().startswith('http'):
-                        sent = enviar_imagen(numero, imagen_encontrada, config)
-                        if sent:
-                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen enviada: {imagen_encontrada}]")
-                            # strip url from textual response
-                            if isinstance(respuesta, str):
-                                respuesta = respuesta.replace(imagen_encontrada, '')
-                        else:
-                            enviar_mensaje(numero, f"No pude enviar la imagen. Aquí está la ruta: {imagen_encontrada}", config)
-                            # Record fallback message as bot text
-                            guardar_respuesta_imagen(numero, imagen_encontrada, config, nota=f"[Imagen (URL) mostrada: {imagen_encontrada}]")
-                    else:
-                        # Try to find by filename in imagenes_productos table
-                        imgs = obtener_imagenes_por_sku(sku_encontrado, config) if sku_encontrado else []
-                        if imgs:
-                            first = imgs[0].get('filename')
-                            if first:
-                                sent = enviar_imagen(numero, first, config)
-                                if sent:
-                                    public_path = f"/uploads/productos/{first}"
-                                    guardar_respuesta_imagen(numero, public_path, config, nota=f"[Imagen enviada: {first}]")
-                                    if isinstance(respuesta, str):
-                                        respuesta = respuesta.replace(imagen_encontrada, first)
-                        else:
-                            # No local image found; inform user (record as bot response)
-                            app.logger.info(f"ℹ️ No se encontró físicamente la imagen: {imagen_encontrada}")
-                            guardar_respuesta_imagen(numero, '', config, nota="[Imagen no encontrada]")
-            else:
-                app.logger.debug("ℹ️ No se detectó imagen para enviar automáticamente")
-        except Exception as e:
-            app.logger.warning(f"⚠️ Error intentando enviar imagen automática: {e}")
-
-        # 🆕 DETECCIÓN Y PROCESAMIENTO DE ARCHIVOS
-        if es_archivo and 'document' in msg:
-            app.logger.info(f"📎 Procesando archivo enviado por {numero}")
-
-            # Obtener el archivo de WhatsApp
-            media_id = msg['document']['id']
-            filepath, filename, extension = obtener_archivo_whatsapp(media_id, config)
-
-            if filepath and extension:
-                # Extraer texto del archivo
-                texto_archivo = extraer_texto_archivo(filepath, extension)
-
-                if texto_archivo:
-                    # Determinar tipo de negocio
-                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-                    tipo_negocio = 'laporfirianna' if es_porfirianna else 'mektia'
-
-                    # Analizar con IA
-                    analisis = analizar_archivo_con_ia(texto_archivo, tipo_negocio, config)
-
-                    # Construir respuesta
-                    respuesta = f"""📎 **He analizado tu archivo** ({filename})
-
-{analisis}
-
-¿Te gustaría que haga algo específico con esta información?"""
-
-                else:
-                    respuesta = f"❌ No pude extraer texto del archivo {filename}. ¿Podrías describirme qué contiene?"
-
-                # Limpiar archivo temporal
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-
-            else:
-                respuesta = "❌ No pude descargar el archivo. ¿Podrías intentar enviarlo de nuevo?"
-
-            # Enviar respuesta y actualizar conversación existente
-            enviar_mensaje(numero, respuesta, config)
-            actualizar_respuesta(numero, texto, respuesta, config)  # FIX: corrected variable name
-            return
-
-        # 🆕 ENVÍO DE RESPUESTA (VOZ O TEXTO)
-        try:
-            # Normalize respuesta to string
-            if respuesta is None:
-                respuesta = ""
-            respuesta = str(respuesta).strip()
-
-            if not respuesta:
-                app.logger.info(f"ℹ️ IA returned empty response for {numero}; nothing to send")
-                return
-
-            sent_ok = False
-
-            if responder_con_voz and not es_imagen:
-                # Try TTS first
-                audio_filename = f"respuesta_{numero}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                audio_url_local = texto_a_voz(respuesta, audio_filename, config)
-                if audio_url_local:
-                    # Build public URL robustly
-                    dominio = config.get('dominio', '').rstrip('/')
-                    if not dominio.startswith('http'):
-                        dominio = f"https://{dominio or os.getenv('MI_DOMINIO', 'smartwhats.mektia.com')}"
-                    audio_url_publica = f"{dominio}/static/audio/respuestas/{audio_filename}.mp3"
-                    try:
-                        if enviar_mensaje_voz(numero, audio_url_publica, config):
-                            sent_ok = True
-                            app.logger.info(f"✅ Respuesta de voz enviada a {numero}")
-                        else:
-                            app.logger.warning(f"⚠️ enviar_mensaje_voz falló para {numero}, intentando fallback texto")
-                    except Exception as e:
-                        app.logger.warning(f"⚠️ Exception al enviar voz: {e}, intentando fallback texto")
-
-                # If TTS not available or sending failed, fallback to text
-                if not sent_ok:
-                    try:
-                        sent_ok = enviar_mensaje(numero, respuesta, config)
-                        if sent_ok:
-                            app.logger.info(f"✅ Respuesta (texto fallback) enviada a {numero}")
-                        else:
-                            app.logger.error(f"🔴 Fallback texto no pudo ser enviado a {numero}")
-                    except Exception as e:
-                        app.logger.error(f"🔴 Exception al enviar fallback texto a {numero}: {e}")
-                        sent_ok = False
-
-                # Update DB after delivery attempt
-                actualizar_respuesta(numero, texto, respuesta, config)
-                if not sent_ok:
-                    app.logger.error(f"🔴 No se pudo enviar la respuesta por voz ni por texto a {numero}. Response persisted in DB.")
-                return
-
-            else:
-                # Send plain text
-                try:
-                    sent_ok = enviar_mensaje(numero, respuesta, config)
-                    if sent_ok:
-                        app.logger.info(f"✅ Respuesta enviada (texto) a {numero}")
-                    else:
-                        app.logger.error(f"🔴 Error enviando respuesta (texto) a {numero}")
-                except Exception as e:
-                    app.logger.error(f"🔴 Exception enviando respuesta (texto) a {numero}: {e}")
-                    sent_ok = False
-
-                # Update DB after attempting to send
-                actualizar_respuesta(numero, texto, respuesta, config)
-                if not sent_ok:
-                    app.logger.error(f"🔴 Respuesta guardada pero no enviada a {numero}")
-                return
-
-        except Exception as e:
-            app.logger.error(f"🔴 Error en el envío de la respuesta: {e}")
-
-        # 🔄 DETECCIÓN DE INTERVENCIÓN HUMANA (para mensajes normales también)
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Intervención humana detectada en mensaje normal para {numero}")
-            resumen = resumen_rafa(numero, config)
-            enviar_alerta_humana(numero, texto, resumen, config)
-
-        # KANBAN AUTOMÁTICO
-        meta = obtener_chat_meta(numero, config)
-        if not meta:
-            inicializar_chat_meta(numero, config)
-
-        nueva_columna = evaluar_movimiento_automatico(numero, texto, respuesta, config)
-        actualizar_columna_chat(numero, nueva_columna, config)
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error procesando mensaje normal: {e}")
 
 @app.route('/chats/data')
 def obtener_datos_chat():
@@ -6594,8 +6064,7 @@ def webhook():
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (documento): {e}")
             # Procesar y salir
-            procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, 
-                                   imagen_base64, transcripcion, es_mi_numero, es_archivo)     
+            procesar_mensaje_unificado(numero, texto, msg, config)
             return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
@@ -6757,10 +6226,7 @@ def webhook():
             actualizar_kanban(numero, columna_id=1, config=config)
             return 'OK', 200
         
-        # 3. PROCESAMIENTO NORMAL DEL MENSAJE
-        procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, imagen_base64, transcripcion, es_mi_numero)
-        # ⛔ Se elimina llamada inválida con columna_id indefinido
-        # actualizar_kanban(numero, columna_id, config)  # ← eliminado
+        procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
         return 'OK', 200 
         
     except Exception as e:
@@ -6768,6 +6234,226 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Error interno del servidor', 500
 
+def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
+                               imagen_base64=None, transcripcion=None,
+                               es_mi_numero=False, es_archivo=False):
+    """
+    Flujo unificado para procesar un mensaje entrante:
+    - Construye un prompt rico (catálogo resumido, precios, asesores, historial).
+    - Llama al modelo (DEEPSEEK_API) para que DECIDA la intención y genere:
+        { intent, respuesta_text, image_filename_or_url, document_url,
+          save_cita: {...}, notify_asesor: bool, followups: [...], confidence }
+    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
+    - Guarda la conversación/resultados en BD.
+    - Retorna True si procesado OK, False en fallo.
+    """
+    try:
+        # --- Preparar config y contexto ---
+        if config is None:
+            config = obtener_configuracion_por_host()
+
+        # 1) Historial reciente
+        historial = obtener_historial(numero, limite=6, config=config) or []
+        historial_text = ""
+        for h in historial:
+            if h.get('mensaje'):
+                historial_text += f"Usuario: {h.get('mensaje')}\n"
+            if h.get('respuesta'):
+                historial_text += f"Asistente: {h.get('respuesta')}\n"
+
+        # 2) Catálogo / precios (resumido)
+        precios = obtener_todos_los_precios(config) or []
+        texto_catalogo = build_texto_catalogo(precios, limit=40)
+
+        # 3) Bloque de asesores (sólo nombres)
+        cfg_full = load_config(config)
+        asesores_block = format_asesores_block(cfg_full)
+
+        # 4) Información multimodal si viene imagen/audio
+        multimodal_info = ""
+        if es_imagen:
+            multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
+            if imagen_base64:
+                multimodal_info += "Se proporciona la imagen codificada en base64 para análisis.\n"
+            if msg.get('image', {}).get('caption'):
+                multimodal_info += f"Caption: {msg['image'].get('caption')}\n"
+        if es_audio:
+            multimodal_info += "El mensaje incluye audio y se ha provisto transcripción.\n"
+            if transcripcion:
+                multimodal_info += f"Transcripción: {transcripcion}\n"
+
+        # 5) Construir system prompt potente
+        system_prompt = f"""
+Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
+que el servidor debe ejecutar. Dispones de:
+- Historial (últimos mensajes):\n{historial_text}
+- Mensaje actual (texto): {texto or '[sin texto]'}
+- Datos multimodales: {multimodal_info}
+- Catálogo / precios (resumen):\n{texto_catalogo}
+- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+
+Reglas estrictas:
+1) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+2) El JSON debe tener al menos estas claves:
+   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío si intent no necesita texto)
+   - image: filename_or_url_or_null
+   - document: url_or_null
+   - save_cita: object|null  (si se debe guardar cita, incluye campos: servicio_solicitado, fecha_sugerida, hora_sugerida, nombre_cliente, telefono, detalles_servicio)
+   - notify_asesor: boolean
+   - followups: [ "pregunta corta 1", ... ]  (preguntas a hacer al usuario)
+   - confidence: 0.0-1.0
+
+3) Usa la información del catálogo/precios/asesores solo si es relevante. No inventes precios ni SKUs inexistentes.
+4) Si decides GUARDAR_CITA, asegúrate de llenar los campos mínimos: servicio_solicitado, nombre_cliente (si disponible), telefono (usa el número del chat si no viene).
+5) Si decides PASAR_ASESOR, set notify_asesor=true y devuelve respuesta_text confirmando al usuario.
+6) Si envías imagen/documento, devuelve image/document con URL absoluta o filename conocido.
+7) No incluyas teléfonos, tokens, ni instrucciones de servidor dentro del campo respuesta_text.
+8) Sé conciso en respuesta_text (1-6 líneas).
+
+Ejemplo de salida JSON:
+{{
+ "intent":"RESPONDER_TEXTO",
+ "respuesta_text":"Hola, te explico... ",
+ "image": null,
+ "document": null,
+ "save_cita": null,
+ "notify_asesor": false,
+ "followups":[],
+ "confidence":0.87
+}}
+"""
+        # 6) Mensaje de usuario (payload)
+        user_content = {
+            "mensaje_actual": texto or "",
+            "es_imagen": bool(es_imagen),
+            "es_audio": bool(es_audio),
+            "transcripcion": transcripcion or "",
+        }
+
+        payload_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
+        ]
+
+        # 7) Llamada al modelo (Deepseek, como en tu repo)
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
+
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data['choices'][0]['message']['content']
+        if isinstance(raw, list):
+            raw = "".join([ (r.get('text') if isinstance(r, dict) else str(r)) for r in raw ])
+        raw = str(raw).strip()
+
+        # 8) Extraer JSON con regex y parsear
+        match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
+        if not match:
+            app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
+            # Fallback: enviar texto simple producido por IA si existe
+            fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
+            if fallback_text:
+                enviar_mensaje(numero, fallback_text, config)
+                guardar_conversacion(numero, texto, fallback_text, config)
+                return True
+            return False
+
+        try:
+            decision = json.loads(match.group(1))
+        except Exception as e:
+            app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
+            return False
+
+        # 9) Ejecutar acciones según decisión
+        intent = (decision.get('intent') or 'NO_ACTION').upper()
+        respuesta_text = decision.get('respuesta_text') or ""
+        image_field = decision.get('image')
+        document_field = decision.get('document')
+        save_cita = decision.get('save_cita')
+        notify_asesor = bool(decision.get('notify_asesor'))
+        followups = decision.get('followups') or []
+
+        # If save_cita requested: ensure phone and minimal fields
+        if save_cita:
+            try:
+                save_cita.setdefault('telefono', numero)
+                # normalize fecha/hora keys names to match guardar_cita expectation
+                info_cita = {
+                    'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
+                    'fecha_sugerida': save_cita.get('fecha_sugerida'),
+                    'hora_sugerida': save_cita.get('hora_sugerida'),
+                    'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
+                    'telefono': save_cita.get('telefono'),
+                    'detalles_servicio': save_cita.get('detalles_servicio') or {}
+                }
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
+                    # enviar confirmación si IA lo sugirió (usamos respuesta_text precedentemente)
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto, respuesta_text, config)
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                else:
+                    app.logger.warning("⚠️ guardar_cita devolvió None")
+            except Exception as e:
+                app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
+
+            # If saved, we consider work done
+            return True
+
+        # If send image
+        if intent == "ENVIAR_IMAGEN" and image_field:
+            try:
+                # image_field can be URL or filename; enviar_imagen en tu repo acepta filename o url
+                sent = enviar_imagen(numero, image_field, config)
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error enviando imagen: {e}")
+
+        # If send document
+        if intent == "ENVIAR_DOCUMENTO" and document_field:
+            try:
+                enviar_documento(numero, document_field, os.path.basename(document_field), config)
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error enviando documento: {e}")
+
+        # If pass to advisor
+        if intent == "PASAR_ASESOR" or notify_asesor:
+            sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+            guardar_conversacion(numero, texto, respuesta_text, config)
+            return True
+
+        # Default: send texto respuesta (RESPONDER_TEXTO / SOLICITAR_DATOS / NO_ACTION)
+        if respuesta_text:
+            enviar_mensaje(numero, respuesta_text, config)
+            guardar_conversacion(numero, texto, respuesta_text, config)
+            return True
+
+        # Nothing actionable
+        app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
+        return False
+
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            app.logger.error(f"🔴 API body: {e.response.text[:1000]}")
+        return False
+    except Exception as e:
+        app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
+        app.logger.error(traceback.format_exc())
+        return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
