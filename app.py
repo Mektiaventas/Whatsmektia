@@ -2194,7 +2194,7 @@ def get_chat_messages(telefono):
     
     # Consultar solo mensajes más recientes que el ID proporcionado
     cursor.execute("""
-        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
+        SELECT id, mensaje as content, timestamp as timestamp, respuesta
         FROM conversaciones 
         WHERE telefono = %s AND id > %s
         ORDER BY fecha ASC
