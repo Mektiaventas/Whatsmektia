@@ -6646,7 +6646,10 @@ def webhook():
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
         # === fin manejo oferta asesor ===
-        guardar_mensaje_inmediato(numero, texto, config)
+        if not locals().get('message_saved'):
+            guardar_mensaje_inmediato(numero, texto, config)
+        else:
+            app.logger.info(f"ℹ️ Mensaje ya registrado previamente para {numero}, omitiendo guardar_mensaje_inmediato()")
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
