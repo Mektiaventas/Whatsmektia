@@ -190,6 +190,16 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
 
 def get_docs_dir_for_config(config=None):
     """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
+    # Prefer runtime app.config['UPLOAD_FOLDER'] if available to avoid import-time races
+    try:
+        # if module-level app exists and has config, prefer it
+        if 'app' in globals() and getattr(app, 'config', None):
+            base_upload = app.config.get('UPLOAD_FOLDER') or UPLOAD_FOLDER
+        else:
+            base_upload = os.environ.get('UPLOAD_FOLDER') or UPLOAD_FOLDER
+    except Exception:
+        base_upload = UPLOAD_FOLDER
+
     if config is None:
         try:
             # in some contexts, app context exists and helper available
@@ -198,13 +208,13 @@ def get_docs_dir_for_config(config=None):
             config = {}
     dominio = (config.get('dominio') or '').strip().lower()
     tenant_slug = dominio.split('.')[0] if dominio else 'default'
-    docs_dir = os.path.join(os.path.abspath(UPLOAD_FOLDER), 'docs', tenant_slug)
+    docs_dir = os.path.join(os.path.abspath(base_upload), 'docs', tenant_slug)
     try:
         os.makedirs(docs_dir, exist_ok=True)
     except Exception as e:
         logger.warning(f"⚠️ No se pudo crear docs_dir {docs_dir}: {e}")
         # fallback to a shared docs dir
-        docs_dir = os.path.join(os.path.abspath(UPLOAD_FOLDER), 'docs')
+        docs_dir = os.path.join(os.path.abspath(base_upload), 'docs')
         os.makedirs(docs_dir, exist_ok=True)
     return docs_dir, tenant_slug
 
