@@ -27,12 +27,12 @@
     </div>
     <div class="chatbox">
         <h2>{{ chat[2] or chat[1] }} <span style="font-size: 12px;">({{ chat[1] }})</span></h2>
-        <button onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
+        <button id="btn-toggle-ia" onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
         <form method="POST" action="{{ url_for('guardar_nota', telefono=chat[1]) }}">
             <textarea name="nota" placeholder="Añadir nota..." maxlength="600">{{ chat[4] }}</textarea>
             <button type="submit">Guardar Nota</button>
         </form>
-        <div class="mensajes" id="mensajes-container">
+        <div class="mensajes" id="mensajes-container" aria-live="polite" role="log">
             {% for msg in mensajes %}
             <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}" data-msg-id="{{ msg[0] }}">{{ msg[2] }}</div>
             {% endfor %}
@@ -40,7 +40,7 @@
 
         <!-- Añadir campo para enviar mensaje manual -->
         <div class="mensaje-manual">
-            <form method="POST" action="/send-manual" class="form-mensaje">
+            <form method="POST" action="/send-manual" class="form-mensaje" id="form-manual">
                 <input type="hidden" name="numero" value="{{ chat[1] }}">
                 <input type="text" name="texto" placeholder="Escribe un mensaje..." class="input-mensaje" autocomplete="off" required>
                 <button type="submit" class="btn-enviar">Enviar</button>
@@ -51,76 +51,149 @@
     <script>
         // Configuración para auto-actualización
         let chatAutoRefresh = true;
-        let refreshInterval = 500; // Medio segundo
+        const refreshInterval = 800; // ms
         let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
-        let telefono = "{{ chat[1] }}";
+        const telefono = "{{ chat[1] }}";
+        const mensajesContainer = document.getElementById('mensajes-container');
 
-        // Función para alternar IA
+        // Toggle IA: endpoint en servidor hace redirect; manejamos de forma segura.
         function toggleIA() {
-            fetch("/toggle_ai/" + telefono, { method: "POST" })
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById("ia-status").innerText = data.ia_activa ? "Activa" : "Desactivada";
+            const btn = document.getElementById('btn-toggle-ia');
+            const statusEl = document.getElementById('ia-status');
+            // Optimist toggle UI while request goes
+            const current = statusEl.innerText.trim().toLowerCase();
+            const newText = current === 'activa' ? 'Desactivada' : 'Activa';
+            // Send request (no JSON esperado). If server redirects, the page will likely change — handle that by reload.
+            fetch("/toggle_ai/" + telefono, { method: "POST", credentials: 'same-origin' })
+                .then(resp => {
+                    // If server responded with a redirect, follow it by reloading
+                    if (resp.redirected) {
+                        window.location.href = resp.url;
+                        return;
+                    }
+                    // Otherwise toggle UI locally (best-effort)
+                    statusEl.innerText = newText;
+                })
+                .catch(err => {
+                    console.warn('Error toggling IA:', err);
+                    // fallback: flip UI so user sees an effect but do not persist
+                    statusEl.innerText = newText;
                 });
         }
 
-        // Función para actualizar mensajes
-        function actualizarMensajes() {
-            if (!chatAutoRefresh) return;
+        // Añade mensaje al DOM asegurando no duplicados
+        function appendMessage(msg) {
+            // msg expected: { id, content, timestamp, direccion } (same shape as /chat/<tel>/messages)
+            if (!msg || !msg.id) return;
+            // avoid duplicate
+            if (mensajesContainer.querySelector(`.msg-box[data-msg-id="${msg.id}"]`) || mensajesContainer.querySelector(`[data-msg-id="${msg.id}"]`)) {
+                return;
+            }
 
-            fetch(`/chat/${telefono}/messages?after=${lastMessageId}`)
-                .then(response => response.json())
-                .then(data => {
-                    if (data.messages && data.messages.length > 0) {
-                        const container = document.getElementById('mensajes-container');
-                        const wasAtBottom = isScrolledToBottom(container);
-
-                        // Añadir nuevos mensajes
-                        data.messages.forEach(msg => {
-                            const msgElement = document.createElement('div');
-                            msgElement.className = msg.direction === 'entrante' ? 'msg-in' : 'msg-out';
-                            msgElement.dataset.msgId = msg.id;
-                            msgElement.textContent = msg.content;
-                            msgElement.classList.add('new-message');
-                            container.appendChild(msgElement);
-
-                            // Actualizar último mensaje ID
-                            lastMessageId = Math.max(lastMessageId, msg.id);
-                        });
-
-                        // Scroll al final si ya estaba al final
-                        if (wasAtBottom) {
-                            scrollToBottom(container);
-                        }
-                    }
-                })
-                .catch(error => console.error('Error actualizando mensajes:', error));
+            const el = document.createElement('div');
+            el.className = (msg.direction === 'entrante' || msg.direccion === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
+            el.dataset.msgId = msg.id;
+            // If message may contain HTML you don't want to render, use textContent
+            el.textContent = msg.content || msg.mensaje || msg.respuesta || '';
+            el.classList.add('new-message');
+            mensajesContainer.appendChild(el);
+            // remove highlight after animation
+            setTimeout(() => el.classList.remove('new-message'), 1800);
         }
 
-        // Verificar si está al final del scroll
+        // Comprueba si el scroll está al final (con un pequeño margen)
         function isScrolledToBottom(element) {
-            return element.scrollHeight - element.clientHeight <= element.scrollTop + 50;
+            return element.scrollHeight - element.clientHeight <= element.scrollTop + 60;
         }
 
-        // Scroll al final del contenedor
         function scrollToBottom(element) {
             element.scrollTop = element.scrollHeight;
         }
 
-        // Iniciar actualización periódica
+        // Poll incremental de mensajes nuevos
+        async function actualizarMensajes() {
+            if (!chatAutoRefresh) return;
+            try {
+                const res = await fetch(`/chat/${encodeURIComponent(telefono)}/messages?after=${lastMessageId}`, { credentials: 'same-origin' });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data || !Array.isArray(data.messages)) return;
+                const msgs = data.messages;
+                if (msgs.length === 0) return;
+
+                const wasAtBottom = isScrolledToBottom(mensajesContainer);
+
+                for (const m of msgs) {
+                    // normalize keys: some endpoints send {id, content, timestamp, direccion}
+                    const normalized = {
+                        id: m.id || m[0] || 0,
+                        content: m.content || m.mensaje || m.respuesta || m[2] || '',
+                        direction: m.direction || m.direccion || (m[3] ? m[3] : null)
+                    };
+                    appendMessage(normalized);
+                    lastMessageId = Math.max(lastMessageId, Number(normalized.id || 0));
+                }
+
+                if (wasAtBottom) scrollToBottom(mensajesContainer);
+            } catch (err) {
+                console.error('Error actualizando mensajes:', err);
+            }
+        }
+
+        // Evita duplicados si el template ya renderizó items con data-msg-id
+        function initLastMessageIdFromDOM() {
+            try {
+                const nodes = mensajesContainer.querySelectorAll('[data-msg-id]');
+                let max = lastMessageId || 0;
+                nodes.forEach(n => {
+                    const v = Number(n.dataset.msgId) || 0;
+                    if (v > max) max = v;
+                });
+                lastMessageId = Math.max(lastMessageId, max);
+            } catch (e) {
+                // ignore
+            }
+        }
+
+        // Inicialización
         document.addEventListener('DOMContentLoaded', function() {
-            const container = document.getElementById('mensajes-container');
+            // ensure container exists
+            if (!mensajesContainer) return;
 
-            // Scroll inicial al último mensaje
-            scrollToBottom(container);
+            initLastMessageIdFromDOM();
 
-            // Iniciar actualización cada medio segundo
-            setInterval(actualizarMensajes, refreshInterval);
+            // initial scroll to bottom
+            scrollToBottom(mensajesContainer);
 
-            // Pausar/reanudar cuando cambia visibilidad
+            // polling
+            const intervalId = setInterval(() => {
+                if (!document.hidden) actualizarMensajes();
+            }, refreshInterval);
+
+            // pause when user hides tab
             document.addEventListener('visibilitychange', () => {
                 chatAutoRefresh = !document.hidden;
+                if (!chatAutoRefresh) {
+                    // do nothing, polling continues but function returns early
+                } else {
+                    // on resume, do an immediate fetch to catch up
+                    actualizarMensajes();
+                }
             });
+
+            // if user manually scrolls far from bottom, pause automatic scroll-to-bottom but continue fetching
+            mensajesContainer.addEventListener('scroll', () => {
+                // nothing to do here, isScrolledToBottom will be checked before auto-scrolling
+            });
+
+            // keep manual send form behavior unchanged but after sending we can fetch immediately
+            const manualForm = document.getElementById('form-manual');
+            if (manualForm) {
+                manualForm.addEventListener('submit', (ev) => {
+                    // let the server process the POST; after short delay poll for new messages
+                    setTimeout(() => actualizarMensajes(), 600);
+                });
+            }
         });
     </script>
 </body>
