@@ -4205,8 +4205,6 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
     
-
-
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
     """
     Genera la respuesta textual de la IA (sin efectos secundarios).
@@ -4244,6 +4242,11 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     if not dominio_publico.startswith('http'):
         dominio_publico = f"https://{dominio_publico}" if dominio_publico else ''
 
+    # Initialize example price fields to safe defaults so they are always available for the prompt
+    inscripcion = ""
+    mensualidad = ""
+    precio_example = ""
+
     # Resolve product image URLs only when the file actually exists on disk (diagnóstico: evita "imagen no encontrada")
     for p in precios[:200]:
         try:
@@ -4251,7 +4254,10 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
             imagen = (p.get('imagen') or '').strip()
-
+            # Safely extract subscription fields
+            inscripcion = str(p.get('inscripcion') or '').strip() or inscripcion
+            mensualidad = str(p.get('mensualidad') or '').strip() or mensualidad
+            precio_example = str(precio) or precio_example
             imagen_url = ''
             if imagen:
                 # If it's already an absolute URL, use it
@@ -4272,7 +4278,6 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
                         else:
                             imagen_url = f"/uploads/productos/{imagen}"
                     else:
-                        # Imagen no encontrada en disco -> dejar campo vacío (evita que el bot mencione rutas inválidas)
                         imagen_url = ''
 
             imagen_part = f" | Imagen:{imagen_url or imagen}" if (imagen_url or imagen) else ""
@@ -4298,7 +4303,9 @@ Dispones de la siguiente lista de productos/servicios (resumida):
 {productos_texto}
 Tambien de los datos de contacto de los asesores de ventas:
 {asesores_block}
-
+Si te preguntan por productos o servicios, responde usando la información del catálogo.
+Si te preguntan por precios, puedes responder con: {inscripcion or 'Inscripción (si aplica)'} o {mensualidad or 'Mensualidad (si aplica)'} si aplica.
+Tambien puedes responder a precios con {precio_example or 'precio'} si aplica.
 REGLAS IMPORTANTES:
 - No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
 - Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde confirmando la petición
