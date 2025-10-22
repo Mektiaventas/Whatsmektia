@@ -73,7 +73,6 @@ def format_time_24h(dt):
     except Exception as e:
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
-# ——— Env vars ———
 
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -88,7 +87,7 @@ OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
 client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
-# ——— Configuración Multi-Tenant ———
+
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
@@ -1410,6 +1409,7 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
     try:
@@ -1856,6 +1856,7 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2185,29 +2186,36 @@ def negocio_contact_block(negocio):
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID"""
+    """Obtener mensajes de un chat específico después de cierto ID (usa la tabla 'conversaciones')."""
     after_id = request.args.get('after', 0, type=int)
     config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
-    # Consultar solo mensajes más recientes que el ID proporcionado
-    cursor.execute("""
-        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
-        FROM mensajes 
-        WHERE telefono = %s AND id > %s
-        ORDER BY fecha ASC
-    """, (telefono, after_id))
-    
-    messages = cursor.fetchall()
-    cursor.close()
-    conn.close()
-    
-    return jsonify({
-        'messages': messages,
-        'timestamp': int(time.time() * 1000)
-    })
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Traer filas desde la tabla 'conversaciones' (estructurada con mensaje/respuesta/timestamp)
+        cursor.execute("""
+            SELECT id, mensaje, respuesta, timestamp, imagen_url, es_imagen
+            FROM conversaciones
+            WHERE numero = %s AND id > %s
+            ORDER BY timestamp ASC
+        """, (telefono, after_id))
+
+        messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Devolver tal cual; el cliente normaliza keys (id, mensaje, respuesta, etc.)
+        return jsonify({
+            'messages': messages,
+            'timestamp': int(time.time() * 1000)
+        })
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_chat_messages para {telefono}: {e}")
+        app.logger.debug(traceback.format_exc())
+        # Devolver respuesta vacía en vez de 500 para que el frontend pueda seguir funcionando
+        return jsonify({'messages': [], 'timestamp': int(time.time() * 1000)})
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
