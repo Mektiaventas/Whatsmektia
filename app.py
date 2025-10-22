@@ -6239,7 +6239,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante:
-    - Construye un prompt rico (catálogo estructurado, historial, asesores).
+    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
+      (keyword shortcut para UX inmediata).
+    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
     - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
     - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
     - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
@@ -6249,6 +6251,26 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     try:
         if config is None:
             config = obtener_configuracion_por_host()
+
+        texto_norm = (texto or "").strip().lower()
+
+        # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
+        # This gives immediate UX for common user requests to receive the published PDF/catalog.
+        catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
+        if any(k in texto_norm for k in catalog_keywords):
+            app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
+                # pero dejamos un registro por seguridad si no lo hizo.
+                if sent:
+                    guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
+                else:
+                    guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                # continue to AI flow as fallback
 
         # Historial reciente
         historial = obtener_historial(numero, limite=6, config=config) or []
@@ -6269,7 +6291,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             try:
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('subcategoria') or p.get('categoria') or '').strip(),
+                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('servicio') or p.get('modelo') or '').strip(),
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
@@ -6309,8 +6331,9 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
 2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
-4) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-5) El JSON debe tener estas claves mínimas:
+4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+6) El JSON debe tener estas claves mínimas:
    - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
    - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
    - image: filename_or_url_or_null
@@ -6321,20 +6344,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - confidence: 0.0-1.0
    - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
 
-6) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-7) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
-Ejemplo de salida JSON:
-{{
- "intent":"RESPONDER_TEXTO",
- "respuesta_text":"Hola, tenemos estos programas: ...",
- "image": null,
- "document": null,
- "save_cita": null,
- "notify_asesor": false,
- "followups":[],
- "confidence":0.87,
- "source":"catalog"
-}}
+7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
@@ -6391,7 +6402,7 @@ Ejemplo de salida JSON:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-        # Si la IA intenta usar catálogo, validarlo contra catalog_list (seguridad extra)
+        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
@@ -6405,6 +6416,20 @@ Ejemplo de salida JSON:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
                 return True
+
+        # If AI requests to send a document but didn't provide one, try enviar_catalogo() as fallback
+        if intent == "ENVIAR_DOCUMENTO" and not document_field:
+            app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                if sent:
+                    guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
+                else:
+                    enviar_mensaje(numero, "No encontré un catálogo publicado para enviar. ¿Deseas que te comparta la lista de programas por aquí?", config)
+                    guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
 
         # If save_cita requested: ensure phone and minimal fields
         if save_cita:
@@ -6438,12 +6463,12 @@ Ejemplo de salida JSON:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
 
-        # ENVIAR DOCUMENTO
+        # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 enviar_documento(numero, document_field, os.path.basename(document_field), config)
