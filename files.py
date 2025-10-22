@@ -189,33 +189,51 @@ def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
     return imagenes
 
 def get_docs_dir_for_config(config=None):
-    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists."""
-    # Prefer runtime app.config['UPLOAD_FOLDER'] if available to avoid import-time races
+    """Return (docs_dir, tenant_slug). Ensures uploads/docs/<tenant_slug> exists.
+
+    Prefer the runtime Flask UPLOAD_FOLDER (current_app or imported app.config) to avoid
+    import-time / env var races that cause files to be written to a different base path.
+    """
+    # Prefer runtime app.config['UPLOAD_FOLDER'] when possible
+    base_upload = None
     try:
-        # if module-level app exists and has config, prefer it
-        if 'app' in globals() and getattr(app, 'config', None):
-            base_upload = app.config.get('UPLOAD_FOLDER') or UPLOAD_FOLDER
-        else:
-            base_upload = os.environ.get('UPLOAD_FOLDER') or UPLOAD_FOLDER
+        from flask import has_request_context, current_app
+        if has_request_context():
+            base_upload = current_app.config.get('UPLOAD_FOLDER')
     except Exception:
-        base_upload = UPLOAD_FOLDER
+        # no request context or flask not available here
+        pass
+
+    # If not available via current_app, try module-level app (import-time)
+    if not base_upload:
+        try:
+            if 'app' in globals() and getattr(app, 'config', None):
+                base_upload = app.config.get('UPLOAD_FOLDER')
+        except Exception:
+            base_upload = None
+
+    # Fallback to environment or module-level constant
+    if not base_upload:
+        base_upload = os.environ.get('UPLOAD_FOLDER') or UPLOAD_FOLDER
 
     if config is None:
         try:
-            # in some contexts, app context exists and helper available
             config = obtener_configuracion_por_host()
         except Exception:
             config = {}
+
     dominio = (config.get('dominio') or '').strip().lower()
     tenant_slug = dominio.split('.')[0] if dominio else 'default'
+
     docs_dir = os.path.join(os.path.abspath(base_upload), 'docs', tenant_slug)
     try:
         os.makedirs(docs_dir, exist_ok=True)
     except Exception as e:
         logger.warning(f"⚠️ No se pudo crear docs_dir {docs_dir}: {e}")
-        # fallback to a shared docs dir
+        # fallback to shared docs dir under same base
         docs_dir = os.path.join(os.path.abspath(base_upload), 'docs')
         os.makedirs(docs_dir, exist_ok=True)
+
     return docs_dir, tenant_slug
 
 def get_productos_dir_for_config(config=None):
