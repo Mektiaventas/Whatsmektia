@@ -4243,7 +4243,7 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
     # Resolve product image URLs only when the file actually exists on disk (diagnóstico: evita "imagen no encontrada")
     for p in precios[:200]:
         try:
-            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
+            nombre = (p.get('subcategoria') or p.get('modelo') or p.get('sku') or '')[:120]
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
             imagen = (p.get('imagen') or '').strip()
