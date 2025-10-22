@@ -49,101 +49,108 @@
     </div>
 
     <script>
-        // Configuración para auto-actualización
+        // Configuration
         let chatAutoRefresh = true;
         const refreshInterval = 800; // ms
         let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
         const telefono = "{{ chat[1] }}";
-        const mensajesContainer = document.getElementById('mensajes-container');
 
-        // Toggle IA: endpoint en servidor hace redirect; manejamos de forma segura.
+        // Toggle IA (best-effort UI update; server may redirect)
         function toggleIA() {
-            const btn = document.getElementById('btn-toggle-ia');
             const statusEl = document.getElementById('ia-status');
-            // Optimist toggle UI while request goes
-            const current = statusEl.innerText.trim().toLowerCase();
-            const newText = current === 'activa' ? 'Desactivada' : 'Activa';
-            // Send request (no JSON esperado). If server redirects, the page will likely change — handle that by reload.
-            fetch("/toggle_ai/" + telefono, { method: "POST", credentials: 'same-origin' })
+            const current = statusEl.textContent.trim().toLowerCase();
+            const optimistic = current === 'activa' ? 'Desactivada' : 'Activa';
+            fetch("/toggle_ai/" + telefono, { method: "POST", credentials: 'same-origin', cache: 'no-store' })
                 .then(resp => {
-                    // If server responded with a redirect, follow it by reloading
                     if (resp.redirected) {
                         window.location.href = resp.url;
                         return;
                     }
-                    // Otherwise toggle UI locally (best-effort)
-                    statusEl.innerText = newText;
+                    // Try to read JSON if returned
+                    return resp.json().catch(() => ({ ia_activa: null }));
+                })
+                .then(body => {
+                    if (body && typeof body.ia_activa !== 'undefined') {
+                        statusEl.textContent = body.ia_activa ? 'Activa' : 'Desactivada';
+                    } else {
+                        statusEl.textContent = optimistic;
+                    }
                 })
                 .catch(err => {
-                    console.warn('Error toggling IA:', err);
-                    // fallback: flip UI so user sees an effect but do not persist
-                    statusEl.innerText = newText;
+                    console.warn('toggleIA error:', err);
+                    statusEl.textContent = optimistic;
                 });
         }
 
-        // Añade mensaje al DOM asegurando no duplicados
-        function appendMessage(msg) {
-            // msg expected: { id, content, timestamp, direccion } (same shape as /chat/<tel>/messages)
-            if (!msg || !msg.id) return;
-            // avoid duplicate
-            if (mensajesContainer.querySelector(`.msg-box[data-msg-id="${msg.id}"]`) || mensajesContainer.querySelector(`[data-msg-id="${msg.id}"]`)) {
-                return;
-            }
+        // Append message without duplicating
+        function appendMessageToDOM(container, normalized) {
+            if (!normalized || !normalized.id) return;
+            if (container.querySelector(`[data-msg-id="${normalized.id}"]`)) return;
 
-            const el = document.createElement('div');
-            el.className = (msg.direction === 'entrante' || msg.direccion === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
-            el.dataset.msgId = msg.id;
-            // If message may contain HTML you don't want to render, use textContent
-            el.textContent = msg.content || msg.mensaje || msg.respuesta || '';
-            el.classList.add('new-message');
-            mensajesContainer.appendChild(el);
-            // remove highlight after animation
-            setTimeout(() => el.classList.remove('new-message'), 1800);
+            const node = document.createElement('div');
+            node.className = (normalized.direction === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
+            node.dataset.msgId = normalized.id;
+            node.textContent = normalized.content || '';
+            node.classList.add('new-message');
+            container.appendChild(node);
+            setTimeout(() => node.classList.remove('new-message'), 1800);
         }
 
-        // Comprueba si el scroll está al final (con un pequeño margen)
-        function isScrolledToBottom(element) {
-            return element.scrollHeight - element.clientHeight <= element.scrollTop + 60;
+        function isScrolledToBottom(el) {
+            return el.scrollHeight - el.clientHeight <= el.scrollTop + 60;
         }
+        function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
 
-        function scrollToBottom(element) {
-            element.scrollTop = element.scrollHeight;
-        }
-
-        // Poll incremental de mensajes nuevos
-        async function actualizarMensajes() {
+        // Robust fetch + normalization + logging
+        async function actualizarMensajes(container) {
             if (!chatAutoRefresh) return;
             try {
-                const res = await fetch(`/chat/${encodeURIComponent(telefono)}/messages?after=${lastMessageId}`, { credentials: 'same-origin' });
-                if (!res.ok) return;
-                const data = await res.json();
-                if (!data || !Array.isArray(data.messages)) return;
+                const url = `/chat/${encodeURIComponent(telefono)}/messages?after=${lastMessageId}`;
+                console.debug('Fetching messages:', url);
+                const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+                console.debug('Response status:', res.status);
+                if (!res.ok) {
+                    console.warn('Fetch failed:', res.status, res.statusText);
+                    return;
+                }
+                const data = await res.json().catch(e => {
+                    console.error('Failed to parse JSON from messages endpoint:', e);
+                    return null;
+                });
+                console.debug('Messages payload:', data);
+                if (!data || !Array.isArray(data.messages)) {
+                    console.debug('No messages array in response');
+                    return;
+                }
                 const msgs = data.messages;
                 if (msgs.length === 0) return;
 
-                const wasAtBottom = isScrolledToBottom(mensajesContainer);
+                const wasAtBottom = isScrolledToBottom(container);
 
                 for (const m of msgs) {
-                    // normalize keys: some endpoints send {id, content, timestamp, direccion}
+                    // Normalize different payload shapes
                     const normalized = {
-                        id: m.id || m[0] || 0,
-                        content: m.content || m.mensaje || m.respuesta || m[2] || '',
-                        direction: m.direction || m.direccion || (m[3] ? m[3] : null)
+                        id: (m.id ?? m[0] ?? m['id'] ?? 0),
+                        content: (m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? m.respuesta ?? m[2] ?? ''),
+                        direction: (m.direction ?? m['direction'] ?? m.direccion ?? m['direccion'] ?? (m[3] ?? null))
                     };
-                    appendMessage(normalized);
-                    lastMessageId = Math.max(lastMessageId, Number(normalized.id || 0));
+                    // Ensure id numeric
+                    normalized.id = Number(normalized.id) || 0;
+                    if (normalized.id === 0) continue;
+                    appendMessageToDOM(container, normalized);
+                    lastMessageId = Math.max(lastMessageId, normalized.id);
                 }
 
-                if (wasAtBottom) scrollToBottom(mensajesContainer);
+                if (wasAtBottom) scrollToBottom(container);
             } catch (err) {
-                console.error('Error actualizando mensajes:', err);
+                console.error('Error updating messages:', err);
             }
         }
 
-        // Evita duplicados si el template ya renderizó items con data-msg-id
-        function initLastMessageIdFromDOM() {
+        // Initialize lastMessageId from DOM rendered messages to avoid duplicates
+        function initLastMessageFromDOM(container) {
             try {
-                const nodes = mensajesContainer.querySelectorAll('[data-msg-id]');
+                const nodes = container.querySelectorAll('[data-msg-id]');
                 let max = lastMessageId || 0;
                 nodes.forEach(n => {
                     const v = Number(n.dataset.msgId) || 0;
@@ -151,47 +158,35 @@
                 });
                 lastMessageId = Math.max(lastMessageId, max);
             } catch (e) {
-                // ignore
+                console.warn('initLastMessageFromDOM failed', e);
             }
         }
 
-        // Inicialización
-        document.addEventListener('DOMContentLoaded', function() {
-            // ensure container exists
-            if (!mensajesContainer) return;
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('mensajes-container');
+            if (!container) return;
 
-            initLastMessageIdFromDOM();
+            initLastMessageFromDOM(container);
+            scrollToBottom(container);
 
-            // initial scroll to bottom
-            scrollToBottom(mensajesContainer);
+            // initial immediate fetch to catch up
+            actualizarMensajes(container);
 
-            // polling
-            const intervalId = setInterval(() => {
-                if (!document.hidden) actualizarMensajes();
+            // periodic polling
+            const timer = setInterval(() => {
+                if (!document.hidden) actualizarMensajes(container);
             }, refreshInterval);
 
-            // pause when user hides tab
             document.addEventListener('visibilitychange', () => {
                 chatAutoRefresh = !document.hidden;
-                if (!chatAutoRefresh) {
-                    // do nothing, polling continues but function returns early
-                } else {
-                    // on resume, do an immediate fetch to catch up
-                    actualizarMensajes();
-                }
+                if (chatAutoRefresh) actualizarMensajes(container);
             });
 
-            // if user manually scrolls far from bottom, pause automatic scroll-to-bottom but continue fetching
-            mensajesContainer.addEventListener('scroll', () => {
-                // nothing to do here, isScrolledToBottom will be checked before auto-scrolling
-            });
-
-            // keep manual send form behavior unchanged but after sending we can fetch immediately
+            // after manual send, poll shortly after to pick up message inserted by server
             const manualForm = document.getElementById('form-manual');
             if (manualForm) {
-                manualForm.addEventListener('submit', (ev) => {
-                    // let the server process the POST; after short delay poll for new messages
-                    setTimeout(() => actualizarMensajes(), 600);
+                manualForm.addEventListener('submit', () => {
+                    setTimeout(() => actualizarMensajes(container), 500);
                 });
             }
         });
