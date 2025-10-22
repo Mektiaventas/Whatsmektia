@@ -3229,7 +3229,8 @@ def extraer_nombre_del_mensaje(mensaje):
 @app.route('/configuracion/negocio/publicar-pdf', methods=['POST'])
 @login_required
 def publicar_pdf_configuracion():
-    """Recibe un PDF, imagen o video desde la vista de configuración (negocio), lo guarda en disk y registra metadatos en la BD."""
+    """Recibe un PDF, imagen o video desde la vista de configuración (negocio),
+    lo guarda en disk y registra metadatos en la BD."""
     config = obtener_configuracion_por_host()
     try:
         if 'public_pdf' not in request.files or request.files['public_pdf'].filename == '':
@@ -3246,7 +3247,7 @@ def publicar_pdf_configuracion():
             flash('❌ Tipo de archivo no permitido. Usa PDF, imágenes, videos o documentos permitidos.', 'error')
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
-        # Prefijos distintos según tipo (imagen/pdf/video) — facilita depuración y lectura
+        # Prefijos distintos según tipo (imagen/pdf/video)
         image_exts = {'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'}
         video_exts = {'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'}
         if ext in image_exts:
@@ -3256,12 +3257,22 @@ def publicar_pdf_configuracion():
         else:
             prefix = 'pdf'  # pdf, docx, txt, xlsx, etc.
 
-        filename = secure_filename(f"{prefix}_{int(time.time())}_{original_name}")
+        # Nombre seguro y consistente: usar secure_filename para evitar caracteres problemáticos
+        sanitized_orig = secure_filename(original_name)
+        filename = f"{prefix}_{int(time.time())}_{sanitized_orig}"
 
         # Tenant-aware docs directory
         docs_dir, tenant_slug = get_docs_dir_for_config(config)
         filepath = os.path.join(docs_dir, filename)
+
+        # Guardar archivo en disco y verificar
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
         file.save(filepath)
+
+        # Verificación inmediata y logging claro
+        exists = os.path.isfile(filepath)
+        size = os.path.getsize(filepath) if exists else 0
+        app.logger.info(f"📄 Archivo guardado: {filepath} (exists={exists} size={size}) tenant_slug={tenant_slug}")
 
         descripcion = (request.form.get('public_pdf_descripcion') or '').strip()
 
@@ -3285,45 +3296,23 @@ def publicar_pdf_configuracion():
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo asegurar tabla documents_publicos (CREATE): {e}")
 
-        # Asegurarse de que la columna tenant_slug exista; si no, intentar añadirla.
-        try:
-            cursor.execute("SHOW COLUMNS FROM documents_publicos")
-            existing_cols = [row[0] for row in cursor.fetchall()]
-            if 'tenant_slug' not in existing_cols:
-                try:
-                    cursor.execute("ALTER TABLE documents_publicos ADD COLUMN tenant_slug VARCHAR(128) DEFAULT NULL AFTER uploaded_by")
-                    conn.commit()
-                    existing_cols.append('tenant_slug')
-                    app.logger.info("🔧 Columna 'tenant_slug' añadida a documents_publicos")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo añadir la columna tenant_slug a documents_publicos: {e}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo inspeccionar columns de documents_publicos: {e}")
-
+        # Insert dinámico: guardar el basename y el tenant_slug, filepath relativo (para servir con /uploads/docs/<tenant>/<file>)
         try:
             user = None
             au = session.get('auth_user')
             if au and isinstance(au, dict):
                 user = au.get('user') or str(au.get('id') or '')
 
-            # Insert dinámico según columnas disponibles (robusto ante esquemas antiguos)
-            cursor.execute("SHOW COLUMNS FROM documents_publicos")
-            cols_info = cursor.fetchall()
-            cols = [row[0] for row in cols_info]
-
-            insert_cols = ['filename', 'filepath', 'descripcion', 'uploaded_by']
-            values = [filename, filepath, descripcion, user]
-
-            if 'tenant_slug' in cols:
-                insert_cols.append('tenant_slug')
-                values.append(tenant_slug)
-
-            placeholders = ', '.join(['%s'] * len(values))
-            cols_sql = ', '.join(insert_cols)
-
-            sql = f"INSERT INTO documents_publicos ({cols_sql}) VALUES ({placeholders}) ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP"
-            cursor.execute(sql, values)
+            # Guardar filepath relativo (desde uploads/docs) para mayor robustez
+            # Ej: docs/ofitodo/filename -> almacenamos tenant_slug y filename; filepath campo guarda ruta absoluta por compatibilidad
+            db_filepath = filepath  # opcional: guarda absoluta para debugging
+            cursor.execute("""
+                INSERT INTO documents_publicos (filename, filepath, descripcion, uploaded_by, tenant_slug)
+                VALUES (%s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE descripcion=VALUES(descripcion), uploaded_by=VALUES(uploaded_by), filepath=VALUES(filepath), created_at=CURRENT_TIMESTAMP
+            """, (filename, db_filepath, descripcion, user, tenant_slug))
             conn.commit()
+            app.logger.info(f"💾 Metadato inserted/updated in DB: filename={filename} tenant_slug={tenant_slug}")
         except Exception as e:
             app.logger.error(f"🔴 Error insertando metadato archivo: {e}")
             conn.rollback()
@@ -3332,10 +3321,11 @@ def publicar_pdf_configuracion():
                 cursor.close(); conn.close()
             except:
                 pass
-            # eliminar archivo guardado para evitar basura
+            # eliminar archivo guardado para evitar basura si DB falló
             try:
                 if os.path.exists(filepath):
                     os.remove(filepath)
+                    app.logger.info(f"🗑️ Archivo eliminado por rollback: {filepath}")
             except:
                 pass
             return redirect(url_for('configuracion_tab', tab='negocio'))
@@ -3349,7 +3339,7 @@ def publicar_pdf_configuracion():
         app.logger.error(f"🔴 Error en publicar_pdf_configuracion: {e}")
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
-        return redirect(url_for('configuracion_tab', tab='negocio')) 
+        return redirect(url_for('configuracion_tab', tab='negocio'))
 
 
 # Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
