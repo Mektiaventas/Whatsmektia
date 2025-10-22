@@ -163,6 +163,17 @@ from whatsapp import (
     enviar_documento,
     enviar_mensaje_voz
 )
+from files import (extraer_texto_pdf,
+extraer_texto_e_imagenes_pdf, extraer_texto_excel,
+extraer_texto_csv,
+extraer_texto_docx,
+extraer_texto_archivo,
+extraer_imagenes_embedded_excel,
+_extraer_imagenes_desde_zip_xlsx,
+get_docs_dir_for_config,
+get_productos_dir_for_config, 
+determinar_extension
+)
 # Diccionario de prefijos a código de país
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
