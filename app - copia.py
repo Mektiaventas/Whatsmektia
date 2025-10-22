@@ -4796,276 +4796,127 @@ def obtener_historial(numero, limite=5, config=None):
 
 
 def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=None, es_audio=False, transcripcion_audio=None, config=None):
+    """
+    Genera la respuesta textual de la IA (sin efectos secundarios).
+    Añadí la lógica para incluir URLs de imágenes de producto en el contexto
+    (y en el texto que se pasa a la IA) — igual que en tu `app - copia.py`.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    cfg = load_config(config)
-    neg = cfg['negocio']
-    ia_nombre = neg.get('ia_nombre', 'Asistente')
-    negocio_nombre = neg.get('negocio_nombre', '')
-    descripcion = neg.get('descripcion', '')
-    que_hace = neg.get('que_hace', '')
-    estado_actual = obtener_estado_conversacion(numero, config)
-    if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
-        return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
-    info_cita = None  # Initialize to avoid UnboundLocalError
-    # Interceptar petición explícita de asesor (antes de llamar a la IA)
-    text_lower = (mensaje_usuario or "").lower()
-        # --- Interceptor: responder directamente consultas de contacto del negocio ---
-    transfer_keywords = [
-        'datos para transferencia', 'datos de transferencia',
-        'clabe interbancaria', 'datos de cuenta', 'numero de cuenta', 'número de cuenta',
-        'datos bancarios', 'pago por transferencia', 'pagar por transferencia',
-        'datos para deposito', 'quiero hacer un depósito', 'hacer transferencia'
-    ]
-    if any(k in text_lower for k in transfer_keywords):
-        transfer_block = negocio_transfer_block(cfg.get('negocio', {}))
-        app.logger.info(f"ℹ️ Respuesta de transferencia servida desde DB para {numero}")
-        return transfer_block
 
-    contact_queries = [
-        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
-        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
-        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion', 'ubican'
-    ]
-    if any(k in text_lower for k in contact_queries):
-        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
-        # Responder inmediatamente desde el servidor (no IA)
-        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
-        return negocio_block
-    advisor_keywords = [
-        'quiero hablar con un asesor', 'hablar con un asesor', 'hablar con un agente',
-        'pásame un asesor', 'pasame un asesor', 'quiero un asesor',
-        'conectar con asesor', 'contacto de asesor'
-    ]
-    if any(k in text_lower for k in advisor_keywords):
-        sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-        if sent:
-            app.logger.info(f"✅ Se envió contacto de asesor a {numero} por petición explícita")
-            # Guardar conversacion que se le pasó el contacto (no duplicar datos)
-            guardar_conversacion(numero, mensaje_usuario, f"Se compartió contacto de asesor.", config)
-        else:
-            app.logger.info(f"ℹ️ No se envió asesor a {numero} (no configurado)")
-            enviar_mensaje(numero, "Lo siento, no hay asesores configurados ahora. ¿Quieres que te comparta otra opción?", config)
-            guardar_conversacion(numero, mensaje_usuario, "No hay asesores configurados.", config)
-        return
-    # 🔥 INTERCEPTAR SOLICITUDES DE CITA ANTES DE LA IA NORMAL
-    if detectar_solicitud_cita_keywords(mensaje_usuario, config):
-        app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{mensaje_usuario}'")
-        info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, obtener_historial(numero, limite=5, config=config), config)
-        if info_cita and info_cita.get('servicio_solicitado'):
-            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            if datos_completos:
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                    return f"✅ Cita agendada exitosamente. ID: #{cita_id}. Te hemos enviado una confirmación y agendado en el calendario."
-            else:
-                mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                if 'fecha' in faltantes:
-                    mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
-                if 'hora' in faltantes:
-                    mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
-                if 'nombre' in faltantes:
-                    mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
-                return mensaje_faltantes
-        else:
-            es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-            if es_porfirianna:
-                return "¡Claro! Me gustaría tomar tu pedido. ¿Qué platillos deseas ordenar y cuándo te gustaría?"
-            else:
-                return "¡Claro! Me gustaría agendar una cita para ti. ¿Qué servicio necesitas y cuándo te gustaría?"
-        # --- Interceptor: responder directamente consultas de contacto del negocio ---
-    contact_queries = [
-        'dirección', 'direccion', 'teléfono', 'telefono', 'correo', 'email',
-        'datos del negocio', 'datos negocio', 'cómo contacto', 'como contacto',
-        '¿dónde están', 'dónde están', 'donde están','donde estan', 'cómo los contacto', 'como los contacto',
-        'información de contacto', 'contacto', 'ubicacion'
-    ]
-    # mensaje_usuario ya definido; text_lower ya existe arriba
-    if any(k in text_lower for k in contact_queries):
-        negocio_block = negocio_contact_block(cfg.get('negocio', {}))
-        # Responder inmediatamente desde el servidor (no IA)
-        app.logger.info(f"ℹ️ Respuesta de contacto servida desde DB para {numero}")
-        return negocio_block
-    # ... el resto de la función permanece igual ...
-    # Fetch detailed products/services data from the precios table
-    precios = obtener_todos_los_precios(config)
+    # Cargar configuración de negocio para prompts
+    try:
+        cfg = load_config(config)
+        neg = cfg.get('negocio', {})
+        ia_nombre = neg.get('ia_nombre', 'Asistente')
+        negocio_nombre = neg.get('negocio_nombre', '')
+        descripcion = neg.get('descripcion', '')
+    except Exception:
+        ia_nombre = 'Asistente'
+        negocio_nombre = ''
+        descripcion = ''
 
-    # Format products using the canonical DB fields ...
-    productos_formateados = []
+    # Si estamos en una secuencia guiada de cita/pedido, delegar
+    try:
+        estado_actual = obtener_estado_conversacion(numero, config)
+        if estado_actual and estado_actual.get('contexto') == 'SOLICITANDO_CITA':
+            return manejar_secuencia_cita(mensaje_usuario, numero, estado_actual, config)
+    except Exception:
+        # si falla al obtener estado, continuar con flujo normal
+        pass
+
+    # Preparar catálogo reducido para contexto con URLs de imagen públicas cuando existan
+    precios = obtener_todos_los_precios(config) or []
+    productos_lines = []
     dominio_publico = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+    if not dominio_publico.startswith('http'):
+        dominio_publico = f"https://{dominio_publico}" if dominio_publico else ''
 
-    # 🔥 FUNCIÓN DE LIMPIEZA - FUERA DEL LOOP
-    def _clean_field(val, imagen_name):
-        if not val:
-            return ''
+    # Resolve product image URLs only when the file actually exists on disk (diagnóstico: evita "imagen no encontrada")
+    for p in precios[:200]:
         try:
-            s = str(val).strip()
-            if not imagen_name:
-                return s
-            img = str(imagen_name).strip()
-            # eliminar coincidencias exactas del nombre de la imagen
-            if img and img in s:
-                s = s.replace(img, '')
-            # eliminar patrones comunes generados por el unzip (ej. excel_unzip_img_289_1760130819)
-            s = re.sub(r'excel(_unzip)?_img_[\w\-\._]+', '', s, flags=re.IGNORECASE)
-            # limpiar espacios sobrantes
-            s = re.sub(r'\s{2,}', ' ', s).strip()
-            return s
-        except Exception:
-            return str(val).strip()
-
-    for p in precios[:1000]:
-        try:
-            # 🔥 OBTENER IMAGEN PRIMERO PARA USARLA EN LA LIMPIEZA
+            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
+            sku = (p.get('sku') or '').strip()
+            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
             imagen = (p.get('imagen') or '').strip()
 
-            # 🔥 LIMPIAR TODOS LOS CAMPOS DE TEXTO CON LA FUNCIÓN
-            sku = _clean_field(p.get('sku'), imagen)
-            modelo = _clean_field(p.get('modelo'), imagen)
-            titulo = modelo or sku or 'Sin identificador'
-            categoria = _clean_field(p.get('categoria'), imagen)
-            subcategoria = _clean_field(p.get('subcategoria'), imagen)
-            linea = _clean_field(p.get('linea'), imagen)
-            descripcion_p = _clean_field(p.get('descripcion'), imagen)
-            medidas = _clean_field(p.get('medidas'), imagen)
-            proveedor = _clean_field(p.get('proveedor'), imagen)
-            status = _clean_field(p.get('status_ws'), imagen) or 'activo'
-            catalogo = _clean_field(p.get('catalogo'), imagen)
-
-            # 🔥 GENERAR URL DE IMAGEN (SIN LIMPIAR ESTA PARTE)
+            imagen_url = ''
             if imagen:
+                # If it's already an absolute URL, use it
                 if imagen.lower().startswith('http'):
                     imagen_url = imagen
                 else:
-                    if dominio_publico.startswith('http'):
-                        base = dominio_publico.rstrip('/')
+                    # Check tenant-aware producto dir and legacy locations for physical existence
+                    try:
+                        productos_dir, tenant_slug = get_productos_dir_for_config(config)
+                    except Exception:
+                        productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+                    candidate1 = os.path.join(productos_dir, imagen)
+                    candidate2 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', imagen)
+                    candidate3 = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), imagen)
+                    if os.path.isfile(candidate1) or os.path.isfile(candidate2) or os.path.isfile(candidate3):
+                        if dominio_publico:
+                            imagen_url = f"{dominio_publico}/uploads/productos/{imagen}"
+                        else:
+                            imagen_url = f"/uploads/productos/{imagen}"
                     else:
-                        base = f"https://{dominio_publico}"
-                    imagen_url = f"{base}/uploads/productos/{imagen}"
-            else:
-                imagen_url = ''
+                        # Imagen no encontrada en disco -> dejar campo vacío (evita que el bot mencione rutas inválidas)
+                        imagen_url = ''
 
-            # Precios y campos de suscripción
-            precio_menudeo = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or None
-            inscripcion = p.get('inscripcion')
-            mensualidad = p.get('mensualidad')
-
-            precio_str = ''
-            try:
-                if precio_menudeo:
-                    precio_str = f"${float(precio_menudeo):,.2f}"
-            except Exception:
-                precio_str = str(precio_menudeo) if precio_menudeo is not None else ''
-
-            extras = []
-            try:
-                if inscripcion not in (None, '', 0):
-                    extras.append(f"Inscripción: ${float(inscripcion):,.2f}")
-            except Exception:
-                extras.append(f"Inscripción: {inscripcion}")
-            try:
-                if mensualidad not in (None, '', 0):
-                    extras.append(f"Mensualidad: ${float(mensualidad):,.2f}")
-            except Exception:
-                extras.append(f"Mensualidad: {mensualidad}")
-
-            parts = [f"{titulo}"]
-            if sku:
-                parts.append(f"(SKU: {sku})")
-            if categoria:
-                parts.append(f"Categoria: {categoria}")
-            if subcategoria:
-                parts.append(f"Subcategoria: {subcategoria}")
-            if linea:
-                parts.append(f"Linea: {linea}")
-            if precio_str:
-                parts.append(f"Precio: {precio_str}")
-            if extras:
-                parts.append(f"{', '.join(extras)}")
-            if medidas:
-                parts.append(f"Medidas: {medidas}")
-            if proveedor:
-                parts.append(f"Proveedor: {proveedor}")
-            if catalogo:
-                parts.append(f"Catalogo: {catalogo}")
-            if imagen_url:
-                parts.append(f"Imagen: {imagen_url}")
-            elif imagen:
-                parts.append(f"Imagen: {imagen}")
-            if descripcion_p:
-                parts.append(f"Descripcion: {descripcion_p[:140]}{'...' if len(descripcion_p) > 140 else ''}")
-            producto_line = " | ".join(parts)
-            producto_line += f" | Status: {status}"
-
+            imagen_part = f" | Imagen:{imagen_url or imagen}" if (imagen_url or imagen) else ""
+            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}{imagen_part}")
         except Exception:
-            producto_line = "Sin datos legibles de producto"
-        productos_formateados.append(f"- {producto_line}")
+            # tolerate single product failure
+            continue
 
-    productos_texto = "\n".join(productos_formateados)
-    if len(precios) > 40:
-        productos_texto += f"\n... y {len(precios) - 40} productos/servicios más."
-    asesores_block = format_asesores_block(cfg)
-    # 🔥 AÑADIR INSTRUCCIÓN ESPECÍFICA AL SYSTEM PROMPT para considerar inscripcion/mensualidad
+    productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos registrados en el catálogo."
+
+    # Asesores block helper (no efectos)
+    try:
+        asesores_block = format_asesores_block(cfg)
+    except Exception:
+        asesores_block = ""
+
+    # System prompt claro
     system_prompt = f"""
-    Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
-    Descripción del negocio: {descripcion}
+Eres {ia_nombre}, asistente virtual de {negocio_nombre}.
+Descripción del negocio: {descripcion}
 
-    Dispones de la siguiente lista de productos/servicios:
+Dispones de la siguiente lista de productos/servicios (resumida):
+{productos_texto}
 
-    {productos_texto}
+{asesores_block}
 
-    {asesores_block}
+REGLAS IMPORTANTES:
+- No ejecutes acciones (no llames a la API, no envíes mensajes, no pases contactos). Devuelve solo texto.
+- Si detectas que el usuario solicita hablar con un asesor o intervención humana, responde confirmando la petición
+  (ej: "Entiendo, solicito la intervención de un asesor.") pero NO intentes contactar.
+- Si identificas un producto y hay una imagen disponible, puedes mencionar la URL pública (Imagen: https://...)
+  o el texto "Imagen: <filename>". No incluyas rutas locales de servidor.
+- Mantén las respuestas concisas y orientadas al usuario.
+""".strip()
 
-    REGLAS IMPORTANTES:
-    1. Cuando el usuario pregunte por un producto, responde usando exclusivamente los campos provistos arriba.
-    2. SI el producto tiene campos de Inscripción o Mensualidad, muéstralos claramente (ej: "Inscripción: $100.00, Mensualidad: $20.00").
-    3. NUNCA incluyas en tus respuestas textos como "excel_unzip_img_335_1760366786.png" - estos son errores de base de datos y debes omitirlos completamente.
-    4. Si encuentras textos corruptos como "excel_unzip_img_" en las descripciones, omítelos y reconstruye el texto de manera coherente.
-    5. Para imágenes, usa las URLs proporcionadas en el campo "Imagen:".
-    6. Mantén las respuestas limpias, concisas y orientadas al cliente.
-    """
-    # ... el resto de tu función se mantiene igual ...
-    historial = obtener_historial(numero, config=config)
-
-    info_cita = extraer_info_cita_mejorado(mensaje_usuario, numero, historial, config)
-    if info_cita and info_cita.get('servicio_solicitado'):
-        app.logger.info(f"✅ Información de cita detectada: {json.dumps(info_cita)}")
-        datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-        if datos_completos:
-            cita_id = guardar_cita(info_cita, config)
-            if cita_id:
-                app.logger.info(f"✅ Cita guardada con ID: {cita_id}")
-                enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-                confirmacion = f"✅ ¡{es_porfirianna and 'Pedido' or 'Cita'} confirmado(a)! Te envié un mensaje con los detalles y pronto nos pondremos en contacto contigo."
-                return confirmacion
-
-    # ... continúa el resto de la función sin cambios ...
-
+    # Construir historial para contexto
     messages_chain = [{'role': 'system', 'content': system_prompt}]
+    try:
+        historial = obtener_historial(numero, limite=6, config=config) or []
+    except Exception:
+        historial = []
+
     for entry in historial:
-        if entry['mensaje'] and str(entry['mensaje']).strip() != '':
+        if entry.get('mensaje') and str(entry['mensaje']).strip() != '':
             messages_chain.append({'role': 'user', 'content': entry['mensaje']})
-        if entry['respuesta'] and str(entry['respuesta']).strip() != '':
+        if entry.get('respuesta') and str(entry['respuesta']).strip() != '':
             messages_chain.append({'role': 'assistant', 'content': entry['respuesta']})
+
+    # Añadir mensaje actual (multimodal handling)
     if mensaje_usuario and str(mensaje_usuario).strip() != '':
         if es_imagen and imagen_base64:
             messages_chain.append({
                 'role': 'user',
                 'content': [
                     {"type": "text", "text": mensaje_usuario},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": imagen_base64,
-                            "detail": "auto"
-                        }
-                    }
+                    {"type": "image_url", "image_url": {"url": imagen_base64, "detail": "auto"}}
                 ]
             })
         elif es_audio and transcripcion_audio:
@@ -5079,15 +4930,15 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             except Exception:
                 content = transcripcion_audio or mensaje_usuario
             messages_chain.append({'role': 'user', 'content': content})
-        elif es_audio and not transcripcion_audio and mensaje_usuario:
-            messages_chain.append({'role': 'user', 'content': mensaje_usuario})
         else:
             messages_chain.append({'role': 'user', 'content': mensaje_usuario})
 
-    try:
-        if len(messages_chain) <= 1:
-            return "¡Hola! ¿En qué puedo ayudarte hoy?"
+    # Seguridad: saludo si no hay contexto
+    if len(messages_chain) <= 1:
+        return "¡Hola! ¿En qué puedo ayudarte hoy?"
 
+    # Llamada a la IA (Deepseek)
+    try:
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
             "Content-Type": "application/json"
@@ -5096,23 +4947,42 @@ def responder_con_ia(mensaje_usuario, numero, es_imagen=False, imagen_base64=Non
             "model": "deepseek-chat",
             "messages": messages_chain,
             "temperature": 0.7,
-            "max_tokens": 2000
+            "max_tokens": 1200
         }
         response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        respuesta = data['choices'][0]['message']['content'].strip()
-        respuesta = aplicar_restricciones(respuesta, numero, config)
-        return respuesta
+        respuesta_raw = data['choices'][0]['message']['content']
+
+        # Normalizar respuesta multimodal (lista -> texto)
+        if isinstance(respuesta_raw, list):
+            parts = []
+            for item in respuesta_raw:
+                if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
+                    parts.append(item.get('text'))
+                elif isinstance(item, str):
+                    parts.append(item)
+            respuesta_text = "\n".join(parts)
+        else:
+            respuesta_text = str(respuesta_raw).strip()
+
+        # Aplicar restricciones/limpieza final (tu helper)
+        try:
+            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+        except Exception:
+            respuesta_text = respuesta_text
+
+        return respuesta_text
 
     except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 API error: {e}")
+        app.logger.error(f"🔴 IA request error en responder_con_ia: {e}")
         if hasattr(e, 'response') and e.response:
-            app.logger.error(f"🔴 Response: {e.response.text}")
-        return 'Lo siento, hubo un error con la IA.'
+            app.logger.error(f"🔴 IA response body: {e.response.text}")
+        return 'Lo siento, hubo un error con la IA. Intenta de nuevo más tarde.'
     except Exception as e:
-        app.logger.error(f"🔴 Error inesperado: {e}")
-        return 'Lo siento, hubo un error con la IA.'
+        app.logger.error(f"🔴 Error inesperado en responder_con_ia: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Lo siento, hubo un error interno procesando la respuesta.'
 
 # New helpers: enviar_imagen and buscar_sku_en_texto
 def enviar_imagen(numero, imagen_ref, config=None):
@@ -7809,57 +7679,75 @@ def format_asesores_block(cfg):
         return ""
 
 
-# REEMPLAZA la función detectar_solicitud_cita_keywords con esta versión mejorada
 def detectar_solicitud_cita_keywords(mensaje, config=None):
     """
-    Detección mejorada por palabras clave de solicitud de cita/pedido
+    Detección mejorada por palabras clave de solicitud de cita/pedido.
+    Retorna un booleano (True si parece solicitud, False si no).
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    mensaje_lower = mensaje.lower().strip()
+    mensaje_lower = (mensaje or "").lower().strip()
     es_porfirianna = 'laporfirianna' in config.get('dominio', '')
     
     # Evitar detectar respuestas a preguntas como nuevas solicitudes
-    if es_respuesta_a_pregunta(mensaje):
-        return False
+    try:
+        if es_respuesta_a_pregunta(mensaje):
+            return False
+    except Exception:
+        # si la función falla, continuar con la detección por IA
+        pass
     
-    if es_porfirianna:
-        # Palabras clave específicas para pedidos de comida
-        palabras_clave = [
-            'pedir', 'ordenar', 'orden', 'pedido', 'quiero', 'deseo', 'necesito',
-            'comida', 'cenar', 'almorzar', 'desayunar', 'gordita', 'taco', 'quesadilla'
-        ]
-    else:
-        # Palabras clave para servicios digitales
-        palabras_clave = [
-            'cita', 'agendar', 'consultoría', 'reunión', 'asesoría', 'cotización',
-            'presupuesto', 'proyecto', 'servicio', 'contratar', 'quiero contratar', 'solicitar', 'comprar'
+    prompt = f"""
+        Eres un asistente que solo puede contestar con un valor booleano True o False.
+        Analiza el siguiente mensaje: {mensaje_lower}. 
+        Si el mensaje indica que el usuario está solicitando agendar una cita o hacer un pedido
+        devuelve True. Si no, devuelve False.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1500
+    }
+    
+    try:
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=120)
+        response.raise_for_status()
+        data = response.json()
+        analisis = str(data['choices'][0]['message']['content']).strip()
+    except Exception as e:
+        app.logger.warning(f"⚠️ detectar_solicitud_cita_keywords: error llamando a IA: {e}")
+        # Fallback simple por palabras clave si la IA falla
+        fallback_kw = ['cita', 'agendar', 'reservar', 'pedido', 'ordenar', 'quiero agendar', 'quiero pedir', 'orden']
+        return any(kw in mensaje_lower for kw in fallback_kw)
+    
+    analisis_norm = analisis.lower().strip()
+    es_solicitud = False
 
-        ]
-    
-    # Verificar si contiene palabras clave principales
-    contiene_palabras_clave = any(
-        palabra in mensaje_lower for palabra in palabras_clave
-    )
-    
-    # Detectar patrones específicos de solicitud
-    patrones_solicitud = [
-        'quiero un', 'deseo un', 'necesito un', 'me gustaría un',
-        'quisiera un', 'puedo tener un', 'agendar una', 'solicitar un'
-    ]
-    
-    contiene_patron = any(
-        patron in mensaje_lower for patron in patrones_solicitud
-    )
-    
-    # Es una solicitud si contiene palabras clave O patrones específicos
-    es_solicitud = contiene_palabras_clave or contiene_patron
-    
-    if es_solicitud:
-        tipo = "pedido" if es_porfirianna else "cita"
-        app.logger.info(f"✅ Solicitud de {tipo} detectada por keywords: '{mensaje_lower}'")
-    
+    # Interpretación directa de respuestas booleanas típicas
+    if analisis_norm in ('true', 'true.', 'yes', 'si', 'sí', 'y', 's', '1'):
+        es_solicitud = True
+    elif analisis_norm in ('false', 'false.', 'no', 'n', '0'):
+        es_solicitud = False
+    else:
+        # Buscar tokens explícitos dentro del texto de la IA
+        if re.search(r'\b(true|yes|si|sí|affirmative|afirmativo)\b', analisis_norm):
+            es_solicitud = True
+        elif re.search(r'\b(false|no|negativo|neg)\b', analisis_norm):
+            es_solicitud = False
+        else:
+            # Último recurso: heurística por palabras clave en el mensaje original
+            heuristics = ['cita', 'agendar', 'reservar', 'pedido', 'ordenar', 'quiero agendar', 'quiero pedir']
+            es_solicitud = any(k in mensaje_lower for k in heuristics)
+
+    app.logger.info(f"✅ detectar_solicitud_cita_keywords -> raw IA: '{analisis[:200]}' -> interpreted: {es_solicitud}")
     return es_solicitud
 # ——— UI ———
 @app.route('/')

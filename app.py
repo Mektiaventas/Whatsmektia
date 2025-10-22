@@ -151,7 +151,18 @@ PHONE_NUMBER_ID = MI_NUMERO_BOT
 # Agrega esto después de las otras variables de configuración
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-
+from whatsapp import (
+    obtener_archivo_whatsapp,
+    obtener_imagen_whatsapp,
+    obtener_audio_whatsapp,
+    transcribir_audio_con_openai,
+    convertir_audio,
+    texto_a_voz,
+    enviar_mensaje,
+    enviar_imagen,
+    enviar_documento,
+    enviar_mensaje_voz
+)
 # Diccionario de prefijos a código de país
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
@@ -428,55 +439,6 @@ def logout():
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-def obtener_archivo_whatsapp(media_id, config=None):
-    """Obtiene archivos de WhatsApp y los guarda localmente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # 1. Obtener metadata del archivo
-        url_metadata = f"https://graph.facebook.com/v18.0/{media_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        
-        app.logger.info(f"📎 Obteniendo metadata de archivo: {url_metadata}")
-        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
-        response_metadata.raise_for_status()
-        
-        metadata = response_metadata.json()
-        download_url = metadata.get('url')
-        mime_type = metadata.get('mime_type', 'application/octet-stream')
-        filename = metadata.get('filename', f'archivo_{media_id}')
-        
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga: {metadata}")
-            return None, None, None
-            
-        app.logger.info(f"📎 Descargando archivo: {filename} ({mime_type})")
-        
-        # 2. Descargar el archivo
-        file_response = requests.get(download_url, headers=headers, timeout=60)
-        if file_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando archivo: {file_response.status_code}")
-            return None, None, None
-        
-        # 3. Determinar extensión y guardar
-        extension = determinar_extension(mime_type, filename)
-        safe_filename = secure_filename(f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}")
-        filepath = os.path.join(UPLOAD_FOLDER, safe_filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(file_response.content)
-        
-        app.logger.info(f"✅ Archivo guardado: {filepath}")
-        return filepath, safe_filename, extension
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo archivo WhatsApp: {str(e)}")
-        return None, None, None
 
 # --- Sesiones activas (en BD de clientes) ---
 def _get_or_create_session_id():
@@ -2343,116 +2305,6 @@ def inicializar_kanban_multitenant():
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
 
-# ——— Función para enviar mensajes de voz ———
-def enviar_mensaje_voz(numero, audio_url, config=None):
-    """Envía un mensaje de audio por WhatsApp; valida accesibilidad y registra respuesta detallada."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    if config is None:
-        config = obtener_configuracion_numero(numero)
-
-    try:
-        if not audio_url or not audio_url.startswith('http'):
-            app.logger.error(f"🔴 enviar_mensaje_voz: audio_url inválida: {audio_url}")
-            return False
-
-        # Verificar que Facebook pueda acceder al archivo (HEAD)
-        try:
-            head = requests.head(audio_url, timeout=8, allow_redirects=True)
-            if head.status_code >= 400:
-                app.logger.error(f"🔴 enviar_mensaje_voz: audio URL not reachable (HEAD {head.status_code}): {audio_url}")
-                return False
-            content_type = head.headers.get('content-type', '')
-            if not content_type.startswith('audio'):
-                app.logger.warning(f"⚠️ enviar_mensaje_voz: content-type no es audio: {content_type}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ enviar_mensaje_voz: HEAD check failed for {audio_url}: {e}")
-            # no short-circuit — intentaremos enviar pero lo registramos
-       
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'audio',
-            'audio': {
-                'link': audio_url
-            }
-        }
-
-        app.logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero} -> {audio_url}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
-
-        if r.status_code in (200, 201, 202):
-            app.logger.info(f"✅ Audio enviado a {numero}")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text}")
-            return False
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_mensaje_voz: {e}")
-        return False
-    
-def texto_a_voz(texto, filename,config=None):
-    """Convierte texto a audio usando Google TTS y devuelve URL pública verificable."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        from gtts import gTTS
-        import os
-
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-        os.makedirs(audio_dir, exist_ok=True)
-
-        filepath = os.path.join(audio_dir, f"{filename}.mp3")
-
-        # Generar y guardar MP3
-        tts = gTTS(text=texto, lang='es', slow=False)
-        tts.save(filepath)
-
-        # Verificar que el archivo se creó
-        if not os.path.isfile(filepath):
-            app.logger.error(f"🔴 texto_a_voz: archivo no encontrado después de gTTS: {filepath}")
-            return None
-
-        # Construir URL pública robusta
-        dominio_conf = None
-        try:
-            if isinstance(config, dict):
-                dominio_conf = config.get('dominio')
-        except Exception:
-            dominio_conf = None
-
-        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
-        if not dominio.startswith('http'):
-            dominio = 'https://' + dominio
-
-        audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
-
-        # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
-        try:
-            resp = requests.head(audio_url, timeout=6, allow_redirects=True)
-            if resp.status_code >= 400:
-                app.logger.warning(f"⚠️ texto_a_voz: HEAD {audio_url} returned {resp.status_code}. The URL may not be publicly accessible.")
-            else:
-                ct = resp.headers.get('content-type', '')
-                app.logger.info(f"🎵 texto_a_voz: audio saved and reachable. HEAD status {resp.status_code} content-type={ct}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ texto_a_voz: unable to HEAD audio_url ({audio_url}): {e}")
-
-        app.logger.info(f"🌐 URL pública generada: {audio_url} (archivo: {filepath})")
-        return audio_url
-
-    except Exception as e:
-        app.logger.error(f"Error en texto_a_voz: {e}")
-        return None
-
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
     if config is None:
@@ -3056,17 +2908,6 @@ def completar_autorizacion():
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
          
-def convertir_audio(audio_path):
-    try:
-        output_path = audio_path.replace('.ogg', '.mp3')
-        audio = AudioSegment.from_file(audio_path, format='ogg')
-        audio.export(output_path, format='mp3')
-        app.logger.info(f"🔄 Audio convertido a: {output_path}")
-        return output_path
-    except Exception as e:
-        app.logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
-        return None
-
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
     if config is None:
@@ -4126,42 +3967,6 @@ def get_plan_status_for_user(username, config=None):
         app.logger.error(f"🔴 Error en get_plan_status_for_user: {e}")
         return None
 
-# --- NEW: helpers to send catalog PDF or textual catalog via WhatsApp --- 
-def enviar_documento(numero, file_url, filename, config=None):
-    """
-    Envía un documento (PDF) por WhatsApp usando Graph API.
-    file_url debe ser una URL pública accesible (https://.../uploads/docs/filename).
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'document',
-            'document': {
-                'link': file_url,
-                'filename': filename
-            }
-        }
-        app.logger.info(f"📤 Enviando documento a {numero}: {file_url}")
-        r = requests.post(url, headers=headers, json=payload, timeout=20)
-        app.logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:1000]}")
-        if r.status_code in (200, 201, 202):
-            app.logger.info(f"✅ Documento enviado a {numero}: {filename}")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando documento ({r.status_code}): {r.text}")
-            return False
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_documento: {e}")
-        return False
-
 def build_texto_catalogo(precios, limit=20):
     """Construye un texto resumen del catálogo (hasta `limit` items)."""
     if not precios:
@@ -4984,62 +4789,6 @@ REGLAS IMPORTANTES:
         app.logger.error(traceback.format_exc())
         return 'Lo siento, hubo un error interno procesando la respuesta.'
 
-# New helpers: enviar_imagen and buscar_sku_en_texto
-def enviar_imagen(numero, imagen_ref, config=None):
-    """
-    Envía una imagen por WhatsApp usando la API de Graph.
-    imagen_ref puede ser:
-      - URL absoluta (empieza con http)
-      - filename almacenado en uploads/productos (enviará https://{dominio}/uploads/productos/{filename})
-    Retorna True si la API respondió OK.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    try:
-        if not imagen_ref:
-            app.logger.warning("🔍 enviar_imagen: imagen_ref vacío")
-            return False
-
-        # Determinar URL pública
-        if str(imagen_ref).lower().startswith('http'):
-            image_url = imagen_ref
-        else:
-            dominio = config.get('dominio', os.getenv('MI_DOMINIO', '')).rstrip('/')
-            # fallback to host-based URL if dominio appears not to be a full domain
-            if not dominio.startswith('http'):
-                image_url = f"https://{dominio}/uploads/productos/{imagen_ref}"
-            else:
-                image_url = f"{dominio}/uploads/productos/{imagen_ref}"
-
-        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        payload = {
-            'messaging_product': 'whatsapp',
-            'to': numero,
-            'type': 'image',
-            'image': {
-                'link': image_url
-            }
-        }
-
-        app.logger.info(f"📤 Enviando imagen a {numero}: {image_url[:200]}")
-        r = requests.post(url, headers=headers, json=payload, timeout=15)
-        if r.status_code == 200:
-            app.logger.info("✅ Imagen enviada correctamente")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando imagen ({r.status_code}): {r.text}")
-            return False
-
-    except Exception as e:
-        app.logger.error(f"🔴 Exception en enviar_imagen: {e}")
-        return False
-
-
 def buscar_sku_en_texto(texto, precios):
     """
     Busca un SKU presente en 'precios' dentro de 'texto'.
@@ -5327,68 +5076,6 @@ def obtener_estado_conversacion(numero, config=None):
             return None
     
     return estado
-
-def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # 1. Obtener metadata de la imagen
-        url_metadata = f"https://graph.facebook.com/v18.0/{image_id}"
-        headers = {
-            'Authorization': f'Bearer {config["whatsapp_token"]}',
-            'Content-Type': 'application/json'
-        }
-        
-        app.logger.info(f"🖼️ Obteniendo metadata de imagen WhatsApp: {url_metadata}")
-        response_metadata = requests.get(url_metadata, headers=headers, timeout=30)
-        response_metadata.raise_for_status()
-        
-        metadata = response_metadata.json()
-        download_url = metadata.get('url')
-        mime_type = metadata.get('mime_type', 'image/jpeg')
-        
-        if not download_url:
-            app.logger.error(f"🔴 No se encontró URL de descarga de imagen: {metadata}")
-            return None, None
-            
-        app.logger.info(f"🖼️ URL de descarga: {download_url}")
-        
-        # 2. Descargar la imagen
-        image_response = requests.get(download_url, headers=headers, timeout=30)
-        if image_response.status_code != 200:
-            app.logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
-            return None, None
-        
-        # 3. Guardar la imagen en directorio estático para mostrarla en web
-        static_images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images', 'whatsapp')
-        os.makedirs(static_images_dir, exist_ok=True)
-        
-        # Nombre seguro para el archivo
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
-        filepath = os.path.join(static_images_dir, filename)
-        
-        with open(filepath, 'wb') as f:
-            f.write(image_response.content)
-        
-        # 4. Convertir a base64 para OpenAI (si es necesario)
-        image_base64 = base64.b64encode(image_response.content).decode('utf-8')
-        base64_string = f"data:{mime_type};base64,{image_base64}"
-        
-        # 5. URL pública para mostrar en web
-        public_url = f"/static/images/whatsapp/{filename}"
-        
-        app.logger.info(f"✅ Imagen guardada: {filepath}")
-        app.logger.info(f"🌐 URL web: {public_url}")
-        
-        return base64_string, public_url
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_imagen_whatsapp: {str(e)}")
-        app.logger.error(traceback.format_exc())
-        return None, None
 
 @app.route('/procesar-codigo', methods=['POST'])
 def procesar_codigo():
@@ -6274,68 +5961,7 @@ def obtener_asesores_por_user(username, default=2, cap=20):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
-
-def obtener_audio_whatsapp(audio_id, config=None):
-    try:
-        url = f"https://graph.facebook.com/v18.0/{audio_id}"
-        headers = {'Authorization': f'Bearer {config["whatsapp_token"]}'}
-        app.logger.info(f"📥 Solicitando metadata de audio: {url}")
-        response = requests.get(url, headers=headers, timeout=30)
-        response.raise_for_status()
-        metadata = response.json()
-        download_url = metadata.get('url')
-        app.logger.info(f"🔗 URL de descarga: {download_url}")
-        
-        audio_response = requests.get(download_url, headers=headers, timeout=30)
-        audio_response.raise_for_status()
-        
-        # Verificar tipo de contenido
-        content_type = audio_response.headers.get('content-type')
-        app.logger.info(f"🎧 Tipo de contenido: {content_type}")
-        if 'audio' not in content_type:
-            app.logger.error(f"🔴 Archivo no es audio: {content_type}")
-            return None, None
-        
-        # Guardar archivo
-        audio_path = os.path.join(UPLOAD_FOLDER, f"audio_{audio_id}.ogg")
-        with open(audio_path, 'wb') as f:
-            f.write(audio_response.content)
-        app.logger.info(f"💾 Audio guardado en: {audio_path}")
-        
-        # Generar URL pública
-        audio_url = f"https://{config['dominio']}/uploads/audio_{audio_id}.ogg"
-        return audio_path, audio_url
-    except Exception as e:
-        app.logger.error(f"🔴 Error en obtener_audio_whatsapp: {str(e)}")
-        return None, None
       
-def transcribir_audio_con_openai(audio_path):
-    try:
-        app.logger.info(f"🎙️ Enviando audio para transcripción: {audio_path}")
-        
-        # Usar el cliente OpenAI correctamente (nueva versión)
-        client = OpenAI(api_key=OPENAI_API_KEY)
-        
-        with open(audio_path, 'rb') as audio_file:
-            transcription = client.audio.transcriptions.create(
-                model="whisper-1",
-                file=audio_file,
-                language="es"
-            )
-            
-        app.logger.info(f"✅ Transcripción exitosa: {transcription.text}")
-        return transcription.text
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en transcripción: {str(e)}")
-        if hasattr(e, 'response'):
-            try:
-                error_response = e.response.json()
-                app.logger.error(f"🔴 Respuesta de OpenAI: {error_response}")
-            except:
-                app.logger.error(f"🔴 Respuesta de OpenAI: {e.response.text}")
-        return None
-    
 # AGREGAR esta función para gestionar conexiones a BD
 def obtener_conexion_db(config):
     """Obtiene conexión a la base de datos correcta según la configuración"""
@@ -6573,49 +6199,6 @@ def resumen_rafa(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error generando resumen: {e}")
         return f"Error generando resumen para {numero}"
-
-# REEMPLAZA tu función enviar_mensaje con esta versión corregida
-def enviar_mensaje(numero, texto, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # Validar texto
-    if not texto or str(texto).strip() == '':
-        app.logger.error("🔴 ERROR: Texto de mensaje vacío")
-        return False
-    
-    texto_limpio = str(texto).strip()
-    
-    url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
-    headers = {
-        'Authorization': f'Bearer {config["whatsapp_token"]}',
-        'Content-Type': 'application/json'
-    }
-    
-    # ✅ PAYLOAD CORRECTO
-    payload = {
-        'messaging_product': 'whatsapp',
-        'to': numero,
-        'type': 'text',
-        'text': {
-            'body': texto_limpio
-        }
-    }
-
-    try:
-        app.logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
-        r = requests.post(url, headers=headers, json=payload, timeout=10)
-        
-        if r.status_code == 200:
-            app.logger.info("✅ Mensaje enviado")
-            return True
-        else:
-            app.logger.error(f"🔴 Error {r.status_code}: {r.text}")
-            return False
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Exception: {e}")
-        return False
 
 @app.route('/actualizar-contactos')
 def actualizar_contactos():
