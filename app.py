@@ -7533,6 +7533,17 @@ def configuracion_tab(tab):
     cfg = load_config(config)
     asesores_list = cfg.get('asesores_list', []) or []
 
+    # Determine asesor_count early to avoid UnboundLocalError when we use it below
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+
     # If DB still contains more advisors than the allowed plan limit, trim them now.
     try:
         if isinstance(asesores_list, list) and len(asesores_list) > asesor_count:
@@ -7544,33 +7555,43 @@ def configuracion_tab(tab):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
 
-    # Prefer plan-specific limit when user is authenticated; fallback to global max
-    au = session.get('auth_user') or {}
-    try:
-        if au and au.get('user'):
-            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
-        else:
-            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
-        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    # If showing 'negocio' tab, load published documents for the template (existing logic)
+    documents_publicos = []
+    if tab == 'negocio':
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
+            if cursor.fetchone():
+                cursor.execute("""
+                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
+                    FROM documents_publicos
+                    ORDER BY created_at DESC
+                    LIMIT 50
+                """)
+                documents_publicos = cursor.fetchall()
+            cursor.close()
+            conn.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudieron obtener documents_publicos: {e}")
+            documents_publicos = []
 
-        if request.method == 'POST':
-            if tab == 'negocio':
-                cfg['negocio'] = {
-                    'ia_nombre':      request.form.get('ia_nombre'),
-                    'negocio_nombre': request.form.get('negocio_nombre'),
-                    'descripcion':    request.form.get('descripcion'),
-                    'url':            request.form.get('url'),
-                    'direccion':      request.form.get('direccion'),
-                    'telefono':       request.form.get('telefono'),
-                    'correo':         request.form.get('correo'),
-                    'que_hace':       request.form.get('que_hace'),
-                    'calendar_email': request.form.get('calendar_email'),
-                    'transferencia_numero': request.form.get('transferencia_numero'),
-                    'transferencia_nombre': request.form.get('transferencia_nombre'),
-                    'transferencia_banco': request.form.get('transferencia_banco')
-                }
+    if request.method == 'POST':
+        if tab == 'negocio':
+            cfg['negocio'] = {
+                'ia_nombre':      request.form.get('ia_nombre'),
+                'negocio_nombre': request.form.get('negocio_nombre'),
+                'descripcion':    request.form.get('descripcion'),
+                'url':            request.form.get('url'),
+                'direccion':      request.form.get('direccion'),
+                'telefono':       request.form.get('telefono'),
+                'correo':         request.form.get('correo'),
+                'que_hace':       request.form.get('que_hace'),
+                'calendar_email': request.form.get('calendar_email'),
+                'transferencia_numero': request.form.get('transferencia_numero'),
+                'transferencia_nombre': request.form.get('transferencia_nombre'),
+                'transferencia_banco': request.form.get('transferencia_banco')
+            }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
@@ -7625,25 +7646,7 @@ def configuracion_tab(tab):
     datos = cfg.get(tab, {})
 
     # If showing 'negocio' tab, load published documents for the template (existing logic)
-    documents_publicos = []
-    if tab == 'negocio':
-        try:
-            conn = get_db_connection(config)
-            cursor = conn.cursor(dictionary=True)
-            cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
-            if cursor.fetchone():
-                cursor.execute("""
-                    SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
-                    FROM documents_publicos
-                    ORDER BY created_at DESC
-                    LIMIT 50
-                """)
-                documents_publicos = cursor.fetchall()
-            cursor.close()
-            conn.close()
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudieron obtener documents_publicos: {e}")
-            documents_publicos = []
+    documents_publicos = documents_publicos  # already loaded above when tab == 'negocio'
 
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
