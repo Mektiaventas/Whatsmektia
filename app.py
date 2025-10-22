@@ -36,6 +36,8 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+from pydub import AudioSegment
+AudioSegment.converter = "/ruta/a/ffmpeg"  # p.ej. /usr/bin/ffmpeg
 
 try:
     # preferred location
@@ -2193,17 +2195,31 @@ def get_chat_messages(telefono):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # Consultar solo mensajes más recientes que el ID proporcionado
+    # CORRECCIÓN: usar la columna 'numero' y 'timestamp' (nombre consistente con el resto del código)
     cursor.execute("""
-        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
-        FROM conversaciones 
-        WHERE telefono = %s AND id > %s
-        ORDER BY fecha ASC
+        SELECT id, mensaje AS content, timestamp AS timestamp, respuesta
+        FROM conversaciones
+        WHERE numero = %s AND id > %s
+        ORDER BY timestamp ASC
     """, (telefono, after_id))
     
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
+    
+    # Normalizar timestamp a ISO string para evitar problemas al parsear en el cliente
+    for m in messages:
+        ts = m.get('timestamp')
+        try:
+            if ts is None:
+                continue
+            # si es datetime, convertir a ISO; si ya es string, dejar como está
+            if hasattr(ts, 'isoformat'):
+                m['timestamp'] = ts.isoformat()
+            else:
+                m['timestamp'] = str(ts)
+        except Exception:
+            m['timestamp'] = str(ts)
     
     return jsonify({
         'messages': messages,
