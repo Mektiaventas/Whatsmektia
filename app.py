@@ -2914,7 +2914,8 @@ def crear_tabla_citas(config=None):
     conn.close()
 
 def guardar_cita(info_cita, config=None):
-    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia"""
+    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia.
+    Además notifica al asesor en turno vía enviar_mensaje()."""
     if config is None:
         config = obtener_configuracion_por_host()
     
@@ -2957,8 +2958,6 @@ def guardar_cita(info_cita, config=None):
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
         conn.commit()
-
-        # ... (omitir verificación de columnas por brevedad, se mantiene igual) ...
 
         # Guardar en tabla citas
         cursor.execute('''
@@ -3020,9 +3019,6 @@ def guardar_cita(info_cita, config=None):
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
         
-        # (resto del guardado de notificaciones_ia y envíos se mantiene igual)
-        # ...
-        
         # Guardar en notificaciones_ia
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         tipo_solicitud = "pedido" if es_porfirianna else "cita"
@@ -3044,37 +3040,76 @@ def guardar_cita(info_cita, config=None):
             'cita_id': cita_id,
             'calendar_event_id': evento_id
         }
+
         mensaje_notificacion = f"""🆕 *NUEVA CITA REGISTRADA* - ID: #{cita_id}
 
-        👤 *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
-        📞 *Teléfono:* {info_cita.get('telefono')}
-        🛠️ *Servicio:* {info_cita.get('servicio_solicitado', 'No especificado')}
-        📅 *Fecha:* {info_cita.get('fecha_sugerida', 'No especificada')}
-        ⏰ *Hora:* {info_cita.get('hora_sugerida', 'No especificada')}
+👤 *Cliente:* {info_cita.get('nombre_cliente', 'No especificado')}
+📞 *Teléfono:* {info_cita.get('telefono')}
+🛠️ *Servicio:* {info_cita.get('servicio_solicitado', 'No especificado')}
+📅 *Fecha:* {info_cita.get('fecha_sugerida', 'No especificada')}
+⏰ *Hora:* {info_cita.get('hora_sugerida', 'No especificada')}
 
-        ⏰ *Registrada:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
+⏰ *Registrada:* {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
-        💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
-        """
+💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
+"""
 
-        enviar_mensaje('5214493432744', mensaje_notificacion, config)
-        enviar_mensaje('5214491182201', mensaje_notificacion, config)
-        app.logger.info(f"✅ Notificación de cita enviada a 5214493432744, ID: {cita_id}")
-        
-        cursor.execute('''
-            INSERT INTO notificaciones_ia (
-                numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            info_cita.get('telefono'),
-            tipo_solicitud,
-            resumen,
-            'pendiente',
-            json.dumps(info_cita),
-            json.dumps(evaluacion_ia),
-            evento_id
-        ))
-        conn.commit()
+        # Notificar administradores fijos (mantener comportamiento previo)
+        try:
+            enviar_mensaje('5214493432744', mensaje_notificacion, config)
+            enviar_mensaje('5214491182201', mensaje_notificacion, config)
+            app.logger.info(f"✅ Notificación de cita enviada a administradores, ID: {cita_id}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo notificar a administradores vía WhatsApp: {e}")
+
+        # --- NUEVO: Notificar al asesor en turno ---
+        try:
+            asesor = obtener_siguiente_asesor(config)
+            if asesor and asesor.get('telefono'):
+                telefono_asesor = asesor.get('telefono')
+                nombre_asesor = asesor.get('nombre') or 'Asesor'
+                mensaje_asesor = f"""👤 *Nueva {tipo_solicitud} asignada* - ID: #{cita_id}
+
+👤 Cliente: {info_cita.get('nombre_cliente', 'No especificado')}
+📞 Teléfono: {info_cita.get('telefono')}
+🛠️ Servicio: {info_cita.get('servicio_solicitado', 'No especificado')}
+📅 Fecha: {info_cita.get('fecha_sugerida', 'No especificada')}
+⏰ Hora: {info_cita.get('hora_sugerida', 'No especificada')}
+
+Por favor contacta al cliente para confirmar.
+"""
+                try:
+                    enviar_mensaje(telefono_asesor, mensaje_asesor, config)
+                    app.logger.info(f"📤 Notificación enviada al asesor en turno ({nombre_asesor} - {telefono_asesor}) para cita ID {cita_id}")
+                    # registrar en evaluacion_ia quién fue notificado
+                    evaluacion_ia['asesor_notificado'] = {'nombre': nombre_asesor, 'telefono': telefono_asesor}
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo notificar al asesor ({telefono_asesor}): {e}")
+            else:
+                app.logger.info("ℹ️ No hay asesores configurados para notificar en turno")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error intentando obtener/enviar al asesor en turno: {e}")
+
+        # Insertar notificación en BD (con evaluacion_ia actualizado)
+        try:
+            cursor.execute('''
+                INSERT INTO notificaciones_ia (
+                    numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                info_cita.get('telefono'),
+                tipo_solicitud,
+                resumen,
+                'pendiente',
+                json.dumps(info_cita),
+                json.dumps(evaluacion_ia, ensure_ascii=False),
+                evento_id
+            ))
+            conn.commit()
+        except Exception as e:
+            app.logger.error(f"🔴 Error insertando notificacion en BD: {e}")
+            conn.rollback()
+
         cursor.close()
         conn.close()
         
