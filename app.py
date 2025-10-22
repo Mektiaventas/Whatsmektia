@@ -36,8 +36,6 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
-from pydub import AudioSegment
-AudioSegment.converter = "/ruta/a/ffmpeg"  # p.ej. /usr/bin/ffmpeg
 
 try:
     # preferred location
@@ -2195,31 +2193,17 @@ def get_chat_messages(telefono):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # CORRECCIÓN: usar la columna 'numero' y 'timestamp' (nombre consistente con el resto del código)
+    # Consultar solo mensajes más recientes que el ID proporcionado
     cursor.execute("""
-        SELECT id, mensaje AS content, timestamp AS timestamp, respuesta
-        FROM conversaciones
-        WHERE numero = %s AND id > %s
-        ORDER BY timestamp ASC
+        SELECT id, mensaje as content, fecha as timestamp, direccion as direction, respuesta
+        FROM mensajes 
+        WHERE telefono = %s AND id > %s
+        ORDER BY fecha ASC
     """, (telefono, after_id))
     
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
-    
-    # Normalizar timestamp a ISO string para evitar problemas al parsear en el cliente
-    for m in messages:
-        ts = m.get('timestamp')
-        try:
-            if ts is None:
-                continue
-            # si es datetime, convertir a ISO; si ya es string, dejar como está
-            if hasattr(ts, 'isoformat'):
-                m['timestamp'] = ts.isoformat()
-            else:
-                m['timestamp'] = str(ts)
-        except Exception:
-            m['timestamp'] = str(ts)
     
     return jsonify({
         'messages': messages,
@@ -3635,7 +3619,7 @@ def build_texto_catalogo(precios, limit=20):
         sku = (p.get('sku') or '').strip()
         nombre = (p.get('servicio') or p.get('modelo') or '').strip()
         # Preferencia en orden para precio mostrado
-        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') 
+        precio = p.get('precio_menudeo') or p.get('precio_mayoreo') or p.get('costo') or ''
         inscripcion = p.get('inscripcion')
         mensualidad = p.get('mensualidad')
         precio_str = ''
@@ -5893,9 +5877,8 @@ def actualizar_contactos():
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
-    Sanitiza el texto entrante y, si existe una fila entrante reciente sin respuesta,
-    intenta actualizarla en lugar de insertar una nueva (evita duplicados).
-    """
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -5904,81 +5887,28 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Primero asegurar que el contacto existe y obtener conexión
+        # Primero asegurar que el contacto existe con su información actualizada
+        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
+
         conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
 
-        # Si viene una respuesta, intentar encontrar un mensaje entrante reciente sin respuesta
-        if respuesta_limpia:
-            try:
-                cursor.execute("""
-                    SELECT id, mensaje, timestamp
-                      FROM conversaciones
-                     WHERE numero = %s
-                       AND (respuesta IS NULL OR respuesta = '')
-                     ORDER BY timestamp DESC
-                     LIMIT 5
-                """, (numero,))
-                candidates = cursor.fetchall()
-                now_dt = datetime.now()
-                for cand in candidates:
-                    db_msg = cand.get('mensaje') or ''
-                    db_ts = cand.get('timestamp')
-                    # permitir match solo si el mensaje es reciente (ej. últimos 10 minutos)
-                    if db_ts and isinstance(db_ts, datetime):
-                        age_seconds = (now_dt - db_ts).total_seconds()
-                    else:
-                        age_seconds = 0
-                    # comparar similitud textual
-                    try:
-                        sim = calcular_similitud(mensaje_limpio or '', db_msg or '')
-                    except Exception:
-                        sim = 0.0
-
-                    if sim > 0.82 and age_seconds <= 600:
-                        # actualizar esa fila en lugar de insertar duplicado
-                        upd = conn.cursor()
-                        upd.execute("""
-                            UPDATE conversaciones
-                               SET respuesta = %s,
-                                   imagen_url = COALESCE(%s, imagen_url),
-                                   es_imagen = %s,
-                                   timestamp = COALESCE(timestamp, NOW())
-                             WHERE id = %s
-                        """, (respuesta_limpia, imagen_url, es_imagen, cand['id']))
-                        conn.commit()
-                        upd.close()
-                        cursor.close()
-                        conn.close()
-                        app.logger.info(f"💾 Conversación actualizada (respuesta) para {numero} id={cand['id']} (sim={sim:.2f})")
-                        return True
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error buscando mensaje para actualizar (fallback a insert): {e}")
-
-        # Si no hicimos update, insertar nuevo registro
-        ins = conn.cursor()
-        ins.execute("""
+        # Usar los nombres de columna existentes en tu BD
+        cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+
         conn.commit()
-        ins.close()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 Conversación guardada para {numero} (insert)")
+        app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
-        try:
-            if 'cursor' in locals() and cursor:
-                cursor.close()
-            if 'conn' in locals() and conn:
-                conn.close()
-        except:
-            pass
         return False
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
@@ -6587,10 +6517,6 @@ def webhook():
         es_archivo = False
         es_documento = False
         es_mi_numero = False
-
-        # NEW: flag to avoid inserting the same incoming message twice
-        message_saved = False
-
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
@@ -6628,7 +6554,6 @@ def webhook():
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
         # Verificar duplicados (excepto audio/imagen)
-        # Note: es_audio/es_imagen are still False here, that's intentional — dedupe applies to all incoming messages.
         if not es_audio and not es_imagen and message_hash in processed_messages:
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
@@ -6658,9 +6583,8 @@ def webhook():
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
 
-            # Guardar mensaje entrante (sin respuesta aún) — only save once
+            # Guardar mensaje entrante (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
-            message_saved = True
 
             # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
             try:
@@ -6751,10 +6675,7 @@ def webhook():
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
         # === fin manejo oferta asesor ===
-
-        # Only save incoming message here if it wasn't already saved earlier (e.g. image branch)
-        if not message_saved:
-            guardar_mensaje_inmediato(numero, texto, config)
+        guardar_mensaje_inmediato(numero, texto, config)
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
@@ -6773,6 +6694,8 @@ def webhook():
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
+        
+        
                 # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         # Primero, comprobar si es una cita/pedido usando el análisis mejorado
         info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
