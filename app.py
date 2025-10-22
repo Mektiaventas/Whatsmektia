@@ -4292,7 +4292,7 @@ Descripción del negocio: {descripcion}
 
 Dispones de la siguiente lista de productos/servicios (resumida):
 {productos_texto}
-
+Tambien de los datos de contacto de los asesores de ventas:
 {asesores_block}
 
 REGLAS IMPORTANTES:
@@ -4302,6 +4302,7 @@ REGLAS IMPORTANTES:
 - Si identificas un producto y hay una imagen disponible, puedes mencionar la URL pública (Imagen: https://...)
   o el texto "Imagen: <filename>". No incluyas rutas locales de servidor.
 - Mantén las respuestas concisas y orientadas al usuario.
+- No inventes productos, precios o servicios que no existen en el catálogo.
 """.strip()
 
     # Construir historial para contexto
