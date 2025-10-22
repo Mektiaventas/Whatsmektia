@@ -7853,8 +7853,20 @@ def configuracion_tab(tab):
         abort(404)
     guardado = False
 
+    # Load current config and advisors
     cfg = load_config(config)
     asesores_list = cfg.get('asesores_list', []) or []
+
+    # Determine advisor limit (asesor_count) up-front so it can be used safely
+    au = session.get('auth_user') or {}
+    try:
+        if au and au.get('user'):
+            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
+        else:
+            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
+        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     # If DB still contains more advisors than the allowed plan limit, trim them now.
     try:
@@ -7867,38 +7879,30 @@ def configuracion_tab(tab):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo recortar lista de asesores tras guardar: {e}")
 
-    # Prefer plan-specific limit when user is authenticated; fallback to global max
-    au = session.get('auth_user') or {}
-    try:
-        if au and au.get('user'):
-            asesor_count = obtener_asesores_por_user(au.get('user'), default=2, cap=20)
-        else:
-            asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error determinando asesor_count: {e}")
-        asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
+    # Handle form submissions
+    if request.method == 'POST':
+        if tab == 'negocio':
+            cfg['negocio'] = {
+                'ia_nombre':      request.form.get('ia_nombre'),
+                'negocio_nombre': request.form.get('negocio_nombre'),
+                'descripcion':    request.form.get('descripcion'),
+                'url':            request.form.get('url'),
+                'direccion':      request.form.get('direccion'),
+                'telefono':       request.form.get('telefono'),
+                'correo':         request.form.get('correo'),
+                'que_hace':       request.form.get('que_hace'),
+                'calendar_email': request.form.get('calendar_email'),
+                'transferencia_numero': request.form.get('transferencia_numero'),
+                'transferencia_nombre': request.form.get('transferencia_nombre'),
+                'transferencia_banco': request.form.get('transferencia_banco')
+            }
 
-        if request.method == 'POST':
-            if tab == 'negocio':
-                cfg['negocio'] = {
-                    'ia_nombre':      request.form.get('ia_nombre'),
-                    'negocio_nombre': request.form.get('negocio_nombre'),
-                    'descripcion':    request.form.get('descripcion'),
-                    'url':            request.form.get('url'),
-                    'direccion':      request.form.get('direccion'),
-                    'telefono':       request.form.get('telefono'),
-                    'correo':         request.form.get('correo'),
-                    'que_hace':       request.form.get('que_hace'),
-                    'calendar_email': request.form.get('calendar_email'),
-                    'transferencia_numero': request.form.get('transferencia_numero'),
-                    'transferencia_nombre': request.form.get('transferencia_nombre'),
-                    'transferencia_banco': request.form.get('transferencia_banco')
-                }
         elif tab == 'personalizacion':
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
                 'lenguaje': request.form.get('lenguaje')
             }
+
         elif tab == 'restricciones':
             cfg['restricciones'] = {
                 'restricciones': request.form.get('restricciones', ''),
@@ -7906,6 +7910,7 @@ def configuracion_tab(tab):
                 'max_mensajes': int(request.form.get('max_mensajes', 10)),
                 'tiempo_max_respuesta': int(request.form.get('tiempo_max_respuesta', 30))
             }
+
         elif tab == 'asesores':
             # Read dynamic number of advisors according to plan (asesor_count)
             advisors_compiled = []
@@ -7945,9 +7950,7 @@ def configuracion_tab(tab):
         except Exception:
             asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
-    datos = cfg.get(tab, {})
-
-    # If showing 'negocio' tab, load published documents for the template (existing logic)
+    # Prepare documents_publicos only for negocio tab (same logic as before)
     documents_publicos = []
     if tab == 'negocio':
         try:
@@ -7967,6 +7970,8 @@ def configuracion_tab(tab):
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudieron obtener documents_publicos: {e}")
             documents_publicos = []
+
+    datos = cfg.get(tab, {})
 
     return render_template('configuracion.html',
         tabs=SUBTABS, active=tab,
