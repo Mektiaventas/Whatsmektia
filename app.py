@@ -138,8 +138,6 @@ servicios_clave = [
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
 
-# Configuración por defecto (para backward compatibility)
-# Por esto (valores explícitos en lugar de llamar a la función):
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
 DB_HOST = DEFAULT_CONFIG['db_host']
@@ -148,7 +146,7 @@ DB_PASSWORD = DEFAULT_CONFIG['db_password']
 DB_NAME = DEFAULT_CONFIG['db_name']
 MI_NUMERO_BOT = DEFAULT_CONFIG['phone_number_id']
 PHONE_NUMBER_ID = MI_NUMERO_BOT
-# Agrega esto después de las otras variables de configuración
+
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 from whatsapp import (
@@ -174,7 +172,7 @@ get_docs_dir_for_config,
 get_productos_dir_for_config, 
 determinar_extension
 )
-# Diccionario de prefijos a código de país
+
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
@@ -191,7 +189,7 @@ ALLOWED_EXTENSIONS = {
     'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
 }
 
-# --- Conexión a la BD de clientes (auth) ---
+
 def get_clientes_conn():
     return mysql.connector.connect(
         host=os.getenv("CLIENTES_DB_HOST"),
@@ -225,7 +223,6 @@ def login_required(f):
         return f(*args, **kwargs)
     return wrapper
 
-# Rutas públicas que NO requieren login (añade más si hace falta)
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
     'static', 'debug_headers', 'debug_dominio', 'diagnostico'
@@ -272,6 +269,19 @@ def proteger_rutas():
 
     # Si ya está autenticado, permitir
     if session.get('auth_user'):
+        try:
+            au = session.get('auth_user') or {}
+            expected_schema = (au.get('schema') or au.get('shema') or '').strip().lower()
+            host = (request.headers.get('Host') or '').lower()
+            if expected_schema and expected_schema not in host:
+                # Sesión válida pero dominio no autorizado -> cerrar sesión y forzar login
+                app.logger.warning(f"🔒 Acceso denegado: usuario '{au.get('user')}' con schema='{expected_schema}' intentó acceder desde host='{host}'")
+                session.pop('auth_user', None)
+                flash('⚠️ Acceso denegado: este usuario no puede acceder desde este dominio', 'error')
+                return redirect(url_for('login', next=request.path))
+        except Exception as e:
+            app.logger.error(f"🔴 Error validando schema en proteger_rutas: {e}")
+        # Si pasa la comprobación, permitir
         return
 
     # Si llega aquí, no está autorizado -> redirigir al login
@@ -296,9 +306,6 @@ def desactivar_sesiones_antiguas(username, within_minutes=SESSION_ACTIVE_WINDOW_
     except Exception as e:
         app.logger.error(f"Error desactivando sesiones antiguas: {e}")
 
-
-
-# Replace your current /login handler with this version (same logic + session limit)
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
@@ -347,7 +354,6 @@ def logout():
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
-# --- Sesiones activas (en BD de clientes) ---
 def _get_or_create_session_id():
     sid = session.get('sid')
     if not sid:
@@ -452,7 +458,6 @@ def contar_sesiones_activas(username, within_minutes=30):
         app.logger.error(f"Error contando sesiones activas: {e}")
         return 0
 
-# Heartbeat de sesión en cada request autenticado
 @app.before_request
 def _heartbeat_sesion_activa():
     try:
@@ -462,7 +467,6 @@ def _heartbeat_sesion_activa():
     except Exception as e:
         app.logger.debug(f"Heartbeat sesión falló: {e}")
 
-# Endpoint rápido para ver conteo por username (protegido)
 @app.route('/admin/sesiones/<username>')
 @login_required
 def admin_sesiones_username(username):
