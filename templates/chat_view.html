@@ -55,6 +55,84 @@
         let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
         const telefono = "{{ chat[1] }}";
 
+        // Notification sound setup
+        // Add a file at: static/audio/notify.mp3 (recommended). If not present, uses WebAudio fallback.
+        const notifSrc = "{{ url_for('static', filename='audio/notify.mp3') }}";
+        const _audio = new Audio(notifSrc);
+        _audio.preload = 'auto';
+        let audioUnlocked = false;
+        let audioContext = null;
+
+        // Try to unlock audio on first user interaction
+        function tryUnlockAudioOnce() {
+            if (audioUnlocked) return;
+            // Play/pause to unlock on gesture
+            _audio.play().then(() => {
+                _audio.pause();
+                _audio.currentTime = 0;
+                audioUnlocked = true;
+                document.removeEventListener('click', tryUnlockAudioOnce);
+                document.removeEventListener('keydown', tryUnlockAudioOnce);
+            }).catch(() => {
+                // if play fails, prepare WebAudio context on gesture
+                try {
+                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                    const o = audioContext.createOscillator();
+                    const g = audioContext.createGain();
+                    o.frequency.value = 0; // silent probe
+                    o.connect(g); g.connect(audioContext.destination);
+                    o.start(0); o.stop(0);
+                    audioUnlocked = true;
+                    document.removeEventListener('click', tryUnlockAudioOnce);
+                    document.removeEventListener('keydown', tryUnlockAudioOnce);
+                } catch (e) {
+                    // ignore
+                }
+            });
+        }
+        document.addEventListener('click', tryUnlockAudioOnce);
+        document.addEventListener('keydown', tryUnlockAudioOnce);
+
+        function playWebAudioBeep() {
+            try {
+                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const ctx = audioContext;
+                const o = ctx.createOscillator();
+                const g = ctx.createGain();
+                o.type = 'sine';
+                o.frequency.value = 1000;
+                g.gain.value = 0.08;
+                o.connect(g);
+                g.connect(ctx.destination);
+                o.start();
+                setTimeout(() => { o.stop(); }, 140);
+            } catch (e) {
+                // silent fallback
+                console.warn('WebAudio beep failed', e);
+            }
+        }
+
+        function playNotificationSound() {
+            // don't disturb if tab not visible
+            if (document.hidden) return;
+            // prefer audio file if unlocked
+            if (audioUnlocked) {
+                _audio.currentTime = 0;
+                _audio.play().catch((e) => {
+                    // fallback to WebAudio
+                    playWebAudioBeep();
+                });
+            } else {
+                // try direct play (may be blocked) then fallback
+                _audio.currentTime = 0;
+                _audio.play().then(() => {
+                    _audio.pause(); _audio.currentTime = 0;
+                }).catch(() => {
+                    playWebAudioBeep();
+                });
+            }
+        }
+
         // Toggle IA (best-effort UI update; server may redirect)
         function toggleIA() {
             const statusEl = document.getElementById('ia-status');
@@ -66,7 +144,6 @@
                         window.location.href = resp.url;
                         return;
                     }
-                    // Try to read JSON if returned
                     return resp.json().catch(() => ({ ia_activa: null }));
                 })
                 .then(body => {
@@ -82,23 +159,28 @@
                 });
         }
 
-        // Append message without duplicating
+        // Append message without duplicating; play sound for incoming messages
         function appendMessageToDOM(container, normalized) {
             if (!normalized || !normalized.id) return;
             if (container.querySelector(`[data-msg-id="${normalized.id}"]`)) return;
 
             const node = document.createElement('div');
-            node.className = (normalized.direction === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
+            node.className = (String(normalized.direction).toLowerCase() === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
             node.dataset.msgId = normalized.id;
             node.textContent = normalized.content || '';
             node.classList.add('new-message');
             container.appendChild(node);
             setTimeout(() => node.classList.remove('new-message'), 1800);
+
+            // Play notification only for incoming messages (common variants)
+            const incomingMarkers = ['entrante', 'in', 'incoming', 'entrada'];
+            const dir = String(normalized.direction || '').toLowerCase();
+            if (incomingMarkers.includes(dir)) {
+                playNotificationSound();
+            }
         }
 
-        function isScrolledToBottom(el) {
-            return el.scrollHeight - el.clientHeight <= el.scrollTop + 60;
-        }
+        function isScrolledToBottom(el) { return el.scrollHeight - el.clientHeight <= el.scrollTop + 60; }
         function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
 
         // Robust fetch + normalization + logging
@@ -106,41 +188,24 @@
             if (!chatAutoRefresh) return;
             try {
                 const url = `/chat/${encodeURIComponent(telefono)}/messages?after=${lastMessageId}`;
-                console.debug('Fetching messages:', url);
                 const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-                console.debug('Response status:', res.status);
-                if (!res.ok) {
-                    console.warn('Fetch failed:', res.status, res.statusText);
-                    return;
-                }
-                const data = await res.json().catch(e => {
-                    console.error('Failed to parse JSON from messages endpoint:', e);
-                    return null;
-                });
-                console.debug('Messages payload:', data);
-                if (!data || !Array.isArray(data.messages)) {
-                    console.debug('No messages array in response');
-                    return;
-                }
+                if (!res.ok) return;
+                const data = await res.json().catch(() => null);
+                if (!data || !Array.isArray(data.messages)) return;
                 const msgs = data.messages;
                 if (msgs.length === 0) return;
 
                 const wasAtBottom = isScrolledToBottom(container);
-
                 for (const m of msgs) {
-                    // Normalize different payload shapes
                     const normalized = {
-                        id: (m.id ?? m[0] ?? m['id'] ?? 0),
+                        id: Number(m.id ?? m[0] ?? m['id'] ?? 0),
                         content: (m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? m.respuesta ?? m[2] ?? ''),
                         direction: (m.direction ?? m['direction'] ?? m.direccion ?? m['direccion'] ?? (m[3] ?? null))
                     };
-                    // Ensure id numeric
-                    normalized.id = Number(normalized.id) || 0;
-                    if (normalized.id === 0) continue;
+                    if (!normalized.id) continue;
                     appendMessageToDOM(container, normalized);
                     lastMessageId = Math.max(lastMessageId, normalized.id);
                 }
-
                 if (wasAtBottom) scrollToBottom(container);
             } catch (err) {
                 console.error('Error updating messages:', err);
@@ -152,44 +217,5 @@
             try {
                 const nodes = container.querySelectorAll('[data-msg-id]');
                 let max = lastMessageId || 0;
-                nodes.forEach(n => {
-                    const v = Number(n.dataset.msgId) || 0;
-                    if (v > max) max = v;
-                });
-                lastMessageId = Math.max(lastMessageId, max);
-            } catch (e) {
-                console.warn('initLastMessageFromDOM failed', e);
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const container = document.getElementById('mensajes-container');
-            if (!container) return;
-
-            initLastMessageFromDOM(container);
-            scrollToBottom(container);
-
-            // initial immediate fetch to catch up
-            actualizarMensajes(container);
-
-            // periodic polling
-            const timer = setInterval(() => {
-                if (!document.hidden) actualizarMensajes(container);
-            }, refreshInterval);
-
-            document.addEventListener('visibilitychange', () => {
-                chatAutoRefresh = !document.hidden;
-                if (chatAutoRefresh) actualizarMensajes(container);
-            });
-
-            // after manual send, poll shortly after to pick up message inserted by server
-            const manualForm = document.getElementById('form-manual');
-            if (manualForm) {
-                manualForm.addEventListener('submit', () => {
-                    setTimeout(() => actualizarMensajes(container), 500);
-                });
-            }
-        });
-    </script>
-</body>
-</html>
+                nodes.forEach(n => { const v = Number(n.dataset.msgId) || 0; if (v > max) max = v; });
+                lastMessageId
