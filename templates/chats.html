@@ -131,7 +131,7 @@
             {% if mensajes %}
             {% for msg in mensajes %}
             {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-user">
+            <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
@@ -321,92 +321,113 @@
 
 
 <script>
-    document.addEventListener('DOMContentLoaded', function () {
-        const emojiBtn = document.getElementById('emoji-pick-btn');
-        const emojiPickerList = document.getElementById('emoji-picker-list');
-        const input = document.getElementById('mensaje-texto');
-        const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-
-        if (!emojiBtn || !emojiPickerList || !input) return; // Prevent errors if not present
-
-        // Fill the picker
-        emojiPickerList.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn">${e}</button>`).join('');
-
-        // Show the picker above the button
-        emojiBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            const rect = emojiBtn.getBoundingClientRect();
-            const parentRect = emojiBtn.parentElement.getBoundingClientRect();
-            // Calculate the position above the button
-            emojiPickerList.style.left = (rect.left - parentRect.left) + 'px';
-            emojiPickerList.style.top = (rect.top - parentRect.top - emojiPickerList.offsetHeight - 70) + 'px';
-            emojiPickerList.style.display = 'block';
-        });
-
-        // Insert emoji at cursor position
-        emojiPickerList.addEventListener('click', function (e) {
-            if (e.target.classList.contains('emoji-pick-btn')) {
-                const emoji = e.target.textContent;
-                const start = input.selectionStart;
-                const end = input.selectionEnd;
-                const text = input.value;
-                input.value = text.slice(0, start) + emoji + text.slice(end);
-                input.selectionStart = input.selectionEnd = start + emoji.length;
-                emojiPickerList.style.display = 'none';
-                input.focus();
-            }
-        });
-
-        // Hide picker when clicking outside
-        document.addEventListener('click', function (e) {
-            if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
-                emojiPickerList.style.display = 'none';
-            }
-        });
-    });
-function ajustarHoraMexico(fechaUTC) {
-    const fecha = new Date(fechaUTC);
-    fecha.setHours(fecha.getHours() + 6);
-    return fecha.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
+/*
+  Auto-update & incremental diff for chats (inspired by kanban.html).
+  - lista de chats: /chats/data  (retorna chats + timestamp)
+  - mensajes del chat seleccionado: /chat/<telefono>/messages?after=<id>
+*/
 
 let chatAutoRefresh = true;
-let refreshInterval = 500;
+let refreshIntervalMs = 800; // ajustable
 let selectedChatId = "{{ selected }}";
-let lastUpdateTimestamp = new Date().getTime();
+let lastChatsTimestamp = 0;
+let lastMessageIdForSelected = 0;
+let isEditingAlias = false;
+let aliasTimers = new Map();
 
-function startChatRefresh() {
-    setInterval(actualizarListaChats, refreshInterval);
-}
+document.addEventListener('DOMContentLoaded', () => {
+    enhanceAliasButtons();
+    setupEmojiPicker();
+    // start refreshing only if container exists
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats(); // initial load
+        setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+    }
+    // start polling messages for selected chat
+    if (selectedChatId) {
+        initSelectedMessagesPolling();
+    }
+    document.addEventListener('visibilitychange', () => chatAutoRefresh = !document.hidden);
+});
+
+/* ===================== CHATS LIST: incremental update ===================== */
 
 function actualizarListaChats() {
     if (!chatAutoRefresh) return;
     fetch('/chats/data')
         .then(r => r.json())
         .then(data => {
-            if (data.timestamp <= lastUpdateTimestamp) return;
-            lastUpdateTimestamp = data.timestamp;
-            actualizarElementosChat(data.chats);
+            if (!data || !data.chats) return;
+            // timestamp from server in seconds or ms -> normalize to ms
+            const ts = Number(data.timestamp) || Date.now();
+            if (ts <= lastChatsTimestamp) return;
+            lastChatsTimestamp = ts;
+            actualizarIncrementalChats(data.chats);
         })
-        .catch(err => console.error(err));
+        .catch(err => console.error('Error actualizando lista de chats:', err));
 }
 
-// FIXED FUNCTION
-function actualizarChatExistente(elemento, chat) {
-    const previewElement = elemento.querySelector('.card-msg');
-    if (previewElement && chat.ultimo_mensaje) {
-        const nuevoTexto = chat.tipo_mensaje === 'imagen'
-            ? '📷 Imagen'
-            : `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`;
-        if (previewElement.textContent.trim() !== nuevoTexto.trim()) {
-            previewElement.textContent = nuevoTexto;
-            elemento.classList.add('new-message');
-            setTimeout(() => elemento.classList.remove('new-message'), 2000);
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+
+    // Build map of existing nodes
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => {
+        existing.set(node.dataset.chatNum, node);
+    });
+
+    // Iterate new list ordering (server provides ordered list)
+    chats.forEach(chat => {
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            // update in-place
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            // move to correct position (ensure newest on top)
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
+            }
+        } else {
+            // create new node and prepend
+            const tmp = document.createElement('div');
+            tmp.innerHTML = crearNuevoChatHTML(chat);
+            const el = tmp.firstElementChild;
+            container.insertBefore(el, container.firstElementChild);
+            // add handlers for alias edit button
+            const editBtn = el.querySelector('.edit-alias-btn');
+            if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
+            // highlight briefly
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1800);
         }
+    });
+
+    // Remove nodes that are not in server list
+    existing.forEach((node, numero) => {
+        node.remove();
+    });
+}
+
+function actualizarChatExistente(elemento, chat) {
+    // alias/nombre
+    const aliasView = elemento.querySelector('.alias-view');
+    if (aliasView && aliasView.textContent.trim() !== chat.nombre_mostrado) {
+        aliasView.textContent = chat.nombre_mostrado;
     }
+    // time
     const timeEl = elemento.querySelector('.card-time');
     if (timeEl && chat.ultima_fecha) {
-        timeEl.textContent = ajustarHoraMexico(chat.ultima_fecha);
+        timeEl.textContent = formatClientTime(chat.ultima_fecha);
+    }
+    // preview
+    const msgEl = elemento.querySelector('.card-msg');
+    const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
+    if (msgEl && msgEl.textContent.trim() !== previewText) {
+        msgEl.textContent = previewText;
+        elemento.classList.add('new-message');
+        setTimeout(() => elemento.classList.remove('new-message'), 1600);
     }
 }
 
@@ -414,80 +435,227 @@ function crearNuevoChatHTML(chat) {
     const isSelected = chat.numero === selectedChatId;
     const avatarUrl = chat.imagen_url || '/static/icons/default-avatar.png';
     const nombreMostrado = chat.nombre_mostrado || chat.numero;
-    const ultimoMensaje = chat.tipo_mensaje === 'imagen'
-        ? '📷 Imagen'
-        : (chat.ultimo_mensaje
-            ? `${chat.ultimo_mensaje.substring(0, 35)}${chat.ultimo_mensaje.length > 35 ? '...' : ''}`
-            : 'Sin mensajes');
+    const ultimoMensaje = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
     return `
 <a href="/chats/${chat.numero}" class="chat-item ${isSelected ? 'selected' : ''}" data-chat-num="${chat.numero}">
-  <div class="chat-content">
+  <div class="card-content">
     <div class="card-title-row">
       <div class="card-avatar-section">
         <img src="${avatarUrl}" class="card-avatar" alt="Avatar"
              onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
       </div>
-      <span class="alias-view" data-num="${chat.numero}">${nombreMostrado}</span>
+      <span class="alias-view" data-num="${chat.numero}">${escapeHtml(nombreMostrado)}</span>
       <span class="alias-edit" style="display:none;">
         <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width:110px;">
       </span>
-      {% if is_admin%}
-      <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
-      {% endif %}
+      ${'{{ is_admin and "" }}'}
      </div>
     <div class="card-meta-row">
       <span class="card-num">${chat.numero}</span>
       <span class="card-time">
-        ${chat.ultima_fecha ? ajustarHoraMexico(chat.ultima_fecha) : ''}
+        ${chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : ''}
       </span>
     </div>
-    <div class="card-msg">${ultimoMensaje}</div>
+    <div class="card-msg">${escapeHtml(ultimoMensaje)}</div>
   </div>
 </a>`;
 }
 
-document.addEventListener('visibilitychange', () => chatAutoRefresh = !document.hidden);
+/* ===================== MESSAGES FOR SELECTED CHAT: incremental polling ===================== */
+
+function initSelectedMessagesPolling() {
+    // initialize lastMessageId from DOM if available
+    const lastDom = document.querySelector('#msgs .msg-box[data-msg-id]:last-child');
+    if (lastDom && lastDom.dataset.msgId) lastMessageIdForSelected = Number(lastDom.dataset.msgId) || 0;
+    // poll every 800ms
+    setInterval(() => {
+        if (!selectedChatId || document.hidden) return;
+        pollSelectedMessages();
+    }, 700);
+}
+
+function pollSelectedMessages() {
+    const after = lastMessageIdForSelected || 0;
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
+            appendMessagesToPanel(data.messages);
+        })
+        .catch(err => console.error('Error polling messages:', err));
+}
+
+function appendMessagesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    messages.forEach(m => {
+        // m: { id, content, timestamp, direction } where direction may be 'in' or 'out' depending on your table mapping
+        const id = m.id || 0;
+        const content = m.content || '';
+        const ts = m.timestamp ? Number(m.timestamp) : Date.now();
+        // Avoid duplicates
+        if (container.querySelector(`.msg-box[data-msg-id="${id}"]`)) {
+            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            return;
+        }
+        // Build a simple message bubble. You can extend for images/audio as needed.
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-user';
+        div.dataset.msgId = id;
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+        container.appendChild(div);
+        lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        // Scroll to bottom
+        container.scrollTop = container.scrollHeight;
+    });
+}
+
+/* ===================== HELPERS ===================== */
+
+function formatClientTime(serverTs) {
+    // serverTs may be ms int or ISO string. Try to normalize.
+    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+    // If invalid, fallback to now
+    if (isNaN(d.getTime())) d = new Date();
+    // Use local formatting similar to server: dd/mm HH:MM
+    const day = d.getDate();
+    const month = d.toLocaleString('es-MX', { month: 'short' });
+    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${day}-${month} ${time}`;
+}
+
+function truncate(str, n) {
+    if (!str) return '';
+    return str.length > n ? str.substring(0, n) + '...' : str;
+}
+
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+}
+
+/* ===================== Alias editing (preserve behavior) ===================== */
+
+function enhanceAliasButtons() {
+    document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+        btn.removeEventListener('click', onEditAliasClick);
+        btn.addEventListener('click', onEditAliasClick);
+    });
+}
+
+function onEditAliasClick(e) {
+    e.preventDefault(); e.stopPropagation();
+    const btn = e.currentTarget;
+    const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content');
+    activarEdicionAlias(parent);
+}
 
 function activarEdicionAlias(parent) {
-    const viewElement = parent.querySelector('.alias-view');
-    const editElement = parent.querySelector('.alias-edit');
-    if (!viewElement || !editElement) return;
-    viewElement.style.display = 'none';
-    editElement.style.display = 'flex';
-    const input = editElement.querySelector('input[type=text]');
+    if (!parent) return;
+    const view = parent.querySelector('.alias-view');
+    const edit = parent.querySelector('.alias-edit');
+    if (!view || !edit) return;
+    const input = edit.querySelector('input[type=text]');
     if (!input) return;
-    input.focus(); input.select();
-    function terminar() {
+
+    view.style.display = 'none';
+    edit.style.display = 'flex';
+    input.focus();
+    input.select();
+    isEditingAlias = true;
+
+    const finish = () => {
+        const nuevo = (input.value || '').trim();
+        edit.style.display = 'none';
+        view.style.display = '';
+        if (!nuevo) return;
+        view.textContent = nuevo;
+        // post
         fetch(`/contactos/${input.dataset.num}/alias`, {
             method: 'POST',
-            body: new URLSearchParams({ alias: input.value }),
+            body: new URLSearchParams({ alias: nuevo }),
             headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        }).finally(() => {
-            editElement.style.display = 'none';
-            viewElement.textContent = input.value || input.dataset.num;
-            viewElement.style.display = '';
-        });
-    }
-    input.onblur = terminar;
-    input.onkeydown = e => {
-        if (e.key === 'Enter') { e.preventDefault(); terminar(); }
-        if (e.key === 'Escape') { editElement.style.display = 'none'; viewElement.style.display = ''; }
+        }).catch(err => console.warn('Error guardando alias:', err))
+          .finally(() => { isEditingAlias = false; });
+    };
+
+    input.onblur = () => setTimeout(finish, 0);
+    input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); finish(); }
+        if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; }
     };
 }
 
+/* ===================== Emoji picker (kept) ===================== */
+
+function setupEmojiPicker() {
+    const emojiBtn = document.getElementById('emoji-pick-btn');
+    const emojiPickerList = document.getElementById('emoji-picker-list');
+    const input = document.getElementById('mensaje-texto');
+    const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+    if (!emojiBtn || !emojiPickerList || !input) return;
+
+    emojiPickerList.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn">${e}</button>`).join('');
+
+    emojiBtn.addEventListener('click', function (e) {
+        e.preventDefault();
+        const rect = emojiBtn.getBoundingClientRect();
+        const parentRect = emojiBtn.parentElement.getBoundingClientRect();
+        emojiPickerList.style.left = (rect.left - parentRect.left) + 'px';
+        emojiPickerList.style.top = (rect.top - parentRect.top - emojiPickerList.offsetHeight - 70) + 'px';
+        emojiPickerList.style.display = 'block';
+    });
+
+    emojiPickerList.addEventListener('click', function (e) {
+        if (e.target.classList.contains('emoji-pick-btn')) {
+            const emoji = e.target.textContent;
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            const text = input.value;
+            input.value = text.slice(0, start) + emoji + text.slice(end);
+            input.selectionStart = input.selectionEnd = start + emoji.length;
+            emojiPickerList.style.display = 'none';
+            input.focus();
+        }
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!emojiPickerList.contains(e.target) && e.target !== emojiBtn) {
+            emojiPickerList.style.display = 'none';
+        }
+    });
+}
+
+/* ===================== Utilities used by old code ===================== */
+
+function toggleChatList() {
+    document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
+}
+
+/* Keep existing audio controls helpers if present in page */
 function toggleAudio(id, btn) {
     const audio = document.getElementById(id);
-    const bar = btn.closest('.audio-player').querySelector('.audio-progress-bar');
-    const durSpan = btn.closest('.audio-player').querySelector('.audio-duration');
+    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
+    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
+    if (!audio) return;
     if (audio.paused) {
         audio.play().then(() => {
             btn.textContent = '⏸️';
             audio.ontimeupdate = () => {
                 if (audio.duration) {
-                    bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
-                    const m = Math.floor(audio.currentTime / 60);
-                    const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0');
-                    durSpan.textContent = `${m}:${s}`;
+                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
+                    if (durSpan) {
+                        const m = Math.floor(audio.currentTime / 60);
+                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0');
+                        durSpan.textContent = `${m}:${s}`;
+                    }
                 }
             };
         }).catch(console.error);
@@ -496,78 +664,16 @@ function toggleAudio(id, btn) {
         btn.textContent = '▶️';
     }
 }
-
 function seekAudio(id, progressBar, evt) {
     const audio = document.getElementById(id);
     const inner = progressBar.querySelector('.audio-progress-bar');
     const rect = progressBar.getBoundingClientRect();
     const clickX = evt.clientX - rect.left;
-    if (audio.duration) {
+    if (audio && audio.duration) {
         audio.currentTime = (clickX / rect.width) * audio.duration;
-        inner.style.width = (clickX / rect.width) * 100 + '%';
+        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
     }
 }
 
-function scrollToBottom() {
-    const c = document.getElementById('msgs');
-    if (c) c.scrollTop = c.scrollHeight;
-}
-
-function ensureScrollBottom() {
-    [0,60,120,240,400].forEach(d => setTimeout(scrollToBottom, d));
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    ensureScrollBottom();
-    document.querySelectorAll('#msgs img').forEach(img => {
-        if (!img.complete) img.addEventListener('load', ensureScrollBottom);
-    });
-    window.addEventListener('load', ensureScrollBottom);
-});
-
-function toggleChatList() {
-    document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-}
-
-function actualizarElementosChat(chats) {
-    const container = document.querySelector('.chat-items');
-    if (!container) return;
-    chats.forEach(chat => {
-        let node = container.querySelector(`.chat-item[data-chat-num="${chat.numero}"]`);
-        if (node) {
-            actualizarChatExistente(node, chat);
-        } else if (chat.ultimo_mensaje) {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = crearNuevoChatHTML(chat);
-            const el = tmp.firstElementChild;
-            container.insertBefore(el, container.firstChild);
-            el.classList.add('new-message');
-            setTimeout(() => el.classList.remove('new-message'), 2000);
-            const editBtn = el.querySelector('.edit-alias-btn');
-            if (editBtn) {
-                editBtn.addEventListener('click', e => {
-                    e.preventDefault(); e.stopPropagation();
-                    const parent = editBtn.closest('.card-title-row');
-                    activarEdicionAlias(parent);
-                });
-            }
-        }
-    });
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.edit-alias-btn').forEach(btn => {
-        btn.addEventListener('click', e => {
-            e.preventDefault(); e.stopPropagation();
-            const parent = btn.closest('.chat-title, .card-title-row, .chat-name');
-            activarEdicionAlias(parent);
-        });
-    });
-    if (document.querySelector('.chat-items')) {
-        refreshInterval = 500;
-        actualizarListaChats();
-        startChatRefresh();
-    }
-});
 </script>
 {% endblock %}
