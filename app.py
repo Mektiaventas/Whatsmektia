@@ -490,7 +490,10 @@ def guardar_configuracion_negocio():
         'telefono': request.form.get('telefono'),
         'correo': request.form.get('correo'),
         'que_hace': request.form.get('que_hace'),
-        'calendar_email': request.form.get('calendar_email')  # Nuevo campo para correo de notificaciones
+        'calendar_email': request.form.get('calendar_email'),  # Nuevo campo para correo de notificaciones
+        'transferencia_numero': request.form.get('transferencia_numero'),
+        'transferencia_nombre': request.form.get('transferencia_nombre'),
+        'transferencia_banco': request.form.get('transferencia_banco')
     }
     
     # Manejar la subida del logo
@@ -515,65 +518,110 @@ def guardar_configuracion_negocio():
     conn = get_db_connection(config)
     cursor = conn.cursor()
     
-    # Verificar si existe la columna calendar_email
+    # Verificar/crear columnas necesarias (calendar_email + transferencias)
     try:
-        cursor.execute("SHOW COLUMNS FROM configuracion LIKE 'calendar_email'")
-        calendar_email_existe = cursor.fetchone() is not None
-        
-        # Crear la columna si no existe
-        if not calendar_email_existe:
-            cursor.execute("ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)")
-        
+        required_cols = {
+            'calendar_email': "ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)",
+            'transferencia_numero': "ALTER TABLE configuracion ADD COLUMN transferencia_numero VARCHAR(100)",
+            'transferencia_nombre': "ALTER TABLE configuracion ADD COLUMN transferencia_nombre VARCHAR(200)",
+            'transferencia_banco': "ALTER TABLE configuracion ADD COLUMN transferencia_banco VARCHAR(100)"
+        }
+        for col, alter_sql in required_cols.items():
+            try:
+                cursor.execute(f"SHOW COLUMNS FROM configuracion LIKE '{col}'")
+                if cursor.fetchone() is None:
+                    # Crear la columna si no existe
+                    cursor.execute(alter_sql)
+                    app.logger.info(f"🔧 Columna creada en configuracion: {col}")
+            except Exception as e:
+                # Si la tabla no existe todavía u otro error, loguear y continuar
+                app.logger.warning(f"⚠️ No se pudo asegurar columna '{col}': {e}")
         conn.commit()
     except Exception as e:
-        app.logger.error(f"Error verificando/creando columna calendar_email: {e}")
-    
+        app.logger.warning(f"⚠️ Error asegurando columnas extra en configuracion: {e}")
+        try:
+            conn.rollback()
+        except:
+            pass
+
     # Verificar si existe una configuración
-    cursor.execute("SELECT COUNT(*) FROM configuracion")
-    count = cursor.fetchone()[0]
-    
+    try:
+        cursor.execute("SELECT COUNT(*) FROM configuracion")
+        count = cursor.fetchone()[0]
+    except Exception as e:
+        app.logger.error(f"🔴 Error consultando configuracion: {e}")
+        cursor.close(); conn.close()
+        flash("❌ Error interno verificando configuración", "error")
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
     if count > 0:
         # Actualizar configuración existente
         set_parts = []
         values = []
         
         for key, value in datos.items():
-            if value is not None:  # Solo incluir campos con valores
+            if value is not None:  # Solo incluir campos con valores (incluye cadena vacía explícita)
                 set_parts.append(f"{key} = %s")
                 values.append(value)
         
-        sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-        try:
-            cursor.execute(sql, values)
-        except Exception as e:
-            app.logger.error(f"Error al actualizar configuración: {e}")
-            # Filtrar columnas que causan problemas
-            if "Unknown column" in str(e):
-                # Obtener las columnas existentes
-                cursor.execute("SHOW COLUMNS FROM configuracion")
-                columnas_existentes = [col[0] for col in cursor.fetchall()]
-                
-                # Filtrar y volver a intentar
-                set_parts = []
-                values = []
-                for key, value in datos.items():
-                    if key in columnas_existentes and value is not None:
-                        set_parts.append(f"{key} = %s")
-                        values.append(value)
-                
-                if set_parts:
-                    sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
-                    cursor.execute(sql, values)
+        if set_parts:
+            sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+            try:
+                cursor.execute(sql, values)
+            except Exception as e:
+                app.logger.error(f"Error al actualizar configuración: {e}")
+                # Filtrar columnas que causan problemas
+                if "Unknown column" in str(e) or "column" in str(e).lower():
+                    try:
+                        cursor.execute("SHOW COLUMNS FROM configuracion")
+                        columnas_existentes = [col[0] for col in cursor.fetchall()]
+                        set_parts = []
+                        values = []
+                        for key, value in datos.items():
+                            if key in columnas_existentes and value is not None:
+                                set_parts.append(f"{key} = %s")
+                                values.append(value)
+                        if set_parts:
+                            sql = f"UPDATE configuracion SET {', '.join(set_parts)} WHERE id = 1"
+                            cursor.execute(sql, values)
+                            conn.commit()
+                    except Exception as e2:
+                        app.logger.error(f"🔴 Reintento update falló: {e2}")
+                else:
+                    app.logger.error(f"🔴 Error inesperado en UPDATE configuracion: {e}")
+        else:
+            app.logger.info("ℹ️ No hay campos nuevos para actualizar en configuracion")
     else:
         # Insertar nueva configuración
         fields = ', '.join(datos.keys())
         placeholders = ', '.join(['%s'] * len(datos))
         sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
-        cursor.execute(sql, [1] + list(datos.values()))
+        try:
+            cursor.execute(sql, [1] + list(datos.values()))
+        except Exception as e:
+            app.logger.error(f"🔴 Error insertando configuración nueva: {e}")
+            # Intentar crear tabla mínima por compatibilidad básica
+            try:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS configuracion (
+                        id INT PRIMARY KEY DEFAULT 1
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """)
+                conn.commit()
+                cursor.execute(sql, [1] + list(datos.values()))
+            except Exception as e2:
+                app.logger.error(f"🔴 Falló intento de reparación al insertar configuracion: {e2}")
     
-    conn.commit()
-    cursor.close()
-    conn.close()
+    try:
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except:
+            pass
+    finally:
+        cursor.close()
+        conn.close()
     
     flash("✅ Configuración guardada correctamente", "success")
     return redirect(url_for('configuracion_tab', tab='negocio', guardado=True))
