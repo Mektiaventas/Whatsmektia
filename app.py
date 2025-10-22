@@ -3507,13 +3507,20 @@ def get_plan_status_for_user(username, config=None):
     Retorna el estado del plan para el cliente user:
     { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
 
-    Ahora cuenta "conversaciones" en lugar de mensajes: cada conversación es una serie de mensajes
-    del mismo número separados por menos de 24 horas; un nuevo grupo separado por >=24h cuenta como
-    una conversación nueva.
-    Si el servidor MySQL no soporta funciones window (LAG), cae al conteo por mensajes antiguo.
+    Cambio: ahora "mensajes_consumidos" representa CONVERSACIONES consumidas.
+    Definición de conversación: un nuevo grupo de mensajes de un mismo número cuando han pasado >= 24 horas
+    desde su mensaje previo. Se cuentan TODAS las conversaciones del tenant (todos los números)
+    y no solo las asociadas a un teléfono específico.
+
+    Implementación:
+    - Intenta usar SQL con LAG() y PARTITION BY (MySQL 8+).
+    - Si falla (MySQL < 8 o SQL no soporta LAG), cae a un fallback en Python que
+      itera los mensajes ordenados por número y timestamp y calcula las sesiones.
+    - Nota: para bases de datos muy grandes el fallback en Python puede ser pesado; considera
+      agregar un filtro por periodo (ej. último mes) o migrar a MySQL 8.
     """
     try:
-        # Obtener cliente desde CLIENTES_DB
+        # Obtener cliente desde CLIENTES_DB (solo para metadatos del plan)
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
         cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
@@ -3540,132 +3547,87 @@ def get_plan_status_for_user(username, config=None):
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
 
-        telefono = (cliente.get('telefono') or '').strip()
-        app.logger.info(f"🔍 get_plan_status_for_user: user={username} telefono='{telefono}'")
-
-        mensajes_consumidos = 0
+        # ---------------------
+        # Contar conversaciones (sessions) en la BD del tenant
+        # ---------------------
+        conversaciones_consumidas = 0
         try:
             if config is None:
                 config = obtener_configuracion_por_host()
             conn_t = get_db_connection(config)
             cur_t = conn_t.cursor()
 
-            # Helper: limpiar dígitos
-            def only_digits(s):
-                return re.sub(r'\D', '', s or '')
-
-            clean_tel = only_digits(telefono)
-
-            # 1) Intentar coincidencia exacta con varias variantes, pero contar "conversaciones"
-            variants = []
-            if telefono:
-                variants.append(telefono)
-            if clean_tel:
-                variants.append(clean_tel)
-                variants.append('+' + clean_tel)
-                if not clean_tel.startswith('52'):
-                    variants.append('52' + clean_tel)
-                    variants.append('521' + clean_tel)
-            # dedupe keeping order
-            seen = set()
-            variants = [v for v in variants if v and not (v in seen or seen.add(v))]
-
-            # SQL para contar "conversaciones" en MySQL 8+ usando LAG
-            sessions_sql_single = """
+            # Intentar SQL con LAG() y PARTITION BY numero (MySQL 8+)
+            sql_sessions = """
                 SELECT COALESCE(SUM(is_new),0) FROM (
-                  SELECT CASE
-                    WHEN LAG(`timestamp`) OVER (ORDER BY `timestamp`) IS NULL
-                      OR TIMESTAMPDIFF(HOUR, LAG(`timestamp`) OVER (ORDER BY `timestamp`), `timestamp`) >= 24
-                    THEN 1 ELSE 0 END AS is_new
+                  SELECT numero, timestamp,
+                    CASE
+                      WHEN LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp) IS NULL
+                        OR TIMESTAMPDIFF(SECOND, LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp), timestamp) >= 86400
+                      THEN 1 ELSE 0 END AS is_new
                   FROM conversaciones
-                  WHERE numero = %s
                 ) t
             """
-
-            for v in variants:
-                try:
-                    cur_t.execute(sessions_sql_single, (v,))
-                    row = cur_t.fetchone()
-                    cnt = int(row[0]) if row and row[0] is not None else 0
-                    app.logger.info(f"🔎 Conversaciones (exact match) numero='{v}' => {cnt}")
-                    if cnt > 0:
-                        mensajes_consumidos = cnt
-                        break
-                except Exception as e:
-                    # Si falla (p.ej. MySQL < 8 sin LAG), loguear y fallback al conteo por mensajes
-                    app.logger.warning(f"⚠️ Session-count SQL falló para exact match (numero={v}): {e}")
-                    # Fallback: contar mensajes como antes (compatibilidad)
+            try:
+                cur_t.execute(sql_sessions)
+                row = cur_t.fetchone()
+                conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
+                app.logger.info(f"🔎 Conversaciones (SQL LAG) => {conversaciones_consumidas}")
+            except Exception as sql_err:
+                # Fallback a procesamiento en Python (compatible con MySQL < 8)
+                app.logger.warning(f"⚠️ Conteo por SQL LAG falló: {sql_err} — usando fallback en Python")
+                cur_t.execute("SELECT numero, timestamp FROM conversaciones ORDER BY numero, timestamp")
+                rows = cur_t.fetchall()  # list of tuples (numero, timestamp)
+                prev_ts_by_num = {}
+                cnt = 0
+                for r in rows:
                     try:
-                        cur_t.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (v,))
-                        row = cur_t.fetchone()
-                        cnt = int(row[0]) if row and row[0] is not None else 0
-                        app.logger.info(f"🔎 Fallback mensajes (exact match) numero='{v}' => {cnt}")
-                        if cnt > 0:
-                            mensajes_consumidos = cnt
-                            break
-                    except Exception as e2:
-                        app.logger.warning(f"⚠️ Fallback mensaje count también falló: {e2}")
+                        num = r[0]
+                        ts = r[1]
+                        if num not in prev_ts_by_num:
+                            cnt += 1
+                            prev_ts_by_num[num] = ts
+                        else:
+                            prev = prev_ts_by_num[num]
+                            # Asegurar que ts y prev sean datetime
+                            try:
+                                diff = (ts - prev).total_seconds()
+                            except Exception:
+                                # si por alguna razón son strings, intentar parsear
+                                try:
+                                    from dateutil import parser as _parser
+                                    prev_dt = _parser.parse(str(prev))
+                                    ts_dt = _parser.parse(str(ts))
+                                    diff = (ts_dt - prev_dt).total_seconds()
+                                    prev_ts_by_num[num] = ts_dt
+                                except Exception:
+                                    # si no se puede, saltar
+                                    diff = 0
+                            if diff >= 86400:  # 24 horas en segundos
+                                cnt += 1
+                                prev_ts_by_num[num] = ts
+                            else:
+                                # actualizar último timestamp aunque no sume nuevo "session"
+                                prev_ts_by_num[num] = ts
+                    except Exception:
                         continue
-
-            # 2) Si sigue 0: intentar comparar solo los últimos dígitos (LIKE) pero sumar sesiones por número
-            if mensajes_consumidos == 0 and clean_tel:
-                for n in (9, 8, 7):
-                    last_n = clean_tel[-n:]
-                    pattern = f"%{last_n}"
-                    # Try the session-counting query across matching numeros (partition by numero)
-                    sessions_sql_like = """
-                        SELECT COALESCE(SUM(is_new),0) FROM (
-                          SELECT numero, `timestamp`,
-                            CASE WHEN LAG(`timestamp`) OVER (PARTITION BY numero ORDER BY `timestamp`) IS NULL
-                              OR TIMESTAMPDIFF(HOUR, LAG(`timestamp`) OVER (PARTITION BY numero ORDER BY `timestamp`), `timestamp`) >= 24
-                            THEN 1 ELSE 0 END AS is_new
-                          FROM conversaciones
-                          WHERE REPLACE(REPLACE(REPLACE(REPLACE(numero, '+', ''), '-', ''), ' ', ''), '(', '') LIKE %s
-                        ) t
-                    """
-                    try:
-                        cur_t.execute(sessions_sql_like, (pattern,))
-                        row = cur_t.fetchone()
-                        cnt = int(row[0]) if row and row[0] is not None else 0
-                        app.logger.info(f"🔎 Conversaciones LIKE ...{last_n} => {cnt}")
-                        if cnt > 0:
-                            mensajes_consumidos = cnt
-                            break
-                    except Exception as e:
-                        app.logger.warning(f"⚠️ Session-count SQL falló para LIKE ...{last_n}: {e}")
-                        # Fallback: count messages with LIKE (legacy behavior)
-                        try:
-                            sql = """
-                                SELECT COUNT(*) FROM conversaciones
-                                WHERE REPLACE(REPLACE(REPLACE(REPLACE(numero, '+', ''), '-', ''), ' ', ''), '(', '') LIKE %s
-                            """
-                            cur_t.execute(sql, (pattern,))
-                            row = cur_t.fetchone()
-                            cnt = int(row[0]) if row and row[0] is not None else 0
-                            app.logger.info(f"🔎 Fallback mensajes LIKE ...{last_n} => {cnt}")
-                            if cnt > 0:
-                                mensajes_consumidos = cnt
-                                break
-                        except Exception as e2:
-                            app.logger.warning(f"⚠️ Fallback mensaje count LIKE también falló: {e2}")
-                            continue
+                conversaciones_consumidas = cnt
+                app.logger.info(f"🔎 Conversaciones (fallback Python) => {conversaciones_consumidas}")
 
             cur_t.close(); conn_t.close()
-            app.logger.info(f"✅ get_plan_status_for_user results: conversaciones_consumidas={mensajes_consumidos}")
-
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
-            mensajes_consumidos = 0
+            conversaciones_consumidas = 0
 
         mensajes_disponibles = None
         if mensajes_incluidos is not None:
-            mensajes_disponibles = max(0, mensajes_incluidos - mensajes_consumidos)
+            mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
 
         return {
             'plan_id': plan_id,
             'plan_name': plan_name,
             'mensajes_incluidos': mensajes_incluidos,
-            'mensajes_consumidos': mensajes_consumidos,
+            'mensajes_consumidos': conversaciones_consumidas,
             'mensajes_disponibles': mensajes_disponibles
         }
 
