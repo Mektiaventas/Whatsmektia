@@ -6039,14 +6039,16 @@ def webhook():
             app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
             return 'OK', 200
             
-        # Crear hash único
+        # Crear hash único y comprobar duplicados (no marcar todavía)
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
-        # Verificar duplicados (excepto audio/imagen)
+        # Evitar ignorar audios/imágenes (puedes ajustar si quieres)
         if not es_audio and not es_imagen and message_hash in processed_messages:
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
-            
+
+        # Decidir marcar después del procesamiento exitoso
+        marcar_luego = True
         # Agregar a mensajes procesados
         processed_messages[message_hash] = time.time()
 
