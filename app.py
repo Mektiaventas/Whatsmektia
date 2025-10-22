@@ -6690,10 +6690,6 @@ def webhook():
                     return 'OK', 200
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
-        # === fin manejo oferta asesor ===
-        guardar_mensaje_inmediato(numero, texto, config)
-        app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
-
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
         try:
             meta = obtener_chat_meta(numero, config)
