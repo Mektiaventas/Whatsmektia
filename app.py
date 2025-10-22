@@ -6310,6 +6310,9 @@ Reglas estrictas:
 6) Si envías imagen/documento, devuelve image/document con URL absoluta o filename conocido.
 7) No incluyas teléfonos, tokens, ni instrucciones de servidor dentro del campo respuesta_text.
 8) Sé conciso en respuesta_text (1-6 líneas).
+9) Si no estás seguro de la intención, usa NO_ACTION con confidence baja (<0.4).
+10) Siempre incluye un valor de confidence realista (0.0-1.0) basado en tu certeza.
+11) No inventes nada del catalogo o precios que no esté en el resumen proporcionado.
 
 Ejemplo de salida JSON:
 {{
