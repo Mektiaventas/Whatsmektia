@@ -5130,10 +5130,7 @@ def procesar_mensaje_normal(msg, numero, texto, es_imagen, es_audio, config, ima
         text_lower = texto.lower() if texto else ""
         # Detectar petición explícita de catálogo/producto (keywords)
         product_info_keywords = [
-            'precio', 'descripcion', 'detalles', 'detalle', 'información del producto',
-            'informacion del producto', 'habla del producto', 'habla de', 'qué es', 'qué cuesta',
-            'qué precio', 'dime sobre', 'dime el precio', 'más info de', 'más información de',
-            'ver producto', 'muestrame el producto', 'muéstrame el producto', 'muestra el producto'
+            'precio'
         ]
         # Si el mensaje parece pedir info de producto, intentamos resolverlo inmediatamente
         try:
