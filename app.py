@@ -6533,6 +6533,10 @@ def webhook():
         es_archivo = False
         es_documento = False
         es_mi_numero = False
+
+        # NEW: flag to avoid inserting the same incoming message twice
+        message_saved = False
+
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
@@ -6570,6 +6574,7 @@ def webhook():
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
 
         # Verificar duplicados (excepto audio/imagen)
+        # Note: es_audio/es_imagen are still False here, that's intentional — dedupe applies to all incoming messages.
         if not es_audio and not es_imagen and message_hash in processed_messages:
             app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
             return 'OK', 200
@@ -6599,8 +6604,9 @@ def webhook():
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
 
-            # Guardar mensaje entrante (sin respuesta aún)
+            # Guardar mensaje entrante (sin respuesta aún) — only save once
             guardar_conversacion(numero, texto, None, config, public_url, True)
+            message_saved = True
 
             # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
             try:
@@ -6690,6 +6696,13 @@ def webhook():
                     return 'OK', 200
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
+        # === fin manejo oferta asesor ===
+
+        # Only save incoming message here if it wasn't already saved earlier (e.g. image branch)
+        if not message_saved:
+            guardar_mensaje_inmediato(numero, texto, config)
+        app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
+
         # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
         try:
             meta = obtener_chat_meta(numero, config)
@@ -6706,8 +6719,6 @@ def webhook():
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
-        
-        
                 # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         # Primero, comprobar si es una cita/pedido usando el análisis mejorado
         info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
