@@ -5893,8 +5893,9 @@ def actualizar_contactos():
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
-    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
-    antes de guardarlo."""
+    Sanitiza el texto entrante y, si existe una fila entrante reciente sin respuesta,
+    intenta actualizarla en lugar de insertar una nueva (evita duplicados).
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -5903,28 +5904,81 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Primero asegurar que el contacto existe con su información actualizada
-        timestamp_local = datetime.now(tz_mx)
+        # Primero asegurar que el contacto existe y obtener conexión
         actualizar_info_contacto(numero, config)
-
         conn = get_db_connection(config)
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
 
-        # Usar los nombres de columna existentes en tu BD
-        cursor.execute("""
+        # Si viene una respuesta, intentar encontrar un mensaje entrante reciente sin respuesta
+        if respuesta_limpia:
+            try:
+                cursor.execute("""
+                    SELECT id, mensaje, timestamp
+                      FROM conversaciones
+                     WHERE numero = %s
+                       AND (respuesta IS NULL OR respuesta = '')
+                     ORDER BY timestamp DESC
+                     LIMIT 5
+                """, (numero,))
+                candidates = cursor.fetchall()
+                now_dt = datetime.now()
+                for cand in candidates:
+                    db_msg = cand.get('mensaje') or ''
+                    db_ts = cand.get('timestamp')
+                    # permitir match solo si el mensaje es reciente (ej. últimos 10 minutos)
+                    if db_ts and isinstance(db_ts, datetime):
+                        age_seconds = (now_dt - db_ts).total_seconds()
+                    else:
+                        age_seconds = 0
+                    # comparar similitud textual
+                    try:
+                        sim = calcular_similitud(mensaje_limpio or '', db_msg or '')
+                    except Exception:
+                        sim = 0.0
+
+                    if sim > 0.82 and age_seconds <= 600:
+                        # actualizar esa fila en lugar de insertar duplicado
+                        upd = conn.cursor()
+                        upd.execute("""
+                            UPDATE conversaciones
+                               SET respuesta = %s,
+                                   imagen_url = COALESCE(%s, imagen_url),
+                                   es_imagen = %s,
+                                   timestamp = COALESCE(timestamp, NOW())
+                             WHERE id = %s
+                        """, (respuesta_limpia, imagen_url, es_imagen, cand['id']))
+                        conn.commit()
+                        upd.close()
+                        cursor.close()
+                        conn.close()
+                        app.logger.info(f"💾 Conversación actualizada (respuesta) para {numero} id={cand['id']} (sim={sim:.2f})")
+                        return True
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error buscando mensaje para actualizar (fallback a insert): {e}")
+
+        # Si no hicimos update, insertar nuevo registro
+        ins = conn.cursor()
+        ins.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
-
         conn.commit()
+        ins.close()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 Conversación guardada para {numero}")
+        app.logger.info(f"💾 Conversación guardada para {numero} (insert)")
         return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
+        try:
+            if 'cursor' in locals() and cursor:
+                cursor.close()
+            if 'conn' in locals() and conn:
+                conn.close()
+        except:
+            pass
         return False
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
