@@ -5463,6 +5463,7 @@ def serve_public_docs(relpath):
     """Serve published files from uploads/docs/<tenant_slug>/<filename> (tenant-aware).
     Accepts paths like 'tenant_slug/filename.pdf' so Facebook can fetch the file_url built by enviar_catalogo.
     """
+    from werkzeug.exceptions import HTTPException
     try:
         # Base docs dir
         docs_base = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
@@ -5474,13 +5475,24 @@ def serve_public_docs(relpath):
             abort(404)
 
         full_path = os.path.join(docs_base, safe_relpath)
+        app.logger.debug(f"🔍 serve_public_docs debug: docs_base={docs_base} safe_relpath={safe_relpath} full_path={full_path}")
+
         if not os.path.isfile(full_path):
-            app.logger.info(f"❌ Public doc not found: {full_path}")
+            # List tenant dir contents to help debugging
+            tenant_dir = os.path.dirname(full_path)
+            try:
+                dir_list = os.listdir(tenant_dir)
+            except Exception:
+                dir_list = []
+            app.logger.info(f"❌ Public doc not found: {full_path} | tenant_dir_contents_count={len(dir_list)} sample={dir_list[:50]}")
             abort(404)
 
         directory = os.path.dirname(full_path)
         filename = os.path.basename(full_path)
         return send_from_directory(directory, filename)
+    except HTTPException:
+        # Re-raise HTTP exceptions (abort(404) -> preserved)
+        raise
     except Exception as e:
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
