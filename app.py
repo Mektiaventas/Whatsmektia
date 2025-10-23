@@ -4777,6 +4777,16 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
+@app.before_request
+def _init_request_saved_messages():
+    # init per-request cache of saved message hashes to avoid duplicate inserts
+    try:
+        if not hasattr(g, '_saved_message_hashes'):
+            g._saved_message_hashes = set()
+    except Exception:
+        # Defensive: if g not available, ignore (shouldn't happen in request context)
+        pass
+
 def obtener_siguiente_asesor(config=None):
     """
     Retorna el siguiente asesor disponible en forma round-robin.
@@ -5393,10 +5403,10 @@ def actualizar_contactos():
     return f"✅ Actualizados {len(numeros)} contactos"
        
 # REEMPLAZA la función guardar_conversacion con esta versión mejorada
-def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
+def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, message_hash=None):
     """Función compatible con la estructura actual de la base de datos.
-    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
-    antes de guardarlo."""
+    Añadido: deduplicación por message_hash (o por hash calculado de contenido).
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -5405,6 +5415,21 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
+        # Compute a deterministic message hash if not provided (numero + mensaje + imagen_url)
+        if not message_hash:
+            key = f"{numero}|{mensaje_limpio or ''}|{imagen_url or ''}"
+            message_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
+
+        # Check per-request saved hashes to avoid double-insert during same request
+        try:
+            saved = getattr(g, '_saved_message_hashes', set())
+            if message_hash in saved:
+                app.logger.info(f"⚠️ Duplicate detected in guardar_conversacion (skipping). numero={numero} hash={message_hash}")
+                return False
+        except Exception:
+            # if g not available, keep going (best-effort)
+            pass
+
         # Primero asegurar que el contacto existe con su información actualizada
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
@@ -5412,7 +5437,6 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
@@ -5422,7 +5446,13 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 Conversación guardada para {numero}")
+        # Mark this message as saved for the current request
+        try:
+            g._saved_message_hashes.add(message_hash)
+        except Exception:
+            pass
+
+        app.logger.info(f"💾 Conversación guardada para {numero} (hash={message_hash})")
         return True
 
     except Exception as e:
@@ -6245,94 +6275,6 @@ def webhook():
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
         
-        
-                # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
-        # Primero, comprobar si es una cita/pedido usando el análisis mejorado
-        info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
-            
-        if info_cita and info_cita.get('servicio_solicitado'):
-            app.logger.info(f"✅ Información de cita/pedido detectada en webhook: {json.dumps(info_cita)}")
-                
-            # Comprobar si hay suficientes datos
-            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            if datos_completos:
-                # Guardar la cita y enviar notificaciones
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    app.logger.info(f"✅ Cita/pedido guardado con ID: {cita_id}")
-                    # Enviar alertas y confirmación
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-                    respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
-                    enviar_mensaje(numero, respuesta, config)
-                    guardar_conversacion(numero, texto, respuesta, config)
-                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                    return 'OK', 200
-                
-        # --- Reemplazo: Manejo unificado para el fallback de detección de pedido/cita ---
-        analisis_pedido = detectar_pedido_inteligente(texto, numero, config=config)
-        if analisis_pedido and analisis_pedido.get('es_pedido'):
-            # Si además parece una solicitud de cita por keywords, tratamos como cita (mantener flujo de citas)
-            if detectar_solicitud_cita_keywords(texto, config):
-                app.logger.info(f"📅 Solicitud de cita detectada para {numero}: '{texto}'")
-                info_cita = extraer_info_cita_mejorado(texto, numero, obtener_historial(numero, limite=5, config=config), config)
-                if info_cita and info_cita.get('servicio_solicitado'):
-                    datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                    if datos_completos:
-                        cita_id = guardar_cita(info_cita, config)
-                        if cita_id:
-                            enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                            enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                            guardar_conversacion(numero, texto, f"Cita/pedido guardado ID #{cita_id}", config)
-                            return 'OK', 200
-                    else:
-                        # Pedir datos faltantes al usuario (misma UX que antes)
-                        mensaje_faltantes = "¡Perfecto! Para agendar tu cita, necesito un poco más de información:\n\n"
-                        if 'fecha' in faltantes:
-                            mensaje_faltantes += "📅 ¿Qué fecha prefieres? (ej: mañana, 15/10/2023)\n"
-                        if 'hora' in faltantes:
-                            mensaje_faltantes += "⏰ ¿A qué hora te viene bien?\n"
-                        if 'nombre' in faltantes:
-                            mensaje_faltantes += "👤 ¿Cuál es tu nombre completo?\n"
-                        mensaje_faltantes += "\nPor favor, responde con esta información y agendo tu cita automáticamente."
-                        enviar_mensaje(numero, mensaje_faltantes, config)
-                        guardar_conversacion(numero, texto, mensaje_faltantes, config)
-                        return 'OK', 200
-
-            # Si NO es una solicitud de "cita" por keywords, tratar como pedido y continuar el flujo automático
-            else:
-                app.logger.info(f"📦 Pedido inteligente detectado para {numero} — entrando a manejar_pedido_automatico")
-                try:
-                    respuesta = manejar_pedido_automatico(numero, texto, analisis_pedido, config)
-                    if respuesta:
-                        enviar_mensaje(numero, respuesta, config)
-                        guardar_conversacion(numero, texto, respuesta, config)
-                    return 'OK', 200
-                except Exception as e:
-                    app.logger.error(f"🔴 Error manejando pedido automático: {e}")
-                    # Fallback: no notificar administradores aquí; dejar que el flujo normal continúe
-                    return 'OK', 200
-        # --- fin reemplazo ---
-        # 2. DETECTAR INTERVENCIÓN HUMANA
-        if detectar_intervencion_humana_ia(texto, numero, config):
-            app.logger.info(f"🚨 Solicitud de intervención humana detectada de {numero}")
-            historial = obtener_historial(numero, limite=5, config=config)
-            info_intervencion = extraer_info_intervencion(texto, numero, historial, config)
-            # Generar un resumen legible para los administradores
-            resumen = resumen_rafa(numero, config) if hasattr(globals().get('resumen_rafa'), '__call__') else None
-
-            if info_intervencion:
-                app.logger.info(f"📋 Información de intervención: {json.dumps(info_intervencion, indent=2)}")
-                # Llamada correcta: (numero_cliente, mensaje_clave, resumen, config)
-                enviar_alerta_humana(numero, texto, resumen, config)
-                respuesta = "🚨 He solicitado la intervención de un agente humano. Un representante se comunicará contigo a la brevedad."
-            else:
-                respuesta = "He detectado que necesitas ayuda humana. Un agente se contactará contigo pronto."
-            enviar_mensaje(numero, respuesta, config)
-            guardar_conversacion(numero, texto, respuesta, config)
-            actualizar_kanban(numero, columna_id=1, config=config)
-            return 'OK', 200
-        
         procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
         return 'OK', 200 
         
@@ -6615,9 +6557,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         app.logger.error(traceback.format_exc())
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, message_hash=None):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
+    Ahora evita doble-insert dentro de la misma petición usando message_hash.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -6625,29 +6568,51 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
+        # Compute deterministic hash if not provided
+        if not message_hash:
+            key = f"{numero}|{texto_limpio or ''}|{imagen_url or ''}"
+            message_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
+
+        # Dedup check (per-request)
+        try:
+            saved = getattr(g, '_saved_message_hashes', set())
+            if message_hash in saved:
+                app.logger.info(f"⚠️ Duplicate detected in guardar_mensaje_inmediato (skipping). numero={numero} hash={message_hash}")
+                return False
+        except Exception:
+            pass
+
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Add detailed logging before saving the message
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()} (hash={message_hash})")
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen))
 
-        # Get the ID of the inserted message for tracking
+        # Get the ID of the inserted message for tracking (optional)
         cursor.execute("SELECT LAST_INSERT_ID()")
-        msg_id = cursor.fetchone()[0]
+        try:
+            msg_id = cursor.fetchone()[0]
+        except Exception:
+            msg_id = None
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        # Mark saved
+        try:
+            g._saved_message_hashes.add(message_hash)
+        except Exception:
+            pass
+
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (hash={message_hash})")
         return True
 
     except Exception as e:
