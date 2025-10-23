@@ -87,7 +87,7 @@
     /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 0.12rem;
+        padding: 0.4rem;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
@@ -96,7 +96,6 @@
         flex-direction: column;
         gap: 0.15rem;
         font-size: 0.78rem;
-        height: 5%;
         align-items: center;
         justify-content: center;
         text-align: center;
@@ -104,20 +103,19 @@
         min-height: 72px;
     }
 
-        /* make the numeric value stand out but compact */
+        /* make the numeric value stand out and allow full height */
         .stat-card > div {
-            font-size: 1rem;
-            font-weight: 350;
+            font-size: 1.05rem;
+            font-weight: 600;
             color: #222;
-            line-height: 1;
-            height: 8px;
+            line-height: 1.2;
             display: flex;
             align-items: center;
             justify-content: center;
             width: 100%;
             box-sizing: border-box;
-            padding: 0 3px;
-            overflow: hidden;
+            padding: 0 6px;
+            overflow: visible; /* allow full number to show */
             text-overflow: ellipsis;
             white-space: nowrap;
         }
@@ -170,6 +168,9 @@
 
             .stat-card > div {
                 font-size: 1.1rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
             }
 
         .tabs a {
