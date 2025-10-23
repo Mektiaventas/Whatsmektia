@@ -16,10 +16,10 @@
         cursor: pointer;
     }
 
-        .tabs a.active {
-            background-color: #1f4e79;
-            color: white;
-        }
+    .tabs a.active {
+        background-color: #1f4e79;
+        color: white;
+    }
 
     .stats {
         margin-top: 20px;
@@ -74,13 +74,8 @@
     }
 
     /* Hidden by default for tab panes */
-    .tab-pane {
-        display: none;
-    }
-
-        .tab-pane.active {
-            display: block;
-        }
+    .tab-pane { display: none; }
+    .tab-pane.active { display: block; }
 </style>
 
 <div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
@@ -130,6 +125,7 @@
                 <div id="planDisponibles">—</div>
             </div>
         </div>
+
         <div class="chart-container" style="height:300px;">
             <canvas id="remainingChart"></canvas>
         </div>
