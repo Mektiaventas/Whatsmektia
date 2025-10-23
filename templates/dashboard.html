@@ -216,18 +216,18 @@
             <canvas id="barChart" style="display: block; box-sizing: border-box; height: 400px; width: 1168px;" width="1460" height="500"></canvas>
         </div>
     </div>
-
+    <div class="stat-card">
+        <strong>Conversaciones disponibles (plan):</strong>
+        <div id="planDisponibles">—</div>
+    </div>
+    <div class="stat-card">
+        <strong>Conversaciones consumidas (plan):</strong>
+        <div id="planConsumidos">—</div>
+    </div>
     <!-- Conversaciones pane (default when no tab param) -->
     <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') %}active{% endif %}">
         <div class="stats" style="margin-top:0;">
-            <div class="stat-card">
-                <strong>Conversaciones disponibles (plan):</strong>
-                <div id="planDisponibles">—</div>
-            </div>
-            <div class="stat-card">
-                <strong>Conversaciones consumidas (plan):</strong>
-                <div id="planConsumidos">—</div>
-            </div>
+
         </div>
 
         <div class="chart-container" style="height:300px;">
