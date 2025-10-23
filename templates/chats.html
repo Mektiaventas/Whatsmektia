@@ -681,8 +681,8 @@ function activarEdicionAlias(parent) {
             return picker;
         }
 
-        // Direct handler on trigger to avoid delegation edge-cases
-        const trigger = document.getElementById('emoji-pick-btn') || document.querySelector('.emoji-btn');
+        // dentro de setupEmojiPicker(): sustituir la asignación de `trigger` por esta línea (más tolerante)
+        const trigger = document.querySelector('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
         if (trigger) {
             trigger.addEventListener('click', function (ev) {
                 ev.preventDefault();
