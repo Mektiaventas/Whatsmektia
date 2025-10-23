@@ -6101,15 +6101,7 @@ def webhook():
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                es_mi_numero=False, es_archivo=False, incoming_saved=False):
-    """
-    Re-implementación mejorada de procesar_mensaje_unificado.
 
-    Cambios principales:
-    - Añadido parámetro incoming_saved: si True, el webhook ya guardó el mensaje entrante.
-      En ese caso se actualiza la fila existente con actualizar_respuesta(...) en vez de insertar.
-    - Helper persistir_respuesta centraliza la lógica de update/fallback insert.
-    - Mantiene la lógica previa para llamadas a la IA y ejecución de acciones.
-    """
     def persistir_respuesta(numero_dest, incoming_saved_flag, incoming_text, respuesta_text, cfg, imagen_url=None, es_imagen_flag=False):
         try:
             if incoming_saved_flag:
@@ -6395,10 +6387,25 @@ Reglas IMPORTANTES (RESPÉTALAS):
                         persistir_respuesta(numero, incoming_saved, texto_original, txt, config)
                         return True
 
-                # Unknown function -> log and no-op
+                # Reemplazo del handler de función desconocida dentro de procesar_mensaje_unificado
                 app.logger.warning(f"⚠️ IA solicitó función desconocida: {fn}")
-                enviar_mensaje(numero, "Lo siento, no puedo ejecutar esa acción automáticamente.", config)
-                persistir_respuesta(numero, incoming_saved, texto_original, "Intento de función desconocida por IA", config)
+
+                # Mejor respuesta al usuario: ofrecer ayuda en lugar de un rechazo seco
+                mens = (
+                    "Puedo ayudarte con eso, pero necesito confirmar cómo quieres que proceda. "
+                    "¿Quieres que te envíe el plan de estudios completo, un resumen de las materias, "
+                    "las horas/duración o los requisitos de ingreso? Responde con: "
+                    "'temario', 'resumen', 'duración' o 'requisitos', o escribe lo que prefieras."
+                )
+                try:
+                    enviar_mensaje(numero, mens, config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, mens, config)
+                except Exception as e:
+                    # Fallback muy sencillo si enviar_mensaje falla
+                    app.logger.warning(f"⚠️ No se pudo enviar el mensaje de clarificación: {e}")
+                    # Guardar una nota en conversaciones para trazabilidad
+                    persistir_respuesta(numero, incoming_saved, texto_original, "Intento de función desconocida por IA (usuario notificado)", config)
+
                 return True
 
             # Si no hay call_function, usar intent para comportamientos comunes
