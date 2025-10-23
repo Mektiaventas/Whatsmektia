@@ -6098,20 +6098,33 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
 
+def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False):
+    """
+    Save the bot response in a way that avoids duplicating the incoming user message.
+    - If incoming_saved is True, try to update the existing incoming message row with respuesta using actualizar_respuesta().
+    - Otherwise insert a new row using guardar_conversacion().
+    Returns True on success, False otherwise.
+    """
+    try:
+        if incoming_saved:
+            try:
+                # Prefer updating the existing incoming message so we don't insert a duplicate user row
+                return actualizar_respuesta(numero, mensaje, respuesta, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta failed, falling back to guardar_conversacion: {e}")
+                # fallback to insert if update fails
+                return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+        else:
+            return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+    except Exception as e:
+        app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
+        return False
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante:
-    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
-      (keyword shortcut para UX inmediata).
-    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
-    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
-    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
-    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
-    - Guarda la conversación/resultados en BD.
-    - Retorna True si procesado OK, False en fallo.
-
+    Flujo unificado para procesar un mensaje entrante.
     incoming_saved: boolean indicating the webhook already persisted the incoming message
                     (so callers can avoid double-saving). Default False for backward compatibility.
     """
@@ -6121,33 +6134,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         texto_norm = (texto or "").strip().lower()
 
-        # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
-        # This gives immediate UX for common user requests to receive the published PDF/catalog.
+        # === Shortcut: catálogo/pdf/flyer ===
         catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
         if any(k in texto_norm for k in catalog_keywords):
             app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
-                # pero dejamos un registro por seguridad si no lo hizo.
-                if sent:
-                    # only save a user->bot record if webhook didn't already persist the incoming message
-                    if not incoming_saved:
-                        guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
-                    else:
-                        # Save only the bot response to avoid double-inserting the incoming message
-                        guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
-                else:
-                    if not incoming_saved:
-                        guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
-                    else:
-                        guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
 
-        # Historial reciente
+        # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -6156,11 +6157,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
-        # Catálogo / precios (resumido y estructurado)
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
-        # Build structured catalog list to send to the model (reduce hallucination)
         catalog_list = []
         for p in precios:
             try:
@@ -6176,11 +6175,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             except Exception:
                 continue
 
-        # Bloque de asesores (sólo nombres)
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
-        # Información multimodal si viene imagen/audio
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -6193,7 +6190,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # System prompt con reglas estrictas para evitar invenciones
+        # --- System prompt (strict rules to avoid hallucinations) ---
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
@@ -6211,26 +6208,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
    - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
+   - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
    - save_cita: object|null
    - notify_asesor: boolean
-   - followups: [ "pregunta corta 1", ... ]
+   - followups: [ ... ]
    - confidence: 0.0-1.0
-   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
-
+   - source: "catalog" | "none"
 7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
 8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
-        # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
         user_content = {
             "mensaje_actual": texto or "",
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
+            "catalogo": catalog_list,
             "catalogo_texto_resumen": texto_catalogo
         }
 
@@ -6239,7 +6234,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ]
 
-        # Llamada al modelo (Deepseek)
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
 
@@ -6248,21 +6242,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         data = resp.json()
         raw = data['choices'][0]['message']['content']
         if isinstance(raw, list):
-            raw = "".join([ (r.get('text') if isinstance(r, dict) else str(r)) for r in raw ])
+            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
-        # Extraer JSON con regex y parsear
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                # avoid duplicating incoming save if webhook already stored the incoming message
-                if not incoming_saved:
-                    guardar_conversacion(numero, texto, fallback_text, config)
-                else:
-                    guardar_conversacion(numero, texto, fallback_text, config)
+                registrar_respuesta_bot(numero, texto, fallback_text, config, incoming_saved=incoming_saved)
                 return True
             return False
 
@@ -6272,7 +6261,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
 
-        # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
@@ -6282,7 +6270,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
+        # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
@@ -6294,33 +6282,21 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
-                if not incoming_saved:
-                    guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
-                else:
-                    guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
+                registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
 
-        # If AI requests to send a document but didn't provide one, try enviar_catalogo() as fallback
+        # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                if sent:
-                    if not incoming_saved:
-                        guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
-                    else:
-                        guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
-                else:
-                    enviar_mensaje(numero, "No encontré un catálogo publicado para enviar. ¿Deseas que te comparta la lista de programas por aquí?", config)
-                    if not incoming_saved:
-                        guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
-                    else:
-                        guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
+                msg_resp = "Te envié el catálogo solicitado." if sent else "No encontré catálogo publicado."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
 
-        # If save_cita requested: ensure phone and minimal fields
+        # GUARDAR CITA
         if save_cita:
             try:
                 save_cita.setdefault('telefono', numero)
@@ -6337,16 +6313,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                        if not incoming_saved:
-                            guardar_conversacion(numero, texto, respuesta_text, config)
-                        else:
-                            guardar_conversacion(numero, texto, respuesta_text, config)
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
                     app.logger.warning("⚠️ guardar_cita devolvió None")
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
-
             return True
 
         # ENVIAR IMAGEN
@@ -6355,19 +6327,23 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                # avoid duplicating incoming save; still record bot response and image
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
+                registrar_respuesta_bot(
+                    numero, texto, respuesta_text, config,
+                    imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"),
+                    es_imagen=True,
+                    incoming_saved=incoming_saved
+                )
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
 
-        # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
+        # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 enviar_documento(numero, document_field, os.path.basename(document_field), config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
@@ -6377,15 +6353,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
                 enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # Aplicar restricciones antes de enviar
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
 
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
