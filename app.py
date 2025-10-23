@@ -6206,7 +6206,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
-                    "mensualidad": str(p.get('mensualidad') or "")
+                    "mensualidad": str(p.get('mensualidad') or ""),
+                    "imagen": str(p.get('imagen') or "")
                 })
             except Exception:
                 continue
@@ -6397,136 +6398,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
 
             return True
-
-        # Early image resolution & send block (to avoid contradictions)
-        image_sent = False
-        imagen_para_enviar = None
-        imagen_url_to_save = None
-        try:
-            # 1) explicit from AI
-            if image_field:
-                imagen_para_enviar = image_field
-
-            # 2) detect SKU in AI text or user text and lookup product image
-            if not imagen_para_enviar:
-                sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
-                if sku_candidate:
-                    producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
-                    if producto and producto.get('imagen'):
-                        imagen_para_enviar = producto.get('imagen')
-
-            # 3) sanitize filename-like values
-            if imagen_para_enviar and isinstance(imagen_para_enviar, str):
-                imagen_para_enviar = imagen_para_enviar.strip()
-
-            # If we found an image, send it BEFORE sending any negative "no images" text.
-            if imagen_para_enviar:
-                try:
-                    sent_image = enviar_imagen(numero, imagen_para_enviar, config)
-                    if sent_image:
-                        image_sent = True
-                        # Build public URL to store in DB (best effort)
-                        imagen_url_to_save = imagen_para_enviar
-                        if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
-                            dominio = config.get('dominio') or os.getenv('MI_DOMINIO') or ''
-                            if dominio and not dominio.startswith('http'):
-                                dominio = 'https://' + dominio
-                            if dominio:
-                                try:
-                                    _, tenant_slug = get_productos_dir_for_config(config)
-                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_para_enviar)}"
-                                except Exception:
-                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_para_enviar)}"
-                        # If AI said "no images", replace that part to avoid contradiction
-                        respuesta_lower = (respuesta_text or "").lower()
-                        negative_indicators = ['no tengo', 'no hay imágenes', 'no tenemos imágenes', 'no tengo acceso', 'no disponemos', 'no puedo enviar imágenes', 'no images', 'currently no']
-                        if any(ind in respuesta_lower for ind in negative_indicators):
-                            respuesta_text = "Te envío la imagen del producto. ¿Deseas más fotos o información adicional?"
-                        # Save a bot-conversacion record indicating image was sent
-                        try:
-                            guardar_respuesta_imagen(numero, imagen_url_to_save, config, nota='[Imagen enviada]')
-                        except Exception as e:
-                            app.logger.debug(f"⚠️ guardar_respuesta_imagen falló: {e}")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ enviar_imagen early attempt failed for {imagen_para_enviar}: {e}")
-        except Exception as e:
-            app.logger.debug(f"⚠️ Error resolving early image: {e}")
-
-        # --- NEW: when source == "catalog" enrich respuesta_text with product data and ensure image is sent/saved ---
-        try:
-            if source == "catalog":
-                # Allow decision to include product identifiers like 'sku' or 'product_sku'
-                sku_candidate = None
-                # 1) check explicit fields from AI decision
-                for key in ('sku', 'product_sku', 'producto_sku'):
-                    v = decision.get(key)
-                    if v and isinstance(v, str) and v.strip():
-                        sku_candidate = v.strip()
-                        break
-                # 2) fallbacks: try to find sku in respuesta_text or original user text
-                if not sku_candidate:
-                    sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
-                if sku_candidate:
-                    try:
-                        producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
-                        if producto:
-                            # Build short product block
-                            nombre_prod = (producto.get('servicio') or producto.get('modelo') or '').strip()
-                            sku_val = (producto.get('sku') or '').strip()
-                            precio = producto.get('precio_menudeo') or producto.get('precio') or producto.get('costo') or ''
-                            descripcion = (producto.get('descripcion') or '').strip()
-                            prod_lines = []
-                            if nombre_prod:
-                                prod_lines.append(f"*{nombre_prod}*")
-                            if sku_val:
-                                prod_lines.append(f"SKU: {sku_val}")
-                            if precio:
-                                try:
-                                    precio_f = float(re.sub(r'[^\d.]', '', str(precio))) if precio else None
-                                    precio_text = f"${precio_f:,.2f}" if precio_f is not None else str(precio)
-                                except Exception:
-                                    precio_text = str(precio)
-                                prod_lines.append(f"Precio: {precio_text}")
-                            if descripcion:
-                                # keep description short
-                                desc_short = descripcion if len(descripcion) <= 200 else descripcion[:197] + "..."
-                                prod_lines.append(desc_short)
-                            producto_info_block = "\n".join(prod_lines)
-                            # Prepend or replace respuesta_text with product info (preserve AI text if present)
-                            if respuesta_text:
-                                respuesta_text = f"{producto_info_block}\n\n{respuesta_text}"
-                            else:
-                                respuesta_text = producto_info_block
-
-                            # If product has image and we haven't sent an image yet, send it now
-                            prod_img = producto.get('imagen')
-                            if prod_img and not image_sent:
-                                try:
-                                    sent = enviar_imagen(numero, prod_img, config)
-                                    if sent:
-                                        image_sent = True
-                                        imagen_url_to_save = prod_img
-                                        if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
-                                            dominio = config.get('dominio') or os.getenv('MI_DOMINIO') or ''
-                                            if dominio and not dominio.startswith('http'):
-                                                dominio = 'https://' + dominio
-                                            if dominio:
-                                                try:
-                                                    _, tenant_slug = get_productos_dir_for_config(config)
-                                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(prod_img)}"
-                                                except Exception:
-                                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(prod_img)}"
-                                        try:
-                                            guardar_respuesta_imagen(numero, imagen_url_to_save, config, nota='[Imagen producto enviada]')
-                                        except Exception:
-                                            pass
-                                except Exception as e:
-                                    app.logger.warning(f"⚠️ No se pudo enviar imagen del producto {prod_img}: {e}")
-                    except Exception as e:
-                        app.logger.debug(f"⚠️ Error enriqueciendo respuesta con datos de producto para sku='{sku_candidate}': {e}")
-        except Exception as e:
-            app.logger.debug(f"⚠️ Error en bloque de enriquecimiento de catálogo: {e}")
-
         # ENVIAR IMAGEN (intent-specific) - skip if already sent early
         if intent == "ENVIAR_IMAGEN" and image_field and not image_sent:
             try:
