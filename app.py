@@ -5477,6 +5477,51 @@ def resumen_rafa(numero, config=None):
         app.logger.error(f"Error generando resumen: {e}")
         return f"Error generando resumen para {numero}"
 
+def actualizar_o_guardar_respuesta(numero, mensaje, incoming_msg_id, respuesta_text, imagen_url=None, es_imagen=False, config=None):
+    """
+    Intenta actualizar la fila del mensaje entrante usando incoming_msg_id.
+    Si no hay incoming_msg_id o la actualización falla, intenta actualizar por texto
+    (actualizar_respuesta) y como último recurso inserta usando guardar_conversacion.
+    Retorna True si alguna acción tuvo éxito.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        # 1) Preferir actualizar por id si lo tenemos
+        if incoming_msg_id:
+            try:
+                ok = actualizar_respuesta_por_id(incoming_msg_id, respuesta_text, imagen_url=imagen_url, es_imagen=es_imagen, config=config)
+                if ok:
+                    app.logger.info(f"🔄 actualizar_o_guardar_respuesta: updated by id={incoming_msg_id} for {numero}")
+                    return True
+                else:
+                    app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: update by id failed (id={incoming_msg_id}), falling back")
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: exception updating id={incoming_msg_id}: {e}")
+
+        # 2) Intentar actualizar por texto (último mensaje pendiente)
+        try:
+            ok = actualizar_respuesta(numero, mensaje, respuesta_text, config=config)
+            if ok:
+                app.logger.info(f"🔄 actualizar_o_guardar_respuesta: updated by message match for {numero}")
+                return True
+        except Exception as e:
+            app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: actualizar_respuesta failed: {e}")
+
+        # 3) Fallback final: insert (solo si todo lo anterior falló)
+        try:
+            guardar_conversacion(numero, mensaje, respuesta_text, config=config, imagen_url=imagen_url, es_imagen=es_imagen)
+            app.logger.info(f"💾 actualizar_o_guardar_respuesta: fallback insert for {numero}")
+            return True
+        except Exception as e:
+            app.logger.error(f"❌ actualizar_o_guardar_respuesta: fallback guardar_conversacion failed: {e}")
+            return False
+
+    except Exception as e:
+        app.logger.error(f"🔴 actualizar_o_guardar_respuesta unexpected error: {e}")
+        return False
+
 @app.route('/actualizar-contactos')
 def actualizar_contactos():
     """Endpoint para actualizar información de todos los contactos"""

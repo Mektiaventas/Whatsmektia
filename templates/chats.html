@@ -463,60 +463,79 @@ function crearNuevoChatHTML(chat) {
 
 /* ===================== MESSAGES FOR SELECTED CHAT: incremental polling ===================== */
 
-    let lastMessageTsMsForSelected = 0;
+let lastMessageTsMsForSelected = 0;
 
-    function initSelectedMessagesPolling() {
-        // init lastMessageTsMs from DOM if available
-        const lastDom = document.querySelector('#msgs .msg-box[data-ts]:last-child');
-        if (lastDom && lastDom.dataset.ts) {
-            lastMessageTsMsForSelected = Number(lastDom.dataset.ts) || 0;
-        } else {
-            lastMessageTsMsForSelected = 0;
+function initSelectedMessagesPolling() {
+    // Initialize lastMessageId from DOM rendered messages (uses data-msg-id)
+    const lastDom = document.querySelector('#msgs .msg-box[data-msg-id]:last-child');
+    if (lastDom && lastDom.dataset && lastDom.dataset.msgId) {
+        lastMessageIdForSelected = Number(lastDom.dataset.msgId) || 0;
+    } else {
+        lastMessageIdForSelected = 0;
+    }
+    setInterval(() => {
+        if (!selectedChatId || document.hidden) return;
+        pollSelectedMessages();
+    }, 700);
+}
+
+function pollSelectedMessages() {
+    const after = lastMessageIdForSelected || 0;
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`)
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
+            appendMessagesToPanel(data.messages);
+        })
+        .catch(err => console.error('Error polling messages:', err));
+}
+
+function appendMessagesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    messages.forEach(m => {
+        // Normalize id and timestamp reliably
+        const id = m.id ?? m[0] ?? (m['id'] || 0);
+        if (!id) return;
+
+        // Prefer explicit message id duplicate check (covers server-rendered nodes)
+        if (container.querySelector(`.msg-box[data-msg-id="${id}"]`)) {
+            // update last seen id and skip
+            const tsCandidate = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || 0) : 0);
+            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, Number(id) || 0);
+            return;
         }
-        setInterval(() => {
-            if (!selectedChatId || document.hidden) return;
-            pollSelectedMessages();
-        }, 700);
-    }
 
-    function pollSelectedMessages() {
-        const after = lastMessageTsMsForSelected || 0;
-        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`)
-            .then(r => r.json())
-            .then(data => {
-                if (!data || !Array.isArray(data.messages)) return;
-                if (data.messages.length === 0) return;
-                appendMessagesToPanel(data.messages);
-            })
-            .catch(err => console.error('Error polling messages:', err));
-    }
+        // fallback uid generation (keeps prior behavior)
+        const uid = m.uid || `${id}-${(m.sender || m[3] || 'u').toString().charAt(0)}`;
 
-    function appendMessagesToPanel(messages) {
-        const container = document.getElementById('msgs');
-        if (!container) return;
-        messages.forEach(m => {
-            const uid = m.uid || `${m.id}-${(m.sender || 'u').charAt(0)}`;
-            // avoid duplicates based on uid
-            if (container.querySelector(`.msg-box[data-uid="${uid}"]`)) {
-                lastMessageTsMsForSelected = Math.max(lastMessageTsMsForSelected, Number(m.ts_ms || 0));
-                return;
-            }
-            const content = m.content || '';
-            const ts = Number(m.ts_ms) || Date.now();
-            // choose class by sender
-            const cls = (m.sender === 'bot') ? 'msg-box msg-ai' : 'msg-box msg-user';
-            const div = document.createElement('div');
-            div.className = cls;
-            div.setAttribute('data-uid', uid);
-            div.setAttribute('data-ts', ts);
-            // basic rendering (extend if you need images/audio)
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
-            container.appendChild(div);
-            lastMessageTsMsForSelected = Math.max(lastMessageTsMsForSelected, ts);
-            // scroll down
-            container.scrollTop = container.scrollHeight;
-        });
-    }
+        if (container.querySelector(`.msg-box[data-uid="${uid}"]`)) {
+            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, Number(id) || 0);
+            return;
+        }
+
+        const content = m.content || m['content'] || m.mensaje || m['mensaje'] || m.respuesta || m[2] || '';
+        const ts = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+
+        // choose class by sender (be tolerant with field names)
+        const sender = (m.sender || m['sender'] || (m.respuesta ? 'bot' : 'user') || (m[3] ? (String(m[3]).toLowerCase().includes('ai') ? 'bot' : 'user') : 'user'));
+        const cls = (String(sender).toLowerCase() === 'bot') ? 'msg-box msg-ai' : 'msg-box msg-user';
+
+        const div = document.createElement('div');
+        div.className = cls;
+        div.setAttribute('data-uid', uid);
+        div.setAttribute('data-msg-id', String(id));
+        div.setAttribute('data-ts', String(ts));
+        // basic rendering (extend if you need images/audio)
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+        container.appendChild(div);
+
+        lastMessageIdForSelected = Math.max(lastMessageIdForSelected, Number(id) || 0);
+        // scroll down
+        container.scrollTop = container.scrollHeight;
+    });
+}
 
 /* ===================== HELPERS ===================== */
 
