@@ -151,11 +151,10 @@
 
     <div class="tabs" style="margin-bottom: 2rem;">
         <!-- Overview period buttons: active only when tab=overview -->
-        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and request.args.get('tab') == 'overview' else '' }}" href="?period=week">Últimos 7 días</a>
-        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?period=month">Últimos 30 días</a>
-
         <!-- Conversaciones tab: default when no tab param -->
         <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
+        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and request.args.get('tab') == 'overview' else '' }}" href="?period=week">Últimos 7 días</a>
+        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?period=month">Últimos 30 días</a>
     </div>
 
     {# Removed global stats (Chats distintos / Respuestas enviadas) per request.
