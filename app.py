@@ -8203,6 +8203,80 @@ def terms_of_service():
 def data_deletion():
         return render_template('data_deletion.html')
 
+@app.route('/dashboard/conversaciones-data')
+def dashboard_conversaciones_data():
+    """
+    Devuelve JSON con:
+    - plan_info (si el usuario está autenticado)
+    - active_count: número de chats con actividad en las últimas 24h
+    - daily labels/values: número de conversaciones iniciadas por día (period week/month)
+    """
+    try:
+        config = obtener_configuracion_por_host()
+        period = request.args.get('period', 'week')
+        now = datetime.now()
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Conteo de conversaciones iniciadas por día:
+        # Una "conversación iniciada" es el mensaje que no tiene otro mensaje
+        # anterior del mismo número dentro de las últimas 24 horas.
+        cursor.execute("""
+            SELECT DATE(c1.timestamp) as dia, COUNT(*) as cnt
+            FROM conversaciones c1
+            WHERE c1.timestamp >= %s
+              AND NOT EXISTS (
+                SELECT 1 FROM conversaciones c2
+                WHERE c2.numero = c1.numero
+                  AND c2.timestamp < c1.timestamp
+                  AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+              )
+            GROUP BY DATE(c1.timestamp)
+            ORDER BY DATE(c1.timestamp)
+        """, (start,))
+
+        rows = cursor.fetchall()
+        # rows: list of tuples (dia, cnt)
+        labels = []
+        values = []
+        for r in rows:
+            dia = r[0]
+            # dia might be date/datetime or string depending on connector
+            if hasattr(dia, 'strftime'):
+                labels.append(dia.strftime('%Y-%m-%d'))
+            else:
+                labels.append(str(dia))
+            values.append(int(r[1] or 0))
+
+        # Chats activos: distinct numero con mensaje en últimas 24h
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        active_count_row = cursor.fetchone()
+        active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+        cursor.close()
+        conn.close()
+
+        # Plan info si el usuario está autenticado
+        plan_info = None
+        try:
+            au = session.get('auth_user')
+            if au and au.get('user'):
+                plan_info = get_plan_status_for_user(au.get('user'), config=config)
+        except Exception:
+            plan_info = None
+
+        return jsonify({
+            'labels': labels,
+            'values': values,
+            'active_count': active_count,
+            'plan_info': plan_info or {}
+        })
+    except Exception as e:
+        app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/test-alerta')
 def test_alerta():
     config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
