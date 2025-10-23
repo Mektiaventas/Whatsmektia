@@ -6100,7 +6100,7 @@ def webhook():
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               es_mi_numero=False, es_archivo=False):
+                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante:
     - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
@@ -6111,6 +6111,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
     - Guarda la conversación/resultados en BD.
     - Retorna True si procesado OK, False en fallo.
+
+    incoming_saved: boolean indicating the webhook already persisted the incoming message
+                    (so callers can avoid double-saving). Default False for backward compatibility.
     """
     try:
         if config is None:
@@ -6128,9 +6131,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
                 # pero dejamos un registro por seguridad si no lo hizo.
                 if sent:
-                    guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
+                    # only save a user->bot record if webhook didn't already persist the incoming message
+                    if not incoming_saved:
+                        guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
+                    else:
+                        # Save only the bot response to avoid double-inserting the incoming message
+                        guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
                 else:
-                    guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                    if not incoming_saved:
+                        guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                    else:
+                        guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
@@ -6247,7 +6258,11 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                guardar_conversacion(numero, texto, fallback_text, config)
+                # avoid duplicating incoming save if webhook already stored the incoming message
+                if not incoming_saved:
+                    guardar_conversacion(numero, texto, fallback_text, config)
+                else:
+                    guardar_conversacion(numero, texto, fallback_text, config)
                 return True
             return False
 
@@ -6279,7 +6294,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
-                guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
+                if not incoming_saved:
+                    guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
+                else:
+                    guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
                 return True
 
         # If AI requests to send a document but didn't provide one, try enviar_catalogo() as fallback
@@ -6288,10 +6306,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
                 if sent:
-                    guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
+                    if not incoming_saved:
+                        guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
+                    else:
+                        guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
                 else:
                     enviar_mensaje(numero, "No encontré un catálogo publicado para enviar. ¿Deseas que te comparta la lista de programas por aquí?", config)
-                    guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
+                    if not incoming_saved:
+                        guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
+                    else:
+                        guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
@@ -6313,7 +6337,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto, respuesta_text, config)
+                        if not incoming_saved:
+                            guardar_conversacion(numero, texto, respuesta_text, config)
+                        else:
+                            guardar_conversacion(numero, texto, respuesta_text, config)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
                     app.logger.warning("⚠️ guardar_cita devolvió None")
@@ -6328,6 +6355,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
+                # avoid duplicating incoming save; still record bot response and image
                 guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
                 return True
             except Exception as e:
@@ -6372,6 +6400,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
         return False
+
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
     Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
