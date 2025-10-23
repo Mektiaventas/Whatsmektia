@@ -5078,52 +5078,169 @@ def actualizar_respuesta_por_id(conv_id, respuesta, config=None):
         return False
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
-    """Actualiza la respuesta para un mensaje ya guardado"""
+    """Actualiza la respuesta para un mensaje ya guardado
+
+    Antes intentaba hacer UPDATE sobre la fila del usuario (mensaje + respuesta en la misma fila),
+    lo que impedía que el endpoint de polling mostrara la respuesta (porque prioriza `mensaje`).
+    Ahora insertamos una fila separada para la respuesta del bot (mensaje='') asociada al mismo número.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-        
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        
-        # Log before update
-        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
-        
-        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
-        cursor.execute("""
-            UPDATE conversaciones 
-            SET respuesta = %s 
-            WHERE numero = %s 
-              AND mensaje = %s 
-              AND respuesta IS NULL 
-            ORDER BY timestamp DESC 
-            LIMIT 1
-        """, (respuesta, numero, mensaje))
-        
-        # Log results of update
-        if cursor.rowcount > 0:
-            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
-        else:
-            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
+
+        app.logger.info(f"🔄 actualizar_respuesta: intentando registrar respuesta para {numero} (mensaje preview: {str(mensaje)[:80]})")
+
+        # Buscar la fila de mensaje original (si existe) — la usamos sólo para referencia.
+        try:
             cursor.execute("""
-                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
+                SELECT id FROM conversaciones
+                 WHERE numero = %s AND mensaje = %s
+                 ORDER BY timestamp DESC
+                 LIMIT 1
+            """, (numero, mensaje))
+            row = cursor.fetchone()
+        except Exception as e:
+            row = None
+            app.logger.debug(f"⚠️ No se pudo buscar fila original para actualizar_respuesta: {e}")
+
+        # Insertar una fila separada para la respuesta del bot (mensaje vacío) para que el polling la muestre
+        try:
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
                 VALUES (%s, %s, %s, NOW())
-            """, (numero, mensaje, respuesta))
-        
-        conn.commit()
+            """, (numero, '', respuesta))
+            conn.commit()
+            app.logger.info(f"✅ actualizar_respuesta: respuesta insertada como fila separada para {numero}")
+        except Exception as e:
+            conn.rollback()
+            app.logger.error(f"🔴 actualizar_respuesta: fallo insertando fila de respuesta para {numero}: {e}")
+            # Fallback: intentar update como último recurso (mantener compatibilidad)
+            try:
+                cursor.execute("""
+                    UPDATE conversaciones
+                       SET respuesta = %s
+                     WHERE numero = %s
+                       AND mensaje = %s
+                       AND respuesta IS NULL
+                     ORDER BY timestamp DESC
+                     LIMIT 1
+                """, (respuesta, numero, mensaje))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    app.logger.info(f"✅ actualizar_respuesta: fallback UPDATE aplicado para {numero}")
+                else:
+                    # Si tampoco se encontró nada, insertar como nueva fila (segunda oportunidad)
+                    cursor.execute("""
+                        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+                        VALUES (%s, %s, %s, NOW())
+                    """, (numero, mensaje, respuesta))
+                    conn.commit()
+                    app.logger.info(f"✅ actualizar_respuesta: fallback INSERT (segunda oportunidad) para {numero}")
+            except Exception as e2:
+                conn.rollback()
+                app.logger.error(f"🔴 actualizar_respuesta: fallback también falló: {e2}")
+                # Last resort: usar guardar_conversacion
+                guardar_conversacion(numero, mensaje, respuesta, config)
+
         cursor.close()
         conn.close()
-        
-        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
         return True
-        
+
     except Exception as e:
-        app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
-        # Fallback a guardar conversación normal
-        guardar_conversacion(numero, mensaje, respuesta, config)
+        app.logger.error(f"❌ actualizar_respuesta error: {e}")
+        # Fallback a guardar_conversacion para asegurar que la respuesta se persista
+        try:
+            guardar_conversacion(numero, mensaje, respuesta, config)
+        except Exception as ex:
+            app.logger.error(f"🔴 Fallback guardar_conversacion falló: {ex}")
+        return Falsedef actualizar_respuesta(numero, mensaje, respuesta, config=None):
+    """Actualiza la respuesta para un mensaje ya guardado
+
+    Antes intentaba hacer UPDATE sobre la fila del usuario (mensaje + respuesta en la misma fila),
+    lo que impedía que el endpoint de polling mostrara la respuesta (porque prioriza `mensaje`).
+    Ahora insertamos una fila separada para la respuesta del bot (mensaje='') asociada al mismo número.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        app.logger.info(f"🔄 actualizar_respuesta: intentando registrar respuesta para {numero} (mensaje preview: {str(mensaje)[:80]})")
+
+        # Buscar la fila de mensaje original (si existe) — la usamos sólo para referencia.
+        try:
+            cursor.execute("""
+                SELECT id FROM conversaciones
+                 WHERE numero = %s AND mensaje = %s
+                 ORDER BY timestamp DESC
+                 LIMIT 1
+            """, (numero, mensaje))
+            row = cursor.fetchone()
+        except Exception as e:
+            row = None
+            app.logger.debug(f"⚠️ No se pudo buscar fila original para actualizar_respuesta: {e}")
+
+        # Insertar una fila separada para la respuesta del bot (mensaje vacío) para que el polling la muestre
+        try:
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+                VALUES (%s, %s, %s, NOW())
+            """, (numero, '', respuesta))
+            conn.commit()
+            app.logger.info(f"✅ actualizar_respuesta: respuesta insertada como fila separada para {numero}")
+        except Exception as e:
+            conn.rollback()
+            app.logger.error(f"🔴 actualizar_respuesta: fallo insertando fila de respuesta para {numero}: {e}")
+            # Fallback: intentar update como último recurso (mantener compatibilidad)
+            try:
+                cursor.execute("""
+                    UPDATE conversaciones
+                       SET respuesta = %s
+                     WHERE numero = %s
+                       AND mensaje = %s
+                       AND respuesta IS NULL
+                     ORDER BY timestamp DESC
+                     LIMIT 1
+                """, (respuesta, numero, mensaje))
+                conn.commit()
+                if cursor.rowcount > 0:
+                    app.logger.info(f"✅ actualizar_respuesta: fallback UPDATE aplicado para {numero}")
+                else:
+                    # Si tampoco se encontró nada, insertar como nueva fila (segunda oportunidad)
+                    cursor.execute("""
+                        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+                        VALUES (%s, %s, %s, NOW())
+                    """, (numero, mensaje, respuesta))
+                    conn.commit()
+                    app.logger.info(f"✅ actualizar_respuesta: fallback INSERT (segunda oportunidad) para {numero}")
+            except Exception as e2:
+                conn.rollback()
+                app.logger.error(f"🔴 actualizar_respuesta: fallback también falló: {e2}")
+                # Last resort: usar guardar_conversacion
+                guardar_conversacion(numero, mensaje, respuesta, config)
+
+        cursor.close()
+        conn.close()
+        return True
+
+    except Exception as e:
+        app.logger.error(f"❌ actualizar_respuesta error: {e}")
+        # Fallback a guardar_conversacion para asegurar que la respuesta se persista
+        try:
+            guardar_conversacion(numero, mensaje, respuesta, config)
+        except Exception as ex:
+            app.logger.error(f"🔴 Fallback guardar_conversacion falló: {ex}")
         return False
 
 def obtener_asesores_por_user(username, default=2, cap=20):
