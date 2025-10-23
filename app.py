@@ -4385,10 +4385,23 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
         
-    except Exception as e:
-        print(f"Error obteniendo precios: {str(e)}")
-        return []
+def obtener_datos_de_transferencia(config):
+    try:
+        db = get_db_connection(config)
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT * FROM configuracion
+            ORDER BY transferencia_numero, transferencia_nombre, transferencia_banco;
+        """)
+        datos_transferencia = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return datos_transferencia
 
+    except Exception as e:
+        print(f"Error obteniendo datos de transferencia: {str(e)}")
+        return []
+        
 def obtener_producto_por_sku_o_nombre(query, config=None):
     """
     Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
@@ -6363,7 +6376,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
-
+        transferencia = obtener_datos_de_transferencia(config) or []
+        transfer_list = []
+        for t in transferencia:
+            try:
+                transfer_list.append({
+                    "cuenta_bancaria": (p.get('transferencia_numero') or '').strip(),
+                    "nombre_transferencia": (p.get('transferencia_nombre') or '').strip(),
+                    "banco_transferencia": str(p.get('transferencia_banco') or "")
+                })
+            except Exception:
+                continue
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
@@ -6388,6 +6411,7 @@ que el servidor debe ejecutar. Dispones de:
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+- Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
@@ -6415,6 +6439,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
             "catalogo": catalog_list,
+            "transferencias": transfer_list,
             "catalogo_texto_resumen": texto_catalogo
         }
 
