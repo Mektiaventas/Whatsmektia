@@ -152,7 +152,7 @@
   let remainingChart = null;
   let dailyChart = null;
 
-  // expose current period to JS
+  // expose current period to JS (server value on load)
   const CURRENT_PERIOD = '{{ period }}';
 
   // --- Overview bar chart (existente) ---
@@ -225,25 +225,27 @@
 
   document.querySelectorAll('.tabs a').forEach(a => {
       a.addEventListener('click', function(e){
-          e.preventDefault();
           const tab = this.getAttribute('data-tab') || 'overview';
-          // Update URL (optional): add tab param
+          const dp = this.getAttribute('data-period'); // period attribute, if any
           const url = new URL(window.location);
+
+          // update tab param in url
           if (tab === 'conversaciones') {
               url.searchParams.set('tab', 'conversaciones');
           } else {
               url.searchParams.delete('tab');
           }
 
-          // If this anchor has a data-period attribute, set period param accordingly
-          const dp = this.getAttribute('data-period');
+          // If this is a period button, do a full navigation so server re-renders page with new data
           if (dp) {
               url.searchParams.set('period', dp);
-          } else {
-              // keep existing or remove if not desired
-              // url.searchParams.delete('period');
+              // Perform navigation (reload) to ensure server-generated charts / values update
+              window.location.search = url.search;
+              return;
           }
 
+          // For tabs that are handled client-side, prevent default and update history
+          e.preventDefault();
           window.history.replaceState({}, '', url);
           showTab(tab);
       });
@@ -252,7 +254,10 @@
   // --- Load data and render conversations charts ---
   async function loadConversacionesData(){
       try {
-          const period = '{{ period }}' || 'week';
+          // read period from current URL, so after navigation or if user manipulated query params
+          const params = new URLSearchParams(window.location.search);
+          const period = params.get('period') || '{{ period }}' || 'week';
+
           const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
           const json = await res.json();
           if (json.error) {
