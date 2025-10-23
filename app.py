@@ -1904,6 +1904,7 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2182,54 +2183,6 @@ def autenticar_google_calendar(config=None):
         app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
-
-def negocio_contact_block(negocio):
-    """
-    Formatea los datos de contacto del negocio desde la configuración.
-    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
-    """
-    if not negocio or not isinstance(negocio, dict):
-        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
-
-    direccion = (negocio.get('direccion') or '').strip()
-    telefono = (negocio.get('telefono') or '').strip()
-    correo = (negocio.get('correo') or '').strip()
-
-    # Normalizar teléfono para mostrar (no modificar DB)
-    telefono_display = telefono or 'No disponible'
-    correo_display = correo or 'No disponible'
-    direccion_display = direccion or 'No disponible'
-    prompt_comentario = f"""
-        Te acaban de hacer una solicitud de datos, 
-        no me des ningun dato, solo has un comentario agradable expresando
-        que estas a su servicio, algo parecido a decir claro que si.
-        """
-        
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-        
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt_comentario}],
-        "temperature": 0.3,
-        "max_tokens": 500
-    }
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-    response.raise_for_status()
-        
-    data = response.json()
-    respuestita = data['choices'][0]['message']['content'].strip()
-    block = (
-        f"{respuestita}\n\n"
-        "📍 DATOS DEL NEGOCIO:\n\n"
-        f"• Dirección: {direccion_display}\n"
-        f"• Teléfono: {telefono_display}\n"
-        f"• Correo: {correo_display}\n\n"
-        "Visitanos pronto!"
-    )
-    return block
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -2763,7 +2716,6 @@ def get_country_flag(numero):
             return f"https://flagcdn.com/24x18/{codigo}.png"
     return None
 
-# ——— Subpestañas válidas ———
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
 
 @app.route('/kanban/data')
@@ -2947,7 +2899,6 @@ def obtener_max_asesores_from_planes(default=2, cap=10):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
     return default
-
 
 def crear_tabla_citas(config=None):
     """Crea la tabla para almacenar las citas"""
@@ -3267,12 +3218,10 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
 def serve_uploaded_file(filename):
     return send_from_directory(UPLOAD_FOLDER, filename)
 
-# Crear directorio de uploads al inicio
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# Also create the logos subdirectory
 os.makedirs(os.path.join(UPLOAD_FOLDER, 'logos'), exist_ok=True)
 
 def extraer_servicio_del_mensaje(mensaje, config=None):
@@ -3443,9 +3392,6 @@ def publicar_pdf_configuracion():
         app.logger.error(traceback.format_exc())
         flash('❌ Error procesando el archivo', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
-
-
-# Insertar cerca de otros helpers de BD (por ejemplo después de get_clientes_conn y get_db_connection)
 
 def _ensure_cliente_plan_columns():
     """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
@@ -3787,7 +3733,6 @@ def seleccionar_mejor_doc(docs, query):
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
 
-
 def enviar_catalogo(numero, original_text=None, config=None):
     """
     Intenta enviar el PDF público más relevante (documents_publicos),
@@ -4025,7 +3970,6 @@ def load_config(config=None):
         'asesores_list': asesores_list if 'asesores_list' in locals() else []
     }
 
-
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4170,27 +4114,6 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
-def obtener_max_asesores_from_planes(default=2, cap=10):
-    """
-    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
-    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
-    """
-    try:
-        conn = get_clientes_conn()
-        cur = conn.cursor()
-        cur.execute("SELECT MAX(asesores) FROM planes")
-        row = cur.fetchone()
-        cur.close(); conn.close()
-        if row and row[0] is not None:
-            n = int(row[0])
-            if n < 1:
-                return default
-            return min(n, cap)
-    except Exception as e:
-        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
-    return default
-
-
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -4266,26 +4189,6 @@ def obtener_precio_por_id(pid, config=None):
     conn.close()
     return row
 
-def obtener_precio(servicio_nombre: str, config):
-    if config is None:
-        config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT precio_mayoreo, precio_menudeo
-        FROM precios
-        WHERE LOWER(servicio)=LOWER(%s)
-        LIMIT 1;
-    """, (servicio_nombre,))
-    res = cursor.fetchone()
-    cursor.close()
-    conn.close()
-    if res:
-        return Decimal(res[0]), res[1]
-    return None
-
-# ——— Memoria de conversación ———
-# REEMPLAZA la función obtener_historial con esta versión mejorada
 def obtener_historial(numero, limite=5, config=None):
     """Función compatible con la estructura actual de la base de datos"""
     if config is None:
@@ -4336,7 +4239,6 @@ def buscar_sku_en_texto(texto, precios):
             return sku or modelo
     return None
 
-# Agregar esta función para manejar el estado de la conversación
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
     Actualiza el estado de la conversación para mantener contexto
@@ -4571,6 +4473,7 @@ def extraer_hora_del_mensaje(mensaje):
         return "19:00"
     
     return None
+
 def obtener_estado_conversacion(numero, config=None):
     """Obtiene el estado actual de la conversación"""
     if config is None:
@@ -5171,8 +5074,7 @@ def obtener_asesores_por_user(username, default=2, cap=20):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
-      
-# AGREGAR esta función para gestionar conexiones a BD
+
 def obtener_conexion_db(config):
     """Obtiene conexión a la base de datos correcta según la configuración"""
     try:
@@ -5209,42 +5111,6 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
-def obtener_imagen_perfil_alternativo(numero, config=None):
-    """Método alternativo para obtener la imagen de perfil"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    conn = get_db_connection(config)
-    try:
-        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
-        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
-        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
-        
-        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
-        
-        params = {
-            'fields': 'profile_picture_url',
-            'user_numbers': f'[{numero}]',
-            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
-        }
-        
-        response = requests.get(url, params=params, timeout=10)
-        
-        if response.status_code == 200:
-            data = response.json()
-            if 'data' in data and len(data['data']) > 0:
-                contacto = data['data'][0]
-                if 'profile_picture_url' in contacto:
-                    return contacto['profile_picture_url']
-        
-        return None
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en método alternativo: {e}")
-        return None
-    finally:
-        conn.close()
-
 def obtener_nombre_mostrado_por_numero(numero, config=None):
     """
     Retorna el nombre a mostrar para un número de contacto.
@@ -5272,7 +5138,6 @@ def obtener_nombre_mostrado_por_numero(numero, config=None):
         app.logger.debug(f"⚠️ obtener_nombre_mostrado_por_numero error: {e}")
     return numero
 
-# Patch: use nombre mostrado en notificaciones de pedido/cita
 def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=None):
     """
     Envía notificación al administrador cuando se detecta un pedido o cita.
@@ -5344,7 +5209,6 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         app.logger.error(f"Error enviando notificación de pedido/cita: {e}")
         return False
 
-# Patch: enviar_alerta_humana mostrar nombre cuando esté disponible
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5374,7 +5238,6 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
     enviar_mensaje('5214493432744', mensaje, config)
     app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} (mostrar: {cliente_mostrado}) desde {config.get('dominio')}")
 
-# Patch: resumen_rafa usar nombre mostrado
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente (muestra nombre si existe)"""
     if config is None:
@@ -5427,8 +5290,7 @@ def actualizar_contactos():
     conn.close()
     
     return f"✅ Actualizados {len(numeros)} contactos"
-       
-# REEMPLAZA la función guardar_conversacion con esta versión mejorada
+
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
     Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
@@ -5548,43 +5410,6 @@ def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
         app.logger.error(f"Error detectando intención: {e}")
         return {"intencion": "OTRO", "confianza": 0.0, "detalles": {}}
 
-"""def manejar_solicitud_cita_mejorado(numero, mensaje, info_cita, config=None):
-
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    # 🔥 VERIFICAR SI ESTAMOS EN MEDIO DE UNA SOLICITUD
-    estado_actual = obtener_estado_conversacion(numero, config)
-    
-    if estado_actual and estado_actual.get('contexto') == 'EN_CITA':
-        # Ya estamos en proceso de cita, usar lógica de continuación
-        return continuar_proceso_cita(numero, mensaje, estado_actual, config)
-    
-    # 🔥 DETECCIÓN MÁS ESTRICTA DE NUEVAS SOLICITUDES
-    es_nueva_solicitud = (
-        detectar_solicitud_cita_keywords(mensaje) and 
-        not es_respuesta_a_pregunta(mensaje) and
-        not estado_actual  # No hay estado previo
-    )
-    
-    if not es_nueva_solicitud:
-        # No es una nueva solicitud, dejar que la IA normal responda
-        return None
-    
-    app.logger.info(f"📅 Nueva solicitud de cita detectada de {numero}")
-    
-    # Iniciar nuevo proceso de cita
-    actualizar_estado_conversacion(numero, "EN_CITA", "solicitar_servicio", 
-                                 {"paso": 1, "intentos": 0}, config)
-    
-    # Determinar tipo de negocio
-    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-    
-    if es_porfirianna:
-        return "¡Hola! 👋 Para tomar tu pedido, necesito que me digas:\n\n1. ¿Qué platillos deseas ordenar?\n2. ¿Para cuándo lo quieres?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
-    else:
-        return "¡Hola! 👋 Para agendar tu cita, necesito que me digas:\n\n1. ¿Qué servicio necesitas?\n2. ¿Qué fecha te viene bien?\n3. ¿Cuál es tu nombre?\n\nPuedes responder todo en un solo mensaje. 😊"
-""" 
 def obtener_citas_pendientes(numero, config=None):
     """
     Obtiene las citas pendientes de un cliente
@@ -5644,8 +5469,6 @@ def modificar_cita(cita_id, nueva_info, config=None):
         app.logger.error(f"Error modificando cita {cita_id}: {e}")
         return False
 
-# ——— Detección y alerta ———
-# REEMPLAZA la función detectar_intervencion_humana_ia con esta versión mejorada
 def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     """
     Detección mejorada de solicitud de intervención humana usando palabras clave
@@ -5787,33 +5610,6 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
-def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
-    if config is None:
-        app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return
-    
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    mensaje += f"👤 *Cliente:* {numero_cliente}\n"
-    mensaje += f"📞 *Número:* {numero_cliente}\n"
-    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
-    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
-    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
-    mensaje += f"{contexto_consulta}\n\n"
-    mensaje += f"_________________________________________\n"
-    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
-    
-    # Enviar mensaje normal (sin template) a tu número personal
-    enviar_mensaje(ALERT_NUMBER, mensaje, config)
-    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
-    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
@@ -5867,7 +5663,6 @@ def enviar_informacion_completa(numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error enviando información completa: {e}")        
 
-# ——— Webhook ———
 @app.route('/webhook', methods=['GET'])
 def webhook_verification():
     # Obtener el host desde los headers para determinar qué verify token usar
@@ -5884,7 +5679,6 @@ def webhook_verification():
         return request.args.get('hub.challenge')
     return 'Token inválido', 403
 
-# Modifica la función obtener_configuracion_por_phone_number_id
 def obtener_configuracion_por_phone_number_id(phone_number_id):
     """Detecta automáticamente la configuración basada en el phone_number_id recibido"""
     for numero, config in NUMEROS_CONFIG.items():
@@ -6739,9 +6533,6 @@ def diagnostico():
     except Exception as e:
         return jsonify({'error': str(e)})    
 
-# Modificar la función home para inyectar plan_info cuando el usuario está autenticado.
-# Reemplaza la parte final de home() donde haces render_template(...) por la versión que incluye plan_info.
-
 @app.route('/home')
 def home():
     config = obtener_configuracion_por_host()
@@ -7146,7 +6937,6 @@ def limpiar_estados_antiguos():
     except Exception as e:
         app.logger.error(f"Error limpiando estados: {e}")
 
-# Ejecutar esta función periódicamente (puedes usar un scheduler)
 def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     """Continúa el proceso de pedido de manera inteligente.
     Añadido: detecta forma de pago y datos de transferencia en las respuestas del usuario.
@@ -7233,7 +7023,6 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
     siguiente_pregunta = generar_pregunta_datos_faltantes(datos.get('datos_obtenidos', {}))
     return siguiente_pregunta
 
-
 def verificar_pedido_completo(datos_obtenidos):
     """Verifica si el pedido tiene todos los datos necesarios.
     Ahora exige: platillos, direccion y forma de pago.
@@ -7297,7 +7086,6 @@ def generar_pregunta_datos_faltantes(datos_obtenidos):
         return "¿Cuál es tu nombre para el pedido?"
 
     return "¿Necesitas agregar algo más a tu pedido?"
-
 
 def confirmar_pedido_completo(numero, datos_pedido, config=None):
     """Confirma el pedido completo. 
@@ -7587,31 +7375,6 @@ def configuracion_tab(tab):
         asesor_count=asesor_count,
         asesores_list=asesores_list
     )
-
-def negocio_contact_block(negocio):
-    """
-    Formatea los datos de contacto del negocio desde la configuración.
-    Si algún campo no está configurado muestra 'No disponible'.
-    (Versión segura: no hace llamadas externas).
-    """
-    if not negocio or not isinstance(negocio, dict):
-        return ("DATOS DEL NEGOCIO:\n"
-                "Dirección: No disponible\n"
-                "Teléfono: No disponible\n"
-                "Correo: No disponible\n\n"
-                "Nota: Los datos no están configurados en el sistema.")
-    direccion = (negocio.get('direccion') or '').strip() or 'No disponible'
-    telefono = (negocio.get('telefono') or '').strip() or 'No disponible'
-    correo = (negocio.get('correo') or '').strip() or 'No disponible'
-
-    block = (
-        f"¡Hola! Estoy a tu servicio. Aquí tienes los datos del negocio:\n\n"
-        f"• Dirección: {direccion}\n"
-        f"• Teléfono: {telefono}\n"
-        f"• Correo: {correo}\n\n"
-        "Si necesitas otra cosa, dime."
-    )
-    return block
 
 def negocio_contact_block(negocio):
     """
@@ -7951,7 +7714,6 @@ def verificar_tablas_bd(config):
         app.logger.error(f"🔴 Error verificando tablas: {e}")
         return False
 
-# Llama esta función al inicio para ambas bases de datos
 with app.app_context():
     # Esta función se ejecutará cuando la aplicación se inicie
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
@@ -8032,8 +7794,6 @@ def kanban_mover():
         conn.commit(); cursor.close(); conn.close()
         return '', 204
     
-   
-
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
         config = obtener_configuracion_por_host()
@@ -8163,7 +7923,6 @@ def obtener_chat_meta(numero, config=None):
         conn.close()
         return meta
 
-# ——— Modificar la función inicializar_chat_meta para ser más robusta ———
 def inicializar_chat_meta(numero, config=None):
     """Inicializa el chat meta usando información existente del contacto"""
     if config is None:
@@ -8207,7 +7966,6 @@ def inicializar_chat_meta(numero, config=None):
         cursor.close()
         conn.close()
 
-# ——— Agregar ruta para reparar Kanban específico ———
 @app.route('/reparar-kanban-porfirianna')
 def reparar_kanban_porfirianna():
     """Repara específicamente el Kanban de La Porfirianna"""
@@ -8284,7 +8042,6 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
         conn.close()
     # No emitas ningún evento aquí
 
-# Add this new function that updates chat_meta immediately when receiving a message
 def actualizar_kanban_inmediato(numero, config=None):
     """Updates the Kanban board immediately when a message is received"""
     if config is None:
@@ -8403,28 +8160,6 @@ def actualizar_info_contacto(numero, config=None):
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
 
-def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
-        if config is None:
-            config = obtener_configuracion_por_host()
-    
-        historial = obtener_historial(numero, limite=5, config=config)
-        
-        # Si es primer mensaje, mantener en "Nuevos"
-        if len(historial) <= 1:
-            return 1  # Nuevos
-        
-        # Si hay intervención humana, mover a "Esperando Respuesta"
-        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
-            return 3  # Esperando Respuesta
-        
-        # Si tiene más de 2 mensajes, mover a "En Conversación"
-        if len(historial) >= 2:
-            return 2  # En Conversación
-        
-        # Si no cumple nada, mantener donde está
-        meta = obtener_chat_meta(numero)
-        return meta['columna_id'] if meta else 1
-
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -8479,7 +8214,6 @@ def obtener_contexto_consulta(numero, config=None):
         app.logger.error(f"Error obteniendo contexto: {e}")
         return "Error al obtener contexto"
 
-# ——— Inicialización al arrancar la aplicación ———
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
