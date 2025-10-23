@@ -152,9 +152,11 @@
     <div class="tabs" style="margin-bottom: 2rem;">
         <!-- Overview period buttons: active only when tab=overview -->
         <!-- Conversaciones tab: default when no tab param -->
-        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
-        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and request.args.get('tab') == 'overview' else '' }}" href="?period=week">Últimos 7 días</a>
-        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?period=month">Últimos 30 días</a>
+        <div class="tabs" style="margin-bottom: 2rem;">
+            <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
+            <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=week">Últimos 7 días</a>
+            <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=month">Últimos 30 días</a>
+        </div>
     </div>
 
     {# Removed global stats (Chats distintos / Respuestas enviadas) per request.
@@ -271,11 +273,15 @@
       }, 200);
   }
 
+
   document.querySelectorAll('.tabs a').forEach(a => {
       a.addEventListener('click', function(e){
           const tab = this.getAttribute('data-tab') || 'overview';
           const dp = this.getAttribute('data-period'); // period attribute, if any
           const url = new URL(window.location);
+
+          // Always prevent default: we control navigation explicitly to avoid races
+          e.preventDefault();
 
           // update tab param in url
           if (tab === 'conversaciones') {
@@ -287,17 +293,17 @@
           // If this is a period button, do a full navigation so server re-renders page with new data
           if (dp) {
               url.searchParams.set('period', dp);
-              // Perform navigation (reload) to ensure server-generated charts / values update
-              window.location.search = url.search;
+              // Use full href navigation (reliable)
+              window.location.href = url.toString();
               return;
           }
 
-          // For tabs that are handled client-side, prevent default and update history
-          e.preventDefault();
+          // For tabs handled client-side, update history and show tab
           window.history.replaceState({}, '', url);
           showTab(tab);
       });
   });
+
 
   // --- Load data and render conversations charts ---
   async function loadConversacionesData(){
