@@ -338,21 +338,15 @@ let aliasTimers = new Map();
 document.addEventListener('DOMContentLoaded', () => {
     enhanceAliasButtons();
     setupEmojiPicker();
-    // start refreshing only if container exists
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats(); // initial load
-        setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-    }
-    // start polling messages for selected chat
-    if (selectedChatId) {
-        initSelectedMessagesPolling();
-    }
-    document.addEventListener('visibilitychange', () => chatAutoRefresh = !document.hidden);
+    // AUTOMATIC UPDATES DISABLED:
+    // The periodic automatic refresh (polling) was removed to avoid duplications and reordering.
+    // To refresh chats/messages now, reload the page or implement a manual refresh button that calls the helper functions.
 });
 
 /* ===================== CHATS LIST: incremental update ===================== */
 
 function actualizarListaChats() {
+    // kept for manual use only (no automatic invocation)
     if (!chatAutoRefresh) return;
     fetch('/chats/data')
         .then(r => r.json())
@@ -410,113 +404,52 @@ function actualizarIncrementalChats(chats) {
     });
 }
 
-function actualizarChatExistente(elemento, chat) {
-    // alias/nombre
-    const aliasView = elemento.querySelector('.alias-view');
-    if (aliasView && aliasView.textContent.trim() !== chat.nombre_mostrado) {
-        aliasView.textContent = chat.nombre_mostrado;
-    }
-    // time
-    const timeEl = elemento.querySelector('.card-time');
-    if (timeEl && chat.ultima_fecha) {
-        timeEl.textContent = formatClientTime(chat.ultima_fecha);
-    }
-    // preview
-    const msgEl = elemento.querySelector('.card-msg');
-    const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
-    if (msgEl && msgEl.textContent.trim() !== previewText) {
-        msgEl.textContent = previewText;
-        elemento.classList.add('new-message');
-        setTimeout(() => elemento.classList.remove('new-message'), 1600);
-    }
-}
+/* ===================== MESSAGES FOR SELECTED CHAT: manual refresh only ===================== */
 
-function crearNuevoChatHTML(chat) {
-    const isSelected = chat.numero === selectedChatId;
-    const avatarUrl = chat.imagen_url || '/static/icons/default-avatar.png';
-    const nombreMostrado = chat.nombre_mostrado || chat.numero;
-    const ultimoMensaje = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
-    return `
-<a href="/chats/${chat.numero}" class="chat-item ${isSelected ? 'selected' : ''}" data-chat-num="${chat.numero}">
-  <div class="card-content">
-    <div class="card-title-row">
-      <div class="card-avatar-section">
-        <img src="${avatarUrl}" class="card-avatar" alt="Avatar"
-             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-      </div>
-      <span class="alias-view" data-num="${chat.numero}">${escapeHtml(nombreMostrado)}</span>
-      <span class="alias-edit" style="display:none;">
-        <input type="text" value="${chat.alias || chat.nombre || ''}" data-num="${chat.numero}" maxlength="100" style="width:110px;">
-      </span>
-      ${'{{ is_admin and "" }}'}
-     </div>
-    <div class="card-meta-row">
-      <span class="card-num">${chat.numero}</span>
-      <span class="card-time">
-        ${chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : ''}
-      </span>
-    </div>
-    <div class="card-msg">${escapeHtml(ultimoMensaje)}</div>
-  </div>
-</a>`;
-}
+/*
+  Automatic polling removed. The helper below can still be used manually:
+  - call actualizarMensajes() in the console or wire a "Refresh" button to call it.
+*/
 
-/* ===================== MESSAGES FOR SELECTED CHAT: incremental polling ===================== */
+async function actualizarMensajes(container) {
+    // Manual fetch helper: fetch new messages after the largest data-msg-id present in DOM
+    try {
+        const msgsContainer = container || document.getElementById('msgs');
+        if (!msgsContainer) return;
+        // Determine last id from DOM
+        const nodes = msgsContainer.querySelectorAll('[data-msg-id]');
+        let maxId = 0;
+        nodes.forEach(n => { const v = Number(n.dataset.msgId) || 0; if (v > maxId) maxId = v; });
+        const after = maxId;
+        const url = `/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`;
+        const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+        if (!res.ok) return;
+        const data = await res.json().catch(() => null);
+        if (!data || !Array.isArray(data.messages)) return;
+        const msgs = data.messages;
+        if (msgs.length === 0) return;
 
-    let lastMessageTsMsForSelected = 0;
-
-    function initSelectedMessagesPolling() {
-        // init lastMessageTsMs from DOM if available
-        const lastDom = document.querySelector('#msgs .msg-box[data-ts]:last-child');
-        if (lastDom && lastDom.dataset.ts) {
-            lastMessageTsMsForSelected = Number(lastDom.dataset.ts) || 0;
-        } else {
-            lastMessageTsMsForSelected = 0;
-        }
-        setInterval(() => {
-            if (!selectedChatId || document.hidden) return;
-            pollSelectedMessages();
-        }, 700);
-    }
-
-    function pollSelectedMessages() {
-        const after = lastMessageTsMsForSelected || 0;
-        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`)
-            .then(r => r.json())
-            .then(data => {
-                if (!data || !Array.isArray(data.messages)) return;
-                if (data.messages.length === 0) return;
-                appendMessagesToPanel(data.messages);
-            })
-            .catch(err => console.error('Error polling messages:', err));
-    }
-
-    function appendMessagesToPanel(messages) {
-        const container = document.getElementById('msgs');
-        if (!container) return;
-        messages.forEach(m => {
-            const uid = m.uid || `${m.id}-${(m.sender || 'u').charAt(0)}`;
-            // avoid duplicates based on uid
-            if (container.querySelector(`.msg-box[data-uid="${uid}"]`)) {
-                lastMessageTsMsForSelected = Math.max(lastMessageTsMsForSelected, Number(m.ts_ms || 0));
-                return;
-            }
-            const content = m.content || '';
-            const ts = Number(m.ts_ms) || Date.now();
-            // choose class by sender
-            const cls = (m.sender === 'bot') ? 'msg-box msg-ai' : 'msg-box msg-user';
+        const wasAtBottom = (msgsContainer.scrollHeight - msgsContainer.clientHeight) <= msgsContainer.scrollTop + 60;
+        for (const m of msgs) {
+            const id = m.id ?? m[0] ?? (m['id'] || 0);
+            if (!id) continue;
+            if (msgsContainer.querySelector(`[data-msg-id="${id}"]`)) continue;
+            // create node
+            const content = m.content || m['content'] || m.mensaje || m['mensaje'] || m.respuesta || m[2] || '';
+            const ts = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+            const sender = (m.sender || m['sender'] || (m.respuesta ? 'bot' : 'user') || 'user');
+            const cls = (String(sender).toLowerCase() === 'bot') ? 'msg-box msg-ai' : 'msg-box msg-user';
             const div = document.createElement('div');
             div.className = cls;
-            div.setAttribute('data-uid', uid);
-            div.setAttribute('data-ts', ts);
-            // basic rendering (extend if you need images/audio)
+            div.setAttribute('data-msg-id', String(id));
             div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
-            container.appendChild(div);
-            lastMessageTsMsForSelected = Math.max(lastMessageTsMsForSelected, ts);
-            // scroll down
-            container.scrollTop = container.scrollHeight;
-        });
+            msgsContainer.appendChild(div);
+        }
+        if (wasAtBottom) msgsContainer.scrollTop = msgsContainer.scrollHeight;
+    } catch (err) {
+        console.error('Error updating messages (manual):', err);
     }
+}
 
 /* ===================== HELPERS ===================== */
 

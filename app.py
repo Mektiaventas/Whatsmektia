@@ -5073,129 +5073,53 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
-def actualizar_respuesta_por_id(msg_id, respuesta, imagen_url=None, es_imagen=None, config=None):
-    """Actualiza la fila de conversaciones por id (no cambia timestamp)."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        # Build dynamic update depending on provided optional params
-        parts = ["respuesta = %s"]
-        params = [respuesta]
-        if imagen_url is not None:
-            parts.append("imagen_url = %s")
-            params.append(imagen_url)
-        if es_imagen is not None:
-            parts.append("es_imagen = %s")
-            params.append(1 if es_imagen else 0)
-        params.append(msg_id)
-        sql = f"UPDATE conversaciones SET {', '.join(parts)} WHERE id = %s"
-        cursor.execute(sql, tuple(params))
-        conn.commit()
-        affected = cursor.rowcount
-        cursor.close()
-        conn.close()
-        app.logger.info(f"🔄 actualizar_respuesta_por_id: id={msg_id} affected={affected}")
-        return affected > 0
-    except Exception as e:
-        app.logger.error(f"🔴 actualizar_respuesta_por_id failed for id={msg_id}: {e}")
-        return False
-
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
-    """Actualiza la respuesta para un mensaje ya guardado.
-    - Primero intenta actualizar por coincidencia exacta (mensaje) y respuesta NULL/''.
-    - Si no encuentra coincidencia exacta, intenta actualizar el último mensaje sin respuesta
-      (respuesta IS NULL OR respuesta = '') para ese número.
-    - Solo si no hay mensaje pendiente real, inserta un nuevo registro (caso extremo).
-    """
+    """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:
         config = obtener_configuracion_por_host()
-
+    
     try:
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
-
-        # Sanitize inputs for matching (same sanitizer used when saving)
-        mensaje_busqueda = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
-
-        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero} at {datetime.now(tz_mx).isoformat()}")
-
-        # 1) Intentar UPDATE por coincidencia exacta (mensaje) y respuesta IS NULL or empty
-        try:
-            cursor.execute("""
-                UPDATE conversaciones 
-                SET respuesta = %s 
-                WHERE numero = %s 
-                  AND mensaje = %s 
-                  AND (respuesta IS NULL OR respuesta = '')
-                ORDER BY timestamp DESC
-                LIMIT 1
-            """, (respuesta, numero, mensaje_busqueda))
-        except Exception:
-            # Fallback a SELECT+UPDATE si el connector no acepta ORDER BY+LIMIT en UPDATE
-            cursor.execute("""
-                SELECT id FROM conversaciones
-                WHERE numero = %s AND mensaje = %s AND (respuesta IS NULL OR respuesta = '')
-                ORDER BY timestamp DESC LIMIT 1
-            """, (numero, mensaje_busqueda))
-            row = cursor.fetchone()
-            if row:
-                msg_id = row[0]
-                cursor.execute("UPDATE conversaciones SET respuesta = %s WHERE id = %s", (respuesta, msg_id))
-
-        # Si la actualización afectó filas, commit y salir
-        if cursor.rowcount > 0:
-            conn.commit()
-            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero} (rows_affected={cursor.rowcount})")
-            cursor.close()
-            conn.close()
-            return True
-
-        # 2) No se encontró por texto: intentar actualizar el último mensaje sin respuesta para este número
+        
+        # Log before update
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        
+        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
         cursor.execute("""
-            SELECT id, mensaje FROM conversaciones
-            WHERE numero = %s AND (respuesta IS NULL OR respuesta = '')
-            ORDER BY timestamp DESC
+            UPDATE conversaciones 
+            SET respuesta = %s 
+            WHERE numero = %s 
+              AND mensaje = %s 
+              AND respuesta IS NULL 
+            ORDER BY timestamp DESC 
             LIMIT 1
-        """, (numero,))
-        last_row = cursor.fetchone()
-        if last_row:
-            try:
-                last_id = last_row[0]
-                cursor.execute("UPDATE conversaciones SET respuesta = %s WHERE id = %s", (respuesta, last_id))
-                conn.commit()
-                app.logger.info(f"✅ TRACKING: Respuesta asociada al último mensaje pendiente (id={last_id}) de {numero}")
-                cursor.close()
-                conn.close()
-                return True
-            except Exception as e:
-                app.logger.warning(f"⚠️ TRACKING: Falla al actualizar último mensaje pendiente: {e}")
-
-        # 3) No hay mensaje pendiente -> insertar nuevo registro (fallback extremo)
-        app.logger.warning(f"⚠️ TRACKING: No se encontró mensaje pendiente para {numero} (texto match falló); insertando nuevo registro como fallback")
-        cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-            VALUES (%s, %s, %s, NOW())
-        """, (numero, sanitize_whatsapp_text(mensaje) if mensaje else mensaje, sanitize_whatsapp_text(respuesta) if respuesta else respuesta))
-
+        """, (respuesta, numero, mensaje))
+        
+        # Log results of update
+        if cursor.rowcount > 0:
+            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
+        else:
+            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
+                VALUES (%s, %s, %s, NOW())
+            """, (numero, mensaje, respuesta))
+        
         conn.commit()
         cursor.close()
         conn.close()
-
-        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero} (insert fallback)")
+        
+        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
         return True
-
+        
     except Exception as e:
         app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
-        # Fallback a guardar conversación normal (mantener comportamiento previo)
-        try:
-            guardar_conversacion(numero, mensaje, respuesta, config)
-        except Exception as ee:
-            app.logger.error(f"❌ TRACKING: fallback guardar_conversacion falló: {ee}")
+        # Fallback a guardar conversación normal
+        guardar_conversacion(numero, mensaje, respuesta, config)
         return False
 
 def obtener_asesores_por_user(username, default=2, cap=20):
@@ -5477,51 +5401,6 @@ def resumen_rafa(numero, config=None):
         app.logger.error(f"Error generando resumen: {e}")
         return f"Error generando resumen para {numero}"
 
-def actualizar_o_guardar_respuesta(numero, mensaje, incoming_msg_id, respuesta_text, imagen_url=None, es_imagen=False, config=None):
-    """
-    Intenta actualizar la fila del mensaje entrante usando incoming_msg_id.
-    Si no hay incoming_msg_id o la actualización falla, intenta actualizar por texto
-    (actualizar_respuesta) y como último recurso inserta usando guardar_conversacion.
-    Retorna True si alguna acción tuvo éxito.
-    """
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    try:
-        # 1) Preferir actualizar por id si lo tenemos
-        if incoming_msg_id:
-            try:
-                ok = actualizar_respuesta_por_id(incoming_msg_id, respuesta_text, imagen_url=imagen_url, es_imagen=es_imagen, config=config)
-                if ok:
-                    app.logger.info(f"🔄 actualizar_o_guardar_respuesta: updated by id={incoming_msg_id} for {numero}")
-                    return True
-                else:
-                    app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: update by id failed (id={incoming_msg_id}), falling back")
-            except Exception as e:
-                app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: exception updating id={incoming_msg_id}: {e}")
-
-        # 2) Intentar actualizar por texto (último mensaje pendiente)
-        try:
-            ok = actualizar_respuesta(numero, mensaje, respuesta_text, config=config)
-            if ok:
-                app.logger.info(f"🔄 actualizar_o_guardar_respuesta: updated by message match for {numero}")
-                return True
-        except Exception as e:
-            app.logger.warning(f"⚠️ actualizar_o_guardar_respuesta: actualizar_respuesta failed: {e}")
-
-        # 3) Fallback final: insert (solo si todo lo anterior falló)
-        try:
-            guardar_conversacion(numero, mensaje, respuesta_text, config=config, imagen_url=imagen_url, es_imagen=es_imagen)
-            app.logger.info(f"💾 actualizar_o_guardar_respuesta: fallback insert for {numero}")
-            return True
-        except Exception as e:
-            app.logger.error(f"❌ actualizar_o_guardar_respuesta: fallback guardar_conversacion failed: {e}")
-            return False
-
-    except Exception as e:
-        app.logger.error(f"🔴 actualizar_o_guardar_respuesta unexpected error: {e}")
-        return False
-
 @app.route('/actualizar-contactos')
 def actualizar_contactos():
     """Endpoint para actualizar información de todos los contactos"""
@@ -5540,99 +5419,41 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
        
+# REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
-    Evita duplicados: si existe un mensaje igual muy reciente sin respuesta, lo actualiza
-    en lugar de insertar uno nuevo. Registra logging diagnóstico.
-    """
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
+        # Sanitize inputs
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
+        # Primero asegurar que el contacto existe con su información actualizada
+        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
 
-        # 1) Buscar la última fila con mismo numero+mensaje
-        cursor.execute("""
-            SELECT id, mensaje, respuesta, timestamp
-              FROM conversaciones
-             WHERE numero = %s AND mensaje = %s
-             ORDER BY timestamp DESC
-             LIMIT 1
-        """, (numero, mensaje_limpio))
-        last = cursor.fetchone()
-
-        now_dt = datetime.now(tz_mx)
-
-        # Umbral para considerar "reciente" (segundos) - evita duplicados por re-procesos rápidos
-        RECENT_SECONDS = 300  # 5 minutos
-
-        if last:
-            last_ts = last.get('timestamp')
-            # Normalizar last_ts a naive/local datetime comparable
-            if last_ts and hasattr(last_ts, 'tzinfo') and last_ts.tzinfo is not None:
-                last_ts_local = last_ts.astimezone(tz_mx).replace(tzinfo=None)
-            else:
-                # if it's naive, assume server local tz near tz_mx for heuristic
-                last_ts_local = last_ts if last_ts else None
-
-            # Si la última fila es reciente y no tiene respuesta -> actualizarla (evitar duplicado)
-            if last.get('respuesta') in (None, ''):
-                if last_ts_local:
-                    delta = (now_dt.replace(tzinfo=None) - last_ts_local).total_seconds()
-                else:
-                    delta = RECENT_SECONDS + 1  # no timestamp -> considerar viejo
-
-                if delta <= RECENT_SECONDS:
-                    # Actualizar esa fila con la respuesta (si hay) y metadata de imagen
-                    update_parts = []
-                    params = []
-                    if respuesta_limpia is not None:
-                        update_parts.append("respuesta = %s")
-                        params.append(respuesta_limpia)
-                    if imagen_url is not None:
-                        update_parts.append("imagen_url = %s")
-                        params.append(imagen_url)
-                    if es_imagen is not None:
-                        update_parts.append("es_imagen = %s")
-                        params.append(1 if es_imagen else 0)
-                    if update_parts:
-                        params.append(last['id'])
-                        sql = f"UPDATE conversaciones SET {', '.join(update_parts)} WHERE id = %s"
-                        cursor.execute(sql, tuple(params))
-                        conn.commit()
-                        app.logger.info(f"🔄 Reusando mensaje existente (id={last['id']}) para {numero} — evitado duplicado")
-                        cursor.close(); conn.close()
-                        return True
-                    else:
-                        # Nada que actualizar (respuesta/imágen vacíos) -> skip
-                        app.logger.info(f"ℹ️ Mensaje existente (id={last['id']}) para {numero} sin cambios — evitado duplicado")
-                        cursor.close(); conn.close()
-                        return True
-
-        # 2) Si no aplicó la actualización, insertar nuevo registro (fallback normal)
+        # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+
         conn.commit()
         cursor.close()
         conn.close()
-        app.logger.info(f"💾 Conversación guardada (insert) para {numero}")
+
+        app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
-        try:
-            cursor.close()
-            conn.close()
-        except:
-            pass
         return False
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
@@ -6293,12 +6114,6 @@ def webhook():
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
 
-        # --- SAVE INCOMING MESSAGE FIRST (prevents duplicates / gives an ID to update later)
-        saved_msg_id = guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
-        if not saved_msg_id:
-            app.logger.warning("⚠️ No se pudo guardar el mensaje entrante antes de procesar; continuar sin id")
-            saved_msg_id = None
-
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
@@ -6308,21 +6123,14 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
-            transcripcion=transcripcion,
-            incoming_msg_id=saved_msg_id
+            transcripcion=transcripcion
         )
 
         if processed_ok:
             app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
             return 'OK', 200
 
-        # Fallback: if unified processor didn't handle it (should be rare now), do not insert duplicate:
-        # If we saved the incoming message already (saved_msg_id), there's nothing else to do.
-        if saved_msg_id:
-            app.logger.info(f"📥 Fallback: incoming message already saved (id={saved_msg_id}) for {numero}")
-            return 'OK', 200
-
-        # Otherwise insert immediate message as before
+        # Fallback: if unified processor didn't handle it, save the incoming message for UI
         guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
         app.logger.info(f"📥 Fallback: saved immediate message for {numero}")
 
@@ -6610,7 +6418,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Retorna el id del mensaje insertado (INT) o False en fallo.
     Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6635,15 +6442,14 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
-        row = cursor.fetchone()
-        msg_id = row[0] if row else None
+        msg_id = cursor.fetchone()[0]
 
         conn.commit()
         cursor.close()
         conn.close()
 
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
-        return msg_id if msg_id else False
+        return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
