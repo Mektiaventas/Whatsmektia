@@ -5947,290 +5947,156 @@ def ver_notificaciones():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # ✅ VERIFICACIÓN CRÍTICA - asegurar que tenemos JSON
+        # Basic validation
         if not request.is_json:
-            app.logger.error("🔴 Error: No se recibió JSON en el webhook")
+            app.logger.error("🔴 Webhook: no JSON payload")
             return 'Invalid content type', 400
-            
         payload = request.get_json()
         if not payload:
-            app.logger.error("🔴 Error: JSON vacío o inválido")
+            app.logger.error("🔴 Webhook: empty JSON")
             return 'Invalid JSON', 400
-            
-        app.logger.info(f"📥 Payload recibido: {json.dumps(payload, indent=2)[:500]}...")
-        
-        # ✅ VERIFICAR ESTRUCTURA BÁSICA DEL PAYLOAD
+
+        app.logger.info(f"📥 Webhook payload: {json.dumps(payload)[:800]}")
+
+        # Basic structure checks
         if 'entry' not in payload or not payload['entry']:
-            app.logger.error("🔴 Error: Payload sin 'entry'")
+            app.logger.error("🔴 Webhook: missing entry")
             return 'Invalid payload structure', 400
-            
         entry = payload['entry'][0]
         if 'changes' not in entry or not entry['changes']:
-            app.logger.error("🔴 Error: Entry sin 'changes'")
+            app.logger.error("🔴 Webhook: missing changes")
             return 'Invalid entry structure', 400
-            
+
         change = entry['changes'][0]['value']
         mensajes = change.get('messages', [])
-        data = request.get_json()
-        try:
-            # Extraer información del contacto del payload
-            if 'contacts' in data['entry'][0]['changes'][0]['value']:
-                contact_info = data['entry'][0]['changes'][0]['value']['contacts'][0]
-                wa_id = contact_info['wa_id']
-                name = contact_info['profile']['name']
-            
-                # Guardar en la base de datos
-                config = obtener_configuracion_por_host()
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
-            
-                cursor.execute("""
-                    INSERT INTO contactos (numero_telefono, nombre, plataforma) 
-                    VALUES (%s, %s, 'WhatsApp')
-                    ON DUPLICATE KEY UPDATE 
-                        nombre = COALESCE(%s, nombre),
-                        fecha_actualizacion = CURRENT_TIMESTAMP
-                """, (wa_id, name, name))
-            
-                conn.commit()
-                cursor.close()
-                conn.close()
-            
-                app.logger.info(f"✅ Contacto guardado desde webhook: {wa_id} - {name}")
-                actualizar_kanban()
-        
-            # Continuar con el procesamiento normal del mensaje
-        
-        except Exception as e:
-            app.logger.error(f"Error procesando webhook: {str(e)}")
-            return jsonify({"status": "error"}), 500
         if not mensajes:
-            app.logger.info("⚠️ No hay mensajes en el payload")
-            return 'OK', 200    
+            app.logger.info("⚠️ Webhook: no messages in payload")
+            return 'OK', 200
 
+        # Try to persist contact info if provided (contacts structure)
+        try:
+            if ('contacts' in entry['changes'][0]['value']):
+                contact = entry['changes'][0]['value']['contacts'][0]
+                wa_id = contact.get('wa_id')
+                name = (contact.get('profile') or {}).get('name')
+                if wa_id:
+                    cfg_tmp = obtener_configuracion_por_host()
+                    conn = get_db_connection(cfg_tmp)
+                    cur = conn.cursor()
+                    cur.execute("""
+                        INSERT INTO contactos (numero_telefono, nombre, plataforma)
+                        VALUES (%s, %s, 'WhatsApp')
+                        ON DUPLICATE KEY UPDATE
+                            nombre = COALESCE(%s, nombre),
+                            fecha_actualizacion = CURRENT_TIMESTAMP
+                    """, (wa_id, name, name))
+                    conn.commit(); cur.close(); conn.close()
+                    app.logger.info(f"✅ Contact saved from webhook: {wa_id} - {name}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Could not save contact from webhook: {e}")
+
+        # Main message
         msg = mensajes[0]
-        numero = msg['from']
-        # Manejo robusto de texto/flags
-        actualizar_kanban_inmediato(numero, config)
-        texto = ''
-        es_imagen = False
-        es_audio = False
-        es_video = False
-        es_archivo = False
-        es_documento = False
-        es_mi_numero = False
+        numero = msg.get('from')
+        if not numero:
+            app.logger.error("🔴 Webhook: message without 'from'")
+            return 'OK', 200
 
-        # NEW: flag to avoid double-saving the same incoming message during one webhook call
-        message_saved = False
-
-        # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
+        # Determine tenant config from phone_number_id if available
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
-        app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
-        
-        # 🔥 OBTENER CONFIGURACIÓN CORRECTA
-        config = None
-        for numero_config, config_data in NUMEROS_CONFIG.items():
-            if str(config_data['phone_number_id']) == str(phone_number_id):
-                config = config_data
-                app.logger.info(f"✅ Configuración encontrada por phone_number_id: {config['dominio']}")
-                break
-                
-        if config is None:
-            app.logger.warning(f"⚠️ No se encontró configuración para phone_number_id: {phone_number_id}")
+        config = obtener_configuracion_por_phone_number_id(phone_number_id) if phone_number_id else obtener_configuracion_por_host()
+        if not config:
             config = obtener_configuracion_por_host()
-            app.logger.info(f"🔄 Usando configuración de fallback: {config.get('dominio', 'desconocido')}")
-        
-        # 🔥 Inicializar/actualizar contacto y kanban
-        nombre_desde_webhook = extraer_nombre_desde_webhook(payload)
-        actualizar_info_contacto(numero, config)  # Para obtener nombre e imagen
-        inicializar_chat_meta(numero, config)
-        actualizar_kanban()
-        if nombre_desde_webhook:
-            actualizar_info_contacto_con_nombre(numero, nombre_desde_webhook, config)
-        else:
-            actualizar_info_contacto(numero, config)
 
-        # 🛑 EVITAR PROCESAR EL MISMO MENSAJE MÚLTIPLES VECES
+        # Ensure kanban/chat meta/contact are present
+        try:
+            actualizar_kanban_inmediato(numero, config)
+            inicializar_chat_meta(numero, config)
+            actualizar_info_contacto(numero, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
+
+        # Deduplication by message id
         message_id = msg.get('id')
         if not message_id:
-            app.logger.error("🔴 Mensaje sin ID, no se puede prevenir duplicados")
+            app.logger.error("🔴 Webhook: message without id, cannot dedupe reliably")
             return 'OK', 200
-            
-        # Crear hash único y comprobar duplicados (no marcar todavía)
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
-
-        # Evitar ignorar audios/imágenes (puedes ajustar si quieres)
-        if not es_audio and not es_imagen and message_hash in processed_messages:
-            app.logger.info(f"⚠️ Mensaje duplicado ignorado: {message_hash}")
+        # quick duplicate check
+        if message_hash in processed_messages:
+            app.logger.info(f"⚠️ Duplicate webhook delivery ignored: {message_hash}")
             return 'OK', 200
-
-        # Decidir marcar después del procesamiento exitoso
-        marcar_luego = True
-        # Agregar a mensajes procesados
         processed_messages[message_hash] = time.time()
+        # cleanup old keys
+        now_ts = time.time()
+        for h, ts in list(processed_messages.items()):
+            if now_ts - ts > 3600:
+                del processed_messages[h]
 
-        # Limpiar mensajes antiguos (más de 1 hora)
-        current_time = time.time()
-        for msg_hash, ts in list(processed_messages.items()):
-            if current_time - ts > 3600:
-                del processed_messages[msg_hash]
-        
-        image_id = None
+        # Parse incoming content (text / image / audio / document)
+        texto = ''
+        es_imagen = es_audio = es_archivo = False
         imagen_base64 = None
         public_url = None
         transcripcion = None
 
-        # Parsear el mensaje entrante
-        actualizar_info_contacto(numero, config)
         if 'text' in msg and 'body' in msg['text']:
-            texto = msg['text']['body'].strip()
-
+            texto = (msg['text']['body'] or '').strip()
         elif 'image' in msg:
             es_imagen = True
-            image_id = msg['image']['id']
-            imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
-            texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
-
-            # Guardar mensaje entrante (sin respuesta aún)
-            guardar_conversacion(numero, texto, None, config, public_url, True)
-            message_saved = True  # <-- mark as saved to avoid a second insert later
-
-            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+            image_id = msg['image'].get('id')
             try:
-                meta = obtener_chat_meta(numero, config)
-                if not meta:
-                    inicializar_chat_meta(numero, config)
-                actualizar_columna_chat(numero, 2, config)  # En Conversación
+                imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (imagen): {e}")
-
-            # ===== NUEVO: Analizar imagen y responder automáticamente =====
-            try:
-                respuesta_imagen = analizar_imagen_y_responder(numero, imagen_base64, texto, public_url, config)
-                if respuesta_imagen:
-                    # Enviar respuesta textual al usuario
-                    enviar_mensaje(numero, respuesta_imagen, config)
-                    # Guardar la respuesta asociada a la imagen
-                    guardar_conversacion(numero, texto, respuesta_imagen, config, public_url, True)
-                    app.logger.info(f"✅ Respuesta automática (imagen) enviada a {numero}")
-                    return 'OK', 200
-                else:
-                    app.logger.info("ℹ️ No se generó respuesta automática tras analizar la imagen; el flujo continúa normalmente")
-            except Exception as e:
-                app.logger.error(f"🔴 Error al analizar/contestar imagen automáticamente: {e}")
-
-        elif 'document' in msg:
-            es_archivo = True
-            texto = msg['document'].get('caption', f"Archivo: {msg['document'].get('filename', 'sin nombre')}")
-            app.logger.info(f"📎 Archivo detectado: {texto}")
-            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
-            try:
-                meta = obtener_chat_meta(numero, config)
-                if not meta:
-                    inicializar_chat_meta(numero, config)
-                actualizar_columna_chat(numero, 2, config)  # En Conversación
-            except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (documento): {e}")
-            # Procesar y salir
-            processed_ok = procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
-            if processed_ok:
-                message_saved = True
-            return 'OK', 200
+                app.logger.warning(f"⚠️ obtener_imagen_whatsapp failed: {e}")
+            texto = (msg.get('image', {}).get('caption') or "El usuario envió una imagen").strip()
         elif 'audio' in msg:
             es_audio = True
-            audio_id = msg['audio']['id']
-            audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
-            if audio_path:
-                transcripcion = transcribir_audio_con_openai(audio_path)
-                texto = transcripcion if transcripcion else "No se pudo transcribir el audio"
-            else:
+            audio_id = msg['audio'].get('id')
+            try:
+                audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
+                if audio_path:
+                    transcripcion = transcribir_audio_con_openai(audio_path)
+                    texto = transcripcion or "No se pudo transcribir el audio"
+                else:
+                    texto = "Error al procesar el audio"
+            except Exception as e:
+                app.logger.warning(f"⚠️ audio processing failed: {e}")
                 texto = "Error al procesar el audio"
+        elif 'document' in msg:
+            es_archivo = True
+            texto = (msg.get('document', {}).get('caption') or f"Archivo: {msg.get('document', {}).get('filename','sin nombre')}").strip()
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
-        try:
-            estado_actual = obtener_estado_conversacion(numero, config)
-            if estado_actual and estado_actual.get('contexto') == 'OFRECIENDO_ASESOR':
-                respuesta_usuario = (texto or '').strip().lower()
-                # Normalizar algunas variantes
-                respuesta_usuario = re.sub(r'[^\wáéíóúüñ ]', '', respuesta_usuario, flags=re.IGNORECASE).strip()
 
-                if respuesta_usuario in ('no', 'no gracias', 'nogracias', 'nop', 'nah'):
-                    datos_estado = estado_actual.get('datos') or {}
-                    pedido_prov = datos_estado.get('pedido_provisional') or {}
-                    if pedido_prov:
-                        # Guardar pedido definitivo ahora
-                        cita_id = guardar_cita(pedido_prov, config)
-                        if cita_id:
-                            enviar_confirmacion_cita(numero, pedido_prov, cita_id, config)
-                            actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO_AUTOMATICO", "pedido_confirmado", {}, config)
-                            enviar_mensaje(numero, f"✅ Entendido. He agendado tu pedido automáticamente. ID: #{cita_id}\nTe enviaré la confirmación en breve.", config)
-                            guardar_conversacion(numero, texto, f"Pedido agendado automáticamente ID #{cita_id}", config)
-                            return 'OK', 200
-                        else:
-                            enviar_mensaje(numero, "Hubo un error guardando tu pedido. ¿Quieres que te conecte con un asesor ahora?", config)
-                            return 'OK', 200
-                    else:
-                        enviar_mensaje(numero, "No encontré los datos provisionales del pedido. ¿Quieres que lo recabemos de nuevo o que te conecte con un asesor?", config)
-                        return 'OK', 200
+        app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
 
-                if respuesta_usuario in ('si', 'sí', 'si claro', 'sí por favor', 'ok', 'claro'):
-                    # Usuario quiere al asesor -> pasar contacto y limpiar estado
-                    sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-                    if sent:
-                        actualizar_estado_conversacion(numero, "EN_PEDIDO", "asesor_conectado", {}, config)
-                        enviar_mensaje(numero, "Perfecto. Te conecté con un asesor. Él te asistirá para completar el pago de forma segura.", config)
-                    else:
-                        enviar_mensaje(numero, "Lo siento, ahora mismo no hay asesores disponibles. ¿Quieres que intente agendar tu pedido mientras tanto?", config)
-                    return 'OK', 200
-        except Exception as _e:
-            app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
-        # === fin manejo oferta asesor ===
+        # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
+        processed_ok = procesar_mensaje_unificado(
+            msg=msg,
+            numero=numero,
+            texto=texto,
+            es_imagen=es_imagen,
+            es_audio=es_audio,
+            config=config,
+            imagen_base64=imagen_base64,
+            transcripcion=transcripcion
+        )
 
-        # Only save immediate message if it wasn't saved earlier
-        if not message_saved:
-            guardar_mensaje_inmediato(numero, texto, config)
-        else:
-            app.logger.info(f"ℹ️ Mensaje ya registrado previamente para {numero}, omitiendo guardar_mensaje_inmediato()")
-        app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
-
-        # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
-        if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
-            app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
-            return 'OK', 200
-        
-                # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
-        # Primero, comprobar si es una cita/pedido usando el análisis mejorado
-        info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
-            
-        if info_cita and info_cita.get('servicio_solicitado'):
-            app.logger.info(f"✅ Información de cita/pedido detectada en webhook: {json.dumps(info_cita)}")
-                
-            # Comprobar si hay suficientes datos
-            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
-            if datos_completos:
-                # Guardar la cita y enviar notificaciones
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    app.logger.info(f"✅ Cita/pedido guardado con ID: {cita_id}")
-                    # Enviar alertas y confirmación
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-                    respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
-                    enviar_mensaje(numero, respuesta, config)
-                    guardar_conversacion(numero, texto, respuesta, config)
-                    message_saved = True
-                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
-                    return 'OK', 200
-        processed_ok = procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
         if processed_ok:
-            # procesar_mensaje_unificado already saved/acted on the message in many flows
-            message_saved = True
-        return 'OK', 200 
-        
+            app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
+            return 'OK', 200
+
+        # Fallback: if unified processor didn't handle it, save the incoming message for UI
+        guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
+        app.logger.info(f"📥 Fallback: saved immediate message for {numero}")
+
+        return 'OK', 200
+
     except Exception as e:
-        app.logger.error(f"🔴 ERROR CRÍTICO en webhook: {str(e)}")
+        app.logger.error(f"🔴 CRITICAL error in webhook: {e}")
         app.logger.error(traceback.format_exc())
-        return 'Error interno del servidor', 500
+        return 'Internal server error', 500
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
