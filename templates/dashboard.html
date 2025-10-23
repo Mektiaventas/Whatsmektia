@@ -81,36 +81,50 @@
         flex-wrap: wrap;
         gap: 0.6rem;
         align-items: flex-start;
+        justify-content: flex-start;
     }
 
+    /* <- CHANGES HERE: make stat cards noticeably thinner (approx half previous width) */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 0.2rem; /* reduced padding to be thinner */
+        padding: 0.12rem; /* reduced padding to be thinner */
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
-        width:100%;
-        flex: 0 0 180px; /* fixed-ish narrow column */
+        width: auto;
+        flex: 0 0 95px; /* narrow: ~half of previous 180px */
         display: flex;
         flex-direction: column;
-        gap: 0.25rem;
-        font-size: xx-small;
+        gap: 0.15rem;
+        font-size: 0.65rem;
         height: 100%;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        box-sizing: border-box;
+        min-height: 80px;
     }
 
         /* make the numeric value stand out but compact */
         .stat-card > div {
-            font-size: 1.25rem;
+            font-size: 1rem;
             font-weight: 700;
             color: #222;
             line-height: 1;
-            height: 80px;
+            height: 56px; /* reduced height to match thinner card */
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            box-sizing: border-box;
+            padding: 0 6px;
         }
 
         .stat-card strong {
             display: block;
-            font-size: 0.85rem;
+            font-size: 0.72rem;
             font-weight: 600;
             color: #333;
+            margin-bottom: 4px;
         }
 
     .chart-container {
