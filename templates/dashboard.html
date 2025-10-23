@@ -85,14 +85,6 @@
 
 <div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
     <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
-
-    <div class="tabs" style="margin-bottom: 2rem;">
-        <!-- add data-period attributes and fix href for week -->
-        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period=week">Últimos 7 días</a>
-        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and not request.args.get('tab') else '' }}" href="?period=month">Últimos 30 días</a>
-        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' else '' }}">Conversaciones</a>
-    </div>
-
     {# Mostrar información del plan si está disponible #}
     {% if plan_info %}
     <div class="plan-box">
@@ -102,6 +94,14 @@
         <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
     </div>
     {% endif %}
+    <div class="tabs" style="margin-bottom: 2rem;">
+        <!-- add data-period attributes and fix href for week -->
+        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period=week">Últimos 7 días</a>
+        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and not request.args.get('tab') else '' }}" href="?period=month">Últimos 30 días</a>
+        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' else '' }}">Conversaciones</a>
+    </div>
+
+
 
     <div class="stats">
         <div class="stat-card">
