@@ -1904,7 +1904,6 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
-
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2183,6 +2182,54 @@ def autenticar_google_calendar(config=None):
         app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
+
+    direccion = (negocio.get('direccion') or '').strip()
+    telefono = (negocio.get('telefono') or '').strip()
+    correo = (negocio.get('correo') or '').strip()
+
+    # Normalizar teléfono para mostrar (no modificar DB)
+    telefono_display = telefono or 'No disponible'
+    correo_display = correo or 'No disponible'
+    direccion_display = direccion or 'No disponible'
+    prompt_comentario = f"""
+        Te acaban de hacer una solicitud de datos, 
+        no me des ningun dato, solo has un comentario agradable expresando
+        que estas a su servicio, algo parecido a decir claro que si.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt_comentario}],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+        
+    data = response.json()
+    respuestita = data['choices'][0]['message']['content'].strip()
+    block = (
+        f"{respuestita}\n\n"
+        "📍 DATOS DEL NEGOCIO:\n\n"
+        f"• Dirección: {direccion_display}\n"
+        f"• Teléfono: {telefono_display}\n"
+        f"• Correo: {correo_display}\n\n"
+        "Visitanos pronto!"
+    )
+    return block
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -4114,6 +4161,26 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
+
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -4188,6 +4255,24 @@ def obtener_precio_por_id(pid, config=None):
     cursor.close()
     conn.close()
     return row
+
+def obtener_precio(servicio_nombre: str, config):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT precio_mayoreo, precio_menudeo
+        FROM precios
+        WHERE LOWER(servicio)=LOWER(%s)
+        LIMIT 1;
+    """, (servicio_nombre,))
+    res = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    if res:
+        return Decimal(res[0]), res[1]
+    return None
 
 def obtener_historial(numero, limite=5, config=None):
     """Función compatible con la estructura actual de la base de datos"""
@@ -5111,6 +5196,42 @@ def obtener_configuracion_numero(numero_whatsapp):
     # Fallback a configuración por defecto (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
+def obtener_imagen_perfil_alternativo(numero, config=None):
+    """Método alternativo para obtener la imagen de perfil"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    try:
+        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
+        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
+        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
+        return None
+    finally:
+        conn.close()
+
 def obtener_nombre_mostrado_por_numero(numero, config=None):
     """
     Retorna el nombre a mostrar para un número de contacto.
@@ -5610,6 +5731,34 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
+
+def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
+    if config is None:
+        app.logger.error("🔴 Configuración no disponible para enviar alerta")
+        return
+    
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    mensaje += f"👤 *Cliente:* {numero_cliente}\n"
+    mensaje += f"📞 *Número:* {numero_cliente}\n"
+    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
+    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
+    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
+    mensaje += f"{contexto_consulta}\n\n"
+    mensaje += f"_________________________________________\n"
+    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    
+    # Enviar mensaje normal (sin template) a tu número personal
+    enviar_mensaje(ALERT_NUMBER, mensaje, config)
+    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
+    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
