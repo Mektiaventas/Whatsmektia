@@ -6060,9 +6060,8 @@ def webhook():
         if not config:
             config = obtener_configuracion_por_host()
 
-        # Ensure kanban/chat meta/contact are present
+        # Ensure kanban/chat meta/contact are present (quick pre-check)
         try:
-            actualizar_kanban_inmediato(numero, config)
             inicializar_chat_meta(numero, config)
             actualizar_info_contacto(numero, config)
         except Exception as e:
@@ -6123,7 +6122,14 @@ def webhook():
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
 
+        # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
+        try:
+            guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
+
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
+        # Indicar a la función que el mensaje ya fue guardado (incoming_saved=True)
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero,
@@ -6132,17 +6138,16 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
-            transcripcion=transcripcion
+            transcripcion=transcripcion,
+            incoming_saved=True
         )
 
         if processed_ok:
             app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
             return 'OK', 200
 
-        # Fallback: if unified processor didn't handle it, save the incoming message for UI
-        guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
-        app.logger.info(f"📥 Fallback: saved immediate message for {numero}")
-
+        # If processing failed, we already saved the incoming message earlier; nothing more to do.
+        app.logger.info(f"⚠️ procesar_mensaje_unificado returned False for {message_id}; message already persisted.")
         return 'OK', 200
 
     except Exception as e:
