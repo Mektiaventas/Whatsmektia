@@ -6098,6 +6098,48 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
 
+def generar_fallback_respuesta(numero, texto_original, historial_text, config, max_tokens=300):
+    """
+    Intento de fallback cuando la IA principal devuelve NO_ACTION.
+    - Llama a la API de IA con un prompt más simple y directo para forzar una respuesta textual.
+    - Devuelve string (respuesta) o None si falla.
+    """
+    try:
+        prompt = (
+            "Eres un asistente conversacional breve y útil. Responde con un texto claro y corto "
+            "al usuario, usando el historial proporcionado para contexto. No inventes precios ni datos.\n\n"
+            f"HISTORIAL:\n{(historial_text or '')}\n\n"
+            f"MENSAJE ACTUAL: {texto_original}\n\n"
+            "RESPONDE en máximo 2-3 frases, de forma cordial y accionable."
+        )
+
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": "Eres un asistente breve y directo."},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.35,
+            "max_tokens": max_tokens
+        }
+
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data['choices'][0]['message']['content']
+        if isinstance(raw, list):
+            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
+        text = str(raw).strip()
+        if not text:
+            return None
+        # clean excess whitespace
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
+    except Exception as e:
+        app.logger.warning(f"⚠️ generar_fallback_respuesta falló: {e}")
+        return None
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -6229,16 +6271,34 @@ No inventes productos ni precios.
         call_function = decision.get('call_function') or decision.get('action')
         function_args = decision.get('function_args') or {}
 
-        # If IA explicitly says NO_ACTION, send a lightweight acknowledgment to avoid silence
+        # If IA explicitly says NO_ACTION: try a targeted fallback generation before sending generic ack
         if intent == "NO_ACTION":
-            app.logger.info(f"ℹ️ IA returned NO_ACTION for {numero} — sending default ack")
-            ack = "Gracias por tu mensaje. En breve te responderemos."
+            app.logger.info(f"ℹ️ IA returned NO_ACTION for {numero} — attempting fallback generation")
             try:
-                enviar_mensaje(numero, ack, config)
+                fallback = generar_fallback_respuesta(numero, texto_original, historial_text, config, max_tokens=220)
+                if fallback:
+                    app.logger.info("✅ Fallback respuesta generada, enviando al usuario")
+                    enviar_mensaje(numero, fallback, config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, fallback, config)
+                    return True
+                else:
+                    app.logger.info("⚠️ Fallback no generó texto útil, enviando ack genérico")
+                    ack = "Gracias por tu mensaje. En breve te responderemos."
+                    try:
+                        enviar_mensaje(numero, ack, config)
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ enviar_mensaje ack failed: {e}")
+                    persistir_respuesta(numero, incoming_saved, texto_original, ack, config)
+                    return True
             except Exception as e:
-                app.logger.warning(f"⚠️ enviar_mensaje ack failed: {e}")
-            persistir_respuesta(numero, incoming_saved, texto_original, ack, config)
-            return True
+                app.logger.error(f"🔴 Error en fallback handling: {e}")
+                ack = "Gracias por tu mensaje. En breve te responderemos."
+                try:
+                    enviar_mensaje(numero, ack, config)
+                except Exception:
+                    pass
+                persistir_respuesta(numero, incoming_saved, texto_original, ack, config)
+                return True
 
         # Ejecutar acciones conocidas (ejemplos)
         if call_function == "enviar_catalogo" or intent == "ENVIAR_CATALOGO":
