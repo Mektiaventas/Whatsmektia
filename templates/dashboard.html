@@ -4,12 +4,13 @@
 
 {% block content %}
 <style>
+    /* Layout tweaks: reduce vertical spacing to "subir" todo un poco */
     .header-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        margin-bottom: 1rem;
+        margin-bottom: 0.5rem; /* reduced from 1rem */
     }
 
         .header-row h1 {
@@ -51,41 +52,68 @@
         white-space: nowrap;
     }
 
-    .tabs a {
-        padding: 10px 20px;
-        text-decoration: none;
-        border-radius: 20px;
-        border: 2px solid #1f4e79;
-        color: #1f4e79;
-        margin-right: 10px;
-        display: inline-block;
-        margin-bottom: 10px;
-        cursor: pointer;
+    .tabs {
+        margin-bottom: 0.6rem; /* bring tabs a bit closer */
     }
 
-        .tabs a.active {
-            background-color: #1f4e79;
-            color: white;
+        .tabs a {
+            padding: 8px 16px; /* slightly slimmer buttons */
+            text-decoration: none;
+            border-radius: 20px;
+            border: 2px solid #1f4e79;
+            color: #1f4e79;
+            margin-right: 10px;
+            display: inline-block;
+            margin-bottom: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
         }
 
+            .tabs a.active {
+                background-color: #1f4e79;
+                color: white;
+            }
+
+    /* Stats container: make it more compact and cards narrower */
     .stats {
-        margin-top: 20px;
+        margin-top: 6px; /* small lift */
         display: flex;
         flex-wrap: wrap;
-        gap: 1rem;
+        gap: 0.6rem;
+        align-items: flex-start;
     }
 
     .stat-card {
-        background: rgba(255, 255, 255, 0.9);
-        padding: 1rem;
+        background: rgba(255, 255, 255, 0.95);
+        padding: 0.5rem; /* reduced padding to be thinner */
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
-        min-width: 200px;
-        flex: 1;
+        min-width: 140px; /* smaller minimum */
+        max-width: 220px; /* cap width */
+        flex: 0 0 180px; /* fixed-ish narrow column */
+        display: flex;
+        flex-direction: column;
+        gap: 0.25rem;
+        font-size: 0.9rem;
     }
 
+        /* make the numeric value stand out but compact */
+        .stat-card > div {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #222;
+            line-height: 1;
+        }
+
+        .stat-card strong {
+            display: block;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #333;
+        }
+
     .chart-container {
-        margin-top: 2rem;
+        margin-top: 1rem; /* slightly less gap above charts */
         width: 100%;
         position: relative;
         height: 400px;
@@ -109,14 +137,25 @@
 
         .stats {
             flex-direction: column;
+            gap: 0.5rem;
         }
 
         .stat-card {
             min-width: auto;
+            flex: 1 1 auto;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.6rem;
         }
 
+            .stat-card > div {
+                font-size: 1.1rem;
+            }
+
         .tabs a {
-            padding: 8px 16px;
+            padding: 8px 12px;
             font-size: 0.9rem;
         }
     }
@@ -131,7 +170,8 @@
         }
 </style>
 
-<div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 0.6rem 1rem;">
+    <!-- reduced top padding to lift content -->
     <div class="header-row">
         <h1 color="white">Dashboard General</h1>
 
