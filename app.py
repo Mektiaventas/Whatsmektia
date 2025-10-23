@@ -5017,7 +5017,7 @@ def obtener_datos_chat():
     """)
     chats = cursor.fetchall()
     
-    # Convert timestamps to ISO format for JSON
+    # Convert timestamps to ISO format for JSON and ensure timezone consistency
     for chat in chats:
         if chat.get('ultima_fecha'):
             if chat['ultima_fecha'].tzinfo is not None:
@@ -5030,7 +5030,8 @@ def obtener_datos_chat():
     
     return jsonify({
         'chats': chats,
-        'timestamp': datetime.now().timestamp(),
+        # <-- RETURN TIMESTAMP IN MILLISECONDS to match client Date.now() units
+        'timestamp': int(time.time() * 1000),
         'total_chats': len(chats)
     })
 
