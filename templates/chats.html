@@ -329,7 +329,7 @@
 
 let chatAutoRefresh = true;
 let refreshIntervalMs = 800; // ajustable
-let selectedChatId = "{{ selected| tojson }}";
+    let selectedChatId = {{ selected| tojson }};
 let lastChatsTimestamp = 0;
 let lastMessageIdForSelected = 0;
 let isEditingAlias = false;
