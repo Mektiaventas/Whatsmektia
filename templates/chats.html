@@ -655,75 +655,85 @@ function activarEdicionAlias(parent) {
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
 
-    function setupEmojiPicker() {
-        const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+function setupEmojiPicker() {
+    const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
-        function buildPicker(picker) {
-            if (picker.dataset.built) return;
-            picker.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn" aria-label="emoji">${e}</button>`).join('');
-            picker.dataset.built = '1';
+    function buildPicker(picker) {
+        if (picker.dataset.built) return;
+        picker.innerHTML = emojis.map(e => `<button type="button" class="emoji-pick-btn" aria-label="emoji">${e}</button>`).join('');
+        picker.dataset.built = '1';
+    }
+
+    function ensurePickerAttached(trigger) {
+        const form = trigger.closest('form') || trigger.parentElement || document.body;
+        let picker = form.querySelector('.emoji-picker-list') || form.querySelector('#emoji-picker-list');
+        if (!picker) {
+            picker = document.createElement('div');
+            picker.className = 'emoji-picker-list';
+            picker.id = 'emoji-picker-list';
+            picker.style.position = 'absolute';
+            picker.style.zIndex = 1000;
+            picker.style.display = 'none';
+            const attachTo = form.querySelector('.input-group') || form;
+            attachTo.appendChild(picker);
         }
+        return picker;
+    }
 
-        function ensurePickerAttached(trigger) {
-            const form = trigger.closest('form') || trigger.parentElement || document.body;
-            let picker = form.querySelector('.emoji-picker-list') || form.querySelector('#emoji-picker-list');
-            if (!picker) {
-                picker = document.createElement('div');
-                picker.className = 'emoji-picker-list';
-                picker.id = 'emoji-picker-list';
-                picker.style.position = 'absolute';
-                picker.style.zIndex = 1000;
-                picker.style.display = 'none';
-                // attach to nearest positioned ancestor (the form or input-group if present)
-                const attachTo = form.querySelector('.input-group') || form;
-                attachTo.appendChild(picker);
-            }
-            return picker;
-        }
-
-        // dentro de setupEmojiPicker(): sustituir la asignación de `trigger` por esta línea (más tolerante)
-        const trigger = document.querySelector('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
-        if (trigger) {
-            trigger.addEventListener('click', function (ev) {
-                ev.preventDefault();
-                ev.stopPropagation();
-
-                const picker = ensurePickerAttached(trigger);
-                buildPicker(picker);
-
-                // toggle
-                if (picker.style.display === 'block') {
-                    picker.style.display = 'none';
-                    return;
-                }
-
-                // show and position relative to the picker's offsetParent
-                picker.style.display = 'block';
-                const rect = trigger.getBoundingClientRect();
-                const parent = picker.offsetParent || document.body;
-                const parentRect = parent.getBoundingClientRect();
-                const pickerHeight = picker.offsetHeight || 180;
-                let top = rect.top - parentRect.top - pickerHeight - 8;
-                if (top < 0) top = rect.bottom - parentRect.top + 8;
-                let left = rect.left - parentRect.left;
-                const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
-                if (left > maxLeft) left = Math.max(8, maxLeft);
-                picker.style.left = left + 'px';
-                picker.style.top = top + 'px';
-
-                // remember input target
-                picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
-            });
-        }
-
-        // Delegated handler for picking an emoji (safe check for closest)
-        document.addEventListener('click', function (ev) {
-            const tgt = ev.target;
-            const pickBtn = (tgt && tgt.closest) ? tgt.closest('.emoji-pick-btn') : null;
-            if (!pickBtn) return;
+    // Delegated handler: works even if button is added later
+    document.addEventListener('click', function (ev) {
+        try {
+            const trigger = ev.target.closest ? ev.target.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
+            if (!trigger) return;
             ev.preventDefault();
             ev.stopPropagation();
+
+            const picker = ensurePickerAttached(trigger);
+            buildPicker(picker);
+
+            // toggle visibility
+            if (picker.style.display === 'block') {
+                picker.style.display = 'none';
+                return;
+            }
+
+            picker.style.display = 'block';
+
+            // position the picker near the trigger (same logic as before)
+            const rect = trigger.getBoundingClientRect();
+            const parent = picker.offsetParent || document.body;
+            const parentRect = parent.getBoundingClientRect();
+            const pickerHeight = picker.offsetHeight || 180;
+            let top = rect.top - parentRect.top - pickerHeight - 8;
+            if (top < 0) top = rect.bottom - parentRect.top + 8;
+            let left = rect.left - parentRect.left;
+            const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
+            if (left > maxLeft) left = Math.max(8, maxLeft);
+            picker.style.left = left + 'px';
+            picker.style.top = top + 'px';
+
+            // remember input target
+            picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
+
+            // small debug help (will appear in browser console)
+            console.debug('emoji picker shown', { trigger, picker });
+        } catch (e) {
+            console.error('setupEmojiPicker trigger handler error', e);
+        }
+    });
+
+    // Delegated handler for picking an emoji
+    document.addEventListener('click', function (ev) {
+        try {
+            const pickBtn = ev.target.closest ? ev.target.closest('.emoji-pick-btn') : null;
+            if (!pickBtn) return;
+            // ensure this is a picker button (not the trigger which may share class)
             const picker = pickBtn.closest('.emoji-picker-list');
+            if (!picker) return;
+
+            ev.preventDefault();
+            ev.stopPropagation();
+
             const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
             const emoji = pickBtn.textContent || '';
             if (input) {
@@ -735,26 +745,34 @@ function activarEdicionAlias(parent) {
                 input.selectionStart = input.selectionEnd = pos;
                 input.focus();
             }
-            if (picker) picker.style.display = 'none';
-        });
+            picker.style.display = 'none';
+            console.debug('emoji picked', emoji);
+        } catch (e) {
+            console.error('emoji pick handler error', e);
+        }
+    });
 
-        // Close pickers when clicking outside (safe checks)
-        document.addEventListener('click', function (ev) {
+    // Close pickers when clicking outside
+    document.addEventListener('click', function (ev) {
+        try {
             const tgt = ev.target;
             const isInsidePicker = tgt && tgt.closest && !!tgt.closest('.emoji-picker-list');
-            const isEmojiTrigger = tgt && tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn');
+            const isEmojiTrigger = tgt && tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
             if (!isInsidePicker && !isEmojiTrigger) {
                 document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
             }
-        });
+        } catch (e) {
+            console.error('emoji close handler error', e);
+        }
+    });
 
-        // Close on Escape
-        document.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Escape') {
-                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
-            }
-        });
-    }
+    // Close on Escape
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') {
+            document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+        }
+    });
+}
 
 /* Audio helpers unchanged */
 function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
