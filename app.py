@@ -2236,22 +2236,28 @@ def get_chat_messages(telefono):
     """Obtener mensajes de un chat específico después de cierto ID"""
     after_id = request.args.get('after', 0, type=int)
     config = obtener_configuracion_por_host()
-    
+
+    # Guardar y validar el parámetro recibido para evitar consultas inválidas
+    if not telefono or str(telefono).lower() in ('none', 'null', ''):
+        app.logger.warning(f"⚠️ get_chat_messages llamado con telefono inválido: {telefono}")
+        return jsonify({'messages': [], 'timestamp': int(time.time() * 1000)})
+
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
-    
+
     # Consultar solo mensajes más recientes que el ID proporcionado
+    # Usar la columna correcta 'numero' y ordenar por 'timestamp'
     cursor.execute("""
-        SELECT id, mensaje as content, timestamp as timestamp, respuesta
+        SELECT id, mensaje AS content, timestamp, respuesta
         FROM conversaciones 
-        WHERE telefono = %s AND id > %s
-        ORDER BY fecha ASC
+        WHERE numero = %s AND id > %s
+        ORDER BY timestamp ASC
     """, (telefono, after_id))
-    
+
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
-    
+
     return jsonify({
         'messages': messages,
         'timestamp': int(time.time() * 1000)
