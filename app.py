@@ -6267,12 +6267,10 @@ No inventes productos ni precios.
                 persistir_respuesta(numero, incoming_saved, texto_original, "No pude guardar la cita, faltan datos. ¿Puedes confirmar?", config)
             return True
 
-        # Default: enviar texto si IA lo sugiere
-        if intent == "RESPONDER_TEXTO" and respuesta_text:
-            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-            enviar_mensaje(numero, respuesta_text, config)
-            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
-            return True
+        respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+        enviar_mensaje(numero, respuesta_text, config)
+        persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
+        return True
 
         # No action
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
