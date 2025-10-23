@@ -6100,49 +6100,71 @@ def webhook():
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
+                               es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante.
-    Si incoming_saved=True, el webhook ya guardó el mensaje entrante: NO insertar de nuevo.
-    En ese caso se usa actualizar_respuesta(...) para asociar la respuesta al mensaje ya guardado.
-    """
-    def persistir_respuesta(numero_dest, incoming_saved_flag, incoming_text, respuesta_text, cfg, imagen_url=None, es_imagen_flag=False):
-        try:
-            if incoming_saved_flag:
-                # Actualiza la fila del mensaje entrante ya guardado (evita duplicados)
-                try:
-                    actualizar_respuesta(numero_dest, incoming_text, respuesta_text, cfg)
-                except Exception as e:
-                    # Fallback: si actualizar falla, guardar conversación completa para no perder el rastro
-                    app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
-                    guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
-            else:
-                guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
-        except Exception as e:
-            app.logger.error(f"🔴 Error persistiendo respuesta: {e}")
+    Re-implementación mejorada de procesar_mensaje_unificado.
 
+    Cambios principales:
+    - Provee a la IA datos explícitos desde la BD:
+        * columnas seleccionadas de la tabla `configuracion`
+        * todo el catálogo/tabla `precios` (incluyendo imagenes)
+    - Construye un prompt más claro y con lista de funciones que la IA
+      puede "invocar" (server-side) para realizar acciones.
+    - Exige formato JSON de salida con un campo `call_function` opcional
+      que indica qué función del servidor debe ejecutarse y `function_args`
+      con argumentos. Esto permite que la IA "proponga" la acción y el
+      servidor la ejecute de forma segura.
+    - Conserva y reutiliza las funciones existentes: enviar_catalogo,
+      enviar_imagen, enviar_documento, pasar_contacto_asesor, guardar_cita,
+      enviar_mensaje, guardar_conversacion, etc.
+    - Validaciones de seguridad: no permitir guardar citas con servicios
+      no presentes en el catálogo cuando source="catalog".
+    """
     try:
         if config is None:
             config = obtener_configuracion_por_host()
 
         texto_original = texto or ""
-        texto_norm = texto_original.strip().lower()
 
-        # Shortcut: catálogo
-        catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
-        if any(k in texto_norm for k in catalog_keywords):
-            app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
+        # 1) Cargar configuración relevante desde la tabla configuracion
+        cfg_row = {}
+        try:
+            conn = get_db_connection(config)
+            cur = conn.cursor(dictionary=True)
+            cur.execute("""
+                SELECT calendar_email, asesor1_nombre, asesor1_telefono,
+                       asesor2_nombre, asesor2_telefono, asesor_next_index,
+                       asesores_json, transferencia_numero, transferencia_nombre,
+                       transferencia_banco
+                FROM configuracion
+                WHERE id = 1 LIMIT 1
+            """)
+            cfg_row = cur.fetchone() or {}
+            cur.close()
+            conn.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo leer columnas de configuracion para prompt IA: {e}")
+            cfg_row = {}
+
+        # 2) Obtener catálogo completo (precios) y construir estructura segura
+        precios = obtener_todos_los_precios(config) or []
+        catalog_list = []
+        for p in precios:
             try:
-                sent = enviar_catalogo(numero, original_text=texto_original, config=config)
-                respuesta_text = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
-                # Persist response: update existing incoming message if it was already saved
-                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
-                # continue to AI flow as fallback
+                catalog_list.append({
+                    "id": p.get('id'),
+                    "sku": (p.get('sku') or '').strip(),
+                    "servicio": (p.get('servicio') or p.get('modelo') or '').strip(),
+                    "categoria": (p.get('categoria') or '').strip(),
+                    "descripcion": (p.get('descripcion') or '').strip(),
+                    "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
+                    "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
+                    "imagen": (p.get('imagen') or ""),
+                })
+            except Exception:
+                continue
 
-        # Preparar contexto (historial y catálogo)
+        # 3) Historial y contexto reducido (evitar tokens excesivos)
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -6150,59 +6172,101 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
+        if len(historial_text) > 3000:
+            historial_text = historial_text[-3000:]  # keep last portion
 
-        precios = obtener_todos_los_precios(config) or []
-        texto_catalogo = build_texto_catalogo(precios, limit=40)
+        # 4) Definir las funciones del servidor que la IA puede solicitar ejecutar
+        available_server_functions = [
+            {
+                "name": "enviar_catalogo",
+                "description": "Envía el PDF público más relevante o el catálogo publicado al número del usuario."
+            },
+            {
+                "name": "enviar_imagen",
+                "description": "Envía una imagen al usuario. args: { 'image': '<url_o_nombre>' }"
+            },
+            {
+                "name": "enviar_documento",
+                "description": "Envía un documento (PDF) al usuario. args: { 'document_url': '<url>' }"
+            },
+            {
+                "name": "pasar_contacto_asesor",
+                "description": "Comparte el contacto de un asesor con el usuario (round-robin). args: { 'notify_asesor': true|false }"
+            },
+            {
+                "name": "guardar_cita",
+                "description": "Guarda una cita/pedido en la base de datos. args: { 'servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente','telefono','detalles_servicio':{...} }"
+            },
+            {
+                "name": "enviar_mensaje",
+                "description": "Enviar texto plano al usuario. args: { 'texto': '...' }"
+            }
+        ]
 
-        # Construir payload para IA (mantener token usage razonable)
-        catalog_list = []
-        for p in precios:
-            try:
-                catalog_list.append({
-                    "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
-                    "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
-                    "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
-                    "imagen": str(p.get('imagen') or "")
-                })
-            except Exception:
-                continue
-
-        cfg_full = load_config(config)
-        asesores_block = format_asesores_block(cfg_full)
-
-        multimodal_info = ""
-        if es_imagen:
-            multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
-            if imagen_base64:
-                multimodal_info += "Se proporciona la imagen codificada en base64 para análisis.\n"
-            if isinstance(msg, dict) and msg.get('image', {}).get('caption'):
-                multimodal_info += f"Caption: {msg['image'].get('caption')}\n"
-        if es_audio:
-            multimodal_info += "El mensaje incluye audio y se ha provisto transcripción.\n"
-            if transcripcion:
-                multimodal_info += f"Transcripción: {transcripcion}\n"
-
+        # 5) Construir prompt del sistema (más directo y prescriptivo)
         system_prompt = f"""
-Eres el asistente conversacional. Usa únicamente la información del catálogo proporcionado.
-Responde con JSON estructurado indicando la acción a ejecutar y un texto breve de respuesta.
-No inventes productos ni precios.
+Eres el asistente conversacional del negocio. Recibirás:
+- Mensaje actual (usuario): "{texto_original[:1000]}"
+- Historial (resumen): {historial_text[:1500]}
+- Catálogo completo (json estructurado) con {len(catalog_list)} items.
+- Configuración del negocio (contactos/asesores, email de calendar, datos de transferencia).
+
+Reglas IMPORTANTES (RESPÉTALAS):
+1) NO INVENTAR productos, precios o SKUs. Solo puedes usar items que aparecen en el catálogo proporcionado.
+2) Si la acción que corresponde es enviar un PDF/catálogo, usa la función servidor enviar_catalogo.
+3) Si necesitas compartir una imagen o documento específico usa enviar_imagen o enviar_documento (especificar URL o filename).
+4) Si el usuario pide hablar con una persona, sugiere pasar_contacto_asesor y devuelve call_function = 'pasar_contacto_asesor'.
+5) Para crear una cita/pedido usa call_function = 'guardar_cita' y provee save_cita con los campos mínimos.
+6) Si vas a pedir al servidor que ejecute una función, responde con JSON donde 'call_function' es el nombre exacto de la función y 'function_args' un objeto con los argumentos.
+7) RESPONDE SÓLO con JSON válido (sin texto fuera del JSON). Estructura mínima esperada:
+{{
+  "intent":"RESPONDER_TEXTO|ENVIAR_IMAGEN|ENVIAR_DOCUMENTO|GUARDAR_CITA|PASAR_ASESOR|ENVIAR_CATALOGO|NO_ACTION",
+  "respuesta_text":"Texto breve a enviar al usuario (1-6 líneas). Puede estar vacío si se usará call_function.",
+  "call_function": null or "enviar_catalogo" or "enviar_imagen" ...,
+  "function_args": {{ ... }} or null,
+  "save_cita": null or {{ ... }},   # si intent == GUARDAR_CITA se puede duplicar aquí
+  "confidence": 0.0-1.0,
+  "source": "catalog"|"none"
+}}
+8) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+9) Cuando reportes un servicio en save_cita, ese servicio debe coincidir exactamente con un sku o nombre presente en el catálogo si source == 'catalog'.
+10) Puedes usar las funciones del servidor listadas; el servidor validará cualquier dato antes de ejecutar.
 """
 
+        # 6) Preparar contenido de usuario (JSON para la IA)
         user_payload = {
             "mensaje_actual": texto_original,
-            "historial_resumen": historial_text,
-            "catalogo_items": catalog_list[:200],
-            "catalogo_texto_resumen": texto_catalogo,
-            "asesores": asesores_block,
-            "multimodal_info": multimodal_info
+            "es_imagen": bool(es_imagen),
+            "es_audio": bool(es_audio),
+            "transcripcion": transcripcion or "",
+            "catalogo_items_count": len(catalog_list),
+            "catalogo_ejemplo": catalog_list[:50],  # limitar tamaño enviado
+            "configuracion": {
+                "calendar_email": cfg_row.get('calendar_email'),
+                "asesor1_nombre": cfg_row.get('asesor1_nombre'),
+                "asesor1_telefono": cfg_row.get('asesor1_telefono'),
+                "asesor2_nombre": cfg_row.get('asesor2_nombre'),
+                "asesor2_telefono": cfg_row.get('asesor2_telefono'),
+                "asesor_next_index": cfg_row.get('asesor_next_index'),
+                "asesores_json": cfg_row.get('asesores_json'),
+                "transferencia_numero": cfg_row.get('transferencia_numero'),
+                "transferencia_nombre": cfg_row.get('transferencia_nombre'),
+                "transferencia_banco": cfg_row.get('transferencia_banco')
+            },
+            "server_functions_available": [f["name"] for f in available_server_functions]
         }
 
+        # 7) Llamada a la API de IA (Deepseek)
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": "deepseek-chat", "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
-        ], "temperature": 0.2, "max_tokens": 800}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
+            ],
+            "temperature": 0.15,
+            "max_tokens": 800
+        }
 
         resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
@@ -6212,71 +6276,195 @@ No inventes productos ni precios.
             raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
+        # 8) Extraer JSON de la respuesta
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
-            app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
+            app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:600])
+            # Fallback: enviar texto libre si hay alguno
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                persistir_respuesta(numero, incoming_saved, texto_original, fallback_text, config)
+                guardar_conversacion(numero, texto_original, fallback_text, config)
                 return True
             return False
 
-        decision = json.loads(match.group(1))
+        try:
+            decision = json.loads(match.group(1))
+        except Exception as e:
+            app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
+            return False
 
+        # 9) Validaciones de seguridad básicas antes de ejecutar acciones
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
-        call_function = decision.get('call_function') or decision.get('action')
+        call_function = decision.get('call_function')
         function_args = decision.get('function_args') or {}
+        save_cita = decision.get('save_cita')
+        confidence = float(decision.get('confidence') or 0.0)
+        source = decision.get('source') or "none"
 
-        # Ejecutar acciones conocidas (ejemplos)
-        if call_function == "enviar_catalogo" or intent == "ENVIAR_CATALOGO":
-            sent = enviar_catalogo(numero, original_text=texto_original, config=config)
-            respuesta_text = respuesta_text or ("Te envié el catálogo." if sent else "No encontré catálogo publicado.")
-            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
-            return True
+        # Si IA quiere guardar cita usando catálogo, validar que servicio exista
+        if (intent == "GUARDAR_CITA" or call_function == "guardar_cita" or save_cita) and source == "catalog":
+            svc = ""
+            if save_cita:
+                svc = (save_cita.get('servicio_solicitado') or save_cita.get('servicio') or "").strip().lower()
+            elif function_args and function_args.get('servicio_solicitado'):
+                svc = (function_args.get('servicio_solicitado') or "").strip().lower()
 
-        if call_function == "pasar_contacto_asesor" or intent == "PASAR_ASESOR":
-            pasar_contacto_asesor(numero, config=config, notificar_asesor=function_args.get('notify_asesor', True))
-            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te pasé con un asesor", config)
-            return True
+            if svc:
+                found = False
+                for item in catalog_list:
+                    if (item.get('sku') or "").strip().lower() == svc or (item.get('servicio') or "").strip().lower() == svc:
+                        found = True
+                        break
+                if not found:
+                    app.logger.warning("⚠️ IA intentó guardar cita con servicio NO presente en catálogo. Abortando guardar.")
+                    enviar_mensaje(numero, "Lo siento, ese servicio no figura en nuestro catálogo. ¿Podrías indicar el SKU o nombre exacto?", config)
+                    guardar_conversacion(numero, texto_original, "Intenté guardar pero el servicio no está en catálogo.", config)
+                    return True
 
-        if call_function == "enviar_imagen" or intent == "ENVIAR_IMAGEN":
-            image = function_args.get('image') or decision.get('image')
-            if image:
-                enviar_imagen(numero, image, config)
-                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te envié la imagen.", config, imagen_url=(image if isinstance(image, str) and image.startswith('http') else f"/uploads/productos/{image}"), es_imagen_flag=True)
+        # 10) Ejecutar acciones solicitadas por la IA (call_function) o por intent
+        try:
+            # Preferir call_function si viene
+            if call_function:
+                fn = call_function
+                if fn == "enviar_catalogo":
+                    sent = enviar_catalogo(numero, original_text=texto_original, config=config)
+                    if sent and respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                    guardar_conversacion(numero, texto_original, respuesta_text or "Se envió el catálogo", config)
+                    return True
+
+                if fn == "enviar_imagen":
+                    image = function_args.get('image') or function_args.get('imagen')
+                    if image:
+                        enviar_imagen(numero, image, config)
+                        if respuesta_text:
+                            enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto_original, respuesta_text, config, imagen_url=image, es_imagen=True)
+                        return True
+
+                if fn == "enviar_documento":
+                    doc = function_args.get('document_url') or function_args.get('document')
+                    if doc:
+                        enviar_documento(numero, doc, os.path.basename(doc), config)
+                        if respuesta_text:
+                            enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto_original, respuesta_text, config, imagen_url=doc, es_imagen=False)
+                        return True
+
+                if fn == "pasar_contacto_asesor":
+                    notify = function_args.get('notify_asesor', True)
+                    pasar_contacto_asesor(numero, config=config, notificar_asesor=notify)
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                    guardar_conversacion(numero, texto_original, respuesta_text or "Te pasé un asesor", config)
+                    return True
+
+                if fn == "guardar_cita":
+                    args = function_args or {}
+                    args.setdefault('telefono', numero)
+                    info_cita = {
+                        'servicio_solicitado': args.get('servicio_solicitado') or args.get('servicio') or "",
+                        'fecha_sugerida': args.get('fecha_sugerida'),
+                        'hora_sugerida': args.get('hora_sugerida'),
+                        'nombre_cliente': args.get('nombre_cliente') or args.get('nombre'),
+                        'telefono': args.get('telefono'),
+                        'detalles_servicio': args.get('detalles_servicio') or {}
+                    }
+                    cid = guardar_cita(info_cita, config)
+                    if cid:
+                        if respuesta_text:
+                            enviar_mensaje(numero, respuesta_text, config)
+                        enviar_alerta_cita_administrador(info_cita, cid, config)
+                        guardar_conversacion(numero, texto_original, respuesta_text or f"Cita creada (ID: {cid})", config)
+                    else:
+                        enviar_mensaje(numero, "No pude guardar la cita, faltan datos. ¿Puedes confirmar la información?", config)
+                        guardar_conversacion(numero, texto_original, "Error al guardar cita (faltan datos)", config)
+                    return True
+
+                if fn == "enviar_mensaje":
+                    txt = function_args.get('texto') or function_args.get('mensaje') or respuesta_text
+                    if txt:
+                        enviar_mensaje(numero, txt, config)
+                        guardar_conversacion(numero, texto_original, txt, config)
+                        return True
+
+                # Unknown function -> log and no-op
+                app.logger.warning(f"⚠️ IA solicitó función desconocida: {fn}")
+                enviar_mensaje(numero, "Lo siento, no puedo ejecutar esa acción automáticamente.", config)
+                guardar_conversacion(numero, texto_original, "Intento de función desconocida por IA", config)
                 return True
 
-        if call_function == "guardar_cita" or intent == "GUARDAR_CITA":
-            save_cita = function_args.get('save_cita') or decision.get('save_cita') or {}
-            save_cita.setdefault('telefono', numero)
-            info = {
-                'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
-                'fecha_sugerida': save_cita.get('fecha_sugerida'),
-                'hora_sugerida': save_cita.get('hora_sugerida'),
-                'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
-                'telefono': save_cita.get('telefono'),
-                'detalles_servicio': save_cita.get('detalles_servicio') or {}
-            }
-            cid = guardar_cita(info, config)
-            if cid:
-                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or f"Cita creada (ID: {cid})", config)
-                enviar_alerta_cita_administrador(info, cid, config)
-            else:
-                persistir_respuesta(numero, incoming_saved, texto_original, "No pude guardar la cita, faltan datos. ¿Puedes confirmar?", config)
-            return True
+            # Si no hay call_function, usar intent para comportamientos comunes
+            if intent == "ENVIAR_CATALOGO":
+                sent = enviar_catalogo(numero, original_text=texto_original, config=config)
+                if sent:
+                    guardar_conversacion(numero, texto_original, "Te envié el catálogo.", config)
+                else:
+                    guardar_conversacion(numero, texto_original, "No encontré catálogo publicado.", config)
+                return True
 
-        # Default: enviar texto si IA lo sugiere
-        if intent == "RESPONDER_TEXTO" and respuesta_text:
-            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-            enviar_mensaje(numero, respuesta_text, config)
-            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
-            return True
+            if intent == "ENVIAR_IMAGEN":
+                image = decision.get('image') or (function_args.get('image') if function_args else None)
+                if image:
+                    enviar_imagen(numero, image, config)
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                    guardar_conversacion(numero, texto_original, respuesta_text or "Imagen enviada", config, imagen_url=image, es_imagen=True)
+                    return True
 
-        # No action
-        app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
-        return False
+            if intent == "ENVIAR_DOCUMENTO":
+                doc = decision.get('document') or (function_args.get('document_url') if function_args else None)
+                if doc:
+                    enviar_documento(numero, doc, os.path.basename(doc), config)
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                    guardar_conversacion(numero, texto_original, respuesta_text or "Documento enviado", config, imagen_url=doc, es_imagen=False)
+                    return True
+
+            if intent == "PASAR_ASESOR":
+                pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                guardar_conversacion(numero, texto_original, respuesta_text or "Te pasé con un asesor", config)
+                return True
+
+            if intent == "GUARDAR_CITA":
+                info = decision.get('save_cita') or save_cita or {}
+                info.setdefault('telefono', numero)
+                cita_id = guardar_cita(info, config)
+                if cita_id:
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                    enviar_alerta_cita_administrador(info, cita_id, config)
+                    guardar_conversacion(numero, texto_original, respuesta_text or f"Cita registrada: #{cita_id}", config)
+                else:
+                    enviar_mensaje(numero, "Faltan datos para agendar, ¿puedes confirmar por favor?", config)
+                    guardar_conversacion(numero, texto_original, "Error guardando cita (faltan datos)", config)
+                return True
+
+            if intent == "RESPONDER_TEXTO" and respuesta_text:
+                # Aplicar restricciones y enviar
+                respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+                enviar_mensaje(numero, respuesta_text, config)
+                guardar_conversacion(numero, texto_original, respuesta_text, config)
+                return True
+
+            # No action requested
+            app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
+            return False
+
+        except Exception as e:
+            app.logger.error(f"🔴 Error ejecutando acción solicitada por IA: {e}")
+            app.logger.error(traceback.format_exc())
+            # Inform user gracefully
+            try:
+                enviar_mensaje(numero, "Ocurrió un error interno al procesar tu solicitud. Intentemos de nuevo.", config)
+                guardar_conversacion(numero, texto_original, "Error interno ejecutando acción IA", config)
+            except:
+                pass
+            return False
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
