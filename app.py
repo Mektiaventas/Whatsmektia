@@ -6162,14 +6162,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         texto_norm = (texto or "").strip().lower()
 
         # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
-        # This gives immediate UX for common user requests to receive the published PDF/catalog.
         catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
         if any(k in texto_norm for k in catalog_keywords):
             app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
-                # pero dejamos un registro por seguridad si no lo hizo.
                 if sent:
                     guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
                 else:
@@ -6232,7 +6229,7 @@ que el servidor debe ejecutar. Dispones de:
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+- Asesores (solo nombres, NO teléfonos):\n{asesores_block}
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
@@ -6350,6 +6347,29 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     'telefono': save_cita.get('telefono'),
                     'detalles_servicio': save_cita.get('detalles_servicio') or {}
                 }
+
+                # Pre-validate completeness so we can respond to the user immediately
+                try:
+                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló en precheck: {e}")
+                    completos, faltantes = False, ['validacion_error']
+
+                if not completos:
+                    # Save provisional state (guardar_cita will persist provisional state)
+                    guardar_cita(info_cita, config)
+                    # Prefer AI-provided respuesta_text; otherwise generate a clear request for missing fields
+                    if respuesta_text:
+                        reply = respuesta_text
+                    else:
+                        faltantes_text = ", ".join(faltantes)
+                        reply = f"Puedo agendar tu cita, pero necesito estos datos: {faltantes_text}. ¿Me los puedes proporcionar?"
+                    enviar_mensaje(numero, reply, config)
+                    guardar_conversacion(numero, texto, reply, config)
+                    app.logger.info(f"⚠️ Cita NO guardada (pre-check) para {numero}. Faltantes: {faltantes}")
+                    return True
+
+                # If complete, proceed to save and schedule
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
@@ -6358,7 +6378,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         guardar_conversacion(numero, texto, respuesta_text, config)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
-                    app.logger.warning("⚠️ guardar_cita devolvió None")
+                    app.logger.warning("⚠️ guardar_cita devolvió None aun con pre-check completo")
+                    # If IA supplied a response prompt, still send it; otherwise send a generic message
+                    if respuesta_text:
+                        enviar_mensaje(numero, respuesta_text, config)
+                        guardar_conversacion(numero, texto, respuesta_text, config)
+                    else:
+                        enviar_mensaje(numero, "Hubo un problema guardando la cita. Por favor inténtalo de nuevo o proporciona más detalles.", config)
+                        guardar_conversacion(numero, texto, "Hubo un problema guardando la cita. Por favor inténtalo de nuevo.", config)
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
 
@@ -6396,7 +6423,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # Aplicar restricciones antes de enviar
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
