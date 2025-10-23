@@ -150,40 +150,34 @@
     </div>
 
     <div class="tabs" style="margin-bottom: 2rem;">
-        <!-- add data-period attributes and fix href for week -->
-        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period=week">Últimos 7 días</a>
-        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and not request.args.get('tab') else '' }}" href="?period=month">Últimos 30 días</a>
-        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' else '' }}">Conversaciones</a>
+        <!-- Overview period buttons: active only when tab=overview -->
+        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and request.args.get('tab') == 'overview' else '' }}" href="?period=week">Últimos 7 días</a>
+        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?period=month">Últimos 30 días</a>
+
+        <!-- Conversaciones tab: default when no tab param -->
+        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
     </div>
 
+    {# Removed global stats (Chats distintos / Respuestas enviadas) per request.
+    Only conversation-related metrics live inside the Conversaciones pane. #}
 
-
-    <div class="stats">
-        <div class="stat-card">
-            <strong>Chats distintos:</strong> {{ chat_counts }}
-        </div>
-        <div class="stat-card">
-            <strong>Respuestas enviadas:</strong> {{ total_responded }}
-        </div>
-    </div>
-
-    <!-- Overview pane (por defecto) -->
-    <div id="pane-overview" class="tab-pane {% if not request.args.get('tab') %}active{% endif %}">
+    <!-- Overview pane (shown only when tab=overview) -->
+    <div id="pane-overview" class="tab-pane {% if request.args.get('tab') == 'overview' %}active{% endif %}">
         <div class="chart-container">
             <canvas id="barChart" style="display: block; box-sizing: border-box; height: 400px; width: 1168px;" width="1460" height="500"></canvas>
         </div>
     </div>
 
-    <!-- Conversaciones pane -->
-    <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' %}active{% endif %}">
+    <!-- Conversaciones pane (default when no tab param) -->
+    <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') %}active{% endif %}">
         <div class="stats" style="margin-top:0;">
-            <div class="stat-card">
-                <strong>Chats activos (últimas 24h):</strong>
-                <div id="activeCount">—</div>
-            </div>
             <div class="stat-card">
                 <strong>Conversaciones disponibles (plan):</strong>
                 <div id="planDisponibles">—</div>
+            </div>
+            <div class="stat-card">
+                <strong>Conversaciones consumidas (plan):</strong>
+                <div id="planConsumidos">—</div>
             </div>
         </div>
 
@@ -288,7 +282,7 @@
           if (tab === 'conversaciones') {
               url.searchParams.set('tab', 'conversaciones');
           } else {
-              url.searchParams.delete('tab');
+              url.searchParams.set('tab', 'overview');
           }
 
           // If this is a period button, do a full navigation so server re-renders page with new data
@@ -320,19 +314,22 @@
               return;
           }
 
-          // actualizar métricas superiores
-          document.getElementById('activeCount').innerText = json.active_count ?? '0';
-          const disponibles = (json.plan_info && (json.plan_info.mensajes_disponibles !== undefined)) ? json.plan_info.mensajes_disponibles : 'N/A';
-          document.getElementById('planDisponibles').innerText = disponibles;
+          // compute plan-related metrics
+          const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
+          const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
+          const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+
+          // actualizar métricas superiores (only disponibles y consumidos)
+          const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+          const elDisponibles = document.getElementById('planDisponibles');
+          const elConsumidos = document.getElementById('planConsumidos');
+          if (elDisponibles) elDisponibles.innerText = disponibles;
+          if (elConsumidos) elConsumidos.innerText = consumed;
 
           // Chart: Remaining / Consumed (pie-like)
           const remCtx = document.getElementById('remainingChart').getContext('2d');
-          const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
-          const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
-          const available = (included !== null) ? Math.max(0, included - consumed) : null;
-
           const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
-          const pieData = included !== null ? [consumed, available] : [json.active_count || 0, 0];
+          const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
 
           if (remainingChart) remainingChart.destroy();
           remainingChart = new Chart(remCtx, {
@@ -391,14 +388,15 @@
       }
   }
 
-  // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos
+  // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
+  // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
   (function initTabFromUrl(){
       const params = new URLSearchParams(window.location.search);
-      if (params.get('tab') === 'conversaciones') {
-          showTab('conversaciones');
-      } else {
-          // ensure overview visible and charts resized
+      if (params.get('tab') === 'overview') {
           showTab('overview');
+      } else {
+          // default to conversaciones
+          showTab('conversaciones');
       }
   })();
 
