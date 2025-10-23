@@ -356,7 +356,7 @@ def enviar_mensaje(numero, texto, config=None):
         return False
 
 def enviar_imagen(numero, image_url, config=None):
-    """Enviar imagen por link con logging diagnóstico."""
+    """Enviar imagen por link o, si se pasa un nombre/local path, subirla a Graph y enviar por media id."""
     if config is None:
         try:
             from app import obtener_configuracion_por_host
@@ -373,25 +373,123 @@ def enviar_imagen(numero, image_url, config=None):
             logger.error("🔴 enviar_imagen: falta phone_number_id o whatsapp_token (config/ENV)")
             return False
 
-        url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
-        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-        payload = {'messaging_product':'whatsapp','to':numero,'type':'image','image':{'link': image_url}}
+        # 1) Si la URL ya es pública (http/https/data:), enviar link directamente
+        if isinstance(image_url, str) and (image_url.startswith('http://') or image_url.startswith('https://') or image_url.startswith('data:')):
+            url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+            payload = {'messaging_product':'whatsapp','to':numero,'type':'image','image':{'link': image_url}}
+            logger.info(f"📤 enviar_imagen (link) -> to={numero} phone_number_id={phone_id} image_url={image_url[:200]}")
+            r = requests.post(url, headers=headers, json=payload, timeout=12)
+            status = getattr(r, 'status_code', 'n/a')
+            body_preview = (r.text or '')[:1000]
+            if status in (200, 201, 202):
+                logger.info(f"✅ enviar_imagen OK (status={status}) - resp_preview: {body_preview}")
+                return True
+            logger.error(f"🔴 enviar_imagen FAILED status={status} - resp_preview: {body_preview}")
+            return False
 
-        logger.info(f"📤 enviar_imagen -> to={numero} phone_number_id={phone_id} image_url={image_url[:200]}")
-        r = requests.post(url, headers=headers, json=payload, timeout=12)
+        # 2) Si no es una URL pública, intentar localizar archivo local y subirlo a Graph (media upload)
+        # Buscar en rutas comunes del proyecto
+        file_path = None
+        try:
+            from app import UPLOAD_FOLDER, get_productos_dir_for_config
+            # 1) If image_url looks like a path/filename, try tenant product dirs
+            possible_paths = []
+            # absolute or relative path given
+            if os.path.isabs(str(image_url)):
+                possible_paths.append(image_url)
+            else:
+                # tenant-aware productos dir
+                try:
+                    productos_dir, tenant_slug = get_productos_dir_for_config(cfg)
+                    possible_paths.append(os.path.join(productos_dir, image_url))
+                except Exception:
+                    pass
+                # legacy: uploads/productos/<imagen>
+                possible_paths.append(os.path.join(UPLOAD_FOLDER, 'productos', str(image_url)))
+                # uploads/<imagen>
+                possible_paths.append(os.path.join(UPLOAD_FOLDER, str(image_url)))
+        except Exception:
+            # Fallback conservative guesses
+            possible_paths = [
+                image_url,
+                os.path.join('uploads', 'productos', str(image_url)),
+                os.path.join('uploads', str(image_url))
+            ]
+
+        for p in possible_paths:
+            if not p:
+                continue
+            try:
+                if os.path.isfile(p):
+                    file_path = p
+                    break
+            except Exception:
+                continue
+
+        if not file_path:
+            logger.error(f"🔴 enviar_imagen: no se encontró archivo local para '{image_url}' en rutas: {possible_paths}")
+            return False
+
+        # Subir media a Graph API
+        upload_url = f"https://graph.facebook.com/v23.0/{phone_id}/media"
+        headers = {'Authorization': f'Bearer {token}'}
+        files = {'file': open(file_path, 'rb')}
+        params = {'messaging_product': 'whatsapp'}
+        logger.info(f"📤 Subiendo media local a Graph: {file_path}")
+        try:
+            r = requests.post(upload_url, headers=headers, files=files, params=params, timeout=60)
+        finally:
+            try:
+                files['file'].close()
+            except:
+                pass
 
         status = getattr(r, 'status_code', 'n/a')
-        try:
-            body_preview = (r.text or '')[:1000]
-        except Exception:
-            body_preview = '<unreadable-response-body>'
+        body = r.text or ''
+        logger.info(f"📥 Upload resp: status={status} body_preview={body[:1000]}")
+        if status not in (200, 201, 202):
+            logger.error(f"🔴 upload_and_send_image FAILED status={status} body={body[:1000]}")
+            return False
 
-        if status in (200, 201, 202):
-            logger.info(f"✅ enviar_imagen OK (status={status}) - resp_preview: {body_preview}")
+        media_id = None
+        try:
+            resp_json = r.json()
+            # Graph may return id or 'id' inside nested object; try common keys
+            media_id = resp_json.get('id') or resp_json.get('media', {}).get('id') if isinstance(resp_json, dict) else None
+        except Exception:
+            logger.warning("⚠️ No se pudo parsear JSON de upload, raw body usado para diagnostico")
+
+        if not media_id:
+            # Intentar regex fallback
+            m = re.search(r'"id"\s*:\s*"([^"]+)"', body)
+            if m:
+                media_id = m.group(1)
+
+        if not media_id:
+            logger.error(f"🔴 No se obtuvo media_id tras upload. Resp body: {body[:1000]}")
+            return False
+
+        # Enviar el mensaje usando media id
+        send_url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
+        headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'image',
+            'image': {'id': media_id}
+        }
+        logger.info(f"📤 Enviando imagen por media_id -> to={numero} media_id={media_id}")
+        s = requests.post(send_url, headers=headers, json=payload, timeout=15)
+        s_status = getattr(s, 'status_code', 'n/a')
+        s_body = s.text or ''
+        if s_status in (200, 201, 202):
+            logger.info(f"✅ enviar_imagen via media_id OK (status={s_status}) - resp_preview: {s_body[:1000]}")
             return True
 
-        logger.error(f"🔴 enviar_imagen FAILED status={status} - resp_preview: {body_preview}")
+        logger.error(f"🔴 enviar_imagen via media_id FAILED status={s_status} - resp_preview: {s_body[:1000]}")
         return False
+
     except Exception as e:
         logger.error(f"Exception enviar_imagen: {e}")
         return False
