@@ -1458,7 +1458,6 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
-
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
     try:
@@ -2232,7 +2231,31 @@ def negocio_contact_block(negocio):
     )
     return block
 
-
+@app.route('/chat/<telefono>/messages')
+def get_chat_messages(telefono):
+    """Obtener mensajes de un chat específico después de cierto ID"""
+    after_id = request.args.get('after', 0, type=int)
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Consultar solo mensajes más recientes que el ID proporcionado
+    cursor.execute("""
+        SELECT id, mensaje as content, timestamp as timestamp, respuesta
+        FROM conversaciones 
+        WHERE telefono = %s AND id > %s
+        ORDER BY fecha ASC
+    """, (telefono, after_id))
+    
+    messages = cursor.fetchall()
+    cursor.close()
+    conn.close()
+    
+    return jsonify({
+        'messages': messages,
+        'timestamp': int(time.time() * 1000)
+    })
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
@@ -4738,16 +4761,6 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
-@app.before_request
-def _init_request_saved_messages():
-    # init per-request cache of saved message hashes to avoid duplicate inserts
-    try:
-        if not hasattr(g, '_saved_message_hashes'):
-            g._saved_message_hashes = set()
-    except Exception:
-        # Defensive: if g not available, ignore (shouldn't happen in request context)
-        pass
-
 def obtener_siguiente_asesor(config=None):
     """
     Retorna el siguiente asesor disponible en forma round-robin.
@@ -5017,109 +5030,53 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
-def actualizar_respuesta_por_id(conv_id, respuesta, config=None):
-    """Actualiza la columna `respuesta` de una fila específica en `conversaciones` por su id."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE conversaciones
-               SET respuesta = %s
-             WHERE id = %s
-        """, (respuesta, conv_id))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info(f"✅ actualizar_respuesta_por_id: actualizado id={conv_id}")
-        return True
-    except Exception as e:
-        app.logger.error(f"🔴 actualizar_respuesta_por_id error: {e}")
-        return False
-
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
-    """Actualiza la respuesta para un mensaje ya guardado
-
-    Antes intentaba hacer UPDATE sobre la fila del usuario (mensaje + respuesta en la misma fila),
-    lo que impedía que el endpoint de polling mostrara la respuesta (porque prioriza `mensaje`).
-    Ahora insertamos una fila separada para la respuesta del bot (mensaje='') asociada al mismo número.
-    """
+    """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:
         config = obtener_configuracion_por_host()
-
+    
     try:
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-
+        
         conn = get_db_connection(config)
         cursor = conn.cursor()
-
-        app.logger.info(f"🔄 actualizar_respuesta: intentando registrar respuesta para {numero} (mensaje preview: {str(mensaje)[:80]})")
-
-        # Buscar la fila de mensaje original (si existe) — la usamos sólo para referencia.
-        try:
+        
+        # Log before update
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        
+        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
+        cursor.execute("""
+            UPDATE conversaciones 
+            SET respuesta = %s 
+            WHERE numero = %s 
+              AND mensaje = %s 
+              AND respuesta IS NULL 
+            ORDER BY timestamp DESC 
+            LIMIT 1
+        """, (respuesta, numero, mensaje))
+        
+        # Log results of update
+        if cursor.rowcount > 0:
+            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
+        else:
+            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
             cursor.execute("""
-                SELECT id FROM conversaciones
-                 WHERE numero = %s AND mensaje = %s
-                 ORDER BY timestamp DESC
-                 LIMIT 1
-            """, (numero, mensaje))
-            row = cursor.fetchone()
-        except Exception as e:
-            row = None
-            app.logger.debug(f"⚠️ No se pudo buscar fila original para actualizar_respuesta: {e}")
-
-        # Insertar una fila separada para la respuesta del bot (mensaje vacío) para que el polling la muestre
-        try:
-            cursor.execute("""
-                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
+                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
                 VALUES (%s, %s, %s, NOW())
-            """, (numero, '', respuesta))
-            conn.commit()
-            app.logger.info(f"✅ actualizar_respuesta: respuesta insertada como fila separada para {numero}")
-        except Exception as e:
-            conn.rollback()
-            app.logger.error(f"🔴 actualizar_respuesta: fallo insertando fila de respuesta para {numero}: {e}")
-            # Fallback: intentar update como último recurso (mantener compatibilidad)
-            try:
-                cursor.execute("""
-                    UPDATE conversaciones
-                       SET respuesta = %s
-                     WHERE numero = %s
-                       AND mensaje = %s
-                       AND respuesta IS NULL
-                     ORDER BY timestamp DESC
-                     LIMIT 1
-                """, (respuesta, numero, mensaje))
-                conn.commit()
-                if cursor.rowcount > 0:
-                    app.logger.info(f"✅ actualizar_respuesta: fallback UPDATE aplicado para {numero}")
-                else:
-                    # Si tampoco se encontró nada, insertar como nueva fila (segunda oportunidad)
-                    cursor.execute("""
-                        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
-                        VALUES (%s, %s, %s, NOW())
-                    """, (numero, mensaje, respuesta))
-                    conn.commit()
-                    app.logger.info(f"✅ actualizar_respuesta: fallback INSERT (segunda oportunidad) para {numero}")
-            except Exception as e2:
-                conn.rollback()
-                app.logger.error(f"🔴 actualizar_respuesta: fallback también falló: {e2}")
-                # Last resort: usar guardar_conversacion
-                guardar_conversacion(numero, mensaje, respuesta, config)
-
+            """, (numero, mensaje, respuesta))
+        
+        conn.commit()
         cursor.close()
         conn.close()
+        
+        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
         return True
-
+        
     except Exception as e:
-        app.logger.error(f"❌ actualizar_respuesta error: {e}")
-        # Fallback a guardar_conversacion para asegurar que la respuesta se persista
-        try:
-            guardar_conversacion(numero, mensaje, respuesta, config)
-        except Exception as ex:
-            app.logger.error(f"🔴 Fallback guardar_conversacion falló: {ex}")
+        app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
+        # Fallback a guardar conversación normal
+        guardar_conversacion(numero, mensaje, respuesta, config)
         return False
 
 def obtener_asesores_por_user(username, default=2, cap=20):
@@ -5419,13 +5376,11 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
        
-def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, message_hash=None):
+# REEMPLAZA la función guardar_conversacion con esta versión mejorada
+def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
-    Añadido: deduplicación por message_hash (o por hash calculado de contenido).
-    Mejora: si detectamos que el mensaje ya fue guardado en esta petición pero ahora
-    queremos guardar la respuesta de la IA, insertamos una fila separada para la respuesta
-    en lugar de omitirla.
-    """
+    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
+    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -5434,54 +5389,14 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Compute a deterministic message hash if not provided (numero + mensaje + imagen_url)
-        if not message_hash:
-            key = f"{numero}|{mensaje_limpio or ''}|{imagen_url or ''}"
-            message_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
-
-        # Check per-request saved hashes to avoid double-insert during same request
-        try:
-            saved = getattr(g, '_saved_message_hashes', set())
-        except Exception:
-            saved = set()
-
-        # If this message hash was already saved in this request...
-        if message_hash in saved:
-            # If we have a bot response now, insert it as a separate row (mensaje='') so UI sees it.
-            if respuesta_limpia:
-                try:
-                    conn = get_db_connection(config)
-                    cursor = conn.cursor()
-                    cursor.execute("""
-                        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
-                        VALUES (%s, %s, %s, NOW(), %s, %s)
-                    """, (numero, '', respuesta_limpia, imagen_url, es_imagen))
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    # Mark response-saved for this request to avoid duplicate response inserts
-                    try:
-                        resp_hash = message_hash + "|resp"
-                        g._saved_message_hashes.add(resp_hash)
-                    except Exception:
-                        pass
-                    app.logger.info(f"💾 Respuesta (fila separada) guardada para {numero} (hash={message_hash})")
-                    return True
-                except Exception as e:
-                    app.logger.error(f"❌ Error insertando fila de respuesta separada para {numero}: {e}")
-                    return False
-            # Otherwise, it's a duplicate user message within the same request — skip
-            app.logger.info(f"⚠️ Duplicate detected in guardar_conversacion (skipping). numero={numero} hash={message_hash}")
-            return False
-
-        # Primero asegurar que el contacto existe
+        # Primero asegurar que el contacto existe con su información actualizada
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Insert message (may include respuesta if provided) as a single row
+        # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
@@ -5491,13 +5406,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         cursor.close()
         conn.close()
 
-        # Mark this message as saved for the current request
-        try:
-            g._saved_message_hashes.add(message_hash)
-        except Exception:
-            pass
-
-        app.logger.info(f"💾 Conversación guardada para {numero} (hash={message_hash})")
+        app.logger.info(f"💾 Conversación guardada para {numero}")
         return True
 
     except Exception as e:
@@ -6178,38 +6087,10 @@ def webhook():
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
 
-            # If provider didn't give us a public URL but returned base64, save it to disk under uploads
-            # so the web UI can fetch it via the existing /uploads/<filename> route.
-            if not public_url and imagen_base64:
-                try:
-                    # imagen_base64 may already be a data URI "data:image/...;base64,..."
-                    b64 = imagen_base64
-                    # extract extension and payload if data URI
-                    m = re.match(r'data:(image/[^;]+);base64,(.+)', imagen_base64, re.DOTALL)
-                    if m:
-                        mime = m.group(1)  # e.g. image/jpeg
-                        ext = mime.split('/')[1].split('+')[0]
-                        b64 = m.group(2)
-                    else:
-                        # fallback to jpg
-                        ext = 'jpg'
-                        if ',' in imagen_base64:
-                            b64 = imagen_base64.split(',', 1)[1]
-
-                    filename = secure_filename(f"wa_img_{int(time.time())}.{ext}")
-                    filepath = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
-                    with open(filepath, 'wb') as f:
-                        f.write(base64.b64decode(b64))
-                    public_url = url_for('serve_uploaded_file', filename=filename)
-                    app.logger.info(f"✅ WhatsApp image saved to disk: {filepath} -> {public_url}")
-                except Exception as e:
-                    app.logger.error(f"🔴 Error saving WhatsApp image to disk: {e}")
-
             # Guardar mensaje entrante (sin respuesta aún)
-            # Prefer guardar public_url (http path). If not available, store the base64 string (data URI)
-            guardar_conversacion(numero, texto, None, config, public_url or imagen_base64, True)
+            guardar_conversacion(numero, texto, None, config, public_url, True)
 
+            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
             try:
                 meta = obtener_chat_meta(numero, config)
                 if not meta:
@@ -6320,6 +6201,29 @@ def webhook():
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
         
+        
+                # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
+        # Primero, comprobar si es una cita/pedido usando el análisis mejorado
+        info_cita = extraer_info_cita_mejorado(texto, numero, None, config)
+            
+        if info_cita and info_cita.get('servicio_solicitado'):
+            app.logger.info(f"✅ Información de cita/pedido detectada en webhook: {json.dumps(info_cita)}")
+                
+            # Comprobar si hay suficientes datos
+            datos_completos, faltantes = validar_datos_cita_completos(info_cita, config)
+            if datos_completos:
+                # Guardar la cita y enviar notificaciones
+                cita_id = guardar_cita(info_cita, config)
+                if cita_id:
+                    app.logger.info(f"✅ Cita/pedido guardado con ID: {cita_id}")
+                    # Enviar alertas y confirmación
+                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
+                    enviar_mensaje(numero, respuesta, config)
+                    guardar_conversacion(numero, texto, respuesta, config)
+                    enviar_confirmacion_cita(numero, info_cita, cita_id, config)
+                    return 'OK', 200
         procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
         return 'OK', 200 
         
@@ -6602,33 +6506,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         app.logger.error(traceback.format_exc())
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, message_hash=None):
-    """Guarda el mensaje del usuario inmediatamente y devuelve el id insertado.
-    Devuelve msg_id (int) en éxito, None en fallo.
-    """
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
+        # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
-
-        # Compute deterministic hash if not provided
-        if not message_hash:
-            key = f"{numero}|{texto_limpio or ''}|{imagen_url or ''}"
-            message_hash = hashlib.md5(key.encode('utf-8')).hexdigest()
-
-        # Dedup check (per-request)
-        try:
-            saved = getattr(g, '_saved_message_hashes', set())
-            if message_hash in saved:
-                app.logger.info(f"⚠️ Duplicate detected in guardar_mensaje_inmediato (skipping). numero={numero} hash={message_hash}")
-                # Try to return existing recently inserted id stored in processed_messages if available
-                pm = processed_messages.get(message_hash)
-                if isinstance(pm, dict) and pm.get('db_id'):
-                    return pm.get('db_id')
-                return None
-        except Exception:
-            pass
 
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
@@ -6636,52 +6522,28 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()} (hash={message_hash})")
+        # Add detailed logging before saving the message
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen))
 
-        # Obtener id del insert
-        try:
-            msg_id = cursor.lastrowid
-        except Exception:
-            # Fallback a SELECT LAST_INSERT_ID()
-            cursor.execute("SELECT LAST_INSERT_ID()")
-            try:
-                msg_id = cursor.fetchone()[0]
-            except Exception:
-                msg_id = None
+        # Get the ID of the inserted message for tracking
+        cursor.execute("SELECT LAST_INSERT_ID()")
+        msg_id = cursor.fetchone()[0]
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        # Mark saved (per-request) and update global processed_messages if present
-        try:
-            g._saved_message_hashes.add(message_hash)
-        except Exception:
-            pass
-
-        # store db id in module-level processed_messages map for cross-step update
-        try:
-            if message_hash:
-                existing = processed_messages.get(message_hash)
-                if isinstance(existing, dict):
-                    existing['db_id'] = msg_id
-                    existing['ts'] = time.time()
-                else:
-                    processed_messages[message_hash] = {'ts': time.time(), 'db_id': msg_id}
-        except Exception:
-            pass
-
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (hash={message_hash})")
-        return msg_id
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
-        return None
+        return False
     
 def extraer_nombre_desde_webhook(payload):
     """
