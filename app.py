@@ -2240,17 +2240,33 @@ def get_chat_messages(telefono):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # Consultar solo mensajes más recientes que el ID proporcionado
+    # Use the correct column name ('numero') and order by the timestamp column.
     cursor.execute("""
-        SELECT id, mensaje as content, timestamp as timestamp, respuesta
-        FROM conversaciones 
-        WHERE telefono = %s AND id > %s
-        ORDER BY fecha ASC
+        SELECT id, mensaje AS content, timestamp
+        FROM conversaciones
+        WHERE numero = %s AND id > %s
+        ORDER BY timestamp ASC
     """, (telefono, after_id))
     
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
+    
+    # Normalize timestamp to milliseconds since epoch (frontend expects number or ISO)
+    for m in messages:
+        ts = m.get('timestamp')
+        try:
+            if hasattr(ts, 'timestamp'):
+                m['timestamp'] = int(ts.timestamp() * 1000)
+            else:
+                # If it's a string, try to parse; otherwise fall back to now
+                try:
+                    parsed = datetime.fromisoformat(str(ts))
+                    m['timestamp'] = int(parsed.timestamp() * 1000)
+                except Exception:
+                    m['timestamp'] = int(time.time() * 1000)
+        except Exception:
+            m['timestamp'] = int(time.time() * 1000)
     
     return jsonify({
         'messages': messages,
