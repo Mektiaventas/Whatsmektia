@@ -6420,7 +6420,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6569,7 +6569,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, respuesta_text, config)
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
-
+        # PASAR DATOS TRANSFERENCIA
+        if intent == "DATOS_TRANSFERENCIA":
+            sent = enviar_datos_transferencia(numero, config=config)
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            return True
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
@@ -6588,6 +6594,61 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
+        return False
+
+def enviar_datos_transferencia(numero, config=None):
+    """
+    Envía al cliente los datos de transferencia tomados desde la configuración del negocio.
+    - numero: número destino (string)
+    - config: tenant config opcional (dict). Si es None se usa obtener_configuracion_por_host().
+    Retorna True si se envió un mensaje, False si no había datos configurados.
+    """
+    try:
+        if config is None:
+            config = obtener_configuracion_por_host()
+
+        # Cargar configuración de negocio (usa load_config para respetar columnas/JSON)
+        cfg = load_config(config)
+        negocio = cfg.get('negocio', {}) or {}
+
+        # Construir bloque de transferencia (usa la función ya existente)
+        texto_transferencia = negocio_transfer_block(negocio)
+
+        # Si no hay datos específicos, intentar leer fila completa de configuracion (fallback)
+        if not texto_transferencia or 'no hay datos' in texto_transferencia.lower():
+            # Try obtener datos directos desde DB as fallback
+            datos = obtener_datos_de_transferencia(config) or []
+            if datos and len(datos) > 0:
+                row = datos[0]
+                numero_t = (row.get('transferencia_numero') or negocio.get('transferencia_numero') or '').strip()
+                nombre_t = (row.get('transferencia_nombre') or negocio.get('transferencia_nombre') or '').strip()
+                banco_t = (row.get('transferencia_banco') or negocio.get('transferencia_banco') or '').strip()
+                parts = []
+                if numero_t:
+                    parts.append(f"• Número / CLABE: {numero_t}")
+                if nombre_t:
+                    parts.append(f"• Nombre: {nombre_t}")
+                if banco_t:
+                    parts.append(f"• Banco: {banco_t}")
+                if parts:
+                    texto_transferencia = "Datos para transferencia:\n" + "\n".join(parts)
+
+        # Si aún no hay datos, avisar al usuario
+        if not texto_transferencia or texto_transferencia.strip() == "":
+            msg = "Lo siento, no hay datos de transferencia configurados en este negocio. Por favor contacta al administrador."
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, "[Solicitud datos transferencia]", msg, config, incoming_saved=False)
+            app.logger.info(f"ℹ️ enviar_datos_transferencia: no hay datos para enviar (numero={numero})")
+            return False
+
+        # Enviar el bloque al cliente y registrar la respuesta en conversaciones
+        enviar_mensaje(numero, texto_transferencia, config)
+        registrar_respuesta_bot(numero, "[Solicitud datos transferencia]", texto_transferencia, config, incoming_saved=False)
+        app.logger.info(f"✅ Datos de transferencia enviados a {numero}")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
