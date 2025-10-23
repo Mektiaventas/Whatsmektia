@@ -2968,33 +2968,75 @@ def crear_tabla_citas(config=None):
     conn.close()
 
 def guardar_cita(info_cita, config=None):
-    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia"""
+    """Guarda la cita en la base de datos, la agenda en Google Calendar y registra en notificaciones_ia.
+    Only persists a real cita when required fields are complete (validated by validar_datos_cita_completos).
+    If data are incomplete, stores a provisional state in estados_conversacion for follow-up and returns None.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
+        # Normalize phone fallback keys
+        telefono = info_cita.get('telefono') or info_cita.get('numero_cliente')
+
+        # 1) Validate completeness BEFORE attempting to save
+        try:
+            completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ validar_datos_cita_completos falló: {e}")
+            completos, faltantes = False, ['validacion_error']
+
+        if not completos:
+            # Do NOT create a real cita when data are incomplete.
+            app.logger.info(f"⚠️ Cita NO guardada (datos incompletos) para {telefono}. Faltantes: {faltantes}")
+
+            # Persist provisional info in estados_conversacion so the conversation flow can continue
+            provisional = {
+                'pedido_provisional': info_cita,
+                'faltantes': faltantes,
+                'timestamp': datetime.now().isoformat()
+            }
+            try:
+                actualizar_estado_conversacion(telefono, "OFRECIENDO_ASESOR", "pedido_provisional", provisional, config)
+                app.logger.info(f"🔁 Estado provisional guardado en estados_conversacion para {telefono}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo guardar estado provisional para {telefono}: {e}")
+
+            return None
+
+        # 2) Prevent rapid duplicates: only check when phone + servicio are present
         conn = get_db_connection(config)
         cursor = conn.cursor()
-        # NUEVO: Verificar si existe una cita similar en los últimos minutos
-        cursor.execute('''
-            SELECT id FROM citas
-            WHERE numero_cliente = %s 
-            AND servicio_solicitado = %s 
-            AND fecha_creacion > NOW() - INTERVAL 5 MINUTE
-        ''', (
-            info_cita.get('telefono'),
-            info_cita.get('servicio_solicitado')
-        ))
-        
-        existing_cita = cursor.fetchone()
-        if existing_cita:
-            app.logger.info(f"⚠️ Cita similar ya existe (ID: {existing_cita[0]}), evitando duplicado")
-            cursor.close()
-            conn.close()
-            return existing_cita[0]  # Retorna el ID de la cita existente
-        
+        try:
+            svc = (info_cita.get('servicio_solicitado') or '').strip()
+            if telefono and svc:
+                cursor.execute('''
+                    SELECT id FROM citas
+                    WHERE numero_cliente = %s
+                      AND servicio_solicitado = %s
+                      AND fecha_creacion > NOW() - INTERVAL 5 MINUTE
+                ''', (telefono, svc))
+                existing_cita = cursor.fetchone()
+            else:
+                existing_cita = None
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error comprobando duplicados en citas: {e}")
+            existing_cita = None
 
-        # Crear tabla notificaciones_ia si no existe con la estructura requerida
+        if existing_cita:
+            try:
+                cid = existing_cita[0]
+            except Exception:
+                cid = existing_cita
+            app.logger.info(f"⚠️ Cita similar ya existe (ID: {cid}), evitando duplicado")
+            try:
+                cursor.close()
+                conn.close()
+            except:
+                pass
+            return cid  # return existing id
+
+        # 3) Create notificaciones_ia table if needed (kept as before)
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS notificaciones_ia (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -3012,38 +3054,34 @@ def guardar_cita(info_cita, config=None):
         ''')
         conn.commit()
 
-        # ... (omitir verificación de columnas por brevedad, se mantiene igual) ...
-
-        # Guardar en tabla citas
+        # 4) Insert into citas (only when validated as complete)
         cursor.execute('''
             INSERT INTO citas (
                 numero_cliente, servicio_solicitado, fecha_propuesta,
                 hora_propuesta, nombre_cliente, telefono, estado
             ) VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (
-            info_cita.get('telefono'),
+            telefono,
             info_cita.get('servicio_solicitado'),
             info_cita.get('fecha_sugerida'),
             info_cita.get('hora_sugerida'),
             info_cita.get('nombre_cliente'),
-            info_cita.get('telefono'),
+            telefono,
             'pendiente'
         ))
-        
+
         conn.commit()
         cita_id = cursor.lastrowid
-        
-        # Determinar si la cita es para un día futuro (o hoy)
+
+        # 5) Google Calendar scheduling (kept behavior)
         evento_id = None
         debe_agendar = False
-        
+
         if info_cita.get('fecha_sugerida'):
             try:
                 fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
                 fecha_actual = datetime.now().date()
-                
                 diff_days = (fecha_cita - fecha_actual).days
-                # Agendar si la fecha es hoy o futura (diff >= 0)
                 if diff_days >= 0:
                     debe_agendar = True
                     app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
@@ -3051,44 +3089,35 @@ def guardar_cita(info_cita, config=None):
                     app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
             except Exception as e:
                 app.logger.error(f"Error procesando fecha: {e}")
-        
-        # Agendar en Google Calendar solo si es para hoy o futuro
+
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
                 evento_id = crear_evento_calendar(service, info_cita, config)
                 if evento_id:
-                    # Asegurarnos de que la columna exista antes de actualizar citas
                     try:
                         cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
                         if cursor.fetchone() is None:
                             cursor.execute("ALTER TABLE citas ADD COLUMN evento_calendar_id VARCHAR(255) DEFAULT NULL")
                             conn.commit()
                             app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
-
-                        cursor.execute('''
-                            UPDATE citas SET evento_calendar_id = %s WHERE id = %s
-                        ''', (evento_id, cita_id))
+                        cursor.execute('UPDATE citas SET evento_calendar_id = %s WHERE id = %s', (evento_id, cita_id))
                         conn.commit()
                         app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
-        
-        # (resto del guardado de notificaciones_ia y envíos se mantiene igual)
-        # ...
-        
-        # Guardar en notificaciones_ia
+
+        # 6) Notificaciones al administrador (kept behavior)
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         tipo_solicitud = "pedido" if es_porfirianna else "cita"
-        
-        # Crear resumen para la notificación
+
         detalles_servicio = info_cita.get('detalles_servicio', {})
         descripcion_servicio = detalles_servicio.get('descripcion', '')
-        
+
         resumen = f"{tipo_solicitud.capitalize()}: {info_cita.get('servicio_solicitado')} - "
         resumen += f"Cliente: {info_cita.get('nombre_cliente')} - "
         resumen += f"Fecha: {info_cita.get('fecha_sugerida')} {info_cita.get('hora_sugerida')}"
-        
+
         evaluacion_ia = {
             'servicio_solicitado': info_cita.get('servicio_solicitado'),
             'detalles_servicio': detalles_servicio,
@@ -3111,29 +3140,37 @@ def guardar_cita(info_cita, config=None):
         💼 *Dominio:* {config.get('dominio', 'smartwhats.mektia.com')}
         """
 
-        enviar_mensaje('5214493432744', mensaje_notificacion, config)
-        enviar_mensaje('5214491182201', mensaje_notificacion, config)
-        app.logger.info(f"✅ Notificación de cita enviada a 5214493432744, ID: {cita_id}")
-        
-        cursor.execute('''
-            INSERT INTO notificaciones_ia (
-                numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            info_cita.get('telefono'),
-            tipo_solicitud,
-            resumen,
-            'pendiente',
-            json.dumps(info_cita),
-            json.dumps(evaluacion_ia),
-            evento_id
-        ))
-        conn.commit()
+        try:
+            enviar_mensaje(ALERT_NUMBER, mensaje_notificacion, config)
+            enviar_mensaje('5214493432744', mensaje_notificacion, config)
+            app.logger.info(f"✅ Notificación de cita enviada a administradores, ID: {cita_id}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudieron enviar notificaciones por WhatsApp: {e}")
+
+        # Insert notification record
+        try:
+            cursor.execute('''
+                INSERT INTO notificaciones_ia (
+                    numero, tipo, resumen, estado, mensaje, evaluacion_ia, calendar_event_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                info_cita.get('telefono'),
+                tipo_solicitud,
+                resumen,
+                'pendiente',
+                json.dumps(info_cita),
+                json.dumps(evaluacion_ia),
+                evento_id
+            ))
+            conn.commit()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo insertar notificacion en DB: {e}")
+
         cursor.close()
         conn.close()
-        
+
         return cita_id
-        
+
     except Exception as e:
         app.logger.error(f"Error guardando cita: {e}")
         app.logger.error(traceback.format_exc())
