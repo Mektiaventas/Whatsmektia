@@ -138,9 +138,9 @@
         {# Mostrar información del plan si está disponible #}
         {% if plan_info %}
         <div class="plan-box" title="{{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}">
-            <strong style="margin-right:6px;">Plan:</strong>
+            <strong style="margin-right:6px;">Plan Info:</strong>
             <div class="plan-details">
-                <span class="plan-metric"><strong>{{ plan_info.plan_name or ('ID: ' ~ (plan_info.plan_id or 'N/A')) }}</strong></span>
+                <span class="plan-metric"><strong>Plan</strong>{{ plan_info.plan_name or ('ID: ' ~ (plan_info.plan_id or 'N/A')) }}</strong></span>
                 <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }}</span>
                 <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }}</span>
                 <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
