@@ -6019,6 +6019,10 @@ def webhook():
         es_archivo = False
         es_documento = False
         es_mi_numero = False
+
+        # NEW: flag to avoid double-saving the same incoming message during one webhook call
+        message_saved = False
+
         # 🔥 DETECTAR CONFIGURACIÓN CORRECTA POR PHONE_NUMBER_ID
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         app.logger.info(f"📱 Phone Number ID recibido: {phone_number_id}")
@@ -6089,6 +6093,7 @@ def webhook():
 
             # Guardar mensaje entrante (sin respuesta aún)
             guardar_conversacion(numero, texto, None, config, public_url, True)
+            message_saved = True  # <-- mark as saved to avoid a second insert later
 
             # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
             try:
@@ -6127,7 +6132,9 @@ def webhook():
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (documento): {e}")
             # Procesar y salir
-            procesar_mensaje_unificado(numero, texto, msg, config)
+            processed_ok = procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
+            if processed_ok:
+                message_saved = True
             return 'OK', 200
         elif 'audio' in msg:
             es_audio = True
@@ -6178,29 +6185,18 @@ def webhook():
         except Exception as _e:
             app.logger.warning(f"⚠️ Manejo oferta asesor falló: {_e}")
         # === fin manejo oferta asesor ===
-        if not locals().get('message_saved'):
+
+        # Only save immediate message if it wasn't saved earlier
+        if not message_saved:
             guardar_mensaje_inmediato(numero, texto, config)
         else:
             app.logger.info(f"ℹ️ Mensaje ya registrado previamente para {numero}, omitiendo guardar_mensaje_inmediato()")
         app.logger.info(f"📝 Mensaje de {numero}: '{texto}' (imagen: {es_imagen}, audio: {es_audio})")
 
-        # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN (cualquier tipo)
-        try:
-            meta = obtener_chat_meta(numero, config)
-            if not meta:
-                inicializar_chat_meta(numero, config)
-            # Si es el primer mensaje de este chat -> Nuevos (1), si no -> En Conversación (2)
-            historial = obtener_historial(numero, limite=1, config=config)
-            nueva_columna = 1 if not historial else 2
-            actualizar_columna_chat(numero, nueva_columna, config)
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo actualizar Kanban en recepción (general): {e}")
-        
         # ⛔ BLOQUEAR MENSAJES DEL SISTEMA DE ALERTAS
         if numero == ALERT_NUMBER and any(tag in texto for tag in ['🚨 ALERTA:', '📋 INFORMACIÓN COMPLETA']):
             app.logger.info(f"⚠️ Mensaje del sistema de alertas, ignorando: {numero}")
             return 'OK', 200
-        
         
                 # ========== DETECCIÓN DE INTENCIONES PRINCIPALES ==========
         # Primero, comprobar si es una cita/pedido usando el análisis mejorado
@@ -6222,9 +6218,13 @@ def webhook():
                     respuesta = f"✅ He registrado tu {es_porfirianna and 'pedido' or 'cita'}. Te enviaré una confirmación con los detalles y nos pondremos en contacto pronto."
                     enviar_mensaje(numero, respuesta, config)
                     guardar_conversacion(numero, texto, respuesta, config)
+                    message_saved = True
                     enviar_confirmacion_cita(numero, info_cita, cita_id, config)
                     return 'OK', 200
-        procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
+        processed_ok = procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config)
+        if processed_ok:
+            # procesar_mensaje_unificado already saved/acted on the message in many flows
+            message_saved = True
         return 'OK', 200 
         
     except Exception as e:
