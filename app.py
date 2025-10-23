@@ -6166,6 +6166,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         if config is None:
             config = obtener_configuracion_por_host()
 
+        # Ensure image state vars exist to avoid NameError when referenced in multiple branches
+        image_sent = False
+        imagen_para_enviar = None
+        imagen_url_to_save = None
+
         texto_norm = (texto or "").strip().lower()
 
         # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
@@ -6247,7 +6252,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
    - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario;)
+   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
    - image: filename_or_url_or_null
    - document: url_or_null
    - save_cita: object|null
@@ -6399,7 +6404,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
             return True
         # ENVIAR IMAGEN (intent-specific) - skip if already sent early
-        if intent == "ENVIAR_IMAGEN":
+        if intent == "ENVIAR_IMAGEN" and image_field and not image_sent:
             try:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
