@@ -3594,77 +3594,26 @@ def _ensure_precios_plan_column(config=None):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columna mensajes_incluidos en precios: {e}")
 
-def get_plan_for_domain(domain):
+def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
     """
-    Return plan info from CLIENTES_DB.domain_plans for given domain (exact or subdomain heuristic).
-    Returns dict {plan_id, mensajes_incluidos} or None.
-    """
-    if not domain:
-        return None
-    try:
-        _ensure_domain_plans_table()
-        conn = get_clientes_conn()
-        cur = conn.cursor(dictionary=True)
-
-        # try exact, then subdomain (take left-most label), then underscore variant
-        candidates = [domain, domain.split('.')[0] if '.' in domain else domain, domain.replace('.', '_')]
-        for c in candidates:
-            try:
-                cur.execute("SELECT plan_id, mensajes_incluidos FROM domain_plans WHERE dominio = %s LIMIT 1", (c,))
-                row = cur.fetchone()
-                if row:
-                    cur.close(); conn.close()
-                    return {'plan_id': int(row['plan_id']), 'mensajes_incluidos': int(row.get('mensajes_incluidos') or 0)}
-            except Exception:
-                continue
-        cur.close(); conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ get_plan_for_domain error: {e}")
-    return None
-
-def asignar_plan_a_cliente_por_user(username_or_domain, plan_id, config=None):
-    """
-    Assign a plan to a cliente in CLIENTES_DB.
-    - If `config` is provided or `username_or_domain` looks like a domain, resolve the cliente by domain.
-    - Otherwise resolve by `user` as before.
-    Keeps behavior of copying mensajes_incluidos from planes table into cliente.mensajes_incluidos.
+    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
+    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
     """
     try:
+        # asegurar columnas en cliente
         _ensure_cliente_plan_columns()
 
-        # Determine whether we should look up by domain or by username
-        cliente = None
+        # 1) Obtener cliente en CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-
-        # If config provided, prefer to find cliente using tenant domain
-        domain_to_check = None
-        if config and config.get('dominio'):
-            domain_to_check = config.get('dominio')
-        else:
-            # Heuristic: if the provided identifier contains a dot assume it's a domain
-            if username_or_domain and '.' in str(username_or_domain):
-                domain_to_check = username_or_domain
-
-        if domain_to_check:
-            found = _find_cliente_in_clientes_by_domain(domain_to_check)
-            if found:
-                cliente = found
-
-        # If not found by domain, fallback to username lookup (legacy behavior)
-        if not cliente and username_or_domain:
-            try:
-                cur_cli.execute("SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password FROM cliente WHERE `user` = %s LIMIT 1", (username_or_domain,))
-                cliente = cur_cli.fetchone()
-            except Exception as e:
-                app.logger.warning(f"⚠️ asignar_plan_a_cliente_por_user fallback by user failed: {e}")
-
+        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
         if not cliente:
             cur_cli.close(); conn_cli.close()
-            app.logger.error(f"🔴 Cliente no encontrado para identifier={username_or_domain} (domain check={domain_to_check})")
+            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
             return False
 
-        # Read plan metadata from planes table
+        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
         mensajes_incluidos = 0
         plan_name = None
         try:
@@ -3673,12 +3622,13 @@ def asignar_plan_a_cliente_por_user(username_or_domain, plan_id, config=None):
             plan_row = cur_pl.fetchone()
             if plan_row:
                 mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
                 plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
             cur_pl.close()
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
 
-        # Update cliente row with plan info
+        # 3) Actualizar cliente en CLIENTES_DB
         try:
             cur_cli.execute("""
                 UPDATE cliente
@@ -3693,122 +3643,145 @@ def asignar_plan_a_cliente_por_user(username_or_domain, plan_id, config=None):
             return False
 
         cur_cli.close(); conn_cli.close()
-        app.logger.info(f"✅ Plan id={plan_id} asignado a cliente(id={cliente.get('id_cliente')}) (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
         return True
 
     except Exception as e:
         app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
         return False
 
-# remove the premature reference to a not-yet-defined function
-# _original_get_plan_status_for_user = get_plan_status_for_user  # keep reference if needed (optional)
-
 def get_plan_status_for_user(username, config=None):
     """
-    Returns plan status. Now also checks CLIENTES_DB.domain_plans when a tenant domain is available.
-    Behavior: if domain mapping exists, that plan wins; otherwise fall back to client row / planes.
+    Retorna el estado del plan para el cliente user:
+    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
+
+    Cambio: ahora "mensajes_consumidos" representa CONVERSACIONES consumidas.
+    Definición de conversación: un nuevo grupo de mensajes de un mismo número cuando han pasado >= 24 horas
+    desde su mensaje previo. Se cuentan TODAS las conversaciones del tenant (todos los números)
+    y no solo las asociadas a un teléfono específico.
+
+    Implementación:
+    - Intenta usar SQL con LAG() y PARTITION BY (MySQL 8+).
+    - Si falla (MySQL < 8 o SQL no soporta LAG), cae a un fallback en Python que
+      itera los mensajes ordenados por número y timestamp y calcula las sesiones.
+    - Nota: para bases de datos muy grandes el fallback en Python puede ser pesado; considera
+      agregar un filtro por periodo (ej. último mes) o migrar a MySQL 8.
     """
     try:
-        # If config/domain present, check domain_plans first
-        domain = None
-        try:
-            if config and config.get('dominio'):
-                domain = (config.get('dominio') or '').strip()
-            elif username and '.' in str(username):
-                domain = username
-        except Exception:
-            domain = None
-
-        if domain:
-            dp = get_plan_for_domain(domain)
-            if dp and dp.get('plan_id'):
-                # Build return using plan metadata from planes table if available
-                plan_id = dp['plan_id']
-                plan_name = None
-                mensajes_incluidos = int(dp.get('mensajes_incluidos') or 0)
-                try:
-                    conn_cli = get_clientes_conn()
-                    curp = conn_cli.cursor(dictionary=True)
-                    curp.execute("SELECT plan_id, modelo, categoria, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
-                    prow = curp.fetchone()
-                    curp.close(); conn_cli.close()
-                    if prow:
-                        plan_name = (prow.get('modelo') or prow.get('categoria') or f"Plan {plan_id}")
-                        mensajes_incluidos = int(prow.get('mensajes_incluidos') or mensajes_incluidos)
-                except Exception:
-                    pass
-
-                # Count conversaciones_consumidas as before using tenant DB (config must be present for that)
-                conversaciones_consumidas = 0
-                try:
-                    if config is None:
-                        config = obtener_configuracion_por_host()
-                    conn_t = get_db_connection(config)
-                    cur_t = conn_t.cursor()
-                    sql_sessions = """
-                        SELECT COALESCE(SUM(is_new),0) FROM (
-                          SELECT numero, timestamp,
-                            CASE
-                              WHEN LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp) IS NULL
-                                OR TIMESTAMPDIFF(SECOND, LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp), timestamp) >= 86400
-                              THEN 1 ELSE 0 END AS is_new
-                          FROM conversaciones
-                        ) t
-                    """
-                    try:
-                        cur_t.execute(sql_sessions)
-                        row = cur_t.fetchone()
-                        conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
-                    except Exception:
-                        # fallback python counting
-                        cur_t.execute("SELECT numero, timestamp FROM conversaciones ORDER BY numero, timestamp")
-                        rows = cur_t.fetchall()
-                        prev_ts_by_num = {}
-                        cnt = 0
-                        for r in rows:
-                            try:
-                                num = r[0]; ts = r[1]
-                                if num not in prev_ts_by_num:
-                                    cnt += 1; prev_ts_by_num[num] = ts
-                                else:
-                                    prev = prev_ts_by_num[num]
-                                    try:
-                                        diff = (ts - prev).total_seconds()
-                                    except Exception:
-                                        diff = 0
-                                    if diff >= 86400:
-                                        cnt += 1; prev_ts_by_num[num] = ts
-                                    else:
-                                        prev_ts_by_num[num] = ts
-                            except Exception:
-                                continue
-                        conversaciones_consumidas = cnt
-                    cur_t.close(); conn_t.close()
-                except Exception:
-                    conversaciones_consumidas = 0
-
-                mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas) if mensajes_incluidos is not None else None
-                return {
-                    'plan_id': plan_id,
-                    'plan_name': plan_name,
-                    'mensajes_incluidos': mensajes_incluidos,
-                    'mensajes_consumidos': conversaciones_consumidas,
-                    'mensajes_disponibles': mensajes_disponibles
-                }
-
-        # If no domain mapping found, fallback to original behavior (resolve cliente by domain/user then planes)
-        # Reuse existing logic implemented previously in this file (keeps compatibility)
-        # The rest of the function remains unchanged from original implementation.
-        # For clarity, call the original implementation body (which exists below in file).
-        # If original_get_plan_status_for_user referenced earlier doesn't exist due to edits, the previous logic will execute instead.
-        return _original_get_plan_status_for_user(username, config)
-    except Exception as e:
-        app.logger.error(f"🔴 Error en get_plan_status_for_user (domain-aware): {e}")
-        # fallback to previous implementation
-        try:
-            return _original_get_plan_status_for_user(username, config)
-        except Exception:
+        # Obtener cliente desde CLIENTES_DB (solo para metadatos del plan)
+        conn_cli = get_clientes_conn()
+        cur_cli = conn_cli.cursor(dictionary=True)
+        cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cliente = cur_cli.fetchone()
+        cur_cli.close(); conn_cli.close()
+        if not cliente:
+            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado para user={username}")
             return None
+
+        plan_id = cliente.get('plan_id')
+        plan_name = None
+
+        mensajes_incluidos = 0
+        if plan_id:
+            try:
+                conn_cli = get_clientes_conn()
+                curp = conn_cli.cursor(dictionary=True)
+                curp.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, descripcion, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                plan_row = curp.fetchone()
+                curp.close(); conn_cli.close()
+                if plan_row:
+                    plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+                    mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
+
+        # ---------------------
+        # Contar conversaciones (sessions) en la BD del tenant
+        # ---------------------
+        conversaciones_consumidas = 0
+        try:
+            if config is None:
+                config = obtener_configuracion_por_host()
+            conn_t = get_db_connection(config)
+            cur_t = conn_t.cursor()
+
+            # Intentar SQL con LAG() y PARTITION BY numero (MySQL 8+)
+            sql_sessions = """
+                SELECT COALESCE(SUM(is_new),0) FROM (
+                  SELECT numero, timestamp,
+                    CASE
+                      WHEN LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp) IS NULL
+                        OR TIMESTAMPDIFF(SECOND, LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp), timestamp) >= 86400
+                      THEN 1 ELSE 0 END AS is_new
+                  FROM conversaciones
+                ) t
+            """
+            try:
+                cur_t.execute(sql_sessions)
+                row = cur_t.fetchone()
+                conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
+                app.logger.info(f"🔎 Conversaciones (SQL LAG) => {conversaciones_consumidas}")
+            except Exception as sql_err:
+                # Fallback a procesamiento en Python (compatible con MySQL < 8)
+                app.logger.warning(f"⚠️ Conteo por SQL LAG falló: {sql_err} — usando fallback en Python")
+                cur_t.execute("SELECT numero, timestamp FROM conversaciones ORDER BY numero, timestamp")
+                rows = cur_t.fetchall()  # list of tuples (numero, timestamp)
+                prev_ts_by_num = {}
+                cnt = 0
+                for r in rows:
+                    try:
+                        num = r[0]
+                        ts = r[1]
+                        if num not in prev_ts_by_num:
+                            cnt += 1
+                            prev_ts_by_num[num] = ts
+                        else:
+                            prev = prev_ts_by_num[num]
+                            # Asegurar que ts y prev sean datetime
+                            try:
+                                diff = (ts - prev).total_seconds()
+                            except Exception:
+                                # si por alguna razón son strings, intentar parsear
+                                try:
+                                    from dateutil import parser as _parser
+                                    prev_dt = _parser.parse(str(prev))
+                                    ts_dt = _parser.parse(str(ts))
+                                    diff = (ts_dt - prev_dt).total_seconds()
+                                    prev_ts_by_num[num] = ts_dt
+                                except Exception:
+                                    # si no se puede, saltar
+                                    diff = 0
+                            if diff >= 86400:  # 24 horas en segundos
+                                cnt += 1
+                                prev_ts_by_num[num] = ts
+                            else:
+                                # actualizar último timestamp aunque no sume nuevo "session"
+                                prev_ts_by_num[num] = ts
+                    except Exception:
+                        continue
+                conversaciones_consumidas = cnt
+                app.logger.info(f"🔎 Conversaciones (fallback Python) => {conversaciones_consumidas}")
+
+            cur_t.close(); conn_t.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
+            conversaciones_consumidas = 0
+
+        mensajes_disponibles = None
+        if mensajes_incluidos is not None:
+            mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
+
+        return {
+            'plan_id': plan_id,
+            'plan_name': plan_name,
+            'mensajes_incluidos': mensajes_incluidos,
+            'mensajes_consumidos': conversaciones_consumidas,
+            'mensajes_disponibles': mensajes_disponibles
+        }
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_plan_status_for_user: {e}")
+        return None
 
 def build_texto_catalogo(precios, limit=20):
     """Construye un texto resumen del catálogo (hasta `limit` items)."""
