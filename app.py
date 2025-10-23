@@ -6202,7 +6202,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
-                    "mensualidad": str(p.get('mensualidad') or "")
+                    "mensualidad": str(p.get('mensualidad') or ""),
+                    "imagen": str(p.get('imagen') or "")
                 })
             except Exception:
                 continue
