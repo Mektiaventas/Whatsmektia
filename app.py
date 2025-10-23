@@ -6102,44 +6102,47 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante:
-    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
-      (keyword shortcut para UX inmediata).
-    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
-    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
-    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
-    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
-    - Guarda la conversación/resultados en BD.
-    - Retorna True si procesado OK, False en fallo.
+    Flujo unificado para procesar un mensaje entrante.
+    Si incoming_saved=True, el webhook ya guardó el mensaje entrante: NO insertar de nuevo.
+    En ese caso se usa actualizar_respuesta(...) para asociar la respuesta al mensaje ya guardado.
     """
+    def persistir_respuesta(numero_dest, incoming_saved_flag, incoming_text, respuesta_text, cfg, imagen_url=None, es_imagen_flag=False):
+        try:
+            if incoming_saved_flag:
+                # Actualiza la fila del mensaje entrante ya guardado (evita duplicados)
+                try:
+                    actualizar_respuesta(numero_dest, incoming_text, respuesta_text, cfg)
+                except Exception as e:
+                    # Fallback: si actualizar falla, guardar conversación completa para no perder el rastro
+                    app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
+                    guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
+            else:
+                guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
+        except Exception as e:
+            app.logger.error(f"🔴 Error persistiendo respuesta: {e}")
+
     try:
         if config is None:
             config = obtener_configuracion_por_host()
 
-        # Log incoming_saved for diagnostics when webhook saved the incoming message earlier
-        app.logger.info(f"🔁 procesar_mensaje_unificado called for {numero} (incoming_saved={incoming_saved})")
+        texto_original = texto or ""
+        texto_norm = texto_original.strip().lower()
 
-        texto_norm = (texto or "").strip().lower()
-
-        # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
-        # This gives immediate UX for common user requests to receive the published PDF/catalog.
+        # Shortcut: catálogo
         catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
         if any(k in texto_norm for k in catalog_keywords):
             app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
             try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
-                # pero dejamos un registro por seguridad si no lo hizo.
-                if sent:
-                    guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
-                else:
-                    guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                sent = enviar_catalogo(numero, original_text=texto_original, config=config)
+                respuesta_text = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                # Persist response: update existing incoming message if it was already saved
+                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
 
-        # Historial reciente
+        # Preparar contexto (historial y catálogo)
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -6148,11 +6151,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
-        # Catálogo / precios (resumido y estructurado)
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
-        # Build structured catalog list to send to the model (reduce hallucination)
+        # Construir payload para IA (mantener token usage razonable)
         catalog_list = []
         for p in precios:
             try:
@@ -6161,18 +6163,14 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
-                    "inscripcion": str(p.get('inscripcion') or ""),
-                    "mensualidad": str(p.get('mensualidad') or ""),
                     "imagen": str(p.get('imagen') or "")
                 })
             except Exception:
                 continue
 
-        # Bloque de asesores (sólo nombres)
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
-        # Información multimodal si viene imagen/audio
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -6185,184 +6183,98 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # System prompt con reglas estrictas para evitar invenciones
         system_prompt = f"""
-Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
-que el servidor debe ejecutar. Dispones de:
-- Historial (últimos mensajes):\n{historial_text}
-- Mensaje actual (texto): {texto or '[sin texto]'}
-- Datos multimodales: {multimodal_info}
-- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
-
-Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
-1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
-2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
-3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
-4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
-5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
-   - image: filename_or_url_or_null
-   - document: url_or_null
-   - save_cita: object|null
-   - notify_asesor: boolean
-   - followups: [ "pregunta corta 1", ... ]
-   - confidence: 0.0-1.0
-   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
-
-7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+Eres el asistente conversacional. Usa únicamente la información del catálogo proporcionado.
+Responde con JSON estructurado indicando la acción a ejecutar y un texto breve de respuesta.
+No inventes productos ni precios.
 """
 
-        # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
-        user_content = {
-            "mensaje_actual": texto or "",
-            "es_imagen": bool(es_imagen),
-            "es_audio": bool(es_audio),
-            "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
-            "catalogo_texto_resumen": texto_catalogo
+        user_payload = {
+            "mensaje_actual": texto_original,
+            "historial_resumen": historial_text,
+            "catalogo_items": catalog_list[:200],
+            "catalogo_texto_resumen": texto_catalogo,
+            "asesores": asesores_block,
+            "multimodal_info": multimodal_info
         }
 
-        payload_messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
-        ]
-
-        # Llamada al modelo (Deepseek)
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
+        payload = {"model": "deepseek-chat", "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)}
+        ], "temperature": 0.2, "max_tokens": 800}
 
         resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
         raw = data['choices'][0]['message']['content']
         if isinstance(raw, list):
-            raw = "".join([ (r.get('text') if isinstance(r, dict) else str(r)) for r in raw ])
+            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
-        # Extraer JSON con regex y parsear
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                guardar_conversacion(numero, texto, fallback_text, config)
+                persistir_respuesta(numero, incoming_saved, texto_original, fallback_text, config)
                 return True
             return False
 
-        try:
-            decision = json.loads(match.group(1))
-        except Exception as e:
-            app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
-            return False
+        decision = json.loads(match.group(1))
 
-        # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
-        image_field = decision.get('image')
-        document_field = decision.get('document')
-        save_cita = decision.get('save_cita')
-        notify_asesor = bool(decision.get('notify_asesor'))
-        followups = decision.get('followups') or []
-        source = decision.get('source') or "none"
+        call_function = decision.get('call_function') or decision.get('action')
+        function_args = decision.get('function_args') or {}
 
-        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
-        if source == "catalog" and decision.get('save_cita'):
-            svc = decision['save_cita'].get('servicio_solicitado') or ""
-            svc_lower = svc.strip().lower()
-            found = False
-            for item in catalog_list:
-                if item.get('sku', '').strip().lower() == svc_lower or item.get('subcategoria', '').strip().lower() == svc_lower:
-                    found = True
-                    break
-            if not found:
-                app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
-                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
-                guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
-                return True
-
-        # If AI requests to send a document but didn't provide one, try enviar_catalogo() as fallback
-        if intent == "ENVIAR_DOCUMENTO" and not document_field:
-            app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
-            try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                if sent:
-                    guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
-                else:
-                    enviar_mensaje(numero, "No encontré un catálogo publicado para enviar. ¿Deseas que te comparta la lista de programas por aquí?", config)
-                    guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
-
-        # If save_cita requested: ensure phone and minimal fields
-        if save_cita:
-            try:
-                save_cita.setdefault('telefono', numero)
-                info_cita = {
-                    'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
-                    'fecha_sugerida': save_cita.get('fecha_sugerida'),
-                    'hora_sugerida': save_cita.get('hora_sugerida'),
-                    'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
-                    'telefono': save_cita.get('telefono'),
-                    'detalles_servicio': save_cita.get('detalles_servicio') or {}
-                }
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
-                    if respuesta_text:
-                        enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto, respuesta_text, config)
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                else:
-                    app.logger.warning("⚠️ guardar_cita devolvió None")
-            except Exception as e:
-                app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
-
+        # Ejecutar acciones conocidas (ejemplos)
+        if call_function == "enviar_catalogo" or intent == "ENVIAR_CATALOGO":
+            sent = enviar_catalogo(numero, original_text=texto_original, config=config)
+            respuesta_text = respuesta_text or ("Te envié el catálogo." if sent else "No encontré catálogo publicado.")
+            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
             return True
 
-        # ENVIAR IMAGEN
-        if intent == "ENVIAR_IMAGEN" and image_field:
-            try:
-                sent = enviar_imagen(numero, image_field, config)
-                if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error enviando imagen: {e}")
-
-        # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
-        if intent == "ENVIAR_DOCUMENTO" and document_field:
-            try:
-                enviar_documento(numero, document_field, os.path.basename(document_field), config)
-                if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error enviando documento: {e}")
-
-        # PASAR A ASESOR
-        if intent == "PASAR_ASESOR" or notify_asesor:
-            sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+        if call_function == "pasar_contacto_asesor" or intent == "PASAR_ASESOR":
+            pasar_contacto_asesor(numero, config=config, notificar_asesor=function_args.get('notify_asesor', True))
+            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te pasé con un asesor", config)
             return True
 
-        # RESPUESTA TEXTUAL POR DEFECTO
-        if respuesta_text:
-            # Aplicar restricciones antes de enviar
+        if call_function == "enviar_imagen" or intent == "ENVIAR_IMAGEN":
+            image = function_args.get('image') or decision.get('image')
+            if image:
+                enviar_imagen(numero, image, config)
+                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te envié la imagen.", config, imagen_url=(image if isinstance(image, str) and image.startswith('http') else f"/uploads/productos/{image}"), es_imagen_flag=True)
+                return True
+
+        if call_function == "guardar_cita" or intent == "GUARDAR_CITA":
+            save_cita = function_args.get('save_cita') or decision.get('save_cita') or {}
+            save_cita.setdefault('telefono', numero)
+            info = {
+                'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
+                'fecha_sugerida': save_cita.get('fecha_sugerida'),
+                'hora_sugerida': save_cita.get('hora_sugerida'),
+                'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
+                'telefono': save_cita.get('telefono'),
+                'detalles_servicio': save_cita.get('detalles_servicio') or {}
+            }
+            cid = guardar_cita(info, config)
+            if cid:
+                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or f"Cita creada (ID: {cid})", config)
+                enviar_alerta_cita_administrador(info, cid, config)
+            else:
+                persistir_respuesta(numero, incoming_saved, texto_original, "No pude guardar la cita, faltan datos. ¿Puedes confirmar?", config)
+            return True
+
+        # Default: enviar texto si IA lo sugiere
+        if intent == "RESPONDER_TEXTO" and respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
             return True
 
+        # No action
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
         return False
 
