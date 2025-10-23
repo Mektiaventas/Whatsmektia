@@ -5073,6 +5073,35 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
+def actualizar_respuesta_por_id(msg_id, respuesta, imagen_url=None, es_imagen=None, config=None):
+    """Actualiza la fila de conversaciones por id (no cambia timestamp)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        # Build dynamic update depending on provided optional params
+        parts = ["respuesta = %s"]
+        params = [respuesta]
+        if imagen_url is not None:
+            parts.append("imagen_url = %s")
+            params.append(imagen_url)
+        if es_imagen is not None:
+            parts.append("es_imagen = %s")
+            params.append(1 if es_imagen else 0)
+        params.append(msg_id)
+        sql = f"UPDATE conversaciones SET {', '.join(parts)} WHERE id = %s"
+        cursor.execute(sql, tuple(params))
+        conn.commit()
+        affected = cursor.rowcount
+        cursor.close()
+        conn.close()
+        app.logger.info(f"🔄 actualizar_respuesta_por_id: id={msg_id} affected={affected}")
+        return affected > 0
+    except Exception as e:
+        app.logger.error(f"🔴 actualizar_respuesta_por_id failed for id={msg_id}: {e}")
+        return False
+
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado.
     - Primero intenta actualizar por coincidencia exacta (mensaje) y respuesta NULL/''.
@@ -6161,6 +6190,12 @@ def webhook():
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
 
+        # --- SAVE INCOMING MESSAGE FIRST (prevents duplicates / gives an ID to update later)
+        saved_msg_id = guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
+        if not saved_msg_id:
+            app.logger.warning("⚠️ No se pudo guardar el mensaje entrante antes de procesar; continuar sin id")
+            saved_msg_id = None
+
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
@@ -6170,14 +6205,21 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
-            transcripcion=transcripcion
+            transcripcion=transcripcion,
+            incoming_msg_id=saved_msg_id
         )
 
         if processed_ok:
             app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
             return 'OK', 200
 
-        # Fallback: if unified processor didn't handle it, save the incoming message for UI
+        # Fallback: if unified processor didn't handle it (should be rare now), do not insert duplicate:
+        # If we saved the incoming message already (saved_msg_id), there's nothing else to do.
+        if saved_msg_id:
+            app.logger.info(f"📥 Fallback: incoming message already saved (id={saved_msg_id}) for {numero}")
+            return 'OK', 200
+
+        # Otherwise insert immediate message as before
         guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
         app.logger.info(f"📥 Fallback: saved immediate message for {numero}")
 
