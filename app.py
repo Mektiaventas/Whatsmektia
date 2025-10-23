@@ -2823,6 +2823,21 @@ def debug_headers():
         'config_db_name': config.get('db_name')
     })
 
+@app.route('/debug-domain-plan')
+def debug_domain_plan():
+    try:
+        domain = request.args.get('domain') or request.host.split(':')[0]
+        # show which CLIENTES_DB connection will be used
+        db_name = os.getenv('CLIENTES_DB_NAME')
+        dp = get_plan_for_domain(domain)
+        return jsonify({
+            'domain_checked': domain,
+            'env_clientes_db': db_name,
+            'domain_plan_row': dp
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/debug-dominio')
 def debug_dominio():
     host = request.headers.get('Host', 'desconocido')
