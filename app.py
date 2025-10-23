@@ -1458,6 +1458,7 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
     try:
@@ -5418,10 +5419,12 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
        
-# REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, message_hash=None):
     """Función compatible con la estructura actual de la base de datos.
     Añadido: deduplicación por message_hash (o por hash calculado de contenido).
+    Mejora: si detectamos que el mensaje ya fue guardado en esta petición pero ahora
+    queremos guardar la respuesta de la IA, insertamos una fila separada para la respuesta
+    en lugar de omitirla.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5439,20 +5442,46 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         # Check per-request saved hashes to avoid double-insert during same request
         try:
             saved = getattr(g, '_saved_message_hashes', set())
-            if message_hash in saved:
-                app.logger.info(f"⚠️ Duplicate detected in guardar_conversacion (skipping). numero={numero} hash={message_hash}")
-                return False
         except Exception:
-            # if g not available, keep going (best-effort)
-            pass
+            saved = set()
 
-        # Primero asegurar que el contacto existe con su información actualizada
+        # If this message hash was already saved in this request...
+        if message_hash in saved:
+            # If we have a bot response now, insert it as a separate row (mensaje='') so UI sees it.
+            if respuesta_limpia:
+                try:
+                    conn = get_db_connection(config)
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
+                        VALUES (%s, %s, %s, NOW(), %s, %s)
+                    """, (numero, '', respuesta_limpia, imagen_url, es_imagen))
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    # Mark response-saved for this request to avoid duplicate response inserts
+                    try:
+                        resp_hash = message_hash + "|resp"
+                        g._saved_message_hashes.add(resp_hash)
+                    except Exception:
+                        pass
+                    app.logger.info(f"💾 Respuesta (fila separada) guardada para {numero} (hash={message_hash})")
+                    return True
+                except Exception as e:
+                    app.logger.error(f"❌ Error insertando fila de respuesta separada para {numero}: {e}")
+                    return False
+            # Otherwise, it's a duplicate user message within the same request — skip
+            app.logger.info(f"⚠️ Duplicate detected in guardar_conversacion (skipping). numero={numero} hash={message_hash}")
+            return False
+
+        # Primero asegurar que el contacto existe
         timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
+        # Insert message (may include respuesta if provided) as a single row
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
