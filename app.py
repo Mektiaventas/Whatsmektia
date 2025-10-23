@@ -5495,41 +5495,99 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
        
-# REEMPLAZA la función guardar_conversacion con esta versión mejorada
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
     """Función compatible con la estructura actual de la base de datos.
-    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
-    antes de guardarlo."""
+    Evita duplicados: si existe un mensaje igual muy reciente sin respuesta, lo actualiza
+    en lugar de insertar uno nuevo. Registra logging diagnóstico.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Sanitize inputs
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Primero asegurar que el contacto existe con su información actualizada
-        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
-        cursor = conn.cursor()
+        cursor = conn.cursor(dictionary=True)
 
-        # Usar los nombres de columna existentes en tu BD
+        # 1) Buscar la última fila con mismo numero+mensaje
+        cursor.execute("""
+            SELECT id, mensaje, respuesta, timestamp
+              FROM conversaciones
+             WHERE numero = %s AND mensaje = %s
+             ORDER BY timestamp DESC
+             LIMIT 1
+        """, (numero, mensaje_limpio))
+        last = cursor.fetchone()
+
+        now_dt = datetime.now(tz_mx)
+
+        # Umbral para considerar "reciente" (segundos) - evita duplicados por re-procesos rápidos
+        RECENT_SECONDS = 300  # 5 minutos
+
+        if last:
+            last_ts = last.get('timestamp')
+            # Normalizar last_ts a naive/local datetime comparable
+            if last_ts and hasattr(last_ts, 'tzinfo') and last_ts.tzinfo is not None:
+                last_ts_local = last_ts.astimezone(tz_mx).replace(tzinfo=None)
+            else:
+                # if it's naive, assume server local tz near tz_mx for heuristic
+                last_ts_local = last_ts if last_ts else None
+
+            # Si la última fila es reciente y no tiene respuesta -> actualizarla (evitar duplicado)
+            if last.get('respuesta') in (None, ''):
+                if last_ts_local:
+                    delta = (now_dt.replace(tzinfo=None) - last_ts_local).total_seconds()
+                else:
+                    delta = RECENT_SECONDS + 1  # no timestamp -> considerar viejo
+
+                if delta <= RECENT_SECONDS:
+                    # Actualizar esa fila con la respuesta (si hay) y metadata de imagen
+                    update_parts = []
+                    params = []
+                    if respuesta_limpia is not None:
+                        update_parts.append("respuesta = %s")
+                        params.append(respuesta_limpia)
+                    if imagen_url is not None:
+                        update_parts.append("imagen_url = %s")
+                        params.append(imagen_url)
+                    if es_imagen is not None:
+                        update_parts.append("es_imagen = %s")
+                        params.append(1 if es_imagen else 0)
+                    if update_parts:
+                        params.append(last['id'])
+                        sql = f"UPDATE conversaciones SET {', '.join(update_parts)} WHERE id = %s"
+                        cursor.execute(sql, tuple(params))
+                        conn.commit()
+                        app.logger.info(f"🔄 Reusando mensaje existente (id={last['id']}) para {numero} — evitado duplicado")
+                        cursor.close(); conn.close()
+                        return True
+                    else:
+                        # Nada que actualizar (respuesta/imágen vacíos) -> skip
+                        app.logger.info(f"ℹ️ Mensaje existente (id={last['id']}) para {numero} sin cambios — evitado duplicado")
+                        cursor.close(); conn.close()
+                        return True
+
+        # 2) Si no aplicó la actualización, insertar nuevo registro (fallback normal)
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, NOW(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
-
         conn.commit()
         cursor.close()
         conn.close()
-
-        app.logger.info(f"💾 Conversación guardada para {numero}")
+        app.logger.info(f"💾 Conversación guardada (insert) para {numero}")
         return True
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass
         return False
     
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
