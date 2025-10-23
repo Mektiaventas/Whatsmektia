@@ -6507,6 +6507,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Retorna el id del mensaje insertado (INT) o False en fallo.
     Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6531,14 +6532,15 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
-        msg_id = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        msg_id = row[0] if row else None
 
         conn.commit()
         cursor.close()
         conn.close()
 
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
-        return True
+        return msg_id if msg_id else False
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
