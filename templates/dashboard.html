@@ -74,7 +74,7 @@
                 color: white;
             }
 
-    /* Stats container: make it more compact and cards slightly narrower */
+    /* Stats container: make it more compact and cards sized close to plan-box */
     .stats {
         margin-top: 6px; /* small lift */
         display: flex;
@@ -84,18 +84,18 @@
         justify-content: flex-start;
     }
 
-    /* subtle reduction: make stat cards only slightly narrower so text still fits */
+    /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
         padding: 0.12rem;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
-        flex: 0 0 140px; /* reduced from 180px — modest slimming so text remains readable */
+        flex: 0 0 200px; /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
-        font-size: 0.75rem;
+        font-size: 0.78rem;
         height: 100%;
         align-items: center;
         justify-content: center;
@@ -110,7 +110,7 @@
             font-weight: 700;
             color: #222;
             line-height: 1;
-            height: 64px; /* reduced height to match narrower card */
+            height: 64px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -228,7 +228,7 @@
     <!-- Conversaciones pane (default when no tab param) -->
     <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') %}active{% endif %}">
         <div class="stats" style="margin-top:0;">
-            <div class="stat-card" style="height:10%">
+            <div class="stat-card">
                 <strong>Conversaciones disponibles (plan):</strong>
                 <div id="planDisponibles">—</div>
             </div>
