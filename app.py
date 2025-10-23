@@ -5866,7 +5866,7 @@ def webhook():
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               es_mi_numero=False, es_archivo=False):
+                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante:
     - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
@@ -5881,6 +5881,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     try:
         if config is None:
             config = obtener_configuracion_por_host()
+
+        # Log incoming_saved for diagnostics when webhook saved the incoming message earlier
+        app.logger.info(f"🔁 procesar_mensaje_unificado called for {numero} (incoming_saved={incoming_saved})")
 
         texto_norm = (texto or "").strip().lower()
 
