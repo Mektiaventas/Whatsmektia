@@ -2233,52 +2233,88 @@ def negocio_contact_block(negocio):
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID.
-    Devuelve filas separadas para user y bot con campos: id, content, timestamp, sender.
+    """Obtener mensajes de un chat específico después de cierto timestamp (ms).
+    Devuelve lista de items con: uid, content, sender, timestamp (ISO), ts_ms (int).
+    Usa timestamp para cursor (más robusto que id cuando hay UPDATE/INSERT mixtos).
     """
-    after_id = request.args.get('after', 0, type=int)
-    config = obtener_configuracion_por_host()
+    after = request.args.get('after', 0)
+    # accept either seconds or milliseconds; normalize to ms
+    try:
+        after = int(after)
+    except Exception:
+        after = 0
 
+    # if value looks like seconds (<= 1e10) assume seconds -> convert to ms
+    if after and after <= 1_000_000_0000:
+        after_ms = after * 1000
+    else:
+        after_ms = after
+
+    # compute threshold datetime in app timezone (tz_mx)
+    if after_ms:
+        try:
+            threshold_dt = datetime.fromtimestamp(after_ms / 1000.0, tz=tz_mx)
+        except Exception:
+            threshold_dt = datetime.fromtimestamp(after_ms / 1000.0)
+    else:
+        # very small past to include everything if after_ms == 0
+        threshold_dt = datetime.fromtimestamp(0, tz=tz_mx)
+
+    config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
 
+    # Return separate rows for user-message and bot-response, filtered by timestamp > threshold
     sql = """
-    SELECT id, content, timestamp, sender FROM (
-      SELECT id, mensaje AS content, timestamp, 'user' AS sender
-        FROM conversaciones
-       WHERE numero = %s AND id > %s AND mensaje IS NOT NULL AND mensaje != ''
-      UNION ALL
-      SELECT id, respuesta AS content, timestamp, 'bot' AS sender
-        FROM conversaciones
-       WHERE numero = %s AND id > %s AND respuesta IS NOT NULL AND respuesta != ''
-    ) t
+    SELECT id, mensaje AS content, timestamp, 'user' AS sender
+      FROM conversaciones
+     WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND timestamp > %s
+    UNION ALL
+    SELECT id, respuesta AS content, timestamp, 'bot' AS sender
+      FROM conversaciones
+     WHERE numero = %s AND respuesta IS NOT NULL AND respuesta != '' AND timestamp > %s
     ORDER BY timestamp ASC, id ASC
     """
-    cursor.execute(sql, (telefono, after_id, telefono, after_id))
-    messages = cursor.fetchall()
+    cursor.execute(sql, (telefono, threshold_dt, telefono, threshold_dt))
+    rows = cursor.fetchall()
     cursor.close()
     conn.close()
 
-    # Normalizar timestamps al huso horario tz_mx y a ISO
-    for m in messages:
-        ts = m.get('timestamp')
+    out = []
+    for r in rows:
+        ts = r.get('timestamp')
+        # normalize timezone to tz_mx and ISO
         try:
             if ts is None:
-                m['timestamp'] = None
+                iso = None
+                ts_ms = 0
             else:
                 if getattr(ts, 'tzinfo', None) is None:
-                    ts = tz_mx.localize(ts)
+                    # assume DB timestamp is naive in UTC -> localize to UTC then convert
+                    ts = pytz.utc.localize(ts).astimezone(tz_mx)
                 else:
                     ts = ts.astimezone(tz_mx)
-                m['timestamp'] = ts.isoformat()
+                iso = ts.isoformat()
+                ts_ms = int(ts.timestamp() * 1000)
         except Exception:
-            # fallback: dejar el valor original si falla la conversión
-            m['timestamp'] = str(ts)
+            iso = str(ts)
+            try:
+                ts_ms = int(time.time() * 1000)
+            except:
+                ts_ms = 0
 
-    return jsonify({
-        'messages': messages,
-        'timestamp': int(time.time() * 1000)
-    })
+        sender = r.get('sender') or 'user'
+        uid = f"{r.get('id')}-{ 'b' if sender=='bot' else 'u' }"
+        out.append({
+            'uid': uid,
+            'id': r.get('id'),
+            'content': r.get('content'),
+            'sender': sender,
+            'timestamp': iso,
+            'ts_ms': ts_ms
+        })
+
+    return jsonify({'messages': out, 'timestamp_ms': int(time.time() * 1000)})
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
