@@ -74,7 +74,7 @@
                 color: white;
             }
 
-    /* Stats container: make it more compact and cards narrower */
+    /* Stats container: make it more compact and cards slightly narrower */
     .stats {
         margin-top: 6px; /* small lift */
         display: flex;
@@ -84,44 +84,47 @@
         justify-content: flex-start;
     }
 
-    /* <- CHANGES HERE: make stat cards noticeably thinner (approx half previous width) */
+    /* subtle reduction: make stat cards only slightly narrower so text still fits */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 0.6rem; /* reduced padding to be thinner */
+        padding: 0.12rem;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
-        flex: 0 0 40px; /* narrow: ~half of previous 180px */
+        flex: 0 0 140px; /* reduced from 180px — modest slimming so text remains readable */
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
-        font-size: 0.65rem;
+        font-size: 0.75rem;
         height: 100%;
         align-items: center;
         justify-content: center;
         text-align: center;
         box-sizing: border-box;
-        min-height: 60px;
+        min-height: 72px;
     }
 
         /* make the numeric value stand out but compact */
         .stat-card > div {
-            font-size: 1rem;
+            font-size: 1.05rem;
             font-weight: 700;
             color: #222;
             line-height: 1;
-            height: 56px; /* reduced height to match thinner card */
+            height: 64px; /* reduced height to match narrower card */
             display: flex;
             align-items: center;
             justify-content: center;
             width: 100%;
             box-sizing: border-box;
             padding: 0 6px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
 
         .stat-card strong {
             display: block;
-            font-size: 0.72rem;
+            font-size: 0.78rem;
             font-weight: 600;
             color: #333;
             margin-bottom: 4px;
