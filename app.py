@@ -6229,6 +6229,17 @@ No inventes productos ni precios.
         call_function = decision.get('call_function') or decision.get('action')
         function_args = decision.get('function_args') or {}
 
+        # If IA explicitly says NO_ACTION, send a lightweight acknowledgment to avoid silence
+        if intent == "NO_ACTION":
+            app.logger.info(f"ℹ️ IA returned NO_ACTION for {numero} — sending default ack")
+            ack = "Gracias por tu mensaje. En breve te responderemos."
+            try:
+                enviar_mensaje(numero, ack, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ enviar_mensaje ack failed: {e}")
+            persistir_respuesta(numero, incoming_saved, texto_original, ack, config)
+            return True
+
         # Ejecutar acciones conocidas (ejemplos)
         if call_function == "enviar_catalogo" or intent == "ENVIAR_CATALOGO":
             sent = enviar_catalogo(numero, original_text=texto_original, config=config)
@@ -6267,10 +6278,12 @@ No inventes productos ni precios.
                 persistir_respuesta(numero, incoming_saved, texto_original, "No pude guardar la cita, faltan datos. ¿Puedes confirmar?", config)
             return True
 
-        respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-        enviar_mensaje(numero, respuesta_text, config)
-        persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
-        return True
+        # Default: enviar texto si IA lo sugiere
+        if intent == "RESPONDER_TEXTO" and respuesta_text:
+            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+            enviar_mensaje(numero, respuesta_text, config)
+            persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
+            return True
 
         # No action
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
