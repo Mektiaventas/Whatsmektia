@@ -2233,41 +2233,48 @@ def negocio_contact_block(negocio):
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID"""
+    """Obtener mensajes de un chat específico después de cierto ID.
+    Devuelve filas separadas para user y bot con campos: id, content, timestamp, sender.
+    """
     after_id = request.args.get('after', 0, type=int)
     config = obtener_configuracion_por_host()
-    
+
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
-    
-    # MODIFICACIÓN: Combinar mensaje y respuesta en un solo campo
-    cursor.execute("""
-        SELECT 
-            id,
-            CASE 
-                WHEN mensaje IS NOT NULL AND mensaje != '' THEN mensaje
-                ELSE respuesta
-            END AS content,
-            timestamp,
-            CASE 
-                WHEN mensaje IS NOT NULL AND mensaje != '' THEN 'user'
-                ELSE 'bot'
-            END AS sender
+
+    sql = """
+    SELECT id, content, timestamp, sender FROM (
+      SELECT id, mensaje AS content, timestamp, 'user' AS sender
         FROM conversaciones
-        WHERE numero = %s AND id > %s
-        AND (mensaje IS NOT NULL AND mensaje != '' OR respuesta IS NOT NULL AND respuesta != '')
-        ORDER BY timestamp ASC
-    """, (telefono, after_id))
-    
+       WHERE numero = %s AND id > %s AND mensaje IS NOT NULL AND mensaje != ''
+      UNION ALL
+      SELECT id, respuesta AS content, timestamp, 'bot' AS sender
+        FROM conversaciones
+       WHERE numero = %s AND id > %s AND respuesta IS NOT NULL AND respuesta != ''
+    ) t
+    ORDER BY timestamp ASC, id ASC
+    """
+    cursor.execute(sql, (telefono, after_id, telefono, after_id))
     messages = cursor.fetchall()
     cursor.close()
     conn.close()
-    
-    # Normalize timestamp...
+
+    # Normalizar timestamps al huso horario tz_mx y a ISO
     for m in messages:
         ts = m.get('timestamp')
-        # ... (tu código existente para normalizar timestamps)
-    
+        try:
+            if ts is None:
+                m['timestamp'] = None
+            else:
+                if getattr(ts, 'tzinfo', None) is None:
+                    ts = tz_mx.localize(ts)
+                else:
+                    ts = ts.astimezone(tz_mx)
+                m['timestamp'] = ts.isoformat()
+        except Exception:
+            # fallback: dejar el valor original si falla la conversión
+            m['timestamp'] = str(ts)
+
     return jsonify({
         'messages': messages,
         'timestamp': int(time.time() * 1000)
