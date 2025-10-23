@@ -6423,6 +6423,68 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
+            # --- NUEVO: intentar enviar imagen del producto si aplica ---
+            imagen_para_enviar = None
+
+            # 1) Si la IA ya devolvió un campo 'image', úsalo
+            if image_field:
+                imagen_para_enviar = image_field
+
+            # 2) Si la fuente viene del catálogo, intentar detectar SKU en la respuesta o en el texto original
+            if not imagen_para_enviar and source == "catalog":
+                try:
+                    sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
+                    if sku_candidate:
+                        producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
+                        if producto and producto.get('imagen'):
+                            imagen_para_enviar = producto.get('imagen')
+                except Exception as e:
+                    app.logger.debug(f"⚠️ No se pudo resolver imagen desde catálogo: {e}")
+
+            # 3) Si aún no hay imagen y la IA devolvió un nombre distinto, intentar buscar SKU en la respuesta libre
+            if not imagen_para_enviar:
+                try:
+                    sku_candidate = buscar_sku_en_texto(respuesta_text, precios)
+                    if sku_candidate:
+                        producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
+                        if producto and producto.get('imagen'):
+                            imagen_para_enviar = producto.get('imagen')
+                except Exception:
+                    pass
+
+            # Si encontramos imagen, enviarla primero y guardar la conversación con imagen
+            if imagen_para_enviar:
+                try:
+                    enviar_imagen(numero, imagen_para_enviar, config)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ enviar_imagen fallback falló para {imagen_para_enviar}: {e}")
+
+                # construir imagen_url pública para guardar en BD (mejor esfuerzo)
+                imagen_url_to_save = imagen_para_enviar
+                if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
+                    try:
+                        dominio = config.get('dominio') or os.getenv('MI_DOMINIO')
+                        if dominio and not dominio.startswith('http'):
+                            dominio = 'https://' + dominio
+                        if dominio:
+                            # intentar tenant-aware
+                            try:
+                                _, tenant_slug = get_productos_dir_for_config(config)
+                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_para_enviar)}"
+                            except Exception:
+                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_para_enviar)}"
+                    except Exception:
+                        imagen_url_to_save = f"/uploads/productos/{os.path.basename(imagen_para_enviar)}"
+
+                # enviar texto si existe
+                if respuesta_text:
+                    respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+                    enviar_mensaje(numero, respuesta_text, config)
+
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
+                return True
+
+            # Si no hay imagen para enviar, comportamiento previo: enviar sólo texto
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
