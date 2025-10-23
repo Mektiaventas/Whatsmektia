@@ -125,6 +125,15 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
         'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
         'dominio': 'ofitodo.mektia.com'
+    },
+    '1011': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
+        'dominio': 'maindsteel.mektia.com'
     }
 }
 
@@ -6749,6 +6758,11 @@ def obtener_configuracion_por_host():
         if 'ofitodo' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524495486324']
+
+        # DETECCIÓN MAINDSTEEL
+        if 'maindsteel' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1011']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")

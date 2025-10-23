@@ -198,6 +198,37 @@ def get_clientes_conn():
         database=os.getenv("CLIENTES_DB_NAME")
     )
 
+def _find_cliente_in_clientes_by_domain(dominio):
+    """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
+    try:
+        if not dominio:
+            return None
+        candidates = [
+            dominio,
+            dominio.split('.')[0] if '.' in dominio else dominio,
+            dominio.replace('.', '_')
+        ]
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        for c in candidates:
+            try:
+                cur.execute("""
+                    SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
+                    FROM cliente
+                    WHERE shema = %s OR entorno = %s OR servicio = %s OR `user` = %s
+                    LIMIT 1
+                """, (c, c, c, c))
+                row = cur.fetchone()
+                if row:
+                    cur.close(); conn.close()
+                    return row
+            except Exception:
+                continue
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ _find_cliente_in_clientes_by_domain error: {e}")
+    return None
+
 def obtener_cliente_por_user(username):
     conn = get_clientes_conn()
     cur = conn.cursor(dictionary=True)
@@ -472,6 +503,64 @@ def _heartbeat_sesion_activa():
 def admin_sesiones_username(username):
     count = contar_sesiones_activas(username, within_minutes=30)
     return jsonify({'username': username, 'activos_ultimos_30_min': count})
+
+@app.route('/admin/asignar-plan-dominio', methods=['POST'])
+@login_required
+def admin_asignar_plan_dominio():
+    """
+    Admin endpoint to assign a plan to a domain.
+    JSON body: { "domain": "laporfirianna.mektia.com", "plan_id": 2 }
+    Requires authenticated user with servicio == 'admin'.
+    """
+    try:
+        au = session.get('auth_user') or {}
+        if str(au.get('servicio') or '').strip().lower() != 'admin':
+            return jsonify({'error': 'Forbidden'}), 403
+
+        data = request.get_json(silent=True) or {}
+        domain = (data.get('domain') or '').strip()
+        plan_id = data.get('plan_id')
+        if not domain or not plan_id:
+            return jsonify({'error': 'domain and plan_id required'}), 400
+
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        try:
+            # Fetch mensajes_incluidos from planes if available
+            mensajes = 0
+            try:
+                cur_pl = conn.cursor(dictionary=True)
+                cur_pl.execute("SELECT mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                pr = cur_pl.fetchone()
+                if pr and pr.get('mensajes_incluidos') is not None:
+                    mensajes = int(pr['mensajes_incluidos'])
+                cur_pl.close()
+            except Exception:
+                pass
+
+            # Upsert domain_plans
+            cur.execute("""
+                INSERT INTO domain_plans (dominio, plan_id, mensajes_incluidos)
+                VALUES (%s, %s, %s)
+                ON DUPLICATE KEY UPDATE plan_id = VALUES(plan_id), mensajes_incluidos = VALUES(mensajes_incluidos), updated_at = NOW()
+            """, (domain, plan_id, mensajes))
+            conn.commit()
+        finally:
+            cur.close(); conn.close()
+
+        # Try to propagate to cliente row if exists (best-effort)
+        propagated = False
+        try:
+            ok = asignar_plan_a_cliente_por_user(domain, plan_id)
+            propagated = bool(ok)
+        except Exception:
+            propagated = False
+
+        return jsonify({'success': True, 'domain': domain, 'plan_id': plan_id, 'propagated_to_cliente': propagated})
+    except Exception as e:
+        app.logger.error(f"🔴 admin_asignar_plan_dominio error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
@@ -1160,6 +1249,7 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
         # Fallback a asociación simple
         return asociar_imagenes_productos(servicios, imagenes)
 
+# Nueva función: analiza una imagen (base64) junto con contexto y devuelve texto de respuesta
 def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None, config=None):
     """
     Analiza una imagen recibida por WhatsApp y genera una respuesta usando IA.
@@ -1903,7 +1993,6 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
-
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2182,6 +2271,54 @@ def autenticar_google_calendar(config=None):
         app.logger.error(f"❌ Error inesperado en autenticar_google_calendar: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
+def negocio_contact_block(negocio):
+    """
+    Formatea los datos de contacto del negocio desde la configuración.
+    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
+    """
+    if not negocio or not isinstance(negocio, dict):
+        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
+
+    direccion = (negocio.get('direccion') or '').strip()
+    telefono = (negocio.get('telefono') or '').strip()
+    correo = (negocio.get('correo') or '').strip()
+
+    # Normalizar teléfono para mostrar (no modificar DB)
+    telefono_display = telefono or 'No disponible'
+    correo_display = correo or 'No disponible'
+    direccion_display = direccion or 'No disponible'
+    prompt_comentario = f"""
+        Te acaban de hacer una solicitud de datos, 
+        no me des ningun dato, solo has un comentario agradable expresando
+        que estas a su servicio, algo parecido a decir claro que si.
+        """
+        
+    headers = {
+        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Content-Type": "application/json"
+    }
+        
+    payload = {
+        "model": "deepseek-chat",
+        "messages": [{"role": "user", "content": prompt_comentario}],
+        "temperature": 0.3,
+        "max_tokens": 500
+    }
+    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+        
+    data = response.json()
+    respuestita = data['choices'][0]['message']['content'].strip()
+    block = (
+        f"{respuestita}\n\n"
+        "📍 DATOS DEL NEGOCIO:\n\n"
+        f"• Dirección: {direccion_display}\n"
+        f"• Teléfono: {telefono_display}\n"
+        f"• Correo: {correo_display}\n\n"
+        "Visitanos pronto!"
+    )
+    return block
 
 @app.route('/chat/<telefono>/messages')
 def get_chat_messages(telefono):
@@ -2683,6 +2820,21 @@ def debug_headers():
         'config_dominio': config.get('dominio'),
         'config_db_name': config.get('db_name')
     })
+
+@app.route('/debug-domain-plan')
+def debug_domain_plan():
+    try:
+        domain = request.args.get('domain') or request.host.split(':')[0]
+        # show which CLIENTES_DB connection will be used
+        db_name = os.getenv('CLIENTES_DB_NAME')
+        dp = get_plan_for_domain(domain)
+        return jsonify({
+            'domain_checked': domain,
+            'env_clientes_db': db_name,
+            'domain_plan_row': dp
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/debug-dominio')
 def debug_dominio():
@@ -4113,6 +4265,26 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
+def obtener_max_asesores_from_planes(default=2, cap=10):
+    """
+    Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
+    Si falla, devuelve `default`. Se aplica un cap (por seguridad).
+    """
+    try:
+        conn = get_clientes_conn()
+        cur = conn.cursor()
+        cur.execute("SELECT MAX(asesores) FROM planes")
+        row = cur.fetchone()
+        cur.close(); conn.close()
+        if row and row[0] is not None:
+            n = int(row[0])
+            if n < 1:
+                return default
+            return min(n, cap)
+    except Exception as e:
+        app.logger.warning(f"⚠️ obtener_max_asesores_from_planes falló: {e}")
+    return default
+
 def obtener_todos_los_precios(config):
     try:
         db = get_db_connection(config)
@@ -4188,6 +4360,24 @@ def obtener_precio_por_id(pid, config=None):
     conn.close()
     return row
 
+def obtener_precio(servicio_nombre: str, config):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT precio_mayoreo, precio_menudeo
+        FROM precios
+        WHERE LOWER(servicio)=LOWER(%s)
+        LIMIT 1;
+    """, (servicio_nombre,))
+    res = cursor.fetchone()
+    cursor.close()
+    conn.close()
+    if res:
+        return Decimal(res[0]), res[1]
+    return None
+
 def obtener_historial(numero, limite=5, config=None):
     """Función compatible con la estructura actual de la base de datos"""
     if config is None:
@@ -4218,6 +4408,25 @@ def obtener_historial(numero, limite=5, config=None):
     except Exception as e:
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
+
+def buscar_sku_en_texto(texto, precios):
+    """
+    Busca un SKU presente en 'precios' dentro de 'texto'.
+    Devuelve el primer SKU encontrado (exact match substring) o None.
+    """
+    if not texto or not precios:
+        return None
+    texto_lower = texto.lower()
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        # Check SKU and modelo presence (case-insensitive)
+        if sku and sku.lower() in texto_lower:
+            return sku
+        if modelo and modelo.lower() in texto_lower:
+            # prefer returning SKU if exists for that product
+            return sku or modelo
+    return None
 
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
@@ -4635,6 +4844,35 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
 
+def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
+    """
+    Actualiza la información del contacto usando el nombre proporcionado desde el webhook
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+            VALUES (%s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = VALUES(nombre),
+                fecha_actualizacion = NOW()
+        """, (numero, nombre))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Contacto actualizado con nombre desde webhook: {numero} -> {nombre}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
+
 def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen enviada]'):
     """Guarda una entrada en conversaciones representando una respuesta del BOT que contiene una imagen.
     - numero: número del chat
@@ -5025,6 +5263,78 @@ def obtener_asesores_por_user(username, default=2, cap=20):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
+
+def obtener_conexion_db(config):
+    """Obtiene conexión a la base de datos correcta según la configuración"""
+    try:
+        if 'porfirianna' in config.get('dominio', ''):
+            # Conectar a base de datos de La Porfirianna
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'laporfirianna_db')
+            )
+        else:
+            # Conectar a base de datos de Mektia (por defecto)
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'mektia_db')
+            )
+        
+        return conn
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error conectando a BD {config.get('db_name')}: {e}")
+        raise
+
+def obtener_configuracion_numero(numero_whatsapp):
+    """Obtiene la configuración específica para un número de WhatsApp"""
+    # Buscar en la configuración multi-tenant
+    for numero_config, config in NUMEROS_CONFIG.items():
+        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
+            return config
+    
+    # Fallback a configuración por defecto (Mektia)
+    return NUMEROS_CONFIG['524495486142']
+
+def obtener_imagen_perfil_alternativo(numero, config=None):
+    """Método alternativo para obtener la imagen de perfil"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    try:
+        # ❌ ESTO ESTÁ MAL - usa la configuración dinámica
+        phone_number_id = config['phone_number_id']  # ← USA LA CONFIGURACIÓN CORRECTA
+        whatsapp_token = config['whatsapp_token']    # ← USA LA CONFIGURACIÓN CORRECTA
+        
+        url = f"https://graph.facebook.com/v18.0/{phone_number_id}/contacts"
+        
+        params = {
+            'fields': 'profile_picture_url',
+            'user_numbers': f'[{numero}]',
+            'access_token': whatsapp_token  # ← USA EL TOKEN CORRECTO
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if 'data' in data and len(data['data']) > 0:
+                contacto = data['data'][0]
+                if 'profile_picture_url' in contacto:
+                    return contacto['profile_picture_url']
+        
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en método alternativo: {e}")
+        return None
+    finally:
+        conn.close()
 
 def obtener_nombre_mostrado_por_numero(numero, config=None):
     """
@@ -5526,6 +5836,34 @@ def es_respuesta_a_pregunta(mensaje):
     
     return False
 
+def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
+    if config is None:
+        app.logger.error("🔴 Configuración no disponible para enviar alerta")
+        return
+    
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
+    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+    mensaje += f"👤 *Cliente:* {numero_cliente}\n"
+    mensaje += f"📞 *Número:* {numero_cliente}\n"
+    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
+    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
+    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
+    mensaje += f"{contexto_consulta}\n\n"
+    mensaje += f"_________________________________________\n"
+    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    
+    # Enviar mensaje normal (sin template) a tu número personal
+    enviar_mensaje(ALERT_NUMBER, mensaje, config)
+    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
+    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
+
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
     if config is None:
@@ -5864,19 +6202,35 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
 
+def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False):
+    """
+    Save the bot response in a way that avoids duplicating the incoming user message.
+    - If incoming_saved is True, try to update the existing incoming message row with respuesta using actualizar_respuesta().
+    - Otherwise insert a new row using guardar_conversacion().
+    Returns True on success, False otherwise.
+    """
+    try:
+        if incoming_saved:
+            try:
+                # Prefer updating the existing incoming message so we don't insert a duplicate user row
+                return actualizar_respuesta(numero, mensaje, respuesta, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ actualizar_respuesta failed, falling back to guardar_conversacion: {e}")
+                # fallback to insert if update fails
+                return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+        else:
+            return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+    except Exception as e:
+        app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
+        return False
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               es_mi_numero=False, es_archivo=False):
+                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante:
-    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
-      (keyword shortcut para UX inmediata).
-    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
-    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
-    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
-    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
-    - Guarda la conversación/resultados en BD.
-    - Retorna True si procesado OK, False en fallo.
+    Flujo unificado para procesar un mensaje entrante.
+    incoming_saved: boolean indicating the webhook already persisted the incoming message
+                    (so callers can avoid double-saving). Default False for backward compatibility.
     """
     try:
         if config is None:
@@ -5884,25 +6238,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         texto_norm = (texto or "").strip().lower()
 
-        # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
-        # This gives immediate UX for common user requests to receive the published PDF/catalog.
+        # === Shortcut: catálogo/pdf/flyer ===
         catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
         if any(k in texto_norm for k in catalog_keywords):
             app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
-                # pero dejamos un registro por seguridad si no lo hizo.
-                if sent:
-                    guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
-                else:
-                    guardar_conversacion(numero, texto, "No se encontró un catálogo para enviar.", config)
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
 
-        # Historial reciente
+        # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -5911,11 +6261,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
-        # Catálogo / precios (resumido y estructurado)
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
-        # Build structured catalog list to send to the model (reduce hallucination)
         catalog_list = []
         for p in precios:
             try:
@@ -5931,11 +6279,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             except Exception:
                 continue
 
-        # Bloque de asesores (sólo nombres)
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
-        # Información multimodal si viene imagen/audio
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -5948,7 +6294,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # System prompt con reglas estrictas para evitar invenciones
+        # --- System prompt (strict rules to avoid hallucinations) ---
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
@@ -5966,26 +6312,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
    - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
+   - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
    - save_cita: object|null
    - notify_asesor: boolean
-   - followups: [ "pregunta corta 1", ... ]
+   - followups: [ ... ]
    - confidence: 0.0-1.0
-   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
-
+   - source: "catalog" | "none"
 7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
 8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
-        # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
         user_content = {
             "mensaje_actual": texto or "",
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
+            "catalogo": catalog_list,
             "catalogo_texto_resumen": texto_catalogo
         }
 
@@ -5994,7 +6338,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ]
 
-        # Llamada al modelo (Deepseek)
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
 
@@ -6003,17 +6346,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         data = resp.json()
         raw = data['choices'][0]['message']['content']
         if isinstance(raw, list):
-            raw = "".join([ (r.get('text') if isinstance(r, dict) else str(r)) for r in raw ])
+            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
-        # Extraer JSON con regex y parsear
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                guardar_conversacion(numero, texto, fallback_text, config)
+                registrar_respuesta_bot(numero, texto, fallback_text, config, incoming_saved=incoming_saved)
                 return True
             return False
 
@@ -6023,7 +6365,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
 
-        # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
@@ -6033,7 +6374,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
+        # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
@@ -6045,24 +6386,21 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
-                guardar_conversacion(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config)
+                registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
 
-        # If AI requests to send a document but didn't provide one, try enviar_catalogo() as fallback
+        # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                if sent:
-                    guardar_conversacion(numero, texto, "Te envié el catálogo solicitado.", config)
-                else:
-                    enviar_mensaje(numero, "No encontré un catálogo publicado para enviar. ¿Deseas que te comparta la lista de programas por aquí?", config)
-                    guardar_conversacion(numero, texto, "No encontré catálogo publicado.", config)
+                msg_resp = "Te envié el catálogo solicitado." if sent else "No encontré catálogo publicado."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
 
-        # If save_cita requested: ensure phone and minimal fields
+        # GUARDAR CITA
         if save_cita:
             try:
                 save_cita.setdefault('telefono', numero)
@@ -6079,13 +6417,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto, respuesta_text, config)
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
                     app.logger.warning("⚠️ guardar_cita devolvió None")
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
-
             return True
 
         # ENVIAR IMAGEN
@@ -6094,18 +6431,23 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
+                registrar_respuesta_bot(
+                    numero, texto, respuesta_text, config,
+                    imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"),
+                    es_imagen=True,
+                    incoming_saved=incoming_saved
+                )
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
 
-        # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
+        # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 enviar_documento(numero, document_field, os.path.basename(document_field), config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
@@ -6115,15 +6457,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
                 enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # Aplicar restricciones antes de enviar
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
-            guardar_conversacion(numero, texto, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
 
         app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
@@ -6187,6 +6528,34 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
+    
+def extraer_nombre_desde_webhook(payload):
+    """
+    Extrae el nombre del contacto directamente desde el webhook de WhatsApp
+    """
+    try:
+        # Verificar si existe la estructura de contacts en el payload
+        if ('entry' in payload and 
+            payload['entry'] and 
+            'changes' in payload['entry'][0] and 
+            payload['entry'][0]['changes'] and 
+            'contacts' in payload['entry'][0]['changes'][0]['value']):
+            
+            contacts = payload['entry'][0]['changes'][0]['value']['contacts']
+            if contacts and len(contacts) > 0:
+                profile = contacts[0].get('profile', {})
+                nombre = profile.get('name')
+                
+                if nombre:
+                    app.logger.info(f"✅ Nombre extraído desde webhook: {nombre}")
+                    return nombre
+        
+        app.logger.info("ℹ️ No se encontró nombre en el webhook")
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
+        return None
 
 def format_asesores_block(cfg):
     """
@@ -6321,6 +6690,19 @@ def test_calendar():
         <pre>{str(e)}</pre>
         """
 
+@app.route('/test-contacto')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
+
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
     if config is None:
@@ -6411,51 +6793,117 @@ def diagnostico():
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
-    now    = datetime.now()
-    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-    # Detectar configuración basada en el host
-    period = request.args.get('period', 'week')
     now = datetime.now()
-    conn = get_db_connection(config)  # ✅ Usar config
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
-        (start,)
-    )
-    chat_counts = cursor.fetchone()[0]
 
-    # 🔁 Unir con contactos y usar alias/nombre si existe
-    cursor.execute("""
-        SELECT 
-            conv.numero,
-            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-            COUNT(*) AS total
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
-        WHERE conv.timestamp >= %s
-        GROUP BY conv.numero, nombre_mostrado
-        ORDER BY total DESC
-    """, (start,))
-    messages_per_chat = cursor.fetchall()
+    # Default behavior for week/month: keep existing logic (messages per chat)
+    if period != 'year':
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
-        (start,)
-    )
-    total_responded = cursor.fetchone()[0]
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
+            (start,)
+        )
+        chat_counts = cursor.fetchone()[0]
 
-    cursor.close()
-    conn.close()
+        cursor.execute(""" 
+            SELECT 
+                conv.numero,
+                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+                COUNT(*) AS total
+            FROM conversaciones conv
+            LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+            WHERE conv.timestamp >= %s
+            GROUP BY conv.numero, nombre_mostrado
+            ORDER BY total DESC
+        """, (start,))
+        messages_per_chat = cursor.fetchall()
 
-    labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
-    values = [row[2] for row in messages_per_chat]  # total
+        cursor.execute(
+            "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+            (start,)
+        )
+        total_responded = cursor.fetchone()[0]
+
+        cursor.close()
+        conn.close()
+
+        labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
+        values = [row[2] for row in messages_per_chat]  # total
+    else:
+        # period == 'year' : compute last 12 months (monthly), counting "conversaciones iniciadas"
+        # build list of last 12 month keys in chronological order
+        def month_key_from_offset(now_dt, offset):
+            total_months = now_dt.year * 12 + now_dt.month - 1
+            target = total_months - offset
+            y = target // 12
+            m = (target % 12) + 1
+            return y, m
+
+        months = []
+        for offset in range(11, -1, -1):  # 11..0 -> oldest .. current
+            y, m = month_key_from_offset(now, offset)
+            months.append((y, m))
+
+        # start = first day of oldest month
+        earliest_year, earliest_month = months[0]
+        start = datetime(earliest_year, earliest_month, 1)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        sql = """
+            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
+            FROM conversaciones c1
+            WHERE c1.timestamp >= %s
+              AND NOT EXISTS (
+                SELECT 1 FROM conversaciones c2
+                WHERE c2.numero = c1.numero
+                  AND c2.timestamp < c1.timestamp
+                  AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+              )
+            GROUP BY y, m
+            ORDER BY y, m
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall()  # list of tuples (y, m, cnt)
+
+        # build map key 'YYYY-MM' -> count
+        counts_map = {}
+        for r in rows:
+            try:
+                y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
+            except Exception:
+                continue
+            key = f"{y}-{m:02d}"
+            counts_map[key] = cnt
+
+        # labels as 'Mon YYYY' (en-US style short month)
+        labels = []
+        values = []
+        for y, m in months:
+            key = f"{y}-{m:02d}"
+            labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+            values.append(counts_map.get(key, 0))
+
+        # keep top-level stats for compatibility (not shown in current template but safe)
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= %s;", (start,))
+        chat_counts_row = cursor.fetchone()
+        chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
+
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;", (start,))
+        total_responded_row = cursor.fetchone()
+        total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
+
+        cursor.close()
+        conn.close()
 
     # Obtener plan info para el usuario autenticado (si aplica)
     plan_info = None
     try:
         au = session.get('auth_user')
         if au and au.get('user'):
-            # obtener plan status
             plan_info = get_plan_status_for_user(au.get('user'), config=config)
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
@@ -6463,7 +6911,7 @@ def home():
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
-        messages_per_chat=messages_per_chat,
+        messages_per_chat=messages_per_chat if period != 'year' else None,
         total_responded=total_responded,
         period=period,
         labels=labels,
@@ -7588,6 +8036,16 @@ def verificar_tablas_bd(config):
         app.logger.error(f"🔴 Error verificando tablas: {e}")
         return False
 
+with app.app_context():
+    # Esta función se ejecutará cuando la aplicación se inicie
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
+def verificar_todas_tablas():
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
+
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
@@ -7770,6 +8228,12 @@ def dashboard_conversaciones_data():
         app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/test-alerta')
+def test_alerta():
+    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
+    return "🚀 Test alerta disparada."
+
 def obtener_chat_meta(numero, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
@@ -7823,6 +8287,66 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/reparar-kanban-porfirianna')
+def reparar_kanban_porfirianna():
+    """Repara específicamente el Kanban de La Porfirianna"""
+    config = NUMEROS_CONFIG['524812372326']  # Config de La Porfirianna
+    
+    try:
+        # 1. Crear tablas Kanban
+        crear_tablas_kanban(config)
+        
+        # 2. Reparar contactos
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT c.numero_telefono 
+            FROM contactos c 
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+            WHERE cm.numero IS NULL
+        """)
+        
+        contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+        
+        for numero in contactos_sin_meta:
+            inicializar_chat_meta(numero, config)
+        
+        cursor.close()
+        conn.close()
+        
+        return f"✅ Kanban de La Porfirianna reparado: {len(contactos_sin_meta)} contactos actualizados"
+        
+    except Exception as e:
+        return f"❌ Error reparando Kanban: {str(e)}"
+
+@app.route('/reparar-contactos')
+def reparar_contactos():
+    """Repara todos los contactos que no están en chat_meta"""
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Encontrar contactos que no están en chat_meta
+    cursor.execute("""
+        SELECT c.numero_telefono 
+        FROM contactos c 
+        LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+        WHERE cm.numero IS NULL
+    """)
+    
+    contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+    
+    for numero in contactos_sin_meta:
+        app.logger.info(f"🔧 Reparando contacto: {numero}")
+        inicializar_chat_meta(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
 def actualizar_kanban(numero=None, columna_id=None, config=None):
     # Actualiza la base de datos si se pasan parámetros
@@ -7957,6 +8481,28 @@ def actualizar_info_contacto(numero, config=None):
             
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
+
+def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+    
+        historial = obtener_historial(numero, limite=5, config=config)
+        
+        # Si es primer mensaje, mantener en "Nuevos"
+        if len(historial) <= 1:
+            return 1  # Nuevos
+        
+        # Si hay intervención humana, mover a "Esperando Respuesta"
+        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
+            return 3  # Esperando Respuesta
+        
+        # Si tiene más de 2 mensajes, mover a "En Conversación"
+        if len(historial) >= 2:
+            return 2  # En Conversación
+        
+        # Si no cumple nada, mantener donde está
+        meta = obtener_chat_meta(numero)
+        return meta['columna_id'] if meta else 1
 
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
