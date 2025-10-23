@@ -16,10 +16,10 @@
         cursor: pointer;
     }
 
-    .tabs a.active {
-        background-color: #1f4e79;
-        color: white;
-    }
+        .tabs a.active {
+            background-color: #1f4e79;
+            color: white;
+        }
 
     .stats {
         margin-top: 20px;
@@ -74,16 +74,22 @@
     }
 
     /* Hidden by default for tab panes */
-    .tab-pane { display: none; }
-    .tab-pane.active { display: block; }
+    .tab-pane {
+        display: none;
+    }
+
+        .tab-pane.active {
+            display: block;
+        }
 </style>
 
 <div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
     <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
 
     <div class="tabs" style="margin-bottom: 2rem;">
-        <a data-tab="overview" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period={{ period }}">Últimos 7 días</a>
-        <a data-tab="overview" class="{{ 'active' if period == 'month' and not request.args.get('tab') else '' }}" href="?period=month">Últimos 30 días</a>
+        <!-- add data-period attributes and fix href for week -->
+        <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period=week">Últimos 7 días</a>
+        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and not request.args.get('tab') else '' }}" href="?period=month">Últimos 30 días</a>
         <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' else '' }}">Conversaciones</a>
     </div>
 
@@ -146,6 +152,9 @@
   let remainingChart = null;
   let dailyChart = null;
 
+  // expose current period to JS
+  const CURRENT_PERIOD = '{{ period }}';
+
   // --- Overview bar chart (existente) ---
   (function renderOverview(){
       const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
@@ -184,11 +193,23 @@
 
   // --- Tab handling ---
   function showTab(tab) {
+      // remove active from all tab anchors
       document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
-      // marcar la pestaña correspondiente
-      document.querySelectorAll('.tabs a').forEach(a => {
-          if (a.getAttribute('data-tab') === tab) a.classList.add('active');
-      });
+
+      if (tab === 'overview') {
+          // For overview, activate only the period button matching CURRENT_PERIOD
+          let el = document.querySelector(`.tabs a[data-period="${CURRENT_PERIOD}"]`);
+          if (!el) {
+              // fallback: first overview anchor
+              el = document.querySelector('.tabs a[data-tab="overview"]');
+          }
+          if (el) el.classList.add('active');
+      } else {
+          // mark anchors that match the tab (normally only the conversation tab)
+          document.querySelectorAll(`.tabs a[data-tab="${tab}"]`).forEach(a => a.classList.add('active'));
+      }
+
+      // show/hide panes
       document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
       const pane = document.getElementById('pane-' + tab);
       if (pane) pane.classList.add('active');
@@ -208,8 +229,21 @@
           const tab = this.getAttribute('data-tab') || 'overview';
           // Update URL (optional): add tab param
           const url = new URL(window.location);
-          if (tab === 'conversaciones') url.searchParams.set('tab', 'conversaciones');
-          else url.searchParams.delete('tab');
+          if (tab === 'conversaciones') {
+              url.searchParams.set('tab', 'conversaciones');
+          } else {
+              url.searchParams.delete('tab');
+          }
+
+          // If this anchor has a data-period attribute, set period param accordingly
+          const dp = this.getAttribute('data-period');
+          if (dp) {
+              url.searchParams.set('period', dp);
+          } else {
+              // keep existing or remove if not desired
+              // url.searchParams.delete('period');
+          }
+
           window.history.replaceState({}, '', url);
           showTab(tab);
       });
