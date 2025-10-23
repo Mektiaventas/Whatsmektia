@@ -523,8 +523,6 @@ def admin_asignar_plan_dominio():
         if not domain or not plan_id:
             return jsonify({'error': 'domain and plan_id required'}), 400
 
-        # Ensure domain_plans table and upsert mapping
-        _ensure_domain_plans_table()
         conn = get_clientes_conn()
         cur = conn.cursor()
         try:
@@ -3702,6 +3700,7 @@ def asignar_plan_a_cliente_por_user(username_or_domain, plan_id, config=None):
         app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
         return False
 
+_original_get_plan_status_for_user = get_plan_status_for_user  # keep reference if needed (optional)
 def get_plan_status_for_user(username, config=None):
     """
     Returns plan status. Now also checks CLIENTES_DB.domain_plans when a tenant domain is available.
