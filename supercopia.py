@@ -125,6 +125,15 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
         'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
         'dominio': 'ofitodo.mektia.com'
+    },
+    '1011': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
+        'dominio': 'maindsteel.mektia.com'
     }
 }
 
@@ -3650,50 +3659,127 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
         app.logger.error(f"🔴 Excepción en asignar_plan_a_cliente_por_user: {e}")
         return False
 
+def _ensure_domain_plans_table(conn):
+    """Ensure domain_plans table exists in CLIENTES_DB (best-effort)."""
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS domain_plans (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                dominio VARCHAR(255) NOT NULL UNIQUE,
+                plan_id INT NOT NULL,
+                mensajes_incluidos INT DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                INDEX idx_plan_id (plan_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+        conn.commit()
+        cur.close()
+    except Exception as e:
+        # If creation fails, just log and continue (table might already exist or insufficient privileges)
+        try:
+            cur.close()
+        except:
+            pass
+        app.logger.warning(f"⚠️ _ensure_domain_plans_table: could not ensure table: {e}")
+
+
+def get_plan_for_domain(dominio):
+    """
+    Busca la fila de domain_plans en la BD de clientes por dominio (o heurísticas).
+    Retorna dict {id, dominio, plan_id, mensajes_incluidos, created_at,...} o None.
+    """
+    try:
+        if not dominio:
+            return None
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        candidates = [
+            dominio,
+            dominio.split('.')[0] if '.' in dominio else dominio,
+            dominio.replace('.', '_')
+        ]
+        for c in candidates:
+            try:
+                # Asegurar tabla si posible
+                _ensure_domain_plans_table(conn)
+                cur.execute("SELECT id, dominio, plan_id, mensajes_incluidos, created_at, updated_at FROM domain_plans WHERE dominio = %s LIMIT 1", (c,))
+                row = cur.fetchone()
+                if row:
+                    cur.close(); conn.close()
+                    return row
+            except Exception:
+                # intentar siguiente candidato
+                continue
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ get_plan_for_domain error: {e}")
+    return None
+
 def get_plan_status_for_user(username, config=None):
     """
     Retorna el estado del plan para el cliente user:
     { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
 
-    Cambio: ahora "mensajes_consumidos" representa CONVERSACIONES consumidas.
-    Definición de conversación: un nuevo grupo de mensajes de un mismo número cuando han pasado >= 24 horas
-    desde su mensaje previo. Se cuentan TODAS las conversaciones del tenant (todos los números)
-    y no solo las asociadas a un teléfono específico.
-
-    Implementación:
-    - Intenta usar SQL con LAG() y PARTITION BY (MySQL 8+).
-    - Si falla (MySQL < 8 o SQL no soporta LAG), cae a un fallback en Python que
-      itera los mensajes ordenados por número y timestamp y calcula las sesiones.
-    - Nota: para bases de datos muy grandes el fallback en Python puede ser pesado; considera
-      agregar un filtro por periodo (ej. último mes) o migrar a MySQL 8.
+    Cambio: si se pasa `config` (tenant), primero intenta leer plan desde CLIENTES_DB.domain_plans
+    usando config['dominio']. Si existe, usa ese plan_id / mensajes_incluidos. Si no existe, mantiene
+    la lógica previa (buscar cliente por user en CLIENTES_DB y planes).
     """
     try:
-        # Obtener cliente desde CLIENTES_DB (solo para metadatos del plan)
-        conn_cli = get_clientes_conn()
-        cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
-        cliente = cur_cli.fetchone()
-        cur_cli.close(); conn_cli.close()
-        if not cliente:
-            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado para user={username}")
-            return None
-
-        plan_id = cliente.get('plan_id')
+        plan_id = None
         plan_name = None
-
         mensajes_incluidos = 0
-        if plan_id:
+
+        # 1) If config provided, try to get domain plan first (preferred)
+        if config and config.get('dominio'):
+            try:
+                dp = get_plan_for_domain(config.get('dominio'))
+                if dp:
+                    plan_id = dp.get('plan_id')
+                    mensajes_incluidos = int(dp.get('mensajes_incluidos') or 0)
+                    # try to read plan name from planes table if possible
+                    try:
+                        conn_cli = get_clientes_conn()
+                        curp = conn_cli.cursor(dictionary=True)
+                        curp.execute("SELECT plan_id, modelo, categoria FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                        plan_row = curp.fetchone()
+                        curp.close(); conn_cli.close()
+                        if plan_row:
+                            plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+                    except Exception:
+                        # ignore and continue with minimal info
+                        pass
+            except Exception as e:
+                app.logger.warning(f"⚠️ get_plan_status_for_user: error obtaining domain plan: {e}")
+
+        # 2) Fallback: if still no plan_id, try old flow (lookup by username in CLIENTES_DB)
+        if not plan_id:
             try:
                 conn_cli = get_clientes_conn()
-                curp = conn_cli.cursor(dictionary=True)
-                curp.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, descripcion, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
-                plan_row = curp.fetchone()
-                curp.close(); conn_cli.close()
-                if plan_row:
-                    plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
-                    mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+                cur_cli = conn_cli.cursor(dictionary=True)
+                cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+                cliente = cur_cli.fetchone()
+                cur_cli.close(); conn_cli.close()
+                if cliente:
+                    plan_id = cliente.get('plan_id')
+                    if plan_id:
+                        # read plan metadata from planes
+                        try:
+                            conn_cli = get_clientes_conn()
+                            curp = conn_cli.cursor(dictionary=True)
+                            curp.execute("SELECT plan_id, categoria, subcategoria, linea, modelo, descripcion, mensajes_incluidos FROM planes WHERE plan_id = %s LIMIT 1", (plan_id,))
+                            plan_row = curp.fetchone()
+                            curp.close(); conn_cli.close()
+                            if plan_row:
+                                plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
+                                mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ get_plan_status_for_user: could not read planes table: {e}")
+                else:
+                    app.logger.info(f"ℹ️ get_plan_status_for_user: cliente not found for user={username}")
             except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
+                app.logger.warning(f"⚠️ get_plan_status_for_user cliente lookup failed: {e}")
 
         # ---------------------
         # Contar conversaciones (sessions) en la BD del tenant
@@ -3749,13 +3835,11 @@ def get_plan_status_for_user(username, config=None):
                                     diff = (ts_dt - prev_dt).total_seconds()
                                     prev_ts_by_num[num] = ts_dt
                                 except Exception:
-                                    # si no se puede, saltar
                                     diff = 0
                             if diff >= 86400:  # 24 horas en segundos
                                 cnt += 1
                                 prev_ts_by_num[num] = ts
                             else:
-                                # actualizar último timestamp aunque no sume nuevo "session"
                                 prev_ts_by_num[num] = ts
                     except Exception:
                         continue
@@ -4301,10 +4385,23 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
         
-    except Exception as e:
-        print(f"Error obteniendo precios: {str(e)}")
-        return []
+def obtener_datos_de_transferencia(config):
+    try:
+        db = get_db_connection(config)
+        cursor = db.cursor(dictionary=True)
+        cursor.execute("""
+            SELECT * FROM configuracion
+            ORDER BY transferencia_numero, transferencia_nombre, transferencia_banco;
+        """)
+        datos_transferencia = cursor.fetchall()
+        cursor.close()
+        db.close()
+        return datos_transferencia
 
+    except Exception as e:
+        print(f"Error obteniendo datos de transferencia: {str(e)}")
+        return []
+        
 def obtener_producto_por_sku_o_nombre(query, config=None):
     """
     Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
@@ -6274,11 +6371,22 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
                     "mensualidad": str(p.get('mensualidad') or ""),
-                    "imagen": str(p.get('imagen') or "")
+                    "imagen": str(p.get('imagen') or ""),
+                    "descripcion": str(p.get('descripcion') or "")
                 })
             except Exception:
                 continue
-
+        transferencia = obtener_datos_de_transferencia(config) or []
+        transfer_list = []
+        for t in transferencia:
+            try:
+                transfer_list.append({
+                    "cuenta_bancaria": (p.get('transferencia_numero') or '').strip(),
+                    "nombre_transferencia": (p.get('transferencia_nombre') or '').strip(),
+                    "banco_transferencia": str(p.get('transferencia_banco') or "")
+                })
+            except Exception:
+                continue
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
 
@@ -6303,6 +6411,7 @@ que el servidor debe ejecutar. Dispones de:
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+- Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
@@ -6311,7 +6420,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6330,6 +6439,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
             "catalogo": catalog_list,
+            "transferencias": transfer_list,
             "catalogo_texto_resumen": texto_catalogo
         }
 
@@ -6459,7 +6569,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, respuesta_text, config)
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
-
+        # PASAR DATOS TRANSFERENCIA
+        if intent == "DATOS_TRANSFERENCIA":
+            sent = enviar_datos_transferencia(numero, config=config)
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            return True
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
@@ -6478,6 +6594,61 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
+        return False
+
+def enviar_datos_transferencia(numero, config=None):
+    """
+    Envía al cliente los datos de transferencia tomados desde la configuración del negocio.
+    - numero: número destino (string)
+    - config: tenant config opcional (dict). Si es None se usa obtener_configuracion_por_host().
+    Retorna True si se envió un mensaje, False si no había datos configurados.
+    """
+    try:
+        if config is None:
+            config = obtener_configuracion_por_host()
+
+        # Cargar configuración de negocio (usa load_config para respetar columnas/JSON)
+        cfg = load_config(config)
+        negocio = cfg.get('negocio', {}) or {}
+
+        # Construir bloque de transferencia (usa la función ya existente)
+        texto_transferencia = negocio_transfer_block(negocio)
+
+        # Si no hay datos específicos, intentar leer fila completa de configuracion (fallback)
+        if not texto_transferencia or 'no hay datos' in texto_transferencia.lower():
+            # Try obtener datos directos desde DB as fallback
+            datos = obtener_datos_de_transferencia(config) or []
+            if datos and len(datos) > 0:
+                row = datos[0]
+                numero_t = (row.get('transferencia_numero') or negocio.get('transferencia_numero') or '').strip()
+                nombre_t = (row.get('transferencia_nombre') or negocio.get('transferencia_nombre') or '').strip()
+                banco_t = (row.get('transferencia_banco') or negocio.get('transferencia_banco') or '').strip()
+                parts = []
+                if numero_t:
+                    parts.append(f"• Número / CLABE: {numero_t}")
+                if nombre_t:
+                    parts.append(f"• Nombre: {nombre_t}")
+                if banco_t:
+                    parts.append(f"• Banco: {banco_t}")
+                if parts:
+                    texto_transferencia = "Datos para transferencia:\n" + "\n".join(parts)
+
+        # Si aún no hay datos, avisar al usuario
+        if not texto_transferencia or texto_transferencia.strip() == "":
+            msg = "Lo siento, no hay datos de transferencia configurados en este negocio. Por favor contacta al administrador."
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, "[Solicitud datos transferencia]", msg, config, incoming_saved=False)
+            app.logger.info(f"ℹ️ enviar_datos_transferencia: no hay datos para enviar (numero={numero})")
+            return False
+
+        # Enviar el bloque al cliente y registrar la respuesta en conversaciones
+        enviar_mensaje(numero, texto_transferencia, config)
+        registrar_respuesta_bot(numero, "[Solicitud datos transferencia]", texto_transferencia, config, incoming_saved=False)
+        app.logger.info(f"✅ Datos de transferencia enviados a {numero}")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
@@ -6749,6 +6920,11 @@ def obtener_configuracion_por_host():
         if 'ofitodo' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524495486324']
+
+        # DETECCIÓN MAINDSTEEL
+        if 'maindsteel' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1011']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
