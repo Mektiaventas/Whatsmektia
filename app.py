@@ -5075,10 +5075,10 @@ def serve_public_docs(relpath):
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado.
-    - Primero intenta actualizar el mensaje que coincida exactamente.
-    - Si no encuentra coincidencia, intenta actualizar el último mensaje sin respuesta
-      para ese número (evita insertar duplicados si el texto original fue transformado).
-    - Solo si no existe ningún mensaje pendiente se inserta uno nuevo.
+    - Primero intenta actualizar por coincidencia exacta (mensaje) y respuesta NULL/''.
+    - Si no encuentra coincidencia exacta, intenta actualizar el último mensaje sin respuesta
+      (respuesta IS NULL OR respuesta = '') para ese número.
+    - Solo si no hay mensaje pendiente real, inserta un nuevo registro (caso extremo).
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5093,36 +5093,35 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         # Sanitize inputs for matching (same sanitizer used when saving)
         mensaje_busqueda = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
 
-        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero} at {datetime.now(tz_mx).isoformat()}")
 
-        # 1) Intentar UPDATE por coincidencia exacta (mensaje) y respuesta IS NULL
+        # 1) Intentar UPDATE por coincidencia exacta (mensaje) y respuesta IS NULL or empty
         try:
             cursor.execute("""
                 UPDATE conversaciones 
                 SET respuesta = %s 
                 WHERE numero = %s 
                   AND mensaje = %s 
-                  AND respuesta IS NULL
+                  AND (respuesta IS NULL OR respuesta = '')
                 ORDER BY timestamp DESC
                 LIMIT 1
             """, (respuesta, numero, mensaje_busqueda))
         except Exception:
-            # Algunos connectors/MySQL configs no aceptan ORDER BY+LIMIT en UPDATE;
-            # fallback a SELECT del id y luego UPDATE por id.
+            # Fallback a SELECT+UPDATE si el connector no acepta ORDER BY+LIMIT en UPDATE
             cursor.execute("""
                 SELECT id FROM conversaciones
-                WHERE numero = %s AND mensaje = %s AND respuesta IS NULL
+                WHERE numero = %s AND mensaje = %s AND (respuesta IS NULL OR respuesta = '')
                 ORDER BY timestamp DESC LIMIT 1
             """, (numero, mensaje_busqueda))
             row = cursor.fetchone()
             if row:
                 msg_id = row[0]
                 cursor.execute("UPDATE conversaciones SET respuesta = %s WHERE id = %s", (respuesta, msg_id))
-        
+
         # Si la actualización afectó filas, commit y salir
         if cursor.rowcount > 0:
             conn.commit()
-            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
+            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero} (rows_affected={cursor.rowcount})")
             cursor.close()
             conn.close()
             return True
@@ -5130,7 +5129,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         # 2) No se encontró por texto: intentar actualizar el último mensaje sin respuesta para este número
         cursor.execute("""
             SELECT id, mensaje FROM conversaciones
-            WHERE numero = %s AND respuesta IS NULL
+            WHERE numero = %s AND (respuesta IS NULL OR respuesta = '')
             ORDER BY timestamp DESC
             LIMIT 1
         """, (numero,))
@@ -5147,8 +5146,8 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
             except Exception as e:
                 app.logger.warning(f"⚠️ TRACKING: Falla al actualizar último mensaje pendiente: {e}")
 
-        # 3) No hay mensaje pendiente -> insertar nuevo registro (fallback)
-        app.logger.info(f"⚠️ TRACKING: No se encontró mensaje pendiente para {numero}, insertando nuevo registro")
+        # 3) No hay mensaje pendiente -> insertar nuevo registro (fallback extremo)
+        app.logger.warning(f"⚠️ TRACKING: No se encontró mensaje pendiente para {numero} (texto match falló); insertando nuevo registro como fallback")
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp)
             VALUES (%s, %s, %s, NOW())
