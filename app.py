@@ -6145,15 +6145,18 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante:
-    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
-      (keyword shortcut para UX inmediata).
-    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
-    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
-    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
-    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
-    - Guarda la conversación/resultados en BD.
-    - Retorna True si procesado OK, False en fallo.
+    Unified message processing pipeline.
+
+    Changes:
+    - Adds an early image-resolution & send block after the AI decision is parsed:
+      * If the AI returned an image field or we can resolve a SKU from the AI/user text
+        and find a product image in the catalog, the image is sent immediately (before
+        any "no images available" textual reply).
+      * Records the sent image in DB via guardar_respuesta_imagen.
+      * If the AI textual reply contains a negative phrase about images, it is replaced
+        with a non-contradictory positive message.
+    - Keeps all previous behavior (intents, document fallback, save_cita, pasar_asesor,
+      text replies, catalog handling). Does not remove any other functions.
     """
     try:
         if config is None:
@@ -6306,13 +6309,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
+        # Safety check for save_cita when source == "catalog"
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
             found = False
             for item in catalog_list:
-                if item.get('sku', '').strip().lower() == svc_lower or item.get('subcategoria', '').strip().lower() == svc_lower:
+                if item.get('sku', '').strip().lower() == svc_lower or item.get('servicio', '').strip().lower() == svc_lower:
                     found = True
                     break
             if not found:
@@ -6391,8 +6394,61 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
             return True
 
-        # ENVIAR IMAGEN
-        if intent == "ENVIAR_IMAGEN" and image_field:
+        # Early image resolution & send block (to avoid contradictions)
+        image_sent = False
+        imagen_para_enviar = None
+        try:
+            # 1) explicit from AI
+            if image_field:
+                imagen_para_enviar = image_field
+
+            # 2) detect SKU in AI text or user text and lookup product image
+            if not imagen_para_enviar:
+                sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
+                if sku_candidate:
+                    producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
+                    if producto and producto.get('imagen'):
+                        imagen_para_enviar = producto.get('imagen')
+
+            # 3) sanitize filename-like values
+            if imagen_para_enviar and isinstance(imagen_para_enviar, str):
+                imagen_para_enviar = imagen_para_enviar.strip()
+
+            # If we found an image, send it BEFORE sending any negative "no images" text.
+            if imagen_para_enviar:
+                try:
+                    sent_image = enviar_imagen(numero, imagen_para_enviar, config)
+                    if sent_image:
+                        image_sent = True
+                        # Build public URL to store in DB (best effort)
+                        imagen_url_to_save = imagen_para_enviar
+                        if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
+                            dominio = config.get('dominio') or os.getenv('MI_DOMINIO') or ''
+                            if dominio and not dominio.startswith('http'):
+                                dominio = 'https://' + dominio
+                            if dominio:
+                                try:
+                                    _, tenant_slug = get_productos_dir_for_config(config)
+                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_para_enviar)}"
+                                except Exception:
+                                    imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_para_enviar)}"
+                        # If AI said "no images", replace that part to avoid contradiction
+                        respuesta_lower = (respuesta_text or "").lower()
+                        negative_indicators = ['no tengo', 'no hay imágenes', 'no tenemos imágenes', 'no tengo acceso', 'no disponemos', 'no puedo enviar imágenes', 'no images', 'currently no']
+                        if any(ind in respuesta_lower for ind in negative_indicators):
+                            respuesta_text = "Te envío la imagen del producto. ¿Deseas más fotos o información adicional?"
+                        # Save a bot-conversacion record indicating image was sent
+                        try:
+                            guardar_respuesta_imagen(numero, imagen_url_to_save, config, nota='[Imagen enviada]')
+                        except Exception as e:
+                            app.logger.debug(f"⚠️ guardar_respuesta_imagen falló: {e}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ enviar_imagen early attempt failed for {imagen_para_enviar}: {e}")
+        except Exception as e:
+            app.logger.debug(f"⚠️ Error resolving early image: {e}")
+
+        # ENVIAR IMAGEN (intent-specific) - skip if already sent early
+        if intent == "ENVIAR_IMAGEN" and image_field and not image_sent:
             try:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
@@ -6423,14 +6479,29 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # --- NUEVO: intentar enviar imagen del producto si aplica ---
+            # If we already sent an image early and adjusted respuesta_text, just send the text and save
+            if image_sent:
+                respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+                enviar_mensaje(numero, respuesta_text, config)
+                # imagen already recorded by guardar_respuesta_imagen earlier; also save conversation with imagen_url if possible
+                try:
+                    # Try to build imagen_url_to_save if not already done (best effort)
+                    if 'imagen_url_to_save' in locals():
+                        guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
+                    else:
+                        guardar_conversacion(numero, texto, respuesta_text, config)
+                except Exception:
+                    guardar_conversacion(numero, texto, respuesta_text, config)
+                return True
+
+            # --- existing heuristic to find an image to send if IA didn't explicitly request it ---
             imagen_para_enviar = None
 
-            # 1) Si la IA ya devolvió un campo 'image', úsalo
-            if image_field:
+            # 1) If the AI already returned an 'image' field, use it (unless we already handled above)
+            if image_field and not image_sent:
                 imagen_para_enviar = image_field
 
-            # 2) Si la fuente viene del catálogo, intentar detectar SKU en la respuesta o en el texto original
+            # 2) If the source came from catalog, try detect SKU in response or original text
             if not imagen_para_enviar and source == "catalog":
                 try:
                     sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
@@ -6441,7 +6512,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 except Exception as e:
                     app.logger.debug(f"⚠️ No se pudo resolver imagen desde catálogo: {e}")
 
-            # 3) Si aún no hay imagen y la IA devolvió un nombre distinto, intentar buscar SKU en la respuesta libre
+            # 3) If still not, try detect SKU in response free text
             if not imagen_para_enviar:
                 try:
                     sku_candidate = buscar_sku_en_texto(respuesta_text, precios)
@@ -6452,14 +6523,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 except Exception:
                     pass
 
-            # Si encontramos imagen, enviarla primero y guardar la conversación con imagen
-            if imagen_para_enviar:
+            # If we found an image, send it first and then the text
+            if imagen_para_enviar and not image_sent:
                 try:
                     enviar_imagen(numero, imagen_para_enviar, config)
                 except Exception as e:
                     app.logger.warning(f"⚠️ enviar_imagen fallback falló para {imagen_para_enviar}: {e}")
 
-                # construir imagen_url pública para guardar en BD (mejor esfuerzo)
+                # construct imagen_url pública para guardar en BD (best-effort)
                 imagen_url_to_save = imagen_para_enviar
                 if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
                     try:
@@ -6467,7 +6538,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         if dominio and not dominio.startswith('http'):
                             dominio = 'https://' + dominio
                         if dominio:
-                            # intentar tenant-aware
                             try:
                                 _, tenant_slug = get_productos_dir_for_config(config)
                                 imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_para_enviar)}"
@@ -6476,7 +6546,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     except Exception:
                         imagen_url_to_save = f"/uploads/productos/{os.path.basename(imagen_para_enviar)}"
 
-                # enviar texto si existe
+                # send text if exists
                 if respuesta_text:
                     respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
                     enviar_mensaje(numero, respuesta_text, config)
@@ -6484,7 +6554,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
                 return True
 
-            # Si no hay imagen para enviar, comportamiento previo: enviar sólo texto
+            # If no image to send, send text only
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
