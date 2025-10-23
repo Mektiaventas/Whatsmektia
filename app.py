@@ -6087,10 +6087,38 @@ def webhook():
             imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             texto = msg['image'].get('caption', '').strip() or "El usuario envió una imagen"
 
-            # Guardar mensaje entrante (sin respuesta aún)
-            guardar_conversacion(numero, texto, None, config, public_url, True)
+            # If provider didn't give us a public URL but returned base64, save it to disk under uploads
+            # so the web UI can fetch it via the existing /uploads/<filename> route.
+            if not public_url and imagen_base64:
+                try:
+                    # imagen_base64 may already be a data URI "data:image/...;base64,..."
+                    b64 = imagen_base64
+                    # extract extension and payload if data URI
+                    m = re.match(r'data:(image/[^;]+);base64,(.+)', imagen_base64, re.DOTALL)
+                    if m:
+                        mime = m.group(1)  # e.g. image/jpeg
+                        ext = mime.split('/')[1].split('+')[0]
+                        b64 = m.group(2)
+                    else:
+                        # fallback to jpg
+                        ext = 'jpg'
+                        if ',' in imagen_base64:
+                            b64 = imagen_base64.split(',', 1)[1]
 
-            # 🔁 ACTUALIZAR KANBAN INMEDIATAMENTE EN RECEPCIÓN
+                    filename = secure_filename(f"wa_img_{int(time.time())}.{ext}")
+                    filepath = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+                    os.makedirs(os.path.dirname(filepath), exist_ok=True)
+                    with open(filepath, 'wb') as f:
+                        f.write(base64.b64decode(b64))
+                    public_url = url_for('serve_uploaded_file', filename=filename)
+                    app.logger.info(f"✅ WhatsApp image saved to disk: {filepath} -> {public_url}")
+                except Exception as e:
+                    app.logger.error(f"🔴 Error saving WhatsApp image to disk: {e}")
+
+            # Guardar mensaje entrante (sin respuesta aún)
+            # Prefer guardar public_url (http path). If not available, store the base64 string (data URI)
+            guardar_conversacion(numero, texto, None, config, public_url or imagen_base64, True)
+
             try:
                 meta = obtener_chat_meta(numero, config)
                 if not meta:

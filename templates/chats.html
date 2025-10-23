@@ -135,13 +135,14 @@
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
-                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
+                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image" onclick="window.open(this.src, '_blank')" />
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                         <div class="image-caption">
-                            {{ msg.mensaje }}
+                                {{ msg.mensaje }}
                         </div>
                         {% endif %}
                     </div>
+                </div>
                     {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
                     <div class="audio-player">
                         <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
@@ -309,7 +310,16 @@
         border: none;
         cursor: pointer;
     }
-
+    .whatsapp-image {
+        max-width: 360px;
+        max-height: 480px;
+        border-radius: 8px;
+        display: block;
+        cursor: pointer;
+        margin-bottom: 6px;
+        object-fit: cover;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+    }
     .input-group {
         position: relative;
     }
@@ -334,7 +344,13 @@ let lastChatsTimestamp = 0;
 let lastMessageIdForSelected = 0;
 let isEditingAlias = false;
 let aliasTimers = new Map();
-
+document.addEventListener('click', function (e) {
+const t = e.target;
+if (t && t.classList && t.classList.contains('whatsapp-image')) {
+// default onclick already opens in new tab, this is defensive for dynamically added nodes
+    window.open(t.src, '_blank');
+}
+});
 document.addEventListener('DOMContentLoaded', () => {
     enhanceAliasButtons();
     setupEmojiPicker();
