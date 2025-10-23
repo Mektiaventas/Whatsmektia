@@ -6100,26 +6100,31 @@ def webhook():
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               es_mi_numero=False, es_archivo=False):
+                               es_mi_numero=False, es_archivo=False, incoming_saved=False):
     """
     Re-implementación mejorada de procesar_mensaje_unificado.
 
     Cambios principales:
-    - Provee a la IA datos explícitos desde la BD:
-        * columnas seleccionadas de la tabla `configuracion`
-        * todo el catálogo/tabla `precios` (incluyendo imagenes)
-    - Construye un prompt más claro y con lista de funciones que la IA
-      puede "invocar" (server-side) para realizar acciones.
-    - Exige formato JSON de salida con un campo `call_function` opcional
-      que indica qué función del servidor debe ejecutarse y `function_args`
-      con argumentos. Esto permite que la IA "proponga" la acción y el
-      servidor la ejecute de forma segura.
-    - Conserva y reutiliza las funciones existentes: enviar_catalogo,
-      enviar_imagen, enviar_documento, pasar_contacto_asesor, guardar_cita,
-      enviar_mensaje, guardar_conversacion, etc.
-    - Validaciones de seguridad: no permitir guardar citas con servicios
-      no presentes en el catálogo cuando source="catalog".
+    - Añadido parámetro incoming_saved: si True, el webhook ya guardó el mensaje entrante.
+      En ese caso se actualiza la fila existente con actualizar_respuesta(...) en vez de insertar.
+    - Helper persistir_respuesta centraliza la lógica de update/fallback insert.
+    - Mantiene la lógica previa para llamadas a la IA y ejecución de acciones.
     """
+    def persistir_respuesta(numero_dest, incoming_saved_flag, incoming_text, respuesta_text, cfg, imagen_url=None, es_imagen_flag=False):
+        try:
+            if incoming_saved_flag:
+                # Actualiza la fila del mensaje entrante ya guardado (evita duplicados)
+                try:
+                    actualizar_respuesta(numero_dest, incoming_text, respuesta_text, cfg)
+                except Exception as e:
+                    # Fallback: si actualizar falla, guardar conversación completa para no perder el rastro
+                    app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
+                    guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
+            else:
+                guardar_conversacion(numero_dest, incoming_text, respuesta_text, cfg, imagen_url=imagen_url, es_imagen=es_imagen_flag)
+        except Exception as e:
+            app.logger.error(f"🔴 Error persistiendo respuesta: {e}")
+
     try:
         if config is None:
             config = obtener_configuracion_por_host()
@@ -6284,7 +6289,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
-                guardar_conversacion(numero, texto_original, fallback_text, config)
+                persistir_respuesta(numero, incoming_saved, texto_original, fallback_text, config)
                 return True
             return False
 
@@ -6320,7 +6325,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                 if not found:
                     app.logger.warning("⚠️ IA intentó guardar cita con servicio NO presente en catálogo. Abortando guardar.")
                     enviar_mensaje(numero, "Lo siento, ese servicio no figura en nuestro catálogo. ¿Podrías indicar el SKU o nombre exacto?", config)
-                    guardar_conversacion(numero, texto_original, "Intenté guardar pero el servicio no está en catálogo.", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, "Intenté guardar pero el servicio no está en catálogo.", config)
                     return True
 
         # 10) Ejecutar acciones solicitadas por la IA (call_function) o por intent
@@ -6332,7 +6337,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                     sent = enviar_catalogo(numero, original_text=texto_original, config=config)
                     if sent and respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                    guardar_conversacion(numero, texto_original, respuesta_text or "Se envió el catálogo", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Se envió el catálogo", config)
                     return True
 
                 if fn == "enviar_imagen":
@@ -6341,7 +6346,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                         enviar_imagen(numero, image, config)
                         if respuesta_text:
                             enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto_original, respuesta_text, config, imagen_url=image, es_imagen=True)
+                        persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config, imagen_url=image, es_imagen_flag=True)
                         return True
 
                 if fn == "enviar_documento":
@@ -6350,7 +6355,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                         enviar_documento(numero, doc, os.path.basename(doc), config)
                         if respuesta_text:
                             enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto_original, respuesta_text, config, imagen_url=doc, es_imagen=False)
+                        persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config, imagen_url=doc, es_imagen_flag=False)
                         return True
 
                 if fn == "pasar_contacto_asesor":
@@ -6358,7 +6363,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                     pasar_contacto_asesor(numero, config=config, notificar_asesor=notify)
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                    guardar_conversacion(numero, texto_original, respuesta_text or "Te pasé un asesor", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te pasé un asesor", config)
                     return True
 
                 if fn == "guardar_cita":
@@ -6377,32 +6382,32 @@ Reglas IMPORTANTES (RESPÉTALAS):
                         if respuesta_text:
                             enviar_mensaje(numero, respuesta_text, config)
                         enviar_alerta_cita_administrador(info_cita, cid, config)
-                        guardar_conversacion(numero, texto_original, respuesta_text or f"Cita creada (ID: {cid})", config)
+                        persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or f"Cita creada (ID: {cid})", config)
                     else:
                         enviar_mensaje(numero, "No pude guardar la cita, faltan datos. ¿Puedes confirmar la información?", config)
-                        guardar_conversacion(numero, texto_original, "Error al guardar cita (faltan datos)", config)
+                        persistir_respuesta(numero, incoming_saved, texto_original, "Error al guardar cita (faltan datos)", config)
                     return True
 
                 if fn == "enviar_mensaje":
                     txt = function_args.get('texto') or function_args.get('mensaje') or respuesta_text
                     if txt:
                         enviar_mensaje(numero, txt, config)
-                        guardar_conversacion(numero, texto_original, txt, config)
+                        persistir_respuesta(numero, incoming_saved, texto_original, txt, config)
                         return True
 
                 # Unknown function -> log and no-op
                 app.logger.warning(f"⚠️ IA solicitó función desconocida: {fn}")
                 enviar_mensaje(numero, "Lo siento, no puedo ejecutar esa acción automáticamente.", config)
-                guardar_conversacion(numero, texto_original, "Intento de función desconocida por IA", config)
+                persistir_respuesta(numero, incoming_saved, texto_original, "Intento de función desconocida por IA", config)
                 return True
 
             # Si no hay call_function, usar intent para comportamientos comunes
             if intent == "ENVIAR_CATALOGO":
                 sent = enviar_catalogo(numero, original_text=texto_original, config=config)
                 if sent:
-                    guardar_conversacion(numero, texto_original, "Te envié el catálogo.", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, "Te envié el catálogo.", config)
                 else:
-                    guardar_conversacion(numero, texto_original, "No encontré catálogo publicado.", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, "No encontré catálogo publicado.", config)
                 return True
 
             if intent == "ENVIAR_IMAGEN":
@@ -6411,7 +6416,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
                     enviar_imagen(numero, image, config)
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                    guardar_conversacion(numero, texto_original, respuesta_text or "Imagen enviada", config, imagen_url=image, es_imagen=True)
+                    persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Imagen enviada", config, imagen_url=image, es_imagen_flag=True)
                     return True
 
             if intent == "ENVIAR_DOCUMENTO":
@@ -6420,14 +6425,14 @@ Reglas IMPORTANTES (RESPÉTALAS):
                     enviar_documento(numero, doc, os.path.basename(doc), config)
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
-                    guardar_conversacion(numero, texto_original, respuesta_text or "Documento enviado", config, imagen_url=doc, es_imagen=False)
+                    persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Documento enviado", config, imagen_url=doc, es_imagen_flag=False)
                     return True
 
             if intent == "PASAR_ASESOR":
                 pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto_original, respuesta_text or "Te pasé con un asesor", config)
+                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or "Te pasé con un asesor", config)
                 return True
 
             if intent == "GUARDAR_CITA":
@@ -6438,17 +6443,17 @@ Reglas IMPORTANTES (RESPÉTALAS):
                     if respuesta_text:
                         enviar_mensaje(numero, respuesta_text, config)
                     enviar_alerta_cita_administrador(info, cita_id, config)
-                    guardar_conversacion(numero, texto_original, respuesta_text or f"Cita registrada: #{cita_id}", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text or f"Cita registrada: #{cita_id}", config)
                 else:
                     enviar_mensaje(numero, "Faltan datos para agendar, ¿puedes confirmar por favor?", config)
-                    guardar_conversacion(numero, texto_original, "Error guardando cita (faltan datos)", config)
+                    persistir_respuesta(numero, incoming_saved, texto_original, "Error guardando cita (faltan datos)", config)
                 return True
 
             if intent == "RESPONDER_TEXTO" and respuesta_text:
                 # Aplicar restricciones y enviar
                 respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
                 enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto_original, respuesta_text, config)
+                persistir_respuesta(numero, incoming_saved, texto_original, respuesta_text, config)
                 return True
 
             # No action requested
@@ -6461,7 +6466,7 @@ Reglas IMPORTANTES (RESPÉTALAS):
             # Inform user gracefully
             try:
                 enviar_mensaje(numero, "Ocurrió un error interno al procesar tu solicitud. Intentemos de nuevo.", config)
-                guardar_conversacion(numero, texto_original, "Error interno ejecutando acción IA", config)
+                persistir_respuesta(numero, incoming_saved, texto_original, "Error interno ejecutando acción IA", config)
             except:
                 pass
             return False
