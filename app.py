@@ -6145,29 +6145,27 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                es_mi_numero=False, es_archivo=False):
     """
-    Unified message processing pipeline.
+    Unified message processing pipeline (modified).
 
-    Changes:
-    - Adds an early image-resolution & send block after the AI decision is parsed:
-      * If the AI returned an image field or we can resolve a SKU from the AI/user text
-        and find a product image in the catalog, the image is sent immediately (before
-        any "no images available" textual reply).
-      * Records the sent image in DB via guardar_respuesta_imagen.
-      * If the AI textual reply contains a negative phrase about images, it is replaced
-        with a non-contradictory positive message.
-    - When the intent/source indicates the response is about catalog products (source == "catalog"),
-      the code now attempts to resolve the SKU/product and enrich the textual reply with the
-      product data (name, SKU, price, short description). If the product has an image it is sent
-      together with that product information and saved in DB as the imagen_url associated with the bot reply.
-    - Keeps all previous behavior (intents, document fallback, save_cita, pasar_asesor,
-      text replies, catalog handling). Does not remove any other functions.
+    Change summary:
+    - Images are NOT sent from the server anymore.
+    - Catalog entries (catalog_list) include an "imagen" field already; we keep that.
+    - Any logic that previously attempted to call enviar_imagen or guardar_respuesta_imagen
+      has been disabled. Instead, when the model references an image (filename or url)
+      we keep it as metadata and store the public URL in the conversation record so the UI
+      can show the image. The model still receives the catalog with image names/URLs.
+    - Behavior for sending documents, saving citas, passing to advisor, text replies, etc.
+      remains unchanged.
     """
     try:
         if config is None:
             config = obtener_configuracion_por_host()
 
+        # Disable server-side image sending: images are passed only as data in 'catalogo'
+        SKIP_IMAGE_SEND = True
+
         # Ensure image state vars exist to avoid NameError when referenced in multiple branches
-        image_sent = False
+        image_sent = False            # kept for compatibility but never set True while SKIP_IMAGE_SEND
         imagen_para_enviar = None
         imagen_url_to_save = None
 
@@ -6212,7 +6210,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
                     "mensualidad": str(p.get('mensualidad') or ""),
-                    "imagen": str(p.get('imagen') or "")
+                    "imagen": str(p.get('imagen') or "")   # keep image reference as data only
                 })
             except Exception:
                 continue
@@ -6241,28 +6239,12 @@ que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
-- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
+- Catálogo (estructura JSON con sku, servicio, precios, imagen): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, NO teléfonos):\n{asesores_block}
 
-Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
-1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
-2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
-3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
-4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
-5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
-   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
-   - image: filename_or_url_or_null
-   - document: url_or_null
-   - save_cita: object|null
-   - notify_asesor: boolean
-   - followups: [ "pregunta corta 1", ... ]
-   - confidence: 0.0-1.0
-   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
-
-7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+REGLA IMPORTANTE: El servidor NO deberá enviar imágenes automáticamente. Si incluyes un campo 'image' en tu JSON de salida,
+debe ser tratado como METADATO: el servidor guardará la referencia (filename o URL) en la conversación para que la UI la muestre.
+No llames a ninguna API de envío de imágenes desde el servidor.
 """
 
         # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
@@ -6271,7 +6253,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
+            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado (incluye 'imagen' como dato)
             "catalogo_texto_resumen": texto_catalogo
         }
 
@@ -6312,7 +6294,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
-        image_field = decision.get('image')
+        image_field = decision.get('image')               # image is metadata only
         document_field = decision.get('document')
         save_cita = decision.get('save_cita')
         notify_asesor = bool(decision.get('notify_asesor'))
@@ -6403,16 +6385,31 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
 
             return True
-        # ENVIAR IMAGEN (intent-specific) - skip if already sent early
-        if intent == "ENVIAR_IMAGEN" and image_field and not image_sent:
+
+        # ENVIAR_IMAGEN intent: treat image as metadata only (no server send)
+        if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                sent = enviar_imagen(numero, image_field, config)
+                # Build public URL to store as metadata (best-effort)
+                imagen_val = str(image_field).strip()
+                imagen_url_to_save = imagen_val
+                if imagen_val and not imagen_val.startswith('http') and not imagen_val.startswith('data:'):
+                    dominio = config.get('dominio') or os.getenv('MI_DOMINIO')
+                    if dominio and not dominio.startswith('http'):
+                        dominio = 'https://' + dominio
+                    if dominio:
+                        try:
+                            _, tenant_slug = get_productos_dir_for_config(config)
+                            imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_val)}"
+                        except Exception:
+                            imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_val)}"
+                # Do NOT call enviar_imagen; only save metadata so UI can show it
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
+                app.logger.info("ℹ️ Image referenced by IA was saved as metadata; server did not send the image (policy: images are catalog data only).")
                 return True
             except Exception as e:
-                app.logger.error(f"🔴 Error enviando imagen: {e}")
+                app.logger.error(f"🔴 Error handling ENVIAR_IMAGEN intent (metadata-only): {e}")
 
         # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
@@ -6435,82 +6432,31 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # If we already sent an image early and adjusted respuesta_text, just send the text and save
-            if image_sent:
-                respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-                enviar_mensaje(numero, respuesta_text, config)
-                # imagen already recorded by guardar_respuesta_imagen earlier; also save conversation with imagen_url if possible
+            # We never send images from server; if the model referenced an image, save as metadata
+            if image_field:
                 try:
-                    # Try to build imagen_url_to_save if not already done (best effort)
-                    if imagen_url_to_save:
-                        guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
-                    else:
-                        guardar_conversacion(numero, texto, respuesta_text, config)
-                except Exception:
-                    guardar_conversacion(numero, texto, respuesta_text, config)
-                return True
-
-            # --- existing heuristic to find an image to send if IA didn't explicitly request it ---
-            imagen_para_enviar = None
-
-            # 1) If the AI already returned an 'image' field, use it (unless we already handled above)
-            if image_field and not image_sent:
-                imagen_para_enviar = image_field
-
-            # 2) If the source came from catalog, try detect SKU in response or original text
-            if not imagen_para_enviar and source == "catalog":
-                try:
-                    sku_candidate = buscar_sku_en_texto(respuesta_text, precios) or buscar_sku_en_texto(texto, precios)
-                    if sku_candidate:
-                        producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
-                        if producto and producto.get('imagen'):
-                            imagen_para_enviar = producto.get('imagen')
-                except Exception as e:
-                    app.logger.debug(f"⚠️ No se pudo resolver imagen desde catálogo: {e}")
-
-            # 3) If still not, try detect SKU in response free text
-            if not imagen_para_enviar:
-                try:
-                    sku_candidate = buscar_sku_en_texto(respuesta_text, precios)
-                    if sku_candidate:
-                        producto = obtener_producto_por_sku_o_nombre(sku_candidate, config)
-                        if producto and producto.get('imagen'):
-                            imagen_para_enviar = producto.get('imagen')
-                except Exception:
-                    pass
-
-            # If we found an image, send it first and then the text
-            if imagen_para_enviar and not image_sent:
-                try:
-                    enviar_imagen(numero, imagen_para_enviar, config)
-                except Exception as e:
-                    app.logger.warning(f"⚠️ enviar_imagen fallback falló para {imagen_para_enviar}: {e}")
-
-                # construct imagen_url pública para guardar en BD (best-effort)
-                imagen_url_to_save = imagen_para_enviar
-                if not imagen_url_to_save.startswith('http') and not imagen_url_to_save.startswith('data:'):
-                    try:
+                    imagen_val = str(image_field).strip()
+                    imagen_url_to_save = imagen_val
+                    if imagen_val and not imagen_val.startswith('http') and not imagen_val.startswith('data:'):
                         dominio = config.get('dominio') or os.getenv('MI_DOMINIO')
                         if dominio and not dominio.startswith('http'):
                             dominio = 'https://' + dominio
                         if dominio:
                             try:
                                 _, tenant_slug = get_productos_dir_for_config(config)
-                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_para_enviar)}"
+                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_val)}"
                             except Exception:
-                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_para_enviar)}"
-                    except Exception:
-                        imagen_url_to_save = f"/uploads/productos/{os.path.basename(imagen_para_enviar)}"
-
-                # send text if exists
-                if respuesta_text:
+                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_val)}"
+                    # Send text and save conversation with imagen_url metadata so UI can show it
                     respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
                     enviar_mensaje(numero, respuesta_text, config)
+                    guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
+                    app.logger.info("ℹ️ Image referenced by IA stored as metadata with the text reply (server did not send image).")
+                    return True
+                except Exception as e:
+                    app.logger.error(f"🔴 Error saving image metadata with text reply: {e}")
 
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
-                return True
-
-            # If no image to send, send text only
+            # No image referenced -> normal text reply
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
