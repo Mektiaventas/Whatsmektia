@@ -2798,13 +2798,20 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps
+        # Convertir timestamps a ISO strings en zona tz_mx para JSON
         for chat in chats:
             if chat.get('ultima_fecha'):
-                if chat['ultima_fecha'].tzinfo is None:
-                    chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
-                else:
-                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                try:
+                    if chat['ultima_fecha'].tzinfo is None:
+                        chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx).isoformat()
+                    else:
+                        chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
+                except Exception:
+                    # Fallback: intentar str() si algo raro ocurre
+                    try:
+                        chat['ultima_fecha'] = str(chat['ultima_fecha'])
+                    except:
+                        chat['ultima_fecha'] = None
 
         cursor.close()
         conn.close()
@@ -2812,10 +2819,11 @@ def kanban_data(config=None):
         return jsonify({
             'columnas': columnas,
             'chats': chats,
-            'timestamp': datetime.now().isoformat(),
+            # Use milliseconds epoch so clients that compare with Date.now() work reliably
+            'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
@@ -6419,7 +6427,9 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp."""
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
+    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -6443,13 +6453,21 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
-        msg_id = cursor.fetchone()[0]
+        row = cursor.fetchone()
+        msg_id = row[0] if row else None
 
         conn.commit()
         cursor.close()
         conn.close()
 
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+
+        # Ensure Kanban reflects the new incoming message immediately.
+        try:
+            actualizar_kanban_inmediato(numero, config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló tras guardar mensaje: {e}")
+
         return True
 
     except Exception as e:
