@@ -6145,38 +6145,31 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                es_mi_numero=False, es_archivo=False):
     """
-    Unified message processing pipeline (modified).
-
-    Change summary:
-    - Images are NOT sent from the server anymore.
-    - Catalog entries (catalog_list) include an "imagen" field already; we keep that.
-    - Any logic that previously attempted to call enviar_imagen or guardar_respuesta_imagen
-      has been disabled. Instead, when the model references an image (filename or url)
-      we keep it as metadata and store the public URL in the conversation record so the UI
-      can show the image. The model still receives the catalog with image names/URLs.
-    - Behavior for sending documents, saving citas, passing to advisor, text replies, etc.
-      remains unchanged.
+    Flujo unificado para procesar un mensaje entrante:
+    - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
+      (keyword shortcut para UX inmediata).
+    - Si no, construye un prompt rico (catálogo estructurado, historial, asesores).
+    - Llama al modelo para que DECIDA la intención y genere un JSON estructurado.
+    - Regla clave: NO INVENTAR programas ni precios. Sólo usar los items del catálogo enviado.
+    - Ejecuta las acciones resultantes (enviar texto/imagen/documento, guardar cita, notificar).
+    - Guarda la conversación/resultados en BD.
+    - Retorna True si procesado OK, False en fallo.
     """
     try:
         if config is None:
             config = obtener_configuracion_por_host()
 
-        # Disable server-side image sending: images are passed only as data in 'catalogo'
-        SKIP_IMAGE_SEND = True
-
-        # Ensure image state vars exist to avoid NameError when referenced in multiple branches
-        image_sent = False            # kept for compatibility but never set True while SKIP_IMAGE_SEND
-        imagen_para_enviar = None
-        imagen_url_to_save = None
-
         texto_norm = (texto or "").strip().lower()
 
         # === Shortcut: if user explicitly asks for catálogo/PDF/flyer -> enviar_catalogo() ===
+        # This gives immediate UX for common user requests to receive the published PDF/catalog.
         catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
         if any(k in texto_norm for k in catalog_keywords):
             app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
+                # guardar conversación: el propio enviar_catalogo ya intenta actualizar/guardar,
+                # pero dejamos un registro por seguridad si no lo hizo.
                 if sent:
                     guardar_conversacion(numero, texto, "Se envió el catálogo solicitado.", config)
                 else:
@@ -6205,12 +6198,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             try:
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('servicio') or p.get('modelo') or '').strip(),
+                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
-                    "mensualidad": str(p.get('mensualidad') or ""),
-                    "imagen": str(p.get('imagen') or "")   # keep image reference as data only
+                    "mensualidad": str(p.get('mensualidad') or "")
                 })
             except Exception:
                 continue
@@ -6239,12 +6231,28 @@ que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
-- Catálogo (estructura JSON con sku, servicio, precios, imagen): se incluye en el mensaje del usuario.
-- Asesores (solo nombres, NO teléfonos):\n{asesores_block}
+- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
+- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 
-REGLA IMPORTANTE: El servidor NO deberá enviar imágenes automáticamente. Si incluyes un campo 'image' en tu JSON de salida,
-debe ser tratado como METADATO: el servidor guardará la referencia (filename o URL) en la conversación para que la UI la muestre.
-No llames a ninguna API de envío de imágenes desde el servidor.
+Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
+1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
+2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
+3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
+4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+6) El JSON debe tener estas claves mínimas:
+   - intent: one of ["RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - respuesta_text: string (mensaje final para enviar al usuario; puede estar vacío)
+   - image: filename_or_url_or_null
+   - document: url_or_null
+   - save_cita: object|null
+   - notify_asesor: boolean
+   - followups: [ "pregunta corta 1", ... ]
+   - confidence: 0.0-1.0
+   - source: "catalog" | "none"   # debe ser "catalog" si la info proviene del catálogo, "none" en caso contrario
+
+7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         # Mensaje de usuario (payload) incluye catálogo estructurado para referencia
@@ -6253,7 +6261,7 @@ No llames a ninguna API de envío de imágenes desde el servidor.
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado (incluye 'imagen' como dato)
+            "catalogo": catalog_list,   # ESTRICTO: catálogo estructurado
             "catalogo_texto_resumen": texto_catalogo
         }
 
@@ -6294,14 +6302,14 @@ No llames a ninguna API de envío de imágenes desde el servidor.
         # Ejecutar acciones según decisión
         intent = (decision.get('intent') or 'NO_ACTION').upper()
         respuesta_text = decision.get('respuesta_text') or ""
-        image_field = decision.get('image')               # image is metadata only
+        image_field = decision.get('image')
         document_field = decision.get('document')
         save_cita = decision.get('save_cita')
         notify_asesor = bool(decision.get('notify_asesor'))
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-        # Safety check for save_cita when source == "catalog"
+        # Seguridad: si IA indica uso del catálogo para guardar cita, validar servicio existe
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
@@ -6342,29 +6350,6 @@ No llames a ninguna API de envío de imágenes desde el servidor.
                     'telefono': save_cita.get('telefono'),
                     'detalles_servicio': save_cita.get('detalles_servicio') or {}
                 }
-
-                # Pre-validate completeness so we can respond to the user immediately
-                try:
-                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                except Exception as e:
-                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló en precheck: {e}")
-                    completos, faltantes = False, ['validacion_error']
-
-                if not completos:
-                    # Save provisional state (guardar_cita will persist provisional state)
-                    guardar_cita(info_cita, config)
-                    # Prefer AI-provided respuesta_text; otherwise generate a clear request for missing fields
-                    if respuesta_text:
-                        reply = respuesta_text
-                    else:
-                        faltantes_text = ", ".join(faltantes)
-                        reply = f"Puedo agendar tu cita, pero necesito estos datos: {faltantes_text}. ¿Me los puedes proporcionar?"
-                    enviar_mensaje(numero, reply, config)
-                    guardar_conversacion(numero, texto, reply, config)
-                    app.logger.info(f"⚠️ Cita NO guardada (pre-check) para {numero}. Faltantes: {faltantes}")
-                    return True
-
-                # If complete, proceed to save and schedule
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
@@ -6373,43 +6358,22 @@ No llames a ninguna API de envío de imágenes desde el servidor.
                         guardar_conversacion(numero, texto, respuesta_text, config)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
-                    app.logger.warning("⚠️ guardar_cita devolvió None aun con pre-check completo")
-                    # If IA supplied a response prompt, still send it; otherwise send a generic message
-                    if respuesta_text:
-                        enviar_mensaje(numero, respuesta_text, config)
-                        guardar_conversacion(numero, texto, respuesta_text, config)
-                    else:
-                        enviar_mensaje(numero, "Hubo un problema guardando la cita. Por favor inténtalo de nuevo o proporciona más detalles.", config)
-                        guardar_conversacion(numero, texto, "Hubo un problema guardando la cita. Por favor inténtalo de nuevo.", config)
+                    app.logger.warning("⚠️ guardar_cita devolvió None")
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
 
             return True
 
-        # ENVIAR_IMAGEN intent: treat image as metadata only (no server send)
+        # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                # Build public URL to store as metadata (best-effort)
-                imagen_val = str(image_field).strip()
-                imagen_url_to_save = imagen_val
-                if imagen_val and not imagen_val.startswith('http') and not imagen_val.startswith('data:'):
-                    dominio = config.get('dominio') or os.getenv('MI_DOMINIO')
-                    if dominio and not dominio.startswith('http'):
-                        dominio = 'https://' + dominio
-                    if dominio:
-                        try:
-                            _, tenant_slug = get_productos_dir_for_config(config)
-                            imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_val)}"
-                        except Exception:
-                            imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_val)}"
-                # Do NOT call enviar_imagen; only save metadata so UI can show it
+                sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
-                app.logger.info("ℹ️ Image referenced by IA was saved as metadata; server did not send the image (policy: images are catalog data only).")
+                guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"), es_imagen=True)
                 return True
             except Exception as e:
-                app.logger.error(f"🔴 Error handling ENVIAR_IMAGEN intent (metadata-only): {e}")
+                app.logger.error(f"🔴 Error enviando imagen: {e}")
 
         # ENVIAR DOCUMENTO (IA proporcionó URL/filename explícito)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
@@ -6432,31 +6396,7 @@ No llames a ninguna API de envío de imágenes desde el servidor.
 
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
-            # We never send images from server; if the model referenced an image, save as metadata
-            if image_field:
-                try:
-                    imagen_val = str(image_field).strip()
-                    imagen_url_to_save = imagen_val
-                    if imagen_val and not imagen_val.startswith('http') and not imagen_val.startswith('data:'):
-                        dominio = config.get('dominio') or os.getenv('MI_DOMINIO')
-                        if dominio and not dominio.startswith('http'):
-                            dominio = 'https://' + dominio
-                        if dominio:
-                            try:
-                                _, tenant_slug = get_productos_dir_for_config(config)
-                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{tenant_slug}/{os.path.basename(imagen_val)}"
-                            except Exception:
-                                imagen_url_to_save = f"{dominio.rstrip('/')}/uploads/productos/{os.path.basename(imagen_val)}"
-                    # Send text and save conversation with imagen_url metadata so UI can show it
-                    respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-                    enviar_mensaje(numero, respuesta_text, config)
-                    guardar_conversacion(numero, texto, respuesta_text, config, imagen_url=imagen_url_to_save, es_imagen=True)
-                    app.logger.info("ℹ️ Image referenced by IA stored as metadata with the text reply (server did not send image).")
-                    return True
-                except Exception as e:
-                    app.logger.error(f"🔴 Error saving image metadata with text reply: {e}")
-
-            # No image referenced -> normal text reply
+            # Aplicar restricciones antes de enviar
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             enviar_mensaje(numero, respuesta_text, config)
             guardar_conversacion(numero, texto, respuesta_text, config)
