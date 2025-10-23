@@ -6801,51 +6801,117 @@ def diagnostico():
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
-    now    = datetime.now()
-    start  = now - (timedelta(days=30) if period=='month' else timedelta(days=7))
-    # Detectar configuración basada en el host
-    period = request.args.get('period', 'week')
     now = datetime.now()
-    conn = get_db_connection(config)  # ✅ Usar config
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
-        (start,)
-    )
-    chat_counts = cursor.fetchone()[0]
 
-    # 🔁 Unir con contactos y usar alias/nombre si existe
-    cursor.execute("""
-        SELECT 
-            conv.numero,
-            COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-            COUNT(*) AS total
-        FROM conversaciones conv
-        LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
-        WHERE conv.timestamp >= %s
-        GROUP BY conv.numero, nombre_mostrado
-        ORDER BY total DESC
-    """, (start,))
-    messages_per_chat = cursor.fetchall()
+    # Default behavior for week/month: keep existing logic (messages per chat)
+    if period != 'year':
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
-    cursor.execute(
-        "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
-        (start,)
-    )
-    total_responded = cursor.fetchone()[0]
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
+            (start,)
+        )
+        chat_counts = cursor.fetchone()[0]
 
-    cursor.close()
-    conn.close()
+        cursor.execute(""" 
+            SELECT 
+                conv.numero,
+                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+                COUNT(*) AS total
+            FROM conversaciones conv
+            LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+            WHERE conv.timestamp >= %s
+            GROUP BY conv.numero, nombre_mostrado
+            ORDER BY total DESC
+        """, (start,))
+        messages_per_chat = cursor.fetchall()
 
-    labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
-    values = [row[2] for row in messages_per_chat]  # total
+        cursor.execute(
+            "SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;",
+            (start,)
+        )
+        total_responded = cursor.fetchone()[0]
+
+        cursor.close()
+        conn.close()
+
+        labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
+        values = [row[2] for row in messages_per_chat]  # total
+    else:
+        # period == 'year' : compute last 12 months (monthly), counting "conversaciones iniciadas"
+        # build list of last 12 month keys in chronological order
+        def month_key_from_offset(now_dt, offset):
+            total_months = now_dt.year * 12 + now_dt.month - 1
+            target = total_months - offset
+            y = target // 12
+            m = (target % 12) + 1
+            return y, m
+
+        months = []
+        for offset in range(11, -1, -1):  # 11..0 -> oldest .. current
+            y, m = month_key_from_offset(now, offset)
+            months.append((y, m))
+
+        # start = first day of oldest month
+        earliest_year, earliest_month = months[0]
+        start = datetime(earliest_year, earliest_month, 1)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        sql = """
+            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
+            FROM conversaciones c1
+            WHERE c1.timestamp >= %s
+              AND NOT EXISTS (
+                SELECT 1 FROM conversaciones c2
+                WHERE c2.numero = c1.numero
+                  AND c2.timestamp < c1.timestamp
+                  AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+              )
+            GROUP BY y, m
+            ORDER BY y, m
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall()  # list of tuples (y, m, cnt)
+
+        # build map key 'YYYY-MM' -> count
+        counts_map = {}
+        for r in rows:
+            try:
+                y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
+            except Exception:
+                continue
+            key = f"{y}-{m:02d}"
+            counts_map[key] = cnt
+
+        # labels as 'Mon YYYY' (en-US style short month)
+        labels = []
+        values = []
+        for y, m in months:
+            key = f"{y}-{m:02d}"
+            labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+            values.append(counts_map.get(key, 0))
+
+        # keep top-level stats for compatibility (not shown in current template but safe)
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= %s;", (start,))
+        chat_counts_row = cursor.fetchone()
+        chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
+
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;", (start,))
+        total_responded_row = cursor.fetchone()
+        total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
+
+        cursor.close()
+        conn.close()
 
     # Obtener plan info para el usuario autenticado (si aplica)
     plan_info = None
     try:
         au = session.get('auth_user')
         if au and au.get('user'):
-            # obtener plan status
             plan_info = get_plan_status_for_user(au.get('user'), config=config)
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
@@ -6853,7 +6919,7 @@ def home():
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
-        messages_per_chat=messages_per_chat,
+        messages_per_chat=messages_per_chat if period != 'year' else None,
         total_responded=total_responded,
         period=period,
         labels=labels,
