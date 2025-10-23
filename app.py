@@ -5056,6 +5056,27 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
+def actualizar_respuesta_por_id(conv_id, respuesta, config=None):
+    """Actualiza la columna `respuesta` de una fila específica en `conversaciones` por su id."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE conversaciones
+               SET respuesta = %s
+             WHERE id = %s
+        """, (respuesta, conv_id))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info(f"✅ actualizar_respuesta_por_id: actualizado id={conv_id}")
+        return True
+    except Exception as e:
+        app.logger.error(f"🔴 actualizar_respuesta_por_id error: {e}")
+        return False
+
 def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:
@@ -6558,14 +6579,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, message_hash=None):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Ahora evita doble-insert dentro de la misma petición usando message_hash.
+    """Guarda el mensaje del usuario inmediatamente y devuelve el id insertado.
+    Devuelve msg_id (int) en éxito, None en fallo.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
         # Compute deterministic hash if not provided
@@ -6578,7 +6598,11 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
             saved = getattr(g, '_saved_message_hashes', set())
             if message_hash in saved:
                 app.logger.info(f"⚠️ Duplicate detected in guardar_mensaje_inmediato (skipping). numero={numero} hash={message_hash}")
-                return False
+                # Try to return existing recently inserted id stored in processed_messages if available
+                pm = processed_messages.get(message_hash)
+                if isinstance(pm, dict) and pm.get('db_id'):
+                    return pm.get('db_id')
+                return None
         except Exception:
             pass
 
@@ -6595,29 +6619,45 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen))
 
-        # Get the ID of the inserted message for tracking (optional)
-        cursor.execute("SELECT LAST_INSERT_ID()")
+        # Obtener id del insert
         try:
-            msg_id = cursor.fetchone()[0]
+            msg_id = cursor.lastrowid
         except Exception:
-            msg_id = None
+            # Fallback a SELECT LAST_INSERT_ID()
+            cursor.execute("SELECT LAST_INSERT_ID()")
+            try:
+                msg_id = cursor.fetchone()[0]
+            except Exception:
+                msg_id = None
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        # Mark saved
+        # Mark saved (per-request) and update global processed_messages if present
         try:
             g._saved_message_hashes.add(message_hash)
         except Exception:
             pass
 
+        # store db id in module-level processed_messages map for cross-step update
+        try:
+            if message_hash:
+                existing = processed_messages.get(message_hash)
+                if isinstance(existing, dict):
+                    existing['db_id'] = msg_id
+                    existing['ts'] = time.time()
+                else:
+                    processed_messages[message_hash] = {'ts': time.time(), 'db_id': msg_id}
+        except Exception:
+            pass
+
         app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (hash={message_hash})")
-        return True
+        return msg_id
 
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
-        return False
+        return None
     
 def extraer_nombre_desde_webhook(payload):
     """
