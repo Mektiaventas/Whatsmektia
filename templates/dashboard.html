@@ -4,6 +4,53 @@
 
 {% block content %}
 <style>
+    .header-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 1rem;
+        margin-bottom: 1rem;
+    }
+
+        .header-row h1 {
+            color: #1f4e79;
+            margin: 0;
+            font-size: 1.5rem;
+            /* allow title to take available space but not force plan box off */
+            flex: 1 1 auto;
+            min-width: 0; /* ensure truncation if needed */
+        }
+
+    .plan-box {
+        background: rgba(255,255,255,0.06);
+        padding: 8px 10px;
+        border-radius: 8px;
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex-shrink: 0;
+        max-width: 420px;
+        font-size: 0.9rem;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+        .plan-box .plan-details {
+            display: inline-flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+    .plan-metric {
+        display: inline-block;
+        margin-right: 8px;
+        white-space: nowrap;
+    }
+
     .tabs a {
         padding: 10px 20px;
         text-decoration: none;
@@ -46,6 +93,20 @@
 
     /* Responsive */
     @media (max-width: 768px) {
+        .header-row {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .plan-box {
+            justify-content: flex-start;
+            white-space: normal;
+            overflow: visible;
+            max-width: 100%;
+            padding: 10px;
+            font-size: 0.95rem;
+        }
+
         .stats {
             flex-direction: column;
         }
@@ -60,19 +121,6 @@
         }
     }
 
-    .plan-box {
-        background: rgba(255,255,255,0.06);
-        padding: 12px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        color: #fff;
-    }
-
-    .plan-metric {
-        display: inline-block;
-        margin-right: 16px;
-    }
-
     /* Hidden by default for tab panes */
     .tab-pane {
         display: none;
@@ -84,16 +132,23 @@
 </style>
 
 <div style="max-width: 1200px; margin: 0 auto; padding: 1rem;">
-    <h1 style="color:#1f4e79; margin-bottom: 1.5rem;">Dashboard General</h1>
-    {# Mostrar información del plan si está disponible #}
-    {% if plan_info %}
-    <div class="plan-box">
-        <strong>Plan actual:</strong> {{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}<br>
-        <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }} conversaciones</span>
-        <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }} conversaciones</span>
-        <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
+    <div class="header-row">
+        <h1>Dashboard General</h1>
+
+        {# Mostrar información del plan si está disponible #}
+        {% if plan_info %}
+        <div class="plan-box" title="{{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}">
+            <strong style="margin-right:6px;">Plan:</strong>
+            <div class="plan-details">
+                <span class="plan-metric"><strong>{{ plan_info.plan_name or ('ID: ' ~ (plan_info.plan_id or 'N/A')) }}</strong></span>
+                <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }}</span>
+                <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }}</span>
+                <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
+            </div>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
+
     <div class="tabs" style="margin-bottom: 2rem;">
         <!-- add data-period attributes and fix href for week -->
         <a data-tab="overview" data-period="week" class="{{ 'active' if period == 'week' and not request.args.get('tab') else '' }}" href="?period=week">Últimos 7 días</a>
