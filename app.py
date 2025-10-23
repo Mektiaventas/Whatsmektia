@@ -198,6 +198,37 @@ def get_clientes_conn():
         database=os.getenv("CLIENTES_DB_NAME")
     )
 
+def _find_cliente_in_clientes_by_domain(dominio):
+    """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
+    try:
+        if not dominio:
+            return None
+        candidates = [
+            dominio,
+            dominio.split('.')[0] if '.' in dominio else dominio,
+            dominio.replace('.', '_')
+        ]
+        conn = get_clientes_conn()
+        cur = conn.cursor(dictionary=True)
+        for c in candidates:
+            try:
+                cur.execute("""
+                    SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
+                    FROM cliente
+                    WHERE shema = %s OR entorno = %s OR servicio = %s OR `user` = %s
+                    LIMIT 1
+                """, (c, c, c, c))
+                row = cur.fetchone()
+                if row:
+                    cur.close(); conn.close()
+                    return row
+            except Exception:
+                continue
+        cur.close(); conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ _find_cliente_in_clientes_by_domain error: {e}")
+    return None
+
 def obtener_cliente_por_user(username):
     conn = get_clientes_conn()
     cur = conn.cursor(dictionary=True)
@@ -3490,26 +3521,49 @@ def _ensure_precios_plan_column(config=None):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columna mensajes_incluidos en precios: {e}")
 
-def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
+def asignar_plan_a_cliente_por_user(username_or_domain, plan_id, config=None):
     """
-    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
-    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
+    Assign a plan to a cliente in CLIENTES_DB.
+    - If `config` is provided or `username_or_domain` looks like a domain, resolve the cliente by domain.
+    - Otherwise resolve by `user` as before.
+    Keeps behavior of copying mensajes_incluidos from planes table into cliente.mensajes_incluidos.
     """
     try:
-        # asegurar columnas en cliente
         _ensure_cliente_plan_columns()
 
-        # 1) Obtener cliente en CLIENTES_DB
+        # Determine whether we should look up by domain or by username
+        cliente = None
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
-        cliente = cur_cli.fetchone()
+
+        # If config provided, prefer to find cliente using tenant domain
+        domain_to_check = None
+        if config and config.get('dominio'):
+            domain_to_check = config.get('dominio')
+        else:
+            # Heuristic: if the provided identifier contains a dot assume it's a domain
+            if username_or_domain and '.' in str(username_or_domain):
+                domain_to_check = username_or_domain
+
+        if domain_to_check:
+            found = _find_cliente_in_clientes_by_domain(domain_to_check)
+            if found:
+                cliente = found
+
+        # If not found by domain, fallback to username lookup (legacy behavior)
+        if not cliente and username_or_domain:
+            try:
+                cur_cli.execute("SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password FROM cliente WHERE `user` = %s LIMIT 1", (username_or_domain,))
+                cliente = cur_cli.fetchone()
+            except Exception as e:
+                app.logger.warning(f"⚠️ asignar_plan_a_cliente_por_user fallback by user failed: {e}")
+
         if not cliente:
             cur_cli.close(); conn_cli.close()
-            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
+            app.logger.error(f"🔴 Cliente no encontrado para identifier={username_or_domain} (domain check={domain_to_check})")
             return False
 
-        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
+        # Read plan metadata from planes table
         mensajes_incluidos = 0
         plan_name = None
         try:
@@ -3518,13 +3572,12 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             plan_row = cur_pl.fetchone()
             if plan_row:
                 mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
-                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
                 plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
             cur_pl.close()
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
 
-        # 3) Actualizar cliente en CLIENTES_DB
+        # Update cliente row with plan info
         try:
             cur_cli.execute("""
                 UPDATE cliente
@@ -3539,7 +3592,7 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             return False
 
         cur_cli.close(); conn_cli.close()
-        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        app.logger.info(f"✅ Plan id={plan_id} asignado a cliente(id={cliente.get('id_cliente')}) (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
         return True
 
     except Exception as e:
@@ -3548,35 +3601,38 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
 
 def get_plan_status_for_user(username, config=None):
     """
-    Retorna el estado del plan para el cliente user:
-    { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' }
-
-    Cambio: ahora "mensajes_consumidos" representa CONVERSACIONES consumidas.
-    Definición de conversación: un nuevo grupo de mensajes de un mismo número cuando han pasado >= 24 horas
-    desde su mensaje previo. Se cuentan TODAS las conversaciones del tenant (todos los números)
-    y no solo las asociadas a un teléfono específico.
-
-    Implementación:
-    - Intenta usar SQL con LAG() y PARTITION BY (MySQL 8+).
-    - Si falla (MySQL < 8 o SQL no soporta LAG), cae a un fallback en Python que
-      itera los mensajes ordenados por número y timestamp y calcula las sesiones.
-    - Nota: para bases de datos muy grandes el fallback en Python puede ser pesado; considera
-      agregar un filtro por periodo (ej. último mes) o migrar a MySQL 8.
+    Returns plan status. Behavior changed to prefer tenant/domain resolution when possible:
+    - If config is provided (obvious tenant context), the function attempts to resolve the cliente
+      row in CLIENTES_DB by the tenant domain (config['dominio']) and use that client's plan.
+    - If not found, falls back to looking up by username (legacy).
+    Returns:
+      { 'plan_id', 'plan_name', 'mensajes_incluidos', 'mensajes_consumidos', 'mensajes_disponibles' } or None
     """
     try:
-        # Obtener cliente desde CLIENTES_DB (solo para metadatos del plan)
-        conn_cli = get_clientes_conn()
-        cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
-        cliente = cur_cli.fetchone()
-        cur_cli.close(); conn_cli.close()
+        # Determine cliente row: prefer domain (from config) then username
+        cliente = None
+        try:
+            conn_cli = get_clientes_conn()
+            cur_cli = conn_cli.cursor(dictionary=True)
+            # If config provided try domain-based lookup
+            if config and config.get('dominio'):
+                found = _find_cliente_in_clientes_by_domain(config.get('dominio'))
+                if found:
+                    cliente = found
+            # If still not found and username provided, lookup by user
+            if not cliente and username:
+                cur_cli.execute("SELECT id_cliente, telefono, entorno, shema, servicio, `user`, plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+                cliente = cur_cli.fetchone()
+            cur_cli.close(); conn_cli.close()
+        except Exception as e:
+            app.logger.warning(f"⚠️ get_plan_status_for_user: error resolving cliente: {e}")
+
         if not cliente:
-            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado para user={username}")
+            app.logger.info(f"ℹ️ get_plan_status_for_user: cliente no encontrado (username={username} config_dom={config.get('dominio') if config else None})")
             return None
 
         plan_id = cliente.get('plan_id')
         plan_name = None
-
         mensajes_incluidos = 0
         if plan_id:
             try:
@@ -3592,7 +3648,7 @@ def get_plan_status_for_user(username, config=None):
                 app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB.planes: {e}")
 
         # ---------------------
-        # Contar conversaciones (sessions) en la BD del tenant
+        # Count conversaciones consumed in tenant DB (same as before)
         # ---------------------
         conversaciones_consumidas = 0
         try:
@@ -3601,7 +3657,6 @@ def get_plan_status_for_user(username, config=None):
             conn_t = get_db_connection(config)
             cur_t = conn_t.cursor()
 
-            # Intentar SQL con LAG() y PARTITION BY numero (MySQL 8+)
             sql_sessions = """
                 SELECT COALESCE(SUM(is_new),0) FROM (
                   SELECT numero, timestamp,
@@ -3618,10 +3673,9 @@ def get_plan_status_for_user(username, config=None):
                 conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
                 app.logger.info(f"🔎 Conversaciones (SQL LAG) => {conversaciones_consumidas}")
             except Exception as sql_err:
-                # Fallback a procesamiento en Python (compatible con MySQL < 8)
                 app.logger.warning(f"⚠️ Conteo por SQL LAG falló: {sql_err} — usando fallback en Python")
                 cur_t.execute("SELECT numero, timestamp FROM conversaciones ORDER BY numero, timestamp")
-                rows = cur_t.fetchall()  # list of tuples (numero, timestamp)
+                rows = cur_t.fetchall()
                 prev_ts_by_num = {}
                 cnt = 0
                 for r in rows:
@@ -3633,11 +3687,9 @@ def get_plan_status_for_user(username, config=None):
                             prev_ts_by_num[num] = ts
                         else:
                             prev = prev_ts_by_num[num]
-                            # Asegurar que ts y prev sean datetime
                             try:
                                 diff = (ts - prev).total_seconds()
                             except Exception:
-                                # si por alguna razón son strings, intentar parsear
                                 try:
                                     from dateutil import parser as _parser
                                     prev_dt = _parser.parse(str(prev))
@@ -3645,19 +3697,16 @@ def get_plan_status_for_user(username, config=None):
                                     diff = (ts_dt - prev_dt).total_seconds()
                                     prev_ts_by_num[num] = ts_dt
                                 except Exception:
-                                    # si no se puede, saltar
                                     diff = 0
-                            if diff >= 86400:  # 24 horas en segundos
+                            if diff >= 86400:
                                 cnt += 1
                                 prev_ts_by_num[num] = ts
                             else:
-                                # actualizar último timestamp aunque no sume nuevo "session"
                                 prev_ts_by_num[num] = ts
                     except Exception:
                         continue
                 conversaciones_consumidas = cnt
                 app.logger.info(f"🔎 Conversaciones (fallback Python) => {conversaciones_consumidas}")
-
             cur_t.close(); conn_t.close()
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")

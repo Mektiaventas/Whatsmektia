@@ -149,7 +149,7 @@
         {% endif %}
     </div>
 
-    <div class="tabs" style="margin-bottom: 2rem;">
+    <div class="tabs" style="margin-bottom: 1rem;">
         <div class="tabs" style="margin-bottom: 2rem;">
             <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
             <a data-tab="overview" data-period="year" class="{{ 'active' if period == 'year' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=year">Último año (mensual)</a>
