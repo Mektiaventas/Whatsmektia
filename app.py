@@ -1160,6 +1160,7 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
         # Fallback a asociación simple
         return asociar_imagenes_productos(servicios, imagenes)
 
+# Nueva función: analiza una imagen (base64) junto con contexto y devuelve texto de respuesta
 def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None, config=None):
     """
     Analiza una imagen recibida por WhatsApp y genera una respuesta usando IA.
@@ -4219,6 +4220,25 @@ def obtener_historial(numero, limite=5, config=None):
         app.logger.error(f"❌ Error al obtener historial: {e}")
         return []
 
+def buscar_sku_en_texto(texto, precios):
+    """
+    Busca un SKU presente en 'precios' dentro de 'texto'.
+    Devuelve el primer SKU encontrado (exact match substring) o None.
+    """
+    if not texto or not precios:
+        return None
+    texto_lower = texto.lower()
+    for p in precios:
+        sku = (p.get('sku') or '').strip()
+        modelo = (p.get('modelo') or '').strip()
+        # Check SKU and modelo presence (case-insensitive)
+        if sku and sku.lower() in texto_lower:
+            return sku
+        if modelo and modelo.lower() in texto_lower:
+            # prefer returning SKU if exists for that product
+            return sku or modelo
+    return None
+
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
     """
     Actualiza el estado de la conversación para mantener contexto
@@ -4635,6 +4655,35 @@ def extraer_info_intervencion(mensaje, numero, historial, config=None):
             "resumen": f"Solicitud de intervención humana: {mensaje}"
         }
 
+def actualizar_info_contacto_con_nombre(numero, nombre, config=None):
+    """
+    Actualiza la información del contacto usando el nombre proporcionado desde el webhook
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+            VALUES (%s, %s, 'WhatsApp', NOW())
+            ON DUPLICATE KEY UPDATE 
+                nombre = VALUES(nombre),
+                fecha_actualizacion = NOW()
+        """, (numero, nombre))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Contacto actualizado con nombre desde webhook: {numero} -> {nombre}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error actualizando contacto con nombre: {e}")
+
 def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen enviada]'):
     """Guarda una entrada en conversaciones representando una respuesta del BOT que contiene una imagen.
     - numero: número del chat
@@ -5025,6 +5074,42 @@ def obtener_asesores_por_user(username, default=2, cap=20):
     except Exception as e:
         app.logger.warning(f"⚠️ obtener_asesores_por_user falló para user={username}: {e}")
         return default
+
+def obtener_conexion_db(config):
+    """Obtiene conexión a la base de datos correcta según la configuración"""
+    try:
+        if 'porfirianna' in config.get('dominio', ''):
+            # Conectar a base de datos de La Porfirianna
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'laporfirianna_db')
+            )
+        else:
+            # Conectar a base de datos de Mektia (por defecto)
+            conn = mysql.connector.connect(
+                host=config.get('db_host', 'localhost'),
+                user=config.get('db_user', 'root'),
+                password=config.get('db_password', ''),
+                database=config.get('db_name', 'mektia_db')
+            )
+        
+        return conn
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error conectando a BD {config.get('db_name')}: {e}")
+        raise
+
+def obtener_configuracion_numero(numero_whatsapp):
+    """Obtiene la configuración específica para un número de WhatsApp"""
+    # Buscar en la configuración multi-tenant
+    for numero_config, config in NUMEROS_CONFIG.items():
+        if numero_whatsapp.endswith(numero_config) or numero_whatsapp == numero_config:
+            return config
+    
+    # Fallback a configuración por defecto (Mektia)
+    return NUMEROS_CONFIG['524495486142']
 
 def obtener_nombre_mostrado_por_numero(numero, config=None):
     """
@@ -5866,7 +5951,7 @@ def webhook():
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
-                               incoming_saved=False, es_mi_numero=False, es_archivo=False):
+                               es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante:
     - Si el usuario pide 'catálogo/PDF/flyer/folleto' por texto, envía el documento usando enviar_catalogo()
@@ -5881,9 +5966,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     try:
         if config is None:
             config = obtener_configuracion_por_host()
-
-        # Log incoming_saved for diagnostics when webhook saved the incoming message earlier
-        app.logger.info(f"🔁 procesar_mensaje_unificado called for {numero} (incoming_saved={incoming_saved})")
 
         texto_norm = (texto or "").strip().lower()
 
@@ -6190,6 +6272,34 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
+    
+def extraer_nombre_desde_webhook(payload):
+    """
+    Extrae el nombre del contacto directamente desde el webhook de WhatsApp
+    """
+    try:
+        # Verificar si existe la estructura de contacts en el payload
+        if ('entry' in payload and 
+            payload['entry'] and 
+            'changes' in payload['entry'][0] and 
+            payload['entry'][0]['changes'] and 
+            'contacts' in payload['entry'][0]['changes'][0]['value']):
+            
+            contacts = payload['entry'][0]['changes'][0]['value']['contacts']
+            if contacts and len(contacts) > 0:
+                profile = contacts[0].get('profile', {})
+                nombre = profile.get('name')
+                
+                if nombre:
+                    app.logger.info(f"✅ Nombre extraído desde webhook: {nombre}")
+                    return nombre
+        
+        app.logger.info("ℹ️ No se encontró nombre en el webhook")
+        return None
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error extrayendo nombre desde webhook: {e}")
+        return None
 
 def format_asesores_block(cfg):
     """
@@ -6323,6 +6433,19 @@ def test_calendar():
         <p>Ocurrió un error al intentar probar la integración con Google Calendar:</p>
         <pre>{str(e)}</pre>
         """
+
+@app.route('/test-contacto')
+def test_contacto(numero = '5214493432744'):
+    """Endpoint para probar la obtención de información de contacto"""
+    config = obtener_configuracion_por_host()
+    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
+    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
+    return jsonify({
+        'numero': numero,
+        'nombre': nombre,
+        'imagen': imagen,
+        'config': config.get('dominio')
+    })
 
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
@@ -7591,6 +7714,16 @@ def verificar_tablas_bd(config):
         app.logger.error(f"🔴 Error verificando tablas: {e}")
         return False
 
+with app.app_context():
+    # Esta función se ejecutará cuando la aplicación se inicie
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
+def verificar_todas_tablas():
+    app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
+    for nombre, config in NUMEROS_CONFIG.items():
+        verificar_tablas_bd(config)
+
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
@@ -7773,6 +7906,12 @@ def dashboard_conversaciones_data():
         app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
         return jsonify({'error': str(e)}), 500
 
+@app.route('/test-alerta')
+def test_alerta():
+    config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
+    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
+    return "🚀 Test alerta disparada."
+
 def obtener_chat_meta(numero, config=None):
         if config is None:
             config = obtener_configuracion_por_host()
@@ -7826,6 +7965,66 @@ def inicializar_chat_meta(numero, config=None):
     finally:
         cursor.close()
         conn.close()
+
+@app.route('/reparar-kanban-porfirianna')
+def reparar_kanban_porfirianna():
+    """Repara específicamente el Kanban de La Porfirianna"""
+    config = NUMEROS_CONFIG['524812372326']  # Config de La Porfirianna
+    
+    try:
+        # 1. Crear tablas Kanban
+        crear_tablas_kanban(config)
+        
+        # 2. Reparar contactos
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("""
+            SELECT c.numero_telefono 
+            FROM contactos c 
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+            WHERE cm.numero IS NULL
+        """)
+        
+        contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+        
+        for numero in contactos_sin_meta:
+            inicializar_chat_meta(numero, config)
+        
+        cursor.close()
+        conn.close()
+        
+        return f"✅ Kanban de La Porfirianna reparado: {len(contactos_sin_meta)} contactos actualizados"
+        
+    except Exception as e:
+        return f"❌ Error reparando Kanban: {str(e)}"
+
+@app.route('/reparar-contactos')
+def reparar_contactos():
+    """Repara todos los contactos que no están en chat_meta"""
+    config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor(dictionary=True)
+    
+    # Encontrar contactos que no están en chat_meta
+    cursor.execute("""
+        SELECT c.numero_telefono 
+        FROM contactos c 
+        LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero 
+        WHERE cm.numero IS NULL
+    """)
+    
+    contactos_sin_meta = [row['numero_telefono'] for row in cursor.fetchall()]
+    
+    for numero in contactos_sin_meta:
+        app.logger.info(f"🔧 Reparando contacto: {numero}")
+        inicializar_chat_meta(numero, config)
+    
+    cursor.close()
+    conn.close()
+    
+    return f"✅ Reparados {len(contactos_sin_meta)} contactos sin chat_meta"
 
 def actualizar_kanban(numero=None, columna_id=None, config=None):
     # Actualiza la base de datos si se pasan parámetros
@@ -7960,6 +8159,28 @@ def actualizar_info_contacto(numero, config=None):
             
     except Exception as e:
         app.logger.error(f"Error actualizando contacto {numero}: {e}")
+
+def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
+        if config is None:
+            config = obtener_configuracion_por_host()
+    
+        historial = obtener_historial(numero, limite=5, config=config)
+        
+        # Si es primer mensaje, mantener en "Nuevos"
+        if len(historial) <= 1:
+            return 1  # Nuevos
+        
+        # Si hay intervención humana, mover a "Esperando Respuesta"
+        if detectar_intervencion_humana_ia(mensaje, respuesta, numero):
+            return 3  # Esperando Respuesta
+        
+        # Si tiene más de 2 mensajes, mover a "En Conversación"
+        if len(historial) >= 2:
+            return 2  # En Conversación
+        
+        # Si no cumple nada, mantener donde está
+        meta = obtener_chat_meta(numero)
+        return meta['columna_id'] if meta else 1
 
 def obtener_contexto_consulta(numero, config=None):
     if config is None:
