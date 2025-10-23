@@ -6278,7 +6278,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             svc_lower = svc.strip().lower()
             found = False
             for item in catalog_list:
-                if item.get('sku', '').strip().lower() == svc_lower or item.get('servicio', '').strip().lower() == svc_lower:
+                if item.get('sku', '').strip().lower() == svc_lower or item.get('subcategoria', '').strip().lower() == svc_lower:
                     found = True
                     break
             if not found:
