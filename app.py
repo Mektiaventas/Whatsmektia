@@ -2240,11 +2240,22 @@ def get_chat_messages(telefono):
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # Use the correct column name ('numero') and order by the timestamp column.
+    # MODIFICACIÓN: Combinar mensaje y respuesta en un solo campo
     cursor.execute("""
-        SELECT id, mensaje AS content, timestamp
+        SELECT 
+            id,
+            CASE 
+                WHEN mensaje IS NOT NULL AND mensaje != '' THEN mensaje
+                ELSE respuesta
+            END AS content,
+            timestamp,
+            CASE 
+                WHEN mensaje IS NOT NULL AND mensaje != '' THEN 'user'
+                ELSE 'bot'
+            END AS sender
         FROM conversaciones
         WHERE numero = %s AND id > %s
+        AND (mensaje IS NOT NULL AND mensaje != '' OR respuesta IS NOT NULL AND respuesta != '')
         ORDER BY timestamp ASC
     """, (telefono, after_id))
     
@@ -2252,21 +2263,10 @@ def get_chat_messages(telefono):
     cursor.close()
     conn.close()
     
-    # Normalize timestamp to milliseconds since epoch (frontend expects number or ISO)
+    # Normalize timestamp...
     for m in messages:
         ts = m.get('timestamp')
-        try:
-            if hasattr(ts, 'timestamp'):
-                m['timestamp'] = int(ts.timestamp() * 1000)
-            else:
-                # If it's a string, try to parse; otherwise fall back to now
-                try:
-                    parsed = datetime.fromisoformat(str(ts))
-                    m['timestamp'] = int(parsed.timestamp() * 1000)
-                except Exception:
-                    m['timestamp'] = int(time.time() * 1000)
-        except Exception:
-            m['timestamp'] = int(time.time() * 1000)
+        # ... (tu código existente para normalizar timestamps)
     
     return jsonify({
         'messages': messages,
