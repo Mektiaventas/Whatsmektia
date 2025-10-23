@@ -2,183 +2,6 @@
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
-<style>
-        /* Quick visual clean-up overrides for chats page -------------------------------------------------
-       Goals: improve spacing, readable contrast, larger avatars, cleaner bubbles, centered layout.
-       These overrides are minimal and non-destructive (they target main classes used in the template).
-    -----------------------------------------------------------------------------------------------*/
-
-        /* Layout center and max width */
-        .chat-layout-v2 {
-            max-width: 1200px;
-            margin: 18px auto;
-            height: calc(100vh - 120px);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        /* Slightly wider chat list for readability */
-        .chat-list-v2 {
-            width: 300px !important;
-            padding: 16px !important;
-            gap: 8px;
-        }
-
-        /* Main panel wider */
-        .chat-panel-v2 {
-            width: calc(100% - 300px - 200px) !important; /* center column remaining space */
-            min-width: 540px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* Right sidebar fixed width */
-        .sidebar-right {
-            width: 200px !important;
-        }
-
-        /* Avatars */
-        .card-avatar, .chat-avatar img {
-            width: 48px !important;
-            height: 48px !important;
-            object-fit: cover;
-            border-radius: 50%;
-            border: 2px solid rgba(255,255,255,0.08);
-        }
-
-        /* Chat item improved */
-        .chat-item {
-            background: rgba(255,255,255,0.06) !important;
-            color: #fff !important;
-            padding: 10px !important;
-            align-items: center;
-        }
-
-        /* Chat title: single line and ellipsis */
-        .alias-view, .chat-name {
-            font-weight: 600;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: calc(100% - 120px);
-        }
-
-        /* Preview text */
-        .card-msg, .chat-preview {
-            color: rgba(255,255,255,0.85) !important;
-            font-size: 0.95rem;
-            margin-top: 4px;
-        }
-
-        /* Timestamps */
-        .card-time, .chat-meta {
-            color: rgba(255,255,255,0.65) !important;
-            font-size: 0.8rem;
-        }
-
-        /* Message bubbles: increased radius and subtle shadows */
-        .msg-box {
-            max-width: 75% !important;
-            border-radius: 14px !important;
-            padding: 12px 16px !important;
-            box-shadow: 0 6px 18px rgba(2,6,23,0.12) !important;
-            color: #0f1720 !important;
-            background: rgba(255,255,255,0.96) !important;
-        }
-
-            /* User vs AI alignment */
-            .msg-box.msg-user {
-                align-self: flex-start !important;
-                background: rgba(230,247,255,0.95) !important;
-                border: 1px solid rgba(120,190,255,0.35) !important;
-            }
-
-            .msg-box.msg-ai {
-                align-self: flex-end !important;
-                background: rgba(255,247,230,0.96) !important;
-                border: 1px solid rgba(255,205,120,0.45) !important;
-            }
-
-        /* Image previews */
-        .whatsapp-image {
-            max-width: 420px !important;
-            border-radius: 12px !important;
-            cursor: zoom-in;
-            display: block;
-            margin-bottom: 6px;
-        }
-
-        /* Reply form cleaner */
-        .reply-form {
-            padding: 12px 16px !important;
-            gap: 8px;
-            align-items: center;
-            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.02));
-            border-top: 1px solid rgba(255,255,255,0.04);
-        }
-
-        .reply-input-line {
-            padding: 12px 14px !important;
-            border-radius: 999px !important;
-            background: rgba(255,255,255,0.06) !important;
-            color: #fff !important;
-            border: 1px solid rgba(255,255,255,0.06);
-        }
-
-        .send-btn {
-            border-radius: 999px !important;
-            padding: 10px 18px !important;
-            background: linear-gradient(90deg,#0078D4,#00A3FF) !important;
-            color: white !important;
-            box-shadow: 0 6px 14px rgba(0,120,212,0.18);
-        }
-
-        /* Reduce heavy shadows on chat items */
-        .chat-item, .msg-box {
-            box-shadow: none !important;
-        }
-
-        /* Improve mobile: make center column full width below 900px */
-        @media (max-width: 900px) {
-            .chat-layout-v2 {
-                height: auto;
-                padding-bottom: 60px;
-            }
-
-            .chat-list-v2 {
-                width: 100% !important;
-                max-height: 260px;
-            }
-
-            .chat-panel-v2 {
-                width: 100% !important;
-                min-width: 0;
-            }
-
-            .sidebar-right {
-                display: none !important;
-            }
-        }
-
-        /* Make badges subtle */
-        .badge {
-            font-weight: 600;
-            padding: 6px 10px;
-            border-radius: 999px;
-        }
-
-        /* Small helpers */
-        .card-content {
-            color: inherit !important;
-        }
-
-        .image-caption {
-            color: rgba(0,0,0,0.6);
-            font-size: 0.95rem;
-            margin-top: 6px;
-        }
-</style>
-
 {% set host = request.host.split(':')[0] %}
 {% set parts = host.split('.') %}
 {% set subdomain = '' %}
@@ -312,150 +135,149 @@
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
-                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image" onclick="window.open(this.src, '_blank')" />
+                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                         <div class="image-caption">
                             {{ msg.mensaje }}
                         </div>
                         {% endif %}
                     </div>
-                </div>
-                {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
-                <div class="audio-player">
-                    <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
-                        <source src="{{ msg.contenido_extra }}" type="audio/ogg">
-                        <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
-                        Tu navegador no soporta el elemento de audio.
-                    </audio>
-                    <div class="audio-controls">
-                        <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
-                            ▶️
-                        </button>
-                        <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
-                            <div class="audio-progress-bar"></div>
+                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                            <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
                         </div>
-                        <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
-                        <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
-                            ⬇️
-                        </a>
+                        {% if msg.transcripcion_audio %}
+                        <div class="audio-transcription">
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                        </div>
+                        {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+                        <div class="audio-transcription">
+                            <strong>Mensaje:</strong> {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
                     </div>
-                    {% if msg.transcripcion_audio %}
-                    <div class="audio-transcription">
-                        <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
-                    </div>
-                    {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-                    <div class="audio-transcription">
-                        <strong>Mensaje:</strong> {{ msg.mensaje }}
+                    {% else %}
+                    <div class="text-message">
+                        {{ msg.mensaje }}
                     </div>
                     {% endif %}
                 </div>
-                {% else %}
-                <div class="text-message">
-                    {{ msg.mensaje }}
-                </div>
-                {% endif %}
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
-            <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
-        </div>
-        {% endif %}
+            {% endif %}
 
-        {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
-        <div class="msg-box msg-manual">
-            <div class="message-content">
-                <div class="manual-indicator">📤 Mensaje enviado:</div>
-                <div class="text-message">
-                    {{ msg.respuesta }}
+            {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+            <div class="msg-box msg-manual">
+                <div class="message-content">
+                    <div class="manual-indicator">📤 Mensaje enviado:</div>
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
                 </div>
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
-            <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
-        </div>
-        {% endif %}
+            {% endif %}
 
-        {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-        <div class="msg-box msg-ai">
-            <div class="message-content">
-                <div class="text-message">
-                    {{ msg.respuesta }}
+            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-ai">
+                <div class="message-content">
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
                 </div>
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
-            <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            <div class="no-chat-selected">
+                <p>Selecciona un chat para ver mensajes.</p>
+            </div>
+            {% endif %}
         </div>
-        {% endif %}
-        {% endfor %}
-        {% else %}
-        <div class="no-chat-selected">
-            <p>Selecciona un chat para ver mensajes.</p>
-        </div>
-        {% endif %}
-</div>
 
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
-<form method="POST" action="/send-manual" class="reply-form">
-    <input type="hidden" name="numero" value="{{ selected }}">
-    <div class="input-group">
+        <form method="POST" action="/send-manual" class="reply-form">
+            <input type="hidden" name="numero" value="{{ selected }}">
+            <div class="input-group">
 
-        <button type="button" id="emoji-pick-btn" class="emoji-btn">😊</button>
-        <!-- Emoji Picker Container (hidden by default) -->
-        <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
-            <!-- Los emojis se llenan por JS -->
+                <button type="button" id="emoji-pick-btn" class="emoji-btn">😊</button>
+                <!-- Emoji Picker Container (hidden by default) -->
+                <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
+                    <!-- Los emojis se llenan por JS -->
+                </div>
+                <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
+                <button type="submit" class="send-btn">Enviar</button>
+            </div>
+        </form>
+        {% else %}
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
+            </form>
         </div>
-        <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
-        <button type="submit" class="send-btn">Enviar</button>
-    </div>
-</form>
-        {% else %}
-<div class="ia-active-message">
-    <div class="ia-indicator">
-        <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
-        <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
-    </div>
-    <form action="/toggle_ai/{{ selected }}" method="POST">
-        {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
-        <button type="submit" class="toggle-btn off">Desactivar IA</button>
-        {% else %}
-        <button type="submit" class="toggle-btn on">Activar IA</button>
-        {% endif %}
-    </form>
-</div>
         {% endif %}
         {% endif %}
     </section>
 
-<aside class="sidebar-right">
-    {% if selected %}
-    <div class="sidebar-section">
-        <h3>Acciones</h3>
-        {% if is_admin %}
-        <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
-            <button type="submit" class="delete-btn">
-                🗑️ Eliminar Chat
-            </button>
-        </form>
-        {% endif %}
-    </div>
+    <aside class="sidebar-right">
+        {% if selected %}
+        <div class="sidebar-section">
+            <h3>Acciones</h3>
+            {% if is_admin %}
+            <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
+                <button type="submit" class="delete-btn">
+                    🗑️ Eliminar Chat
+                </button>
+            </form>
+            {% endif %}
+        </div>
 
-    <div class="sidebar-section">
-        <h3>Información</h3>
-        <div class="chat-info-stats">
-            <div class="stat-item">
-                <span class="stat-label">Total mensajes:</span>
-                <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
-            </div>
-            <div class="stat-item">
-                <span class="stat-label">Última actividad:</span>
-                <span class="stat-value">
-                    {% if mensajes and mensajes[-1].timestamp %}
-                    {{ mensajes[-1].timestamp|format_time_24h }}
-                    {% else %}
-                    N/A
-                    {% endif %}
-                </span>
+        <div class="sidebar-section">
+            <h3>Información</h3>
+            <div class="chat-info-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total mensajes:</span>
+                    <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Última actividad:</span>
+                    <span class="stat-value">
+                        {% if mensajes and mensajes[-1].timestamp %}
+                        {{ mensajes[-1].timestamp|format_time_24h }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </span>
+                </div>
             </div>
         </div>
-    </div>
-    {% endif %}
-</aside>
+        {% endif %}
+    </aside>
 </div>
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
@@ -486,17 +308,6 @@
         background: none;
         border: none;
         cursor: pointer;
-    }
-
-    .whatsapp-image {
-        max-width: 360px;
-        max-height: 480px;
-        border-radius: 8px;
-        display: block;
-        cursor: pointer;
-        margin-bottom: 6px;
-        object-fit: cover;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
     }
 
     .input-group {
