@@ -6627,6 +6627,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
                 # Final attempt to save (may still return None -> handled as before)
                 cita_id = guardar_cita(info_cita, config)
+                crear_evento_calendar(info_cita, cita_id, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
                     if respuesta_text:
@@ -8462,19 +8463,26 @@ def terms_of_service():
 def data_deletion():
         return render_template('data_deletion.html')
 
-@app.route('/dashboard/conversaciones-data')
 def dashboard_conversaciones_data():
     """
     Devuelve JSON con:
     - plan_info (si el usuario está autenticado)
     - active_count: número de chats con actividad en las últimas 24h
-    - daily labels/values: número de conversaciones iniciadas por día (period week/month)
+    - daily labels/values: número de conversaciones iniciadas por día (period week/month/3months)
     """
     try:
         config = obtener_configuracion_por_host()
         period = request.args.get('period', 'week')
         now = datetime.now()
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
+        # Support: week, month (30d), 3months (90d), year (handled elsewhere if needed)
+        if period == 'month':
+            start = now - timedelta(days=30)
+        elif period in ('3months', 'quarter', 'trimester'):
+            start = now - timedelta(days=90)
+        else:
+            # default to 7 days for 'week' or unknown values
+            start = now - timedelta(days=7)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
