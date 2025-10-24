@@ -131,7 +131,7 @@
             {% if mensajes %}
             {% for msg in mensajes %}
             {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
+            <div class="msg-box msg-user" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
@@ -182,7 +182,7 @@
             {% endif %}
 
             {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
-            <div class="msg-box msg-manual">
+            <div class="msg-box msg-manual" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
                     <div class="text-message">
@@ -194,7 +194,7 @@
             {% endif %}
 
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-ai">
+            <div class="msg-box msg-ai" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
                 <div class="message-content">
                     <div class="text-message">
                         {{ msg.respuesta }}
@@ -524,10 +524,10 @@ function appendUserMessagesToPanel(messages) {
     for (let i = Math.max(0, shownNodes.length - 30); i < shownNodes.length; i++) {
         const n = shownNodes[i];
         const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
-        const id = Number(n.dataset.msgId) || 0;
-        const timeMeta = n.querySelector('.msg-meta') ? Date.parse(n.querySelector('.msg-meta').textContent.replace('-', ' ')) || 0 : 0;
+        // Prefer numeric timestamp from data attributes (ts-ms / ts) or fallback to numeric msgId
+        const timeMeta = Number(n.dataset.tsMs || n.dataset.ts || n.dataset.msgId) || 0;
         const key = normalizeText(txt);
-        if (key) recentShown.set(key, Math.max(recentShown.get(key) || 0, timeMeta || id));
+        if (key) recentShown.set(key, Math.max(recentShown.get(key) || 0, timeMeta || 0));
     }
 
     for (const m of messages) {
@@ -570,6 +570,7 @@ function appendUserMessagesToPanel(messages) {
         const div = document.createElement('div');
         div.className = 'msg-box msg-user';
         div.setAttribute('data-msg-id', String(id));
+        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
         div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
 
         container.appendChild(div);
@@ -614,6 +615,7 @@ async function actualizarMensajesManual(container) {
             const div = document.createElement('div');
             div.className = cls;
             div.setAttribute('data-msg-id', String(id));
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
             div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(String(content))}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
             msgsContainer.appendChild(div);
         }
@@ -682,128 +684,5 @@ function activarEdicionAlias(parent) {
     input.onblur = () => setTimeout(finish, 0);
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
-
-    function setupEmojiPicker() {
-        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-
-        function buildPicker(container) {
-            if (container.dataset.built === '1') return container;
-            container.innerHTML = EMOJIS.map(e =>
-                `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
-            ).join('');
-            container.dataset.built = '1';
-            return container;
-        }
-
-        function ensurePicker(trigger) {
-            const form = trigger.closest('form') || document.body;
-            let picker = form.querySelector('.emoji-picker-list');
-            if (!picker) {
-                picker = document.createElement('div');
-                picker.className = 'emoji-picker-list';
-                picker.style.position = 'absolute';
-                picker.style.display = 'none';
-                picker.style.zIndex = 10000;
-                picker.style.background = 'white';
-                picker.style.border = '1px solid #ccc';
-                picker.style.borderRadius = '8px';
-                picker.style.padding = '6px';
-                picker.style.maxWidth = '320px';
-                picker.style.maxHeight = '180px';
-                picker.style.overflowY = 'auto';
-                // attach to nearest positioned ancestor (input-group or form)
-                const attachTo = form.querySelector('.input-group') || form;
-                attachTo.appendChild(picker);
-            }
-            buildPicker(picker);
-            return picker;
-        }
-
-        // Single delegated click handler for showing picker and picking emoji
-        document.addEventListener('click', function (ev) {
-            try {
-                const tgt = ev.target;
-
-                // 1) Trigger click: show/hide picker
-                const trigger = tgt.closest ? tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
-                if (trigger) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    const picker = ensurePicker(trigger);
-                    // toggle
-                    const isVisible = picker.style.display === 'block';
-                    if (isVisible) {
-                        picker.style.display = 'none';
-                        return;
-                    }
-                    // position picker relative to trigger
-                    const rect = trigger.getBoundingClientRect();
-                    const parent = picker.offsetParent || document.body;
-                    const parentRect = parent.getBoundingClientRect();
-                    const top = rect.top - parentRect.top - picker.offsetHeight - 8;
-                    // try above, else below
-                    if (top > 0) {
-                        picker.style.top = top + 'px';
-                    } else {
-                        picker.style.top = (rect.bottom - parentRect.top + 8) + 'px';
-                    }
-                    let left = rect.left - parentRect.left;
-                    const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
-                    if (left > maxLeft) left = Math.max(8, maxLeft);
-                    picker.style.left = left + 'px';
-                    picker.style.display = 'block';
-                    // store target input
-                    picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
-                    return;
-                }
-
-                // 2) Emoji option click
-                const emojiBtn = tgt.closest ? tgt.closest('.emoji-option') : null;
-                if (emojiBtn) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    const picker = emojiBtn.closest('.emoji-picker-list');
-                    const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
-                    const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
-                    if (input) {
-                        const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
-                        const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
-                        input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-                        const pos = start + emoji.length;
-                        input.selectionStart = input.selectionEnd = pos;
-                        input.focus();
-                    }
-                    if (picker) picker.style.display = 'none';
-                    return;
-                }
-
-                // 3) Click outside: hide any visible pickers
-                const insidePicker = tgt.closest && !!tgt.closest('.emoji-picker-list');
-                const isTrigger = tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
-                if (!insidePicker && !isTrigger) {
-                    document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
-                }
-
-            } catch (err) {
-                // helpful debug in browser console
-                console.error('emoji handler error', err);
-            }
-        }, false);
-
-        // hide on Escape
-        document.addEventListener('keydown', function (ev) {
-            if (ev.key === 'Escape') {
-                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
-            }
-        });
-
-        // quick console hint
-        console.debug('setupEmojiPicker initialized');
-    }
-
-/* Audio helpers unchanged */
-function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
-function toggleAudio(id, btn) { const audio = document.getElementById(id); const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar'); const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration'); if (!audio) return; if (audio.paused) { audio.play().then(() => { btn.textContent = '⏸️'; audio.ontimeupdate = () => { if (audio.duration) { if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%'; if (durSpan) { const m = Math.floor(audio.currentTime / 60); const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0'); durSpan.textContent = `${m}:${s}`; } } }; }).catch(console.error); } else { audio.pause(); btn.textContent = '▶️'; } }
-function seekAudio(id, progressBar, evt) { const audio = document.getElementById(id); const inner = progressBar.querySelector('.audio-progress-bar'); const rect = progressBar.getBoundingClientRect(); const clickX = evt.clientX - rect.left; if (audio && audio.duration) { audio.currentTime = (clickX / rect.width) * audio.duration; if (inner) inner.style.width = (clickX / rect.width) * 100 + '%'; } }
 </script>
 {% endblock %}
