@@ -11,7 +11,7 @@
         justify-content: space-between;
         gap: 1rem;
         margin-bottom: 0.5rem; /* reduced from 1rem */
-        color:white;
+        color: white;
     }
 
         .header-row h1 {
@@ -88,7 +88,8 @@
     /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 3px 3px;
+        /* reduced internal vertical padding and extra horizontal padding for compactness */
+        padding: 4px 8px;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
@@ -96,13 +97,14 @@
         flex: 1 1 calc(50% - 0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
         display: flex;
         flex-direction: column;
-        gap: 0.15rem;
+        /* remove gap between title and value so they sit tighter */
+        gap: 0;
         font-size: 0.78rem;
         align-items: center;
         justify-content: center;
         text-align: center;
         box-sizing: border-box;
-        /* increase default min-height so changing this value affects visible height */
+        /* keep min-height small to allow compact layout */
         min-height: 30px;
     }
 
@@ -111,14 +113,16 @@
             font-size: 1.05rem;
             font-weight: 600;
             color: #222;
-            line-height: 1.2;
+            line-height: 1.1;
             display: flex;
             align-items: center;
             justify-content: center;
             /* use full width so the inner element doesn't artificially constrain the card */
             width: 100%;
             box-sizing: border-box;
-            padding: 3px;
+            /* remove extra padding so value sits closer to the title */
+            padding: 0;
+            margin-top: 2px;
             overflow: visible; /* allow full number to show */
             text-overflow: ellipsis;
             white-space: nowrap;
@@ -129,7 +133,9 @@
             font-size: 0.78rem;
             font-weight: 300;
             color: #333;
-            margin-bottom: 0px;
+            /* minimal spacing between title and value */
+            margin-bottom: 2px;
+            line-height: 1;
         }
 
     .chart-container {
