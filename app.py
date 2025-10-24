@@ -8469,20 +8469,88 @@ def dashboard_conversaciones_data():
     Devuelve JSON con:
     - plan_info (si el usuario está autenticado)
     - active_count: número de chats con actividad en las últimas 24h
-    - daily labels/values: número de conversaciones iniciadas por día (period week/month)
+    - labels/values: por día, por mes (3 meses) o por rango existente según ?period=
     """
     try:
         config = obtener_configuracion_por_host()
         period = request.args.get('period', 'week')
         now = datetime.now()
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Conteo de conversaciones iniciadas por día:
-        # Una "conversación iniciada" es el mensaje que no tiene otro mensaje
-        # anterior del mismo número dentro de las últimas 24 horas.
+        # Si piden los últimos 3 meses agregados por mes
+        if period == '3months':
+            # construir lista de los últimos 3 meses (oldest -> newest)
+            months = []
+            for offset in range(2, -1, -1):  # 2,1,0 => hace 3 meses incluyendo el mes actual
+                total_months = now.year * 12 + now.month - 1
+                target = total_months - offset
+                y = target // 12
+                m = (target % 12) + 1
+                months.append((y, m))
+
+            earliest_year, earliest_month = months[0]
+            start = datetime(earliest_year, earliest_month, 1)
+
+            sql = """
+                SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
+                FROM conversaciones c1
+                WHERE c1.timestamp >= %s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM conversaciones c2
+                    WHERE c2.numero = c1.numero
+                      AND c2.timestamp < c1.timestamp
+                      AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+                  )
+                GROUP BY y, m
+                ORDER BY y, m
+            """
+            cursor.execute(sql, (start,))
+            rows = cursor.fetchall()
+
+            counts_map = {}
+            for r in rows:
+                try:
+                    y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
+                except Exception:
+                    continue
+                key = f"{y}-{m:02d}"
+                counts_map[key] = cnt
+
+            labels = []
+            values = []
+            for y, m in months:
+                key = f"{y}-{m:02d}"
+                labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+                values.append(counts_map.get(key, 0))
+
+            # Chats activos: distinct numero con mensaje en últimas 24h
+            cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+            active_count_row = cursor.fetchone()
+            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+            cursor.close()
+            conn.close()
+
+            plan_info = None
+            try:
+                au = session.get('auth_user')
+                if au and au.get('user'):
+                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
+            except Exception:
+                plan_info = None
+
+            return jsonify({
+                'labels': labels,
+                'values': values,
+                'active_count': active_count,
+                'plan_info': plan_info or {}
+            })
+
+        # --- fallback: comportamiento anterior (diario para week/month) ---
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
         cursor.execute("""
             SELECT DATE(c1.timestamp) as dia, COUNT(*) as cnt
             FROM conversaciones c1
@@ -8498,19 +8566,16 @@ def dashboard_conversaciones_data():
         """, (start,))
 
         rows = cursor.fetchall()
-        # rows: list of tuples (dia, cnt)
         labels = []
         values = []
         for r in rows:
             dia = r[0]
-            # dia might be date/datetime or string depending on connector
             if hasattr(dia, 'strftime'):
                 labels.append(dia.strftime('%Y-%m-%d'))
             else:
                 labels.append(str(dia))
             values.append(int(r[1] or 0))
 
-        # Chats activos: distinct numero con mensaje en últimas 24h
         cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
         active_count_row = cursor.fetchone()
         active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
@@ -8518,7 +8583,6 @@ def dashboard_conversaciones_data():
         cursor.close()
         conn.close()
 
-        # Plan info si el usuario está autenticado
         plan_info = None
         try:
             au = session.get('auth_user')

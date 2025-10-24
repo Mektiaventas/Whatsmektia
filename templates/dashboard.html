@@ -353,92 +353,91 @@
 
 
   // --- Load data and render conversations charts ---
-  async function loadConversacionesData(){
-      try {
-          // read period from current URL, so after navigation or if user manipulated query params
-          const params = new URLSearchParams(window.location.search);
-          const period = params.get('period') || '{{ period }}' || 'week';
+    async function loadConversacionesData() {
+        try {
+            // For the dailyChart we now want the last 3 months aggregated by month:
+            const period = '3months';
 
-          const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
-          const json = await res.json();
-          if (json.error) {
-              console.error('Error fetching conversaciones data', json.error);
-              return;
-          }
+            const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
+            const json = await res.json();
+            if (json.error) {
+                console.error('Error fetching conversaciones data', json.error);
+                return;
+            }
 
-          // compute plan-related metrics
-          const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
-          const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
-          const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+            // compute plan-related metrics
+            const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
+            const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
+            const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
 
-          // actualizar métricas superiores (only disponibles y consumidos)
-          const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
-          const elDisponibles = document.getElementById('planDisponibles');
-          const elConsumidos = document.getElementById('planConsumidos');
-          if (elDisponibles) elDisponibles.innerText = disponibles;
-          if (elConsumidos) elConsumidos.innerText = consumed;
+            // actualizar métricas superiores (only disponibles y consumidos)
+            const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+            const elDisponibles = document.getElementById('planDisponibles');
+            const elConsumidos = document.getElementById('planConsumidos');
+            if (elDisponibles) elDisponibles.innerText = disponibles;
+            if (elConsumidos) elConsumidos.innerText = consumed;
 
-          // Chart: Remaining / Consumed (pie-like)
-          const remCtx = document.getElementById('remainingChart').getContext('2d');
-          const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
-          const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
+            // Chart: Remaining / Consumed (pie-like)
+            const remCtx = document.getElementById('remainingChart').getContext('2d');
+            const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
+            const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
 
-          if (remainingChart) remainingChart.destroy();
-          remainingChart = new Chart(remCtx, {
-              type: 'doughnut',
-              data: {
-                  labels: pieLabels,
-                  datasets: [{
-                      data: pieData,
-                      backgroundColor: ['#e74c3c', '#2ecc71']
-                  }]
-              },
-              options: {
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                      legend: { position: 'bottom', labels: { color: 'white' } },
-                      datalabels: { color: 'white', formatter: (v) => v }
-                  }
-              },
-              plugins: [ChartDataLabels]
-          });
+            if (remainingChart) remainingChart.destroy();
+            remainingChart = new Chart(remCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels,
+                    datasets: [{
+                        data: pieData,
+                        backgroundColor: ['#e74c3c', '#2ecc71']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        datalabels: { color: 'white', formatter: (v) => v }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
 
-          // Chart: Daily conversations
-          const dailyCtx = document.getElementById('dailyChart').getContext('2d');
-          const dailyLabels = json.labels || [];
-          const dailyValues = json.values || [];
+            // Chart: Monthly conversations (last 3 months)
+            const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+            const dailyLabels = json.labels || [];
+            const dailyValues = json.values || [];
 
-          if (dailyChart) dailyChart.destroy();
-          dailyChart = new Chart(dailyCtx, {
-              type: 'line',
-              data: {
-                  labels: dailyLabels,
-                  datasets: [{
-                      label: 'Conversaciones nuevas por día',
-                      data: dailyValues,
-                      borderColor: '#1f4e79',
-                      backgroundColor: 'rgba(31,78,121,0.15)',
-                      fill: true,
-                      tension: 0.2,
-                      pointRadius: 4
-                  }]
-              },
-              options: {
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: { legend: { display: false }, datalabels: { display: false } },
-                  scales: {
-                      y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-                      x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
-                  }
-              }
-          });
+            if (dailyChart) dailyChart.destroy();
+            dailyChart = new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: dailyLabels,
+                    datasets: [{
+                        label: 'Conversaciones nuevas por mes',
+                        data: dailyValues,
+                        borderColor: '#1f4e79',
+                        backgroundColor: 'rgba(31,78,121,0.15)',
+                        fill: true,
+                        tension: 0.2,
+                        pointRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, datalabels: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                    }
+                }
+            });
 
-      } catch (err) {
-          console.error('Failed to load conversaciones data', err);
-      }
-  }
+        } catch (err) {
+            console.error('Failed to load conversaciones data', err);
+        }
+    }
 
   // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
   // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
