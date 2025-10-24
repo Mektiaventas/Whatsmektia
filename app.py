@@ -6151,6 +6151,30 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
 
+@app.route('/chats/<numero>/marcar-leido', methods=['POST'])
+def marcar_leido_chat(numero):
+    """
+    Marca como 'leído' todos los mensajes entrantes (respuesta IS NULL) de un chat.
+    Esto pone `respuesta = ''` para que la columna sin_leer calculada en kanban_data pase a 0.
+    """
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE conversaciones
+               SET respuesta = ''
+             WHERE numero = %s AND respuesta IS NULL
+        """, (numero,))
+        updated = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        app.logger.error(f"🔴 Error marcando mensajes como leídos para {numero}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/notificaciones')
 def ver_notificaciones():
     """Endpoint para ver notificaciones de pedidos y citas con información ampliada"""
