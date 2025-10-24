@@ -91,7 +91,8 @@
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
-        flex: 1 1 calc(50%-0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
+        /* fixed: valid calc syntax with spaces around the minus */
+        flex: 1 1 calc(50% - 0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
@@ -100,7 +101,8 @@
         justify-content: center;
         text-align: center;
         box-sizing: border-box;
-        min-height: 16px;
+        /* increase default min-height so changing this value affects visible height */
+        min-height: 56px;
     }
 
         /* make the numeric value stand out and allow full height */
@@ -112,7 +114,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            width: 80%;
+            /* use full width so the inner element doesn't artificially constrain the card */
+            width: 100%;
             box-sizing: border-box;
             padding: 3px;
             overflow: visible; /* allow full number to show */
@@ -155,13 +158,17 @@
             gap: 0.5rem;
         }
 
-
-        .stat-card > div {
-            font-size: 1.1rem;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
+        /* reduce min-height for narrow screens but keep enough space */
+        .stat-card {
+            min-height: 48px;
         }
+
+            .stat-card > div {
+                font-size: 1.1rem;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
 
         .tabs a {
             padding: 8px 12px;
