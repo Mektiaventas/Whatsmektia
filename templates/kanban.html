@@ -299,6 +299,10 @@
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
                     <div class="card-meta-row">
+                        <span class="card-num">
+                            
+                            {% endif %}{{ chat.numero }}
+                        </span>
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
