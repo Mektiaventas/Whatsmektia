@@ -115,47 +115,59 @@
     .kanban-column,
     .kanban-card,
     .card-content {
-        font-size: 11px; /* slightly smaller base */
+        font-size: 10px; /* slightly smaller base */
     }
 
     /* make column icon about half size (override previous) */
     .col-icon {
-        width: 32px !important;
-        height: 32px !important;
-        padding: 1px !important;
+        width: 24px !important;
+        height: 24px !important;
+        margin-right: 6px;
+        padding: 0 !important;
         background: transparent !important;
     }
 
     /* avatar inside card: reduce to ~50% of typical size */
     .card-avatar {
-        width: 16px !important;
-        height: 16px !important;
-        border-radius: 4px !important;
-        object-fit: cover !important;
+        width: 12px !important;
+        height: 12px !important;
+        border-radius: 3px !important;
         margin-right: 6px;
         flex: 0 0 auto;
+        object-fit: cover !important;
     }
 
-    /* title / alias smaller and tighter */
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
     .card-title-row .alias-view {
-        font-size: 0.88rem;
+        font-size: 0.82rem;
         font-weight: 600;
         line-height: 1;
-        display: inline-block;
-        vertical-align: middle;
-        max-width: calc(100% - 80px);
+        white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        max-width: calc(100% - 90px);
     }
 
-    /* meta row smaller and muted */
-    .card-meta-row,
-    .card-meta-row span {
-        font-size: 0.68rem;
-        color: white;
-        line-height: 1;
+    .card-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        margin-left: 6px;
     }
+
+        .card-meta-row span {
+            font-size: 0.62rem;
+            color: rgba(255,255,255,0.9);
+            line-height: 1;
+        }
 
     /* ensure edit button smaller */
     .edit-alias-btn {
@@ -166,27 +178,22 @@
 
     /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        font-size: 0.78rem;
-        color: white;
-        margin-top: 2px;
-        /* Force a single truncated line across browsers */
-        display: block;
+        font-size: 0.72rem;
+        color: rgba(255,255,255,0.95);
+        margin-left: 2px;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 100%;
         line-height: 1;
-        max-height: 1.1em;
     }
 
 
-    /* reduce spacing inside card for compact list */
     .card-content {
-        padding: 8px 4px; /* decreased vertical padding to make cards thinner */
-        gap: 4px;
         display: flex;
-        flex-direction: column;
-        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        padding: 4px 2px;
     }
 
     .card-title-row {
@@ -211,10 +218,12 @@
 
     /* make kanban cards slightly more compact vertically */
     .kanban-card {
-        padding: 0;
-        margin-bottom: 6px;
+        display: block;
+        padding: 0 6px;
+        margin-bottom: 4px;
         border-radius: 6px;
-        min-height: 35px; /* keep visual consistency while reducing height */
+        min-height: 28px; /* very compact */
+        line-height: 1;
         overflow: hidden;
     }
 
@@ -227,31 +236,29 @@
 
     /* responsive: keep compactness on small screens */
     @media (max-width: 768px) {
-        .card-avatar {
-            width: 14px !important;
-            height: 14px !important;
-        }
-
         .col-icon {
-            width: 24px !important;
-            height: 24px !important;
+            width: 20px !important;
+            height: 20px !important;
         }
 
-        .card-title-row .alias-view {
-            font-size: 0.86rem;
+        .card-avatar {
+            width: 10px !important;
+            height: 10px !important;
+            margin-right: 6px;
         }
 
         .card-msg {
-            font-size: 0.76rem;
+            font-size: 0.68rem;
         }
 
-        .card-content {
-            padding: 3px 6px;
+        .card-title-row .alias-view {
+            font-size: 0.80rem;
+            max-width: calc(100% - 80px);
         }
 
         .kanban-card {
-            min-height: 34px;
-            margin-bottom: 6px;
+            min-height: 26px;
+            margin-bottom: 4px;
         }
     }
 </style>
