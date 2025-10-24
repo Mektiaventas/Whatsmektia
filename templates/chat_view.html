@@ -26,7 +26,24 @@
         <a href="{{ url_for('chats') }}">← Volver</a>
     </div>
     <div class="chatbox">
-        <h2>{{ chat[2] or chat[1] }} <span style="font-size: 12px;">({{ chat[1] }})</span></h2>
+        <!-- Replace the existing <h2> and nearby IA button with this block -->
+        <div class="chat-title">
+            <div class="card-title-row" style="align-items:center; gap:8px;">
+                <span class="alias-view">{{ chat[2] or chat[1] }}</span>
+
+                <span class="alias-edit" style="display:none;">
+                    <input type="text" value="{{ chat[2] or '' }}" data-num="{{ chat[1] }}" maxlength="100" style="width: 180px;">
+                </span>
+
+                <button type="button" class="edit-alias-btn" data-num="{{ chat[1] }}" title="Editar nombre" style="background:none;border:0;cursor:pointer;font-size:14px;margin-left:6px;">
+                    ✏️
+                </button>
+
+                <span style="font-size: 12px; margin-left:8px;">({{ chat[1] }})</span>
+            </div>
+        </div>
+
+        <button id="btn-toggle-ia" onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
         <button id="btn-toggle-ia" onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
         <form method="POST" action="{{ url_for('guardar_nota', telefono=chat[1]) }}">
             <textarea name="nota" placeholder="Añadir nota..." maxlength="600">{{ chat[4] }}</textarea>
@@ -219,3 +236,68 @@
                 let max = lastMessageId || 0;
                 nodes.forEach(n => { const v = Number(n.dataset.msgId) || 0; if (v > max) max = v; });
                 lastMessageId
+
+                document.addEventListener('DOMContentLoaded', () => {
+                    // Bind existing edit-alias buttons (if any)
+                    document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                        // avoid duplicate handlers
+                        if (btn.dataset.boundAlias === '1') return;
+                        btn.dataset.boundAlias = '1';
+                        btn.addEventListener('click', function (e) {
+                            e.preventDefault(); e.stopPropagation();
+                            const parent = this.closest('.card-title-row') || this.closest('.chatbox') || document.body;
+                            activarEdicionAlias(parent);
+                        });
+                    });
+                });
+
+                function activarEdicionAlias(parent) {
+                    if (!parent) return;
+                    const view = parent.querySelector('.alias-view');
+                    const edit = parent.querySelector('.alias-edit');
+                    if (!view || !edit) return;
+                    const input = edit.querySelector('input[type=text]');
+                    if (!input) return;
+
+                    const original = (view.textContent || '').trim();
+                    if (!input.value || input.value.trim() === '') input.value = original;
+
+                    view.style.display = 'none';
+                    edit.style.display = 'inline-flex';
+                    input.focus();
+                    input.select();
+
+                    let submitted = false;
+
+                    function finishAndSave() {
+                        if (submitted) return;
+                        submitted = true;
+                        const nuevo = (input.value || '').trim();
+                        edit.style.display = 'none';
+                        view.style.display = '';
+                        if (!nuevo || nuevo === original) return;
+
+                        // Optimistic UI update
+                        view.textContent = nuevo;
+
+                        // Send alias to server
+                        fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                            body: new URLSearchParams({ alias: nuevo })
+                        }).catch(err => {
+                            console.warn('Error guardando alias:', err);
+                            // on failure, revert visually (optional)
+                            try { view.textContent = original; } catch (e) { }
+                        }).finally(() => {
+                            submitted = false;
+                        });
+                    }
+
+                    input.onblur = () => setTimeout(finishAndSave, 0);
+                    input.onkeydown = (ev) => {
+                        if (ev.key === 'Enter') { ev.preventDefault(); finishAndSave(); }
+                        if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; }
+                    };
+                }
+        </script>
