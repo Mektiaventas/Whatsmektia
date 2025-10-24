@@ -131,7 +131,7 @@
             {% if mensajes %}
             {% for msg in mensajes %}
             {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-user" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
+            <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
@@ -182,7 +182,7 @@
             {% endif %}
 
             {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
-            <div class="msg-box msg-manual" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
+            <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
                     <div class="text-message">
@@ -194,7 +194,7 @@
             {% endif %}
 
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-ai" {% if msg.id %}data-msg-id="{{ msg.id }}" {% endif %}{% if msg.ts_ms %} data-ts-ms="{{ msg.ts_ms }}" {% elif msg.timestamp %} data-ts="{{ msg.timestamp }}" {% endif %}>
+            <div class="msg-box msg-ai">
                 <div class="message-content">
                     <div class="text-message">
                         {{ msg.respuesta }}
@@ -293,7 +293,6 @@
     .card-content {
         color: white;
     }
-
     .emoji-picker-list {
         box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         min-width: 220px;
@@ -359,62 +358,35 @@ let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
 
     document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM cargado - inicializando componentes');
-        enhanceAliasButtons();
+    console.log('DOM cargado - inicializando componentes');
+    enhanceAliasButtons();
+    setupEmojiPicker();
 
-        // Guarded init for setupEmojiPicker to avoid "setupEmojiPicker is not defined"
-        try {
-            if (typeof setupEmojiPicker === 'function') {
-                setupEmojiPicker();
-            } else {
-                // fallback: poll briefly in case the function is defined later during parsing
-                const __emojiInitInterval = setInterval(() => {
-                    if (typeof setupEmojiPicker === 'function') {
-                        clearInterval(__emojiInitInterval);
-                        setupEmojiPicker();
-                    }
-                }, 50);
-                // safety timeout to avoid infinite polling
-                setTimeout(() => clearInterval(__emojiInitInterval), 3000);
-            }
-        } catch (err) {
-            console.error('Error initializing emoji picker:', err);
-        }
-
-        // Start automatic chat-list refresh
-        if (document.querySelector('.chat-items')) {
-            actualizarListaChats(); // initial load
-            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-        }
-
-        // Start polling messages for selected chat
-        if (selectedChatId) {
-            initSelectedMessagesPolling();
-        }
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                chatAutoRefresh = false;
-            } else {
-                chatAutoRefresh = true;
-                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                    chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-                }
-                if (selectedChatId && !messagesIntervalHandle) {
-                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
-                }
-            }
-        });
-    });
-
-/* ===================== SMALL HELPER: coalesce ===================== */
-function coalesce(...args) {
-    for (let i = 0; i < args.length; i++) {
-        const v = args[i];
-        if (v !== undefined && v !== null) return v;
+    // Start automatic chat-list refresh
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats(); // initial load
+        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
     }
-    return null;
-}
+
+    // Start polling messages for selected chat
+    if (selectedChatId) {
+        initSelectedMessagesPolling();
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
+        } else {
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+            }
+            if (selectedChatId && !messagesIntervalHandle) {
+                messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
+            }
+        }
+    });
+});
 
 /* ===================== CHATS LIST: incremental update ===================== */
 
@@ -519,7 +491,7 @@ function pollSelectedMessages() {
             if (data.messages.length === 0) return;
             // update lastMessageId from server max id early to avoid race
             const maxId = data.messages.reduce((m, mm) => {
-                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
+                const id = Number(mm.id ?? mm[0] ?? mm['id'] ?? 0) || 0;
                 return id > m ? id : m;
             }, lastMessageIdForSelected);
             if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
@@ -542,14 +514,14 @@ function appendUserMessagesToPanel(messages) {
     for (let i = Math.max(0, shownNodes.length - 30); i < shownNodes.length; i++) {
         const n = shownNodes[i];
         const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
-        // Prefer numeric timestamp from data attributes (ts-ms / ts) or fallback to numeric msgId
-        const timeMeta = Number(n.dataset.tsMs || n.dataset.ts || n.dataset.msgId) || 0;
+        const id = Number(n.dataset.msgId) || 0;
+        const timeMeta = n.querySelector('.msg-meta') ? Date.parse(n.querySelector('.msg-meta').textContent.replace('-', ' ')) || 0 : 0;
         const key = normalizeText(txt);
-        if (key) recentShown.set(key, Math.max(recentShown.get(key) || 0, timeMeta || 0));
+        if (key) recentShown.set(key, Math.max(recentShown.get(key) || 0, timeMeta || id));
     }
 
     for (const m of messages) {
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        const id = Number(m.id ?? m[0] ?? m['id'] ?? 0) || 0;
         if (!id) continue;
 
         // Skip if already in DOM by id
@@ -558,8 +530,8 @@ function appendUserMessagesToPanel(messages) {
             continue;
         }
 
-        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
-        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '') ) || '';
+        const content = String(m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? '').trim();
+        const respuesta = String(m.respuesta ?? m['respuesta'] ?? '') || '';
 
         // Only consider pure incoming user messages (has content and no respuesta yet)
         if (!content || (respuesta && respuesta.trim().length > 0)) {
@@ -568,7 +540,7 @@ function appendUserMessagesToPanel(messages) {
         }
 
         // determine timestamp (prefer numeric ms)
-        let ts = coalesce(m.ts_ms, 0);
+        let ts = m.ts_ms || 0;
         if (!ts && m.timestamp) {
             const parsed = Date.parse(m.timestamp);
             ts = isNaN(parsed) ? Date.now() : parsed;
@@ -588,7 +560,6 @@ function appendUserMessagesToPanel(messages) {
         const div = document.createElement('div');
         div.className = 'msg-box msg-user';
         div.setAttribute('data-msg-id', String(id));
-        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
         div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
 
         container.appendChild(div);
@@ -624,17 +595,16 @@ async function actualizarMensajesManual(container) {
 
         const wasAtBottom = (msgsContainer.scrollHeight - msgsContainer.clientHeight) <= msgsContainer.scrollTop + 60;
         for (const m of msgs) {
-            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            const id = Number(m.id ?? m[0] ?? m['id'] || 0);
             if (!id) continue;
             if (msgsContainer.querySelector(`[data-msg-id="${id}"]`)) continue;
-            const content = coalesce(m.content, m['content'], m.mensaje, m['mensaje'], m.respuesta, m[2], '');
-            const ts = coalesce(m.ts_ms, (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now()));
+            const content = m.content || m['content'] || m.mensaje || m['mensaje'] || m.respuesta || m[2] || '';
+            const ts = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
             const cls = (m.respuesta && !m.mensaje) ? 'msg-box msg-ai' : 'msg-box msg-user';
             const div = document.createElement('div');
             div.className = cls;
             div.setAttribute('data-msg-id', String(id));
-            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(String(content))}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
             msgsContainer.appendChild(div);
         }
         if (wasAtBottom) msgsContainer.scrollTop = msgsContainer.scrollHeight;
@@ -702,5 +672,120 @@ function activarEdicionAlias(parent) {
     input.onblur = () => setTimeout(finish, 0);
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
+
+function setupEmojiPicker() {
+    const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+    const trigger = document.getElementById('emoji-pick-btn');
+    const picker = document.getElementById('emoji-picker-list');
+    const input = document.getElementById('mensaje-texto');
+
+    console.log('Configurando emoji picker...');
+    console.log('Trigger:', trigger);
+    console.log('Picker:', picker);
+    console.log('Input:', input);
+
+    if (!trigger || !picker || !input) {
+        console.error('Elementos necesarios no encontrados:', {
+            trigger: !!trigger,
+            picker: !!picker,
+            input: !!input
+        });
+        return;
+    }
+
+    // Construir el picker si no está construido
+    if (!picker.dataset.built) {
+        console.log('Construyendo picker de emojis...');
+        picker.innerHTML = emojis.map(emoji =>
+            `<button type="button" class="emoji-option" data-emoji="${emoji}" style="font-size: 20px; background: none; border: none; cursor: pointer; padding: 5px; margin: 2px; border-radius: 4px; transition: background-color 0.2s;">${emoji}</button>`
+        ).join('');
+        picker.dataset.built = 'true';
+    }
+
+    // Mostrar/ocultar picker
+    trigger.addEventListener('click', function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('Botón de emoji clickeado');
+
+        const isVisible = picker.style.display === 'block';
+        picker.style.display = isVisible ? 'none' : 'block';
+        console.log('Picker visible:', !isVisible);
+
+        // Posicionar el picker
+        if (!isVisible) {
+            const rect = trigger.getBoundingClientRect();
+            const formRect = trigger.closest('.reply-form').getBoundingClientRect();
+
+            picker.style.bottom = '50px';
+            picker.style.left = '10px';
+            picker.style.top = 'auto';
+            picker.style.right = 'auto';
+        }
+    });
+
+    // Seleccionar emoji
+    picker.addEventListener('click', function (e) {
+        const emojiBtn = e.target.closest('.emoji-option');
+        if (emojiBtn && input) {
+            const emoji = emojiBtn.dataset.emoji;
+            const start = input.selectionStart;
+            const end = input.selectionEnd;
+            const value = input.value;
+
+            console.log('Emoji seleccionado:', emoji);
+
+            input.value = value.substring(0, start) + emoji + value.substring(end);
+            input.focus();
+            input.selectionStart = input.selectionEnd = start + emoji.length;
+
+            // Ocultar picker después de seleccionar
+            picker.style.display = 'none';
+        }
+    });
+
+    // Ocultar picker al hacer clic fuera
+    document.addEventListener('click', function (e) {
+        if (picker.style.display === 'block' &&
+            !trigger.contains(e.target) &&
+            !picker.contains(e.target)) {
+            console.log('Ocultando picker (click fuera)');
+            picker.style.display = 'none';
+        }
+    });
+
+    // Ocultar con Escape
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape' && picker.style.display === 'block') {
+            console.log('Ocultando picker (Escape)');
+            picker.style.display = 'none';
+        }
+    });
+
+    console.log('Emoji picker configurado correctamente');
+}
+
+/* Audio helpers unchanged */
+function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
+function toggleAudio(id, btn) { const audio = document.getElementById(id); const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar'); const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration'); if (!audio) return; if (audio.paused) { audio.play().then(() => { btn.textContent = '⏸️'; audio.ontimeupdate = () => { if (audio.duration) { if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%'; if (durSpan) { const m = Math.floor(audio.currentTime / 60); const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0'); durSpan.textContent = `${m}:${s}`; } } }; }).catch(console.error); } else { audio.pause(); btn.textContent = '▶️'; } }
+function seekAudio(id, progressBar, evt) { const audio = document.getElementById(id); const inner = progressBar.querySelector('.audio-progress-bar'); const rect = progressBar.getBoundingClientRect(); const clickX = evt.clientX - rect.left; if (audio && audio.duration) { audio.currentTime = (clickX / rect.width) * audio.duration; if (inner) inner.style.width = (clickX / rect.width) * 100 + '%'; } }
+    // Debug para el botón de emojis
+    console.log('Script cargado - verificando botón de emojis');
+    const emojiBtn = document.getElementById('emoji-pick-btn');
+    console.log('Botón encontrado:', emojiBtn);
+
+    if (emojiBtn) {
+        emojiBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            console.log('Botón de emoji clickeado');
+            const picker = document.getElementById('emoji-picker-list');
+            console.log('Picker encontrado:', picker);
+            if (picker) {
+                picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+                console.log('Picker display:', picker.style.display);
+            }
+        });
+    }
 </script>
 {% endblock %}
