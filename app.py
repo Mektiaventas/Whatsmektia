@@ -6600,8 +6600,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
         # RESPUESTA TEXTUAL POR DEFECTO
