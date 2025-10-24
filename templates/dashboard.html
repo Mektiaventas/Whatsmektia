@@ -234,9 +234,6 @@
         </div>
 
         <div class="chart-container" style="height:400px;">
-            templates/dashboard.html
-            <!-- add "Últimos 3 meses" button and default JS period -->
-            <a data-tab="overview" data-period="3months" class="{{ 'active' if period == '3months' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=3months">Últimos 3 meses</a>
             <canvas id="dailyChart"></canvas>
         </div>
     </div>
@@ -253,7 +250,7 @@
   let dailyChart = null;
 
   // expose current period to JS (server value on load)
-  const CURRENT_PERIOD = '{{ period or "3months" }}';
+  const CURRENT_PERIOD = '{{ period }}';
 
   // --- Overview bar chart (existente) ---
   (function renderOverview(){
@@ -360,7 +357,7 @@
       try {
           // read period from current URL, so after navigation or if user manipulated query params
           const params = new URLSearchParams(window.location.search);
-          const period = params.get('period') || '{{ period or "3months" }}' || '3months';
+          const period = params.get('period') || '{{ period }}' || 'week';
 
           const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
           const json = await res.json();
