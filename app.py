@@ -7464,6 +7464,15 @@ def ver_chat(numero):
         
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
 
+        # Ensure chat_meta exists and move the chat to "En Conversación" when user opens it.
+        # This makes opening the chat immediately reflect the agent activity in the kanban.
+        try:
+            inicializar_chat_meta(numero, config)
+            actualizar_columna_chat(numero, 2, config)  # 2 = "En Conversación"
+            app.logger.info(f"📊 Chat {numero} movido a 'En Conversación' (columna 2) al abrir la vista")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo mover chat a 'En Conversación' al abrir: {e}")
+
         # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
