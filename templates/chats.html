@@ -752,10 +752,6 @@ function seekAudio(id, progressBar, evt) {
             if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
         }
 
-        // Start polling messages for selected chat
-        if (selectedChatId) {
-            initSelectedMessagesPolling();
-        }
 
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
