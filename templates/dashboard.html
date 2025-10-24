@@ -295,7 +295,7 @@
 
       if (tab === 'overview') {
           // For overview, activate only the period button matching CURRENT_PERIOD
-          let el = document.querySelector(`.tabs a[data-period="${CURRENT_PERIOD}"]`);
+          let el = document.querySelector(.tabs a[data-period="${CURRENT_PERIOD}"]);
           if (!el) {
               // fallback: first overview anchor
               el = document.querySelector('.tabs a[data-tab="overview"]');
@@ -303,7 +303,7 @@
           if (el) el.classList.add('active');
       } else {
           // mark anchors that match the tab (normally only the conversation tab)
-          document.querySelectorAll(`.tabs a[data-tab="${tab}"]`).forEach(a => a.classList.add('active'));
+          document.querySelectorAll(.tabs a[data-tab="${tab}"]).forEach(a => a.classList.add('active'));
       }
 
       // show/hide panes
@@ -358,7 +358,7 @@
             // For the dailyChart we now want the last 3 months aggregated by month:
             const period = '3months';
 
-            const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
+            const res = await fetch(/dashboard/conversaciones-data?period=${period});
             const json = await res.json();
             if (json.error) {
                 console.error('Error fetching conversaciones data', json.error);
@@ -459,4 +459,4 @@
       if (dailyChart) dailyChart.resize();
   });
 </script>
-{% endblock %}
+{% endblock %}
