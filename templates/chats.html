@@ -337,19 +337,50 @@
     }
 </style>
 
-
 <script>
-/*
-  Auto-update seguro:
-  - chats list: /chats/data (auto refresh)
-  - selected chat messages: /chat/<telefono>/messages?after=<id>
-  Only append incoming user messages (no bot responses) to avoid premature ordering/duplication.
-*/
+/* Small helpers */
+function coalesce(...args) {
+    for (let i = 0; i < args.length; i++) {
+        const v = args[i];
+        if (v !== undefined && v !== null) return v;
+    }
+    return null;
+}
 
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+}
+
+function truncate(str, n) {
+    if (!str) return '';
+    return str.length > n ? str.substring(0, n) + '...' : str;
+}
+
+function formatClientTime(serverTs) {
+    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+    if (isNaN(d.getTime())) d = new Date();
+    const day = d.getDate();
+    const month = d.toLocaleString('es-MX', { month: 'short' });
+    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${day}-${month} ${time}`;
+}
+
+/* State */
 let chatAutoRefresh = true;
-let refreshIntervalMs = 2000; // safe default for chats list
-let messagePollIntervalMs = 1200; // poll interval (slightly larger to avoid race)
-
+let refreshIntervalMs = 2000;
+let messagePollIntervalMs = 1200;
+let selectedChatId = {{ selected|tojson }}; // injected by server; may be null
 let lastChatsTimestamp = 0;
 let lastMessageIdForSelected = 0;
 let isEditingAlias = false;
@@ -357,126 +388,10 @@ let aliasTimers = new Map();
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
 
-    document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado - inicializando componentes');
-    enhanceAliasButtons();
-    setupEmojiPicker();
+/* Deduplication set (initialized from DOM on poll init) */
+let seenMessageKeys = new Set();
 
-    // Start automatic chat-list refresh
-    //if (document.querySelector('.chat-items')) {
-    //    actualizarListaChats(); // initial load
-    //    if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-    //}
-
-        function setupEmojiPicker() {
-            const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-
-            const trigger = document.getElementById('emoji-pick-btn');
-            const picker = document.getElementById('emoji-picker-list');
-            const input = document.getElementById('mensaje-texto');
-
-            console.log('Configurando emoji picker...');
-            console.log('Trigger:', trigger);
-            console.log('Picker:', picker);
-            console.log('Input:', input);
-
-            if (!trigger || !picker || !input) {
-                console.error('Elementos necesarios no encontrados:', {
-                    trigger: !!trigger,
-                    picker: !!picker,
-                    input: !!input
-                });
-                return;
-            }
-
-            // Construir el picker si no está construido
-            if (!picker.dataset.built) {
-                console.log('Construyendo picker de emojis...');
-                picker.innerHTML = emojis.map(emoji =>
-                    `<button type="button" class="emoji-option" data-emoji="${emoji}" style="font-size: 20px; background: none; border: none; cursor: pointer; padding: 5px; margin: 2px; border-radius: 4px; transition: background-color 0.2s;">${emoji}</button>`
-                ).join('');
-                picker.dataset.built = 'true';
-            }
-
-            // Mostrar/ocultar picker
-            trigger.addEventListener('click', function (e) {
-                e.preventDefault();
-                e.stopPropagation();
-                console.log('Botón de emoji clickeado');
-
-                const isVisible = picker.style.display === 'block';
-                picker.style.display = isVisible ? 'none' : 'block';
-                console.log('Picker visible:', !isVisible);
-
-                // Posicionar el picker
-                if (!isVisible) {
-                    const rect = trigger.getBoundingClientRect();
-                    const formRect = trigger.closest('.reply-form').getBoundingClientRect();
-
-                    picker.style.bottom = '50px';
-                    picker.style.left = '10px';
-                    picker.style.top = 'auto';
-                    picker.style.right = 'auto';
-                }
-            });
-
-            // Seleccionar emoji
-            picker.addEventListener('click', function (e) {
-                const emojiBtn = e.target.closest('.emoji-option');
-                if (emojiBtn && input) {
-                    const emoji = emojiBtn.dataset.emoji;
-                    const start = input.selectionStart;
-                    const end = input.selectionEnd;
-                    const value = input.value;
-
-                    console.log('Emoji seleccionado:', emoji);
-
-                    input.value = value.substring(0, start) + emoji + value.substring(end);
-                    input.focus();
-                    input.selectionStart = input.selectionEnd = start + emoji.length;
-
-                    // Ocultar picker después de seleccionar
-                    picker.style.display = 'none';
-                }
-            });
-
-            // Ocultar picker al hacer clic fuera
-            document.addEventListener('click', function (e) {
-                if (picker.style.display === 'block' &&
-                    !trigger.contains(e.target) &&
-                    !picker.contains(e.target)) {
-                    console.log('Ocultando picker (click fuera)');
-                    picker.style.display = 'none';
-                }
-            });
-
-            // Ocultar con Escape
-            document.addEventListener('keydown', function (e) {
-                if (e.key === 'Escape' && picker.style.display === 'block') {
-                    console.log('Ocultando picker (Escape)');
-                    picker.style.display = 'none';
-                }
-            });
-
-            console.log('Emoji picker configurado correctamente');
-        }
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            chatAutoRefresh = false;
-        } else {
-            chatAutoRefresh = true;
-            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-            }
-            if (selectedChatId && !messagesIntervalHandle) {
-                messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
-            }
-        }
-    });
-});
-
-/* ===================== CHATS LIST: incremental update ===================== */
+/* ===================== CHAT-LIST ===================== */
 
 function actualizarListaChats() {
     if (!chatAutoRefresh) return;
@@ -509,7 +424,12 @@ function actualizarIncrementalChats(chats) {
             }
         } else {
             const tmp = document.createElement('div');
-            tmp.innerHTML = crearNuevoChatHTML ? crearNuevoChatHTML(chat) : `
+
+            // safe optional builder
+            const hasBuilder = typeof crearNuevoChatHTML === 'function';
+            tmp.innerHTML = hasBuilder
+                ? crearNuevoChatHTML(chat)
+                : `
                 <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                     <div class="card-content">
                         <div class="card-title-row">
@@ -525,7 +445,9 @@ function actualizarIncrementalChats(chats) {
                         <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                     </div>
                 </a>`;
+
             const el = tmp.firstElementChild;
+            if (!el) return;
             container.insertBefore(el, container.firstElementChild);
             const editBtn = el.querySelector('.edit-alias-btn');
             if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
@@ -551,8 +473,69 @@ function actualizarChatExistente(elemento, chat) {
     }
 }
 
-/* ===================== MESSAGES: polling for USER messages with dedupe ===================== */
+/* ===================== MESSAGES POLLING & DEDUPE ===================== */
 
+/**
+ * Build stable key for a message
+ */
+function buildMessageKeyFor(m) {
+    const id = coalesce(m.id, m[0], m['id']);
+    if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
+        return 'id:' + String(id);
+    }
+    const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+    let ts = coalesce(m.ts_ms, m.ts, 0);
+    if (!ts && m.timestamp) {
+        const parsed = Date.parse(m.timestamp);
+        ts = isNaN(parsed) ? 0 : parsed;
+    }
+    ts = Number(ts) || 0;
+    const rounded = Math.floor(ts / 1000);
+    return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
+}
+
+/**
+ * Initialize messages polling state and seen keys from DOM
+ */
+function initSelectedMessagesPolling() {
+    const nodes = Array.from(document.querySelectorAll('#msgs .msg-box[data-msg-id]'));
+    lastMessageIdForSelected = nodes.reduce((max, n) => {
+        const v = Number(n.dataset.msgId) || 0;
+        return v > max ? v : max;
+    }, 0);
+
+    // Build seenMessageKeys from DOM (covers messages without id)
+    seenMessageKeys = new Set();
+    const shownNodes = Array.from(document.querySelectorAll('#msgs .msg-box'));
+    shownNodes.forEach(n => {
+        const id = n.dataset.msgId;
+        if (id) {
+            seenMessageKeys.add('id:' + String(id));
+        } else {
+            const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
+            let ts = Number(n.dataset.tsMs || n.dataset.ts || 0) || 0;
+            if (!ts) {
+                const meta = n.querySelector('.msg-meta') ? n.querySelector('.msg-meta').textContent : '';
+                const parsed = Date.parse(meta.replace('-', ' '));
+                ts = isNaN(parsed) ? 0 : parsed;
+            }
+            const rounded = Math.floor(Number(ts || 0) / 1000);
+            const key = 'text:' + normalizeText(txt) + '|ts:' + String(rounded);
+            seenMessageKeys.add(key);
+        }
+    });
+
+    if (!messagesIntervalHandle) {
+        messagesIntervalHandle = setInterval(() => {
+            if (!selectedChatId || document.hidden) return;
+            pollSelectedMessages();
+        }, messagePollIntervalMs);
+    }
+}
+
+/**
+ * Poll selected chat messages and append only new ones
+ */
 function pollSelectedMessages() {
     const after = Number(lastMessageIdForSelected) || 0;
     fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`, { cache: 'no-store' })
@@ -560,9 +543,8 @@ function pollSelectedMessages() {
         .then(data => {
             if (!data || !Array.isArray(data.messages)) return;
             if (data.messages.length === 0) return;
-            // update lastMessageId from server max id early to avoid race
             const maxId = data.messages.reduce((m, mm) => {
-                const id = Number(mm.id ?? mm[0] ?? mm['id'] ?? 0) || 0;
+                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
                 return id > m ? id : m;
             }, lastMessageIdForSelected);
             if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
@@ -571,73 +553,49 @@ function pollSelectedMessages() {
         .catch(err => console.error('Error polling messages:', err));
 }
 
-/*
- Append ONLY user messages and apply content/time dedupe to avoid duplicates.
-*/
+/**
+ * Append only new user messages using seenMessageKeys
+ */
 function appendUserMessagesToPanel(messages) {
     const container = document.getElementById('msgs');
     if (!container) return;
     let appended = false;
 
-    // Build map of recent contents already shown (normalized -> timestamp)
-    const recentShown = new Map();
-    const shownNodes = Array.from(container.querySelectorAll('.msg-box'));
-    for (let i = Math.max(0, shownNodes.length - 30); i < shownNodes.length; i++) {
-        const n = shownNodes[i];
-        const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
-        const id = Number(n.dataset.msgId) || 0;
-        const timeMeta = n.querySelector('.msg-meta') ? Date.parse(n.querySelector('.msg-meta').textContent.replace('-', ' ')) || 0 : 0;
-        const key = normalizeText(txt);
-        if (key) recentShown.set(key, Math.max(recentShown.get(key) || 0, timeMeta || id));
-    }
-
     for (const m of messages) {
-        const id = Number(m.id ?? m[0] ?? m['id'] ?? 0) || 0;
-        if (!id) continue;
-
-        // Skip if already in DOM by id
-        if (container.querySelector(`[data-msg-id="${id}"]`)) {
-            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        const key = buildMessageKeyFor(m);
+        if (!key) continue;
+        if (seenMessageKeys.has(key)) {
+            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
             continue;
         }
 
-        const content = String(m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? '').trim();
-        const respuesta = String(m.respuesta ?? m['respuesta'] ?? '') || '';
-
-        // Only consider pure incoming user messages (has content and no respuesta yet)
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
         if (!content || (respuesta && respuesta.trim().length > 0)) {
-            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            seenMessageKeys.add(key);
             continue;
         }
 
-        // determine timestamp (prefer numeric ms)
-        let ts = m.ts_ms || 0;
+        let ts = coalesce(m.ts_ms, 0);
         if (!ts && m.timestamp) {
             const parsed = Date.parse(m.timestamp);
             ts = isNaN(parsed) ? Date.now() : parsed;
         }
         ts = Number(ts) || Date.now();
 
-        // Deduplicate by normalized content + recent timestamp window (2 min)
-        const norm = normalizeText(content);
-        const seenTs = recentShown.get(norm) || 0;
-        if (seenTs && Math.abs(ts - seenTs) < (2 * 60 * 1000)) {
-            // duplicate within 2 minutes, skip
-            lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-            continue;
-        }
-
-        // create DOM node as user message
         const div = document.createElement('div');
         div.className = 'msg-box msg-user';
-        div.setAttribute('data-msg-id', String(id));
+        if (id) div.setAttribute('data-msg-id', String(id));
+        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
         div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
 
         container.appendChild(div);
         appended = true;
-        lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-        // record it to prevent duplicates in same batch
-        recentShown.set(norm, ts);
+        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        seenMessageKeys.add(key);
     }
 
     if (appended) {
@@ -646,8 +604,7 @@ function appendUserMessagesToPanel(messages) {
     }
 }
 
-/* ===================== Manual helper (unchanged) ===================== */
-
+/* Manual update helper (uses coalesce) */
 async function actualizarMensajesManual(container) {
     try {
         const msgsContainer = container || document.getElementById('msgs');
@@ -666,16 +623,17 @@ async function actualizarMensajesManual(container) {
 
         const wasAtBottom = (msgsContainer.scrollHeight - msgsContainer.clientHeight) <= msgsContainer.scrollTop + 60;
         for (const m of msgs) {
-            const id = Number(m.id ?? m[0] ?? m['id'] || 0);
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
             if (!id) continue;
             if (msgsContainer.querySelector(`[data-msg-id="${id}"]`)) continue;
-            const content = m.content || m['content'] || m.mensaje || m['mensaje'] || m.respuesta || m[2] || '';
-            const ts = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+            const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], m.respuesta, m[2], ''));
+            const ts = Number(coalesce(m.ts_ms, (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now())));
             const cls = (m.respuesta && !m.mensaje) ? 'msg-box msg-ai' : 'msg-box msg-user';
             const div = document.createElement('div');
             div.className = cls;
             div.setAttribute('data-msg-id', String(id));
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(String(content))}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
             msgsContainer.appendChild(div);
         }
         if (wasAtBottom) msgsContainer.scrollTop = msgsContainer.scrollHeight;
@@ -684,38 +642,7 @@ async function actualizarMensajesManual(container) {
     }
 }
 
-/* ===================== HELPERS ===================== */
-
-function normalizeText(s) {
-    if (!s) return '';
-    return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
-}
-
-function formatClientTime(serverTs) {
-    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
-    if (isNaN(d.getTime())) d = new Date();
-    const day = d.getDate();
-    const month = d.toLocaleString('es-MX', { month: 'short' });
-    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-    return `${day}-${month} ${time}`;
-}
-
-function truncate(str, n) {
-    if (!str) return '';
-    return str.length > n ? str.substring(0, n) + '...' : str;
-}
-
-function escapeHtml(unsafe) {
-    if (unsafe === null || unsafe === undefined) return '';
-    return String(unsafe)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-}
-
-/* ===================== Alias editing & emoji (unchanged) ===================== */
+/* ===================== ALIAS EDITING & EMOJI ===================== */
 
 function enhanceAliasButtons() {
     document.querySelectorAll('.edit-alias-btn').forEach(btn => {
@@ -744,28 +671,170 @@ function activarEdicionAlias(parent) {
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
 
+/* ===================== EMOJI PICKER ===================== */
 
+function setupEmojiPicker() {
+    const EMOJIS = ['😊','😂','😍','👍','🙏','😎','🥳','😢','😡','🎉','💬','❤️','🔥','🤔','🙌','😅','😉','😇','😜','🤖'];
 
-/* Audio helpers unchanged */
+    function buildPicker(container) {
+        if (container.dataset.built === '1') return container;
+        container.innerHTML = EMOJIS.map(e =>
+            `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+        ).join('');
+        container.dataset.built = '1';
+        return container;
+    }
+
+    function ensurePicker(trigger) {
+        const form = trigger.closest('form') || document.body;
+        let picker = form.querySelector('.emoji-picker-list');
+        if (!picker) {
+            picker = document.createElement('div');
+            picker.className = 'emoji-picker-list';
+            picker.style.position = 'absolute';
+            picker.style.display = 'none';
+            picker.style.zIndex = 10000;
+            picker.style.background = 'white';
+            picker.style.border = '1px solid #ccc';
+            picker.style.borderRadius = '8px';
+            picker.style.padding = '6px';
+            picker.style.maxWidth = '320px';
+            picker.style.maxHeight = '180px';
+            picker.style.overflowY = 'auto';
+            const attachTo = form.querySelector('.input-group') || form;
+            attachTo.appendChild(picker);
+        }
+        buildPicker(picker);
+        return picker;
+    }
+
+    // delegated
+    document.addEventListener('click', function (ev) {
+        try {
+            const tgt = ev.target;
+            const trigger = tgt.closest ? tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
+            if (trigger) {
+                ev.preventDefault(); ev.stopPropagation();
+                const picker = ensurePicker(trigger);
+                const isVisible = picker.style.display === 'block';
+                if (isVisible) { picker.style.display = 'none'; return; }
+                const rect = trigger.getBoundingClientRect();
+                const parent = picker.offsetParent || document.body;
+                const parentRect = parent.getBoundingClientRect();
+                const topVal = rect.top - parentRect.top - picker.offsetHeight - 8;
+                if (topVal > 0) picker.style.top = topVal + 'px';
+                else picker.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+                let left = rect.left - parentRect.left;
+                const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
+                if (left > maxLeft) left = Math.max(8, maxLeft);
+                picker.style.left = left + 'px';
+                picker.style.display = 'block';
+                picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
+                return;
+            }
+
+            const emojiBtn = tgt.closest ? tgt.closest('.emoji-option') : null;
+            if (emojiBtn) {
+                ev.preventDefault(); ev.stopPropagation();
+                const picker = emojiBtn.closest('.emoji-picker-list');
+                const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
+                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+                if (input) {
+                    const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+                    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
+                    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+                    const pos = start + emoji.length;
+                    input.selectionStart = input.selectionEnd = pos;
+                    input.focus();
+                }
+                if (picker) picker.style.display = 'none';
+                return;
+            }
+
+            const insidePicker = tgt.closest && !!tgt.closest('.emoji-picker-list');
+            const isTrigger = tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
+            if (!insidePicker && !isTrigger) {
+                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+            }
+        } catch (err) {
+            console.error('emoji handler error', err);
+        }
+    }, false);
+
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+    });
+
+    console.debug('setupEmojiPicker initialized');
+}
+
+/* ===================== AUDIO & UI HELPERS ===================== */
+
 function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
-function toggleAudio(id, btn) { const audio = document.getElementById(id); const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar'); const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration'); if (!audio) return; if (audio.paused) { audio.play().then(() => { btn.textContent = '⏸️'; audio.ontimeupdate = () => { if (audio.duration) { if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%'; if (durSpan) { const m = Math.floor(audio.currentTime / 60); const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0'); durSpan.textContent = `${m}:${s}`; } } }; }).catch(console.error); } else { audio.pause(); btn.textContent = '▶️'; } }
-function seekAudio(id, progressBar, evt) { const audio = document.getElementById(id); const inner = progressBar.querySelector('.audio-progress-bar'); const rect = progressBar.getBoundingClientRect(); const clickX = evt.clientX - rect.left; if (audio && audio.duration) { audio.currentTime = (clickX / rect.width) * audio.duration; if (inner) inner.style.width = (clickX / rect.width) * 100 + '%'; } }
-    // Debug para el botón de emojis
-    console.log('Script cargado - verificando botón de emojis');
-    const emojiBtn = document.getElementById('emoji-pick-btn');
-    console.log('Botón encontrado:', emojiBtn);
 
-    if (emojiBtn) {
-        emojiBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            console.log('Botón de emoji clickeado');
-            const picker = document.getElementById('emoji-picker-list');
-            console.log('Picker encontrado:', picker);
-            if (picker) {
-                picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
-                console.log('Picker display:', picker.style.display);
+function toggleAudio(id, btn) {
+    const audio = document.getElementById(id);
+    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
+    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
+    if (!audio) return;
+    if (audio.paused) {
+        audio.play().then(() => {
+            btn.textContent = '⏸️';
+            audio.ontimeupdate = () => {
+                if (audio.duration) {
+                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
+                    if (durSpan) {
+                        const m = Math.floor(audio.currentTime / 60);
+                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                        durSpan.textContent = `${m}:${s}`;
+                    }
+                }
+            };
+        }).catch(console.error);
+    } else {
+        audio.pause();
+        btn.textContent = '▶️';
+    }
+}
+function seekAudio(id, progressBar, evt) {
+    const audio = document.getElementById(id);
+    const inner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = evt.clientX - rect.left;
+    if (audio && audio.duration) {
+        audio.currentTime = (clickX / rect.width) * audio.duration;
+        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+    }
+}
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM cargado - inicializando componentes');
+        enhanceAliasButtons();
+        setupEmojiPicker();
+
+        // Start automatic chat-list refresh
+        if (document.querySelector('.chat-items')) {
+            actualizarListaChats(); // initial load
+            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+        }
+
+        // Start polling messages for selected chat
+        if (selectedChatId) {
+            initSelectedMessagesPolling();
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                chatAutoRefresh = false;
+            } else {
+                chatAutoRefresh = true;
+                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                    chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+                }
+                if (selectedChatId && !messagesIntervalHandle) {
+                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
+                }
             }
         });
-    }
+    });
 </script>
 {% endblock %}
