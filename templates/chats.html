@@ -349,7 +349,7 @@
 let chatAutoRefresh = true;
 let refreshIntervalMs = 2000; // safe default for chats list
 let messagePollIntervalMs = 1200; // poll interval (slightly larger to avoid race)
-let selectedChatId = {{ selected| tojson }};
+
 let lastChatsTimestamp = 0;
 let lastMessageIdForSelected = 0;
 let isEditingAlias = false;
@@ -368,10 +368,7 @@ let messagesIntervalHandle = null;
         if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
     }
 
-    // Start polling messages for selected chat
-    if (selectedChatId) {
-        initSelectedMessagesPolling();
-    }
+
 
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
