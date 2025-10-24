@@ -608,14 +608,30 @@ function activarEdicionAlias(parent) {
 
     // Fallback: direct click handler for the emoji button in case delegation doesn't match.
     (function addEmojiButtonFallback() {
+        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        function buildLocalPicker(container) {
+            if (!container) return;
+            if (container.dataset && container.dataset.built === '1') return;
+            container.innerHTML = EMOJIS.map(e =>
+                `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+            ).join('');
+            if (container.dataset) container.dataset.built = '1';
+        }
+
         function togglePickerForButton(btn) {
             try {
-                // prefer the picker inside the same form, fall back to the fixed id/class
                 const form = btn.closest && btn.closest('form');
                 let picker = form && form.querySelector('.emoji-picker-list');
                 if (!picker) picker = document.getElementById('emoji-picker-list') || document.querySelector('.emoji-picker-list');
-                // if ensurePicker is available (inside setupEmojiPicker scope) prefer it to build picker
-                if (!picker && typeof ensurePicker === 'function') picker = ensurePicker(btn);
+                // If picker exists but is not yet populated, populate it locally
+                if (picker) buildLocalPicker(picker);
+
+                // If setupEmojiPicker exported ensurePicker to global (not the case normally), prefer it
+                if (!picker && typeof ensurePicker === 'function') {
+                    picker = ensurePicker(btn);
+                }
+
                 if (!picker) return;
                 const isVisible = picker.style.display === 'block';
                 picker.style.display = isVisible ? 'none' : 'block';
@@ -628,11 +644,10 @@ function activarEdicionAlias(parent) {
         document.addEventListener('DOMContentLoaded', () => {
             const btn = document.getElementById('emoji-pick-btn');
             if (btn) {
-                // prevent duplicate handlers if file reloaded
-                btn.removeEventListener('__emoji_fallback_click__', null);
+                // Add only one handler
                 btn.addEventListener('click', function handler(ev) {
+                    // do not stop propagation—let the delegated handler also run when it can
                     ev.preventDefault();
-                    ev.stopPropagation();
                     togglePickerForButton(this);
                 }, false);
             }
