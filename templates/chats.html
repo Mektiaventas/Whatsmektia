@@ -606,16 +606,37 @@ function activarEdicionAlias(parent) {
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
 
-    // Fallback: direct click handler for the emoji button in case delegation doesn't match.
     (function addEmojiButtonFallback() {
+        const EMOJIS_FALLBACK = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        function buildPickerInto(container) {
+            try {
+                if (!container) return container;
+                if (container.dataset.built === '1') return container;
+                container.innerHTML = EMOJIS_FALLBACK.map(e =>
+                    `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+                ).join('');
+                container.dataset.built = '1';
+            } catch (err) {
+                console.error('buildPickerInto error', err);
+            }
+            return container;
+        }
+
         function togglePickerForButton(btn) {
             try {
-                // prefer the picker inside the same form, fall back to the fixed id/class
                 const form = btn.closest && btn.closest('form');
                 let picker = form && form.querySelector('.emoji-picker-list');
                 if (!picker) picker = document.getElementById('emoji-picker-list') || document.querySelector('.emoji-picker-list');
-                // if ensurePicker is available (inside setupEmojiPicker scope) prefer it to build picker
+
+                // If the picker exists but is empty, build it immediately so it's not a blank box.
+                if (picker && (!picker.dataset || picker.dataset.built !== '1')) {
+                    buildPickerInto(picker);
+                }
+
+                // if ensurePicker is available (from setupEmojiPicker) prefer it to build/attach picker
                 if (!picker && typeof ensurePicker === 'function') picker = ensurePicker(btn);
+
                 if (!picker) return;
                 const isVisible = picker.style.display === 'block';
                 picker.style.display = isVisible ? 'none' : 'block';
@@ -628,7 +649,7 @@ function activarEdicionAlias(parent) {
         document.addEventListener('DOMContentLoaded', () => {
             const btn = document.getElementById('emoji-pick-btn');
             if (btn) {
-                // prevent duplicate handlers if file reloaded
+                // remove any previous bound handler to avoid duplicates
                 btn.removeEventListener('__emoji_fallback_click__', null);
                 btn.addEventListener('click', function handler(ev) {
                     ev.preventDefault();
