@@ -87,11 +87,11 @@
     /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 5px;
+        padding: 6px 10px;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
-        flex: 0 0 200px; /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
+        flex: 1 1 calc(50%-0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
@@ -100,7 +100,7 @@
         justify-content: center;
         text-align: center;
         box-sizing: border-box;
-        min-height: 36px;
+        min-height: 28px;
     }
 
         /* make the numeric value stand out and allow full height */
