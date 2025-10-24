@@ -293,16 +293,12 @@
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
                         <span class="alias-edit" style="display:none;">
-
                             <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
                         </span>
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
                     <div class="card-meta-row">
-                        <span class="card-num">
-                            
-                            {% endif %}{{ chat.numero }}
-                        </span>
+                        {% endif %}
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
