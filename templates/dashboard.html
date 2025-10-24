@@ -53,7 +53,7 @@
     }
 
     .tabs {
-        margin-bottom: 0.6rem; /* bring tabs a bit closer */
+        margin-bottom: 0.3rem; /* bring tabs a bit closer */
     }
 
         .tabs a {
@@ -205,8 +205,8 @@
         {% endif %}
     </div>
 
-    <div class="tabs" style="margin-bottom: 1rem;">
-        <div class="tabs" style="margin-bottom: 2rem;">
+    <div class="tabs" style="margin-bottom: 0.3rem;">
+        <div class="tabs" style="margin-bottom: 0.3rem;">
             <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
             <a data-tab="overview" data-period="year" class="{{ 'active' if period == 'year' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=year">Último año (mensual)</a>
             <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=month">Últimos 30 días</a>
