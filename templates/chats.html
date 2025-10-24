@@ -432,30 +432,30 @@ function actualizarListaChats() {
         .catch(err => console.error('Error actualizando lista de chats:', err));
 }
 
-    function actualizarIncrementalChats(chats) {
-        const container = document.querySelector('.chat-items');
-        if (!container) return;
-        const existing = new Map();
-        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-        chats.forEach(chat => {
-            const num = chat.numero;
-            const node = existing.get(num);
-            if (node) {
-                actualizarChatExistente(node, chat);
-                existing.delete(num);
-                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                    container.insertBefore(node, container.firstElementChild);
-                }
-            } else {
-                const tmp = document.createElement('div');
+    chats.forEach(chat => {
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
+            }
+        } else {
+            const tmp = document.createElement('div');
 
-                // Safe check for optional global builder function
-                const hasBuilder = (typeof crearNuevoChatHTML === 'function');
+            // Safe check for optional global builder function
+            const hasBuilder = (typeof crearNuevoChatHTML === 'function');
 
-                tmp.innerHTML = hasBuilder
-                    ? crearNuevoChatHTML(chat)
-                    : `
+            tmp.innerHTML = hasBuilder
+                ? crearNuevoChatHTML(chat)
+                : `
                 <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                     <div class="card-content">
                         <div class="card-title-row">
@@ -472,18 +472,18 @@ function actualizarListaChats() {
                     </div>
                 </a>`;
 
-                const el = tmp.firstElementChild;
-                if (!el) return; // guard against builder returning invalid HTML
-                container.insertBefore(el, container.firstElementChild);
-                const editBtn = el.querySelector('.edit-alias-btn');
-                if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
-                el.classList.add('new-message');
-                setTimeout(() => el.classList.remove('new-message'), 1400);
-            }
-        });
+            const el = tmp.firstElementChild;
+            if (!el) return; // guard against builder returning invalid HTML
+            container.insertBefore(el, container.firstElementChild);
+            const editBtn = el.querySelector('.edit-alias-btn');
+            if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
+        }
+    });
 
-        existing.forEach((node) => node.remove());
-    }
+    existing.forEach((node) => node.remove());
+}
 
 function actualizarChatExistente(elemento, chat) {
     const aliasView = elemento.querySelector('.alias-view');
