@@ -128,22 +128,22 @@
 
     /* avatar inside card: reduce to ~50% of typical size */
     .card-avatar {
-        width: 20px !important;
-        height: 20px !important;
-        border-radius: 6px !important;
+        width: 16px !important;
+        height: 16px !important;
+        border-radius: 4px !important;
         object-fit: cover !important;
-        margin-right: 8px;
+        margin-right: 6px;
         flex: 0 0 auto;
     }
 
     /* title / alias smaller and tighter */
     .card-title-row .alias-view {
-        font-size: 0.92rem;
+        font-size: 0.88rem;
         font-weight: 600;
         line-height: 1;
         display: inline-block;
         vertical-align: middle;
-        max-width: calc(100% - 90px);
+        max-width: calc(100% - 80px);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -152,48 +152,53 @@
     /* meta row smaller and muted */
     .card-meta-row,
     .card-meta-row span {
-        font-size: 0.72rem;
+        font-size: 0.68rem;
         color: white;
         line-height: 1;
     }
 
     /* ensure edit button smaller */
     .edit-alias-btn {
-        font-size: 12px;
+        font-size: 11px;
         padding: 2px 6px;
         margin-left: 6px;
     }
 
     /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        font-size: 0.82rem;
+        font-size: 0.78rem;
         color: white;
-        margin-top: 4px;
+        margin-top: 2px;
         /* Force a single truncated line across browsers */
         display: block;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
         max-width: 100%;
+        line-height: 1;
+        max-height: 1.1em;
     }
 
 
     /* reduce spacing inside card for compact list */
     .card-content {
-        padding: 6px 8px;
+        padding: 4px 6px; /* decreased vertical padding to make cards thinner */
         gap: 4px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
 
     .card-title-row {
         display: flex;
         align-items: center;
-        gap: 8px;
+        gap: 6px;
     }
 
     /* shrink unread badge */
     .card-unread {
-        font-size: 0.7rem;
-        padding: 2px 6px;
+        font-size: 0.65rem;
+        padding: 1px 4px;
         border-radius: 999px;
     }
 
@@ -207,27 +212,46 @@
     /* make kanban cards slightly more compact vertically */
     .kanban-card {
         padding: 0;
-        margin-bottom: 8px;
+        margin-bottom: 6px;
+        border-radius: 6px;
+        min-height: 38px; /* keep visual consistency while reducing height */
+        overflow: hidden;
+    }
+
+    /* reduce spacing inside the meta row to compact further */
+    .card-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
     /* responsive: keep compactness on small screens */
     @media (max-width: 768px) {
         .card-avatar {
-            width: 18px !important;
-            height: 18px !important;
+            width: 14px !important;
+            height: 14px !important;
         }
 
         .col-icon {
-            width: 8px !important;
-            height: 8px !important;
+            width: 24px !important;
+            height: 24px !important;
         }
 
         .card-title-row .alias-view {
-            font-size: 0.9rem;
+            font-size: 0.86rem;
         }
 
         .card-msg {
-            font-size: 0.8rem;
+            font-size: 0.76rem;
+        }
+
+        .card-content {
+            padding: 3px 6px;
+        }
+
+        .kanban-card {
+            min-height: 34px;
+            margin-bottom: 6px;
         }
     }
 </style>
