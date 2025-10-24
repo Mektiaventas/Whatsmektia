@@ -6558,7 +6558,32 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
-                    app.logger.warning("⚠️ guardar_cita devolvió None")
+                    # guardar_cita devolvió None -> preparar y enviar follow-up pidiendo los datos faltantes
+                    try:
+                        completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
+                    except Exception:
+                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']  # fallback
+
+                    # Build a friendly prompt based on missing fields
+                    preguntas = []
+                    if 'servicio' in (faltantes2 or []):
+                        preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
+                    if 'fecha' in (faltantes2 or []):
+                        preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
+                    if 'hora' in (faltantes2 or []):
+                        preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
+                    if 'nombre' in (faltantes2 or []):
+                        preguntas.append("¿Cuál es tu nombre completo?")
+                    if not preguntas:
+                        preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
+
+                    follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
+                    follow_up += "\n\nResponde con los datos cuando puedas."
+
+                    enviar_mensaje(numero, follow_up, config)
+                    registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
+
+                    app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
             return True
