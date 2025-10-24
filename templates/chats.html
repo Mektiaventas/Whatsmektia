@@ -358,54 +358,54 @@ let aliasTimers = new Map();
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado - inicializando componentes');
-    enhanceAliasButtons();
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM cargado - inicializando componentes');
+        enhanceAliasButtons();
 
-    // Guarded init for setupEmojiPicker to avoid "setupEmojiPicker is not defined"
-    try {
-        if (typeof setupEmojiPicker === 'function') {
-            setupEmojiPicker();
-        } else {
-            // fallback: poll briefly in case the function is defined later during parsing
-            const __emojiInitInterval = setInterval(() => {
-                if (typeof setupEmojiPicker === 'function') {
-                    clearInterval(__emojiInitInterval);
-                    setupEmojiPicker();
+        // Guarded init for setupEmojiPicker to avoid "setupEmojiPicker is not defined"
+        try {
+            if (typeof setupEmojiPicker === 'function') {
+                setupEmojiPicker();
+            } else {
+                // fallback: poll briefly in case the function is defined later during parsing
+                const __emojiInitInterval = setInterval(() => {
+                    if (typeof setupEmojiPicker === 'function') {
+                        clearInterval(__emojiInitInterval);
+                        setupEmojiPicker();
+                    }
+                }, 50);
+                // safety timeout to avoid infinite polling
+                setTimeout(() => clearInterval(__emojiInitInterval), 3000);
+            }
+        } catch (err) {
+            console.error('Error initializing emoji picker:', err);
+        }
+
+        // Start automatic chat-list refresh
+        if (document.querySelector('.chat-items')) {
+            actualizarListaChats(); // initial load
+            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+        }
+
+        // Start polling messages for selected chat
+        if (selectedChatId) {
+            initSelectedMessagesPolling();
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                chatAutoRefresh = false;
+            } else {
+                chatAutoRefresh = true;
+                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                    chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
                 }
-            }, 50);
-            // safety timeout to avoid infinite polling
-            setTimeout(() => clearInterval(__emojiInitInterval), 3000);
-        }
-    } catch (err) {
-        console.error('Error initializing emoji picker:', err);
-    }
-
-    // Start automatic chat-list refresh
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats(); // initial load
-        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-    }
-
-    // Start polling messages for selected chat
-    if (selectedChatId) {
-        initSelectedMessagesPolling();
-    }
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            chatAutoRefresh = false;
-        } else {
-            chatAutoRefresh = true;
-            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+                if (selectedChatId && !messagesIntervalHandle) {
+                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
+                }
             }
-            if (selectedChatId && !messagesIntervalHandle) {
-                messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
-            }
-        }
+        });
     });
-});
 
 /* ===================== SMALL HELPER: coalesce ===================== */
 function coalesce(...args) {
@@ -449,13 +449,7 @@ function actualizarIncrementalChats(chats) {
             }
         } else {
             const tmp = document.createElement('div');
-
-            // Safe check for optional global builder function
-            const hasBuilder = (typeof crearNuevoChatHTML === 'function');
-
-            tmp.innerHTML = hasBuilder
-                ? crearNuevoChatHTML(chat)
-                : `
+            tmp.innerHTML = crearNuevoChatHTML ? crearNuevoChatHTML(chat) : `
                 <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                     <div class="card-content">
                         <div class="card-title-row">
@@ -471,9 +465,7 @@ function actualizarIncrementalChats(chats) {
                         <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                     </div>
                 </a>`;
-
             const el = tmp.firstElementChild;
-            if (!el) return; // guard against builder returning invalid HTML
             container.insertBefore(el, container.firstElementChild);
             const editBtn = el.querySelector('.edit-alias-btn');
             if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
