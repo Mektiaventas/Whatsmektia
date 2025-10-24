@@ -65,14 +65,14 @@
         line-height: 1;
     }
 
-    .add-chat-btn:hover {
-        background: #1976d2;
-    }
+        .add-chat-btn:hover {
+            background: #1976d2;
+        }
 
     /* Icono de columna y selector */
     .col-icon {
-        width: 3px;
-        height: 3px;
+        width: 18px;
+        height: 18px;
         margin-right: 6px;
         cursor: pointer;
         border-radius: 4px;
@@ -93,8 +93,8 @@
     }
 
         .icon-picker button {
-            width: 16px;
-            height: 16px;
+            width: 32px;
+            height: 32px;
             margin: 4px;
             font-size: 18px;
             border: none;
@@ -106,6 +106,130 @@
             .icon-picker button:hover {
                 background: #2b3440;
             }
+
+    /* =========================
+       COMPACT/OVERRIDES FOR KANBAN
+       ========================= */
+    /* smaller overall typography for kanban area */
+    .kanban-board,
+    .kanban-column,
+    .kanban-card,
+    .card-content {
+        font-size: 13px; /* slightly smaller base */
+    }
+
+    /* make column icon about half size (override previous) */
+    .col-icon {
+        width: 9px !important;
+        height: 9px !important;
+        padding: 1px !important;
+        background: transparent !important;
+    }
+
+    /* avatar inside card: reduce to ~50% of typical size */
+    .card-avatar {
+        width: 20px !important;
+        height: 20px !important;
+        border-radius: 6px !important;
+        object-fit: cover !important;
+        margin-right: 8px;
+        flex: 0 0 auto;
+    }
+
+    /* title / alias smaller and tighter */
+    .card-title-row .alias-view {
+        font-size: 0.92rem;
+        font-weight: 600;
+        line-height: 1;
+        display: inline-block;
+        vertical-align: middle;
+        max-width: calc(100% - 90px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    /* meta row smaller and muted */
+    .card-meta-row,
+    .card-meta-row span {
+        font-size: 0.72rem;
+        color: #666;
+        line-height: 1;
+    }
+
+    /* ensure edit button smaller */
+    .edit-alias-btn {
+        font-size: 12px;
+        padding: 2px 6px;
+        margin-left: 6px;
+    }
+
+    /* message: single line only, ellipsis */
+    .card-msg {
+        font-size: 0.82rem;
+        color: #333;
+        margin-top: 4px;
+        /* single line clamp */
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: normal;
+    }
+
+    /* reduce spacing inside card for compact list */
+    .card-content {
+        padding: 6px 8px;
+        gap: 4px;
+    }
+
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    /* shrink unread badge */
+    .card-unread {
+        font-size: 0.7rem;
+        padding: 2px 6px;
+        border-radius: 999px;
+    }
+
+    /* tweak delete button size */
+    .delete-col-btn {
+        font-size: 16px;
+        line-height: 1;
+        padding: 0 6px;
+    }
+
+    /* make kanban cards slightly more compact vertically */
+    .kanban-card {
+        padding: 0;
+        margin-bottom: 8px;
+    }
+
+    /* responsive: keep compactness on small screens */
+    @media (max-width: 768px) {
+        .card-avatar {
+            width: 18px !important;
+            height: 18px !important;
+        }
+
+        .col-icon {
+            width: 8px !important;
+            height: 8px !important;
+        }
+
+        .card-title-row .alias-view {
+            font-size: 0.9rem;
+        }
+
+        .card-msg {
+            font-size: 0.8rem;
+        }
+    }
 </style>
 
 <div id="kanban-board" class="kanban-board">
@@ -139,7 +263,7 @@
                         {% endif %}
                         <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
                         <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="50" style="width:110px;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
                         </span>
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
@@ -423,7 +547,7 @@
 
     function actualizarChatExistente(elemento, chat) {
         const aliasView = elemento.querySelector('.alias-view');
-        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+        if (aliasView and aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
 
         const timeElement = elemento.querySelector('.card-time');
         if (timeElement && chat.ultima_fecha) {
