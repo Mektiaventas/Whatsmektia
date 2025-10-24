@@ -8463,26 +8463,19 @@ def terms_of_service():
 def data_deletion():
         return render_template('data_deletion.html')
 
+@app.route('/dashboard/conversaciones-data')
 def dashboard_conversaciones_data():
     """
     Devuelve JSON con:
     - plan_info (si el usuario está autenticado)
     - active_count: número de chats con actividad en las últimas 24h
-    - daily labels/values: número de conversaciones iniciadas por día (period week/month/3months)
+    - daily labels/values: número de conversaciones iniciadas por día (period week/month)
     """
     try:
         config = obtener_configuracion_por_host()
         period = request.args.get('period', 'week')
         now = datetime.now()
-
-        # Support: week, month (30d), 3months (90d), year (handled elsewhere if needed)
-        if period == 'month':
-            start = now - timedelta(days=30)
-        elif period in ('3months', 'quarter', 'trimester'):
-            start = now - timedelta(days=90)
-        else:
-            # default to 7 days for 'week' or unknown values
-            start = now - timedelta(days=7)
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
