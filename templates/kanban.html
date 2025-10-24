@@ -259,7 +259,7 @@
                         </div>
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
-
+                        
                         <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
                         <span class="alias-edit" style="display:none;">
                             <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
@@ -276,14 +276,11 @@
                             {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
                             {% endif %}
                         </span>
-
-                    </div>
-                    <div class="card-msg">
-                        {{ chat.ultimo_mensaje or "&nbsp;" }}{% if chat.sin_leer > 0 %}
+                        {% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
-                    
+                    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
                 </div>
             </a>
             {% endfor %}
@@ -308,10 +305,39 @@
         bindDeleteButtons();
         initRenameHandlers();
         bindIconPicker();
+        bindMarkReadOnClick();
         startAutoRefresh();
         inicializarSortable();
         document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
     });
+
+    function bindMarkReadOnClick() {
+                document.addEventListener('click', (e) => {
+                        try {
+                                const a = e.target.closest && e.target.closest('.kanban-chat-link');
+                                if (!a) return;
+                                // permitir abrir en nueva pestaña / modificar con teclas modificadoras
+                                    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                                e.preventDefault();
+                                const numero = a.dataset.chatNum;
+                                if (!numero) {
+                                        window.location = a.href;
+                                        return;
+                                    }
+                                // Fire-and-forget: marcar mensajes como leídos antes de navegar.
+                                   fetch(`/chats/${encodeURIComponent(numero)}/marcar-leido`, { method: 'POST' })
+                                        .catch(err => console.warn('Error marcando como leído:', err))
+                                        .finally(() => {
+                                                // navegar al href aunque la petición falle o tarde
+                                                    window.location = a.href;
+                                            });
+                           } catch (err) {
+                                    // en caso de error, fallback a navegación normal
+                                        const anchor = e.target.closest && e.target.closest('a');
+                                    if (anchor && anchor.href) window.location = anchor.href;
+                                }
+                   }, { passive: true });
+            }
 
     function bindAddColumnButtons() {
         document.querySelectorAll('.add-chat-btn').forEach(btn => {
