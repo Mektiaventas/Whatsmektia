@@ -6512,7 +6512,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # GUARDAR CITA
         if save_cita or intent == "COMPRAR_PRODUCTO":
             try:
+                # Ensure we have a mutable dict to work with (IA may return null)
+                if not isinstance(save_cita, dict):
+                    save_cita = {}
+
+                # Always ensure phone is present
                 save_cita.setdefault('telefono', numero)
+
                 info_cita = {
                     'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
                     'fecha_sugerida': save_cita.get('fecha_sugerida'),
@@ -6523,11 +6529,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 }
 
                 # Validate before saving
-                completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                try:
+                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                except Exception as _e:
+                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
+                    completos, faltantes = False, ['validacion_error']
+
                 if not completos:
                     app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
                     try:
-                        # Try to enrich using message + historial extractor
                         enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
                         if enriquecido and isinstance(enriquecido, dict):
                             # Merge only missing fields (do not overwrite existing valid values)
@@ -6539,7 +6549,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                                 info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
                             if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
                                 info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
-                            # also merge detalles_servicio if present
                             if enriquecido.get('detalles_servicio'):
                                 info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
                             app.logger.info(f"🔁 Info cita enriquecida: {json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']})}")
@@ -6557,13 +6566,11 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
-                    # guardar_cita devolvió None -> preparar y enviar follow-up pidiendo los datos faltantes
                     try:
                         completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
                     except Exception:
-                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']  # fallback
+                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
 
-                    # Build a friendly prompt based on missing fields
                     preguntas = []
                     if 'servicio' in (faltantes2 or []):
                         preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
