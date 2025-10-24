@@ -6600,9 +6600,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            if not sent:
+                # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            else:
+                app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
