@@ -368,7 +368,98 @@ let messagesIntervalHandle = null;
         if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
     }
 
+        function setupEmojiPicker() {
+            const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
+            const trigger = document.getElementById('emoji-pick-btn');
+            const picker = document.getElementById('emoji-picker-list');
+            const input = document.getElementById('mensaje-texto');
+
+            console.log('Configurando emoji picker...');
+            console.log('Trigger:', trigger);
+            console.log('Picker:', picker);
+            console.log('Input:', input);
+
+            if (!trigger || !picker || !input) {
+                console.error('Elementos necesarios no encontrados:', {
+                    trigger: !!trigger,
+                    picker: !!picker,
+                    input: !!input
+                });
+                return;
+            }
+
+            // Construir el picker si no está construido
+            if (!picker.dataset.built) {
+                console.log('Construyendo picker de emojis...');
+                picker.innerHTML = emojis.map(emoji =>
+                    `<button type="button" class="emoji-option" data-emoji="${emoji}" style="font-size: 20px; background: none; border: none; cursor: pointer; padding: 5px; margin: 2px; border-radius: 4px; transition: background-color 0.2s;">${emoji}</button>`
+                ).join('');
+                picker.dataset.built = 'true';
+            }
+
+            // Mostrar/ocultar picker
+            trigger.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                console.log('Botón de emoji clickeado');
+
+                const isVisible = picker.style.display === 'block';
+                picker.style.display = isVisible ? 'none' : 'block';
+                console.log('Picker visible:', !isVisible);
+
+                // Posicionar el picker
+                if (!isVisible) {
+                    const rect = trigger.getBoundingClientRect();
+                    const formRect = trigger.closest('.reply-form').getBoundingClientRect();
+
+                    picker.style.bottom = '50px';
+                    picker.style.left = '10px';
+                    picker.style.top = 'auto';
+                    picker.style.right = 'auto';
+                }
+            });
+
+            // Seleccionar emoji
+            picker.addEventListener('click', function (e) {
+                const emojiBtn = e.target.closest('.emoji-option');
+                if (emojiBtn && input) {
+                    const emoji = emojiBtn.dataset.emoji;
+                    const start = input.selectionStart;
+                    const end = input.selectionEnd;
+                    const value = input.value;
+
+                    console.log('Emoji seleccionado:', emoji);
+
+                    input.value = value.substring(0, start) + emoji + value.substring(end);
+                    input.focus();
+                    input.selectionStart = input.selectionEnd = start + emoji.length;
+
+                    // Ocultar picker después de seleccionar
+                    picker.style.display = 'none';
+                }
+            });
+
+            // Ocultar picker al hacer clic fuera
+            document.addEventListener('click', function (e) {
+                if (picker.style.display === 'block' &&
+                    !trigger.contains(e.target) &&
+                    !picker.contains(e.target)) {
+                    console.log('Ocultando picker (click fuera)');
+                    picker.style.display = 'none';
+                }
+            });
+
+            // Ocultar con Escape
+            document.addEventListener('keydown', function (e) {
+                if (e.key === 'Escape' && picker.style.display === 'block') {
+                    console.log('Ocultando picker (Escape)');
+                    picker.style.display = 'none';
+                }
+            });
+
+            console.log('Emoji picker configurado correctamente');
+        }
 
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
@@ -670,98 +761,7 @@ function activarEdicionAlias(parent) {
     input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
 }
 
-function setupEmojiPicker() {
-    const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
-    const trigger = document.getElementById('emoji-pick-btn');
-    const picker = document.getElementById('emoji-picker-list');
-    const input = document.getElementById('mensaje-texto');
-
-    console.log('Configurando emoji picker...');
-    console.log('Trigger:', trigger);
-    console.log('Picker:', picker);
-    console.log('Input:', input);
-
-    if (!trigger || !picker || !input) {
-        console.error('Elementos necesarios no encontrados:', {
-            trigger: !!trigger,
-            picker: !!picker,
-            input: !!input
-        });
-        return;
-    }
-
-    // Construir el picker si no está construido
-    if (!picker.dataset.built) {
-        console.log('Construyendo picker de emojis...');
-        picker.innerHTML = emojis.map(emoji =>
-            `<button type="button" class="emoji-option" data-emoji="${emoji}" style="font-size: 20px; background: none; border: none; cursor: pointer; padding: 5px; margin: 2px; border-radius: 4px; transition: background-color 0.2s;">${emoji}</button>`
-        ).join('');
-        picker.dataset.built = 'true';
-    }
-
-    // Mostrar/ocultar picker
-    trigger.addEventListener('click', function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('Botón de emoji clickeado');
-
-        const isVisible = picker.style.display === 'block';
-        picker.style.display = isVisible ? 'none' : 'block';
-        console.log('Picker visible:', !isVisible);
-
-        // Posicionar el picker
-        if (!isVisible) {
-            const rect = trigger.getBoundingClientRect();
-            const formRect = trigger.closest('.reply-form').getBoundingClientRect();
-
-            picker.style.bottom = '50px';
-            picker.style.left = '10px';
-            picker.style.top = 'auto';
-            picker.style.right = 'auto';
-        }
-    });
-
-    // Seleccionar emoji
-    picker.addEventListener('click', function (e) {
-        const emojiBtn = e.target.closest('.emoji-option');
-        if (emojiBtn && input) {
-            const emoji = emojiBtn.dataset.emoji;
-            const start = input.selectionStart;
-            const end = input.selectionEnd;
-            const value = input.value;
-
-            console.log('Emoji seleccionado:', emoji);
-
-            input.value = value.substring(0, start) + emoji + value.substring(end);
-            input.focus();
-            input.selectionStart = input.selectionEnd = start + emoji.length;
-
-            // Ocultar picker después de seleccionar
-            picker.style.display = 'none';
-        }
-    });
-
-    // Ocultar picker al hacer clic fuera
-    document.addEventListener('click', function (e) {
-        if (picker.style.display === 'block' &&
-            !trigger.contains(e.target) &&
-            !picker.contains(e.target)) {
-            console.log('Ocultando picker (click fuera)');
-            picker.style.display = 'none';
-        }
-    });
-
-    // Ocultar con Escape
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && picker.style.display === 'block') {
-            console.log('Ocultando picker (Escape)');
-            picker.style.display = 'none';
-        }
-    });
-
-    console.log('Emoji picker configurado correctamente');
-}
 
 /* Audio helpers unchanged */
 function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
