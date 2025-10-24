@@ -8480,7 +8480,7 @@ def dashboard_conversaciones_data():
         cursor = conn.cursor()
 
         # Special case: user asked previously '3months' -> now return up to last 90 days,
-        # ending on the last day that actually has data.
+        # but start the series at the first day that actually has data within that window.
         if period == '3months':
             # Find last day with data
             try:
@@ -8493,7 +8493,6 @@ def dashboard_conversaciones_data():
                     if isinstance(last_day, str):
                         last_day = datetime.strptime(last_day, "%Y-%m-%d").date()
                     else:
-                        # if it's a datetime/date-like from connector
                         try:
                             last_day = last_day.date() if hasattr(last_day, 'date') else last_day
                         except Exception:
@@ -8501,11 +8500,10 @@ def dashboard_conversaciones_data():
                 else:
                     last_day = datetime.now().date()
             except Exception:
-                # fallback to today
                 last_day = datetime.now().date()
 
-            # Start = last_day - 89 days (so inclusive range is up to 90 days)
-            start_date = last_day - timedelta(days=89)
+            # Window lower bound (maximum 90 days back)
+            window_start = last_day - timedelta(days=89)
 
             # Query: same "conversation started" definition, limited to the date range
             sql = """
@@ -8521,7 +8519,7 @@ def dashboard_conversaciones_data():
                 GROUP BY DATE(c1.timestamp)
                 ORDER BY DATE(c1.timestamp)
             """
-            cursor.execute(sql, (start_date, last_day))
+            cursor.execute(sql, (window_start, last_day))
             rows = cursor.fetchall()
 
             # Map counts by date string 'YYYY-MM-DD'
@@ -8538,14 +8536,28 @@ def dashboard_conversaciones_data():
                 except Exception:
                     continue
 
-            # Build labels for the full window (oldest -> newest)
-            labels = []
-            values = []
-            for i in range(0, 90):
-                d = start_date + timedelta(days=i)
-                key = d.strftime('%Y-%m-%d')
-                labels.append(key)
-                values.append(counts_map.get(key, 0))
+            # If there are no days with data in the window, return an empty (or single-day) series
+            if not counts_map:
+                labels = []
+                values = []
+            else:
+                # Find earliest date within counts_map (first day that has data)
+                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
+                earliest_with_data = min(parsed_dates)
+
+                # Ensure earliest_with_data is not earlier than window_start
+                if earliest_with_data < window_start:
+                    earliest_with_data = window_start
+
+                # Build labels from earliest_with_data .. last_day (inclusive)
+                labels = []
+                values = []
+                days_range = (last_day - earliest_with_data).days + 1
+                for i in range(days_range):
+                    d = earliest_with_data + timedelta(days=i)
+                    key = d.strftime('%Y-%m-%d')
+                    labels.append(key)
+                    values.append(counts_map.get(key, 0))
 
             # Chats activos: distinct numero with message in last 24h
             cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
