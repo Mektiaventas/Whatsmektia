@@ -8901,44 +8901,72 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
     # No emitas ningún evento aquí
 
 def actualizar_kanban_inmediato(numero, config=None):
-    """Updates the Kanban board immediately when a message is received"""
+    """Updates the Kanban board immediately when a message is received.
+
+    Behavior:
+    - If there are any incoming messages without respuesta (respuesta IS NULL)
+      for this numero, set columna = 1 ("Nuevos").
+    - Otherwise fall back to previous logic (existing conversation -> columna 2).
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
-        # Ensure contact exists in chat_meta
+        # Ensure chat_meta exists
         meta = obtener_chat_meta(numero, config)
         if not meta:
             inicializar_chat_meta(numero, config)
             app.logger.info(f"✅ Chat meta initialized for {numero}")
-        
-        # Determine appropriate column based on message history
-        historial = obtener_historial(numero, limite=2, config=config)
-        
-        if not historial:
-            # First message ever - put in "Nuevos"
-            nueva_columna = 1
-            app.logger.info(f"📊 First message from {numero} - moving to column 1 (Nuevos)")
-        else:
-            # Existing conversation - put in "En Conversación"
-            nueva_columna = 2
-            app.logger.info(f"📊 New message from {numero} - moving to column 2 (En Conversación)")
-        
-        # Update the database
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # Count unread incoming messages (respuesta IS NULL)
         cursor.execute("""
-            UPDATE chat_meta SET columna_id = %s
-            WHERE numero = %s
-        """, (nueva_columna, numero))
+            SELECT COUNT(*) FROM conversaciones
+            WHERE numero = %s AND respuesta IS NULL
+        """, (numero,))
+        row = cursor.fetchone()
+        sin_leer = int(row[0]) if row and row[0] is not None else 0
+
+        # Decide target column: if any unread -> Nuevos (1). Else En Conversación (2)
+        if sin_leer > 0:
+            nueva_columna = 1
+            app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+        else:
+            # Existing conversation heuristic: put in "En Conversación"
+            # If there's no history at all, still default to Nuevos (1)
+            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
+            total_msgs = int(cursor.fetchone()[0] or 0)
+            if total_msgs == 0:
+                nueva_columna = 1
+                app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
+            else:
+                nueva_columna = 2
+                app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+
+        # Persist update to chat_meta
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id), fecha_actualizacion = CURRENT_TIMESTAMP
+        """, (numero, nueva_columna))
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"✅ Kanban updated immediately for {numero} to column {nueva_columna}")
         return True
     except Exception as e:
         app.logger.error(f"❌ Error updating Kanban immediately: {e}")
+        try:
+            cursor.close()
+        except:
+            pass
+        try:
+            conn.close()
+        except:
+            pass
         return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
