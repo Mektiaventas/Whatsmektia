@@ -6420,7 +6420,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6510,7 +6510,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
         # GUARDAR CITA
-        if save_cita:
+        if save_cita or intent == "COMPRAR_PRODUCTO":
             try:
                 save_cita.setdefault('telefono', numero)
                 info_cita = {
