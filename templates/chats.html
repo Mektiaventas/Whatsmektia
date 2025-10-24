@@ -363,10 +363,10 @@ let messagesIntervalHandle = null;
     setupEmojiPicker();
 
     // Start automatic chat-list refresh
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats(); // initial load
-        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-    }
+    //if (document.querySelector('.chat-items')) {
+    //    actualizarListaChats(); // initial load
+    //    if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+    //}
 
         function setupEmojiPicker() {
             const emojis = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
@@ -552,23 +552,6 @@ function actualizarChatExistente(elemento, chat) {
 }
 
 /* ===================== MESSAGES: polling for USER messages with dedupe ===================== */
-
-function initSelectedMessagesPolling() {
-    // compute lastMessageId from existing DOM nodes robustly
-    const nodes = Array.from(document.querySelectorAll('#msgs .msg-box[data-msg-id]'));
-    lastMessageIdForSelected = nodes.reduce((max, n) => {
-        const v = Number(n.dataset.msgId) || 0;
-        return v > max ? v : max;
-    }, 0);
-
-    // start interval
-    if (!messagesIntervalHandle) {
-        messagesIntervalHandle = setInterval(() => {
-            if (!selectedChatId || document.hidden) return;
-            pollSelectedMessages();
-        }, messagePollIntervalMs);
-    }
-}
 
 function pollSelectedMessages() {
     const after = Number(lastMessageIdForSelected) || 0;
