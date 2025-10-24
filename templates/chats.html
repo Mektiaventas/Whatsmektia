@@ -744,14 +744,35 @@ function seekAudio(id, progressBar, evt) {
     document.addEventListener('DOMContentLoaded', () => {
         console.log('DOM cargado - inicializando componentes');
         enhanceAliasButtons();
-        setupEmojiPicker();
 
-        // Start automatic chat-list refresh
+        // Guarded init for setupEmojiPicker (llama inmediatamente si ya existe,
+        // si no, espera brevemente hasta 3s a que se defina).
+        try {
+            if (typeof setupEmojiPicker === 'function') {
+                setupEmojiPicker();
+            } else {
+                const __emojiInitInterval = setInterval(() => {
+                    if (typeof setupEmojiPicker === 'function') {
+                        clearInterval(__emojiInitInterval);
+                        setupEmojiPicker();
+                    }
+                }, 50);
+                setTimeout(() => clearInterval(__emojiInitInterval), 3000);
+            }
+        } catch (err) {
+            console.error('Error initializing emoji picker:', err);
+        }
+
+        // Start automatic chat-list refresh (opcional: comentar si no quieres auto-refresh)
         if (document.querySelector('.chat-items')) {
             actualizarListaChats(); // initial load
             if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
         }
 
+        // Start polling messages for selected chat only if selectedChatId is set
+        if (selectedChatId) {
+            initSelectedMessagesPolling();
+        }
 
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
