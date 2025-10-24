@@ -304,12 +304,8 @@
             };
         }
 
-        // Bind handlers after DOM is ready
-        document.addEventListener('DOMContentLoaded', () => {
-            const container = document.getElementById('mensajes-container');
-            initLastMessageFromDOM(container);
-
-            // Attach handlers to edit buttons that are already in DOM on load
+        // Bind helpers for edit buttons (call immediately and on DOMContentLoaded to avoid timing issues)
+        function bindEditAliasButtons() {
             try {
                 document.querySelectorAll('.edit-alias-btn').forEach(btn => {
                     if (btn.dataset.boundAlias === '1') return;
@@ -325,6 +321,17 @@
             } catch (err) {
                 console.error('Error binding edit-alias-btn handlers:', err);
             }
+        }
+
+        // attempt binding now (covers case where DOMContentLoaded already fired)
+        bindEditAliasButtons();
+
+        // Bind handlers after DOM is ready as well
+        document.addEventListener('DOMContentLoaded', () => {
+            const container = document.getElementById('mensajes-container');
+            initLastMessageFromDOM(container);
+
+            bindEditAliasButtons();
 
             // Start incremental refresh loop that uses actualizarMensajes
             setInterval(() => {
