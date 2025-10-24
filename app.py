@@ -6370,6 +6370,132 @@ def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=
         app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
         return False
 
+def cerrar_venta(numero, items, config=None, texto_original=None, incoming_saved=False):
+    """
+    Inicia / cierra la venta propuesta por chat.
+    - numero: número del cliente (string)
+    - items: lista de dicts [{'sku'|'query': '...', 'cantidad': N}, ...]
+      - Se intenta resolver cada item por SKU/modelo/servicio.
+    - config: optional tenant config
+    - texto_original: mensaje del usuario que inició la compra (opcional, para tracking)
+    - incoming_saved: si True, registrar_respuesta_bot usará actualizar_respuesta()
+
+    Comportamiento:
+    1) Resuelve cada item a producto en DB y obtiene precio unitario (precio_menudeo, precio, precio_mayoreo o costo).
+    2) Calcula subtotal por línea y total general (Decimal).
+    3) Crea un registro provisional en estados_conversacion con contexto "EN_VENTA".
+    4) Envía al cliente un resumen + pregunta: ¿efectivo/transferencia? ¿domicilio/recoger?
+    5) Devuelve el texto enviado.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        from decimal import Decimal, InvalidOperation
+
+        if not items or not isinstance(items, (list, tuple)):
+            msg = "No detecté los productos. ¿Puedes indicar el SKU o nombre y la cantidad? Ej: '2 x SKU123' o '1 silla escolar'."
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", msg, config, incoming_saved=incoming_saved)
+            return msg
+
+        lineas = []
+        total = Decimal('0.00')
+
+        for it in items:
+            qty = int(it.get('cantidad') or it.get('qty') or 1)
+            query = (it.get('sku') or it.get('query') or it.get('modelo') or it.get('servicio') or '').strip()
+            producto = None
+            if query:
+                try:
+                    producto = obtener_producto_por_sku_o_nombre(query, config)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ obtener_producto_por_sku_o_nombre falló para '{query}': {e}")
+                    producto = None
+
+            # Fallback: if no product found, push as free-text line with price 0
+            precio_unit = Decimal('0.00')
+            nombre = query or 'Producto sin identificar'
+            sku = None
+            if producto:
+                nombre = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or nombre)
+                sku = (producto.get('sku') or '').strip() or None
+                # Prefer price fields in order
+                for key in ('precio_menudeo', 'precio', 'precio_mayoreo', 'costo'):
+                    val = producto.get(key)
+                    if val not in (None, ''):
+                        try:
+                            cleaned = re.sub(r'[^\d.]', '', str(val))
+                            precio_unit = Decimal(cleaned) if cleaned else Decimal('0.00')
+                            break
+                        except (InvalidOperation, Exception):
+                            continue
+
+            linea_total = (precio_unit * Decimal(qty)).quantize(Decimal('0.01'))
+            total += linea_total
+            lineas.append({
+                'nombre': str(nombre),
+                'sku': sku,
+                'cantidad': qty,
+                'precio_unit': f"{precio_unit:.2f}",
+                'line_total': f"{linea_total:.2f}"
+            })
+
+        total = total.quantize(Decimal('0.01'))
+
+        # Preparar provisional de venta (similar estructura a info_cita)
+        detalles = {
+            'items': lineas,
+            'total': f"{total:.2f}",
+            'moneda': 'MXN'
+        }
+        provisional = {
+            'venta_provisional': {
+                'detalle': detalles,
+                'telefono': numero
+            },
+            'timestamp': datetime.now(tz_mx).isoformat()
+        }
+
+        # Guardar estado provisional para continuar la conversación (EN_VENTA)
+        try:
+            actualizar_estado_conversacion(numero, "EN_VENTA", "venta_provisional", provisional, config)
+            app.logger.info(f"🔁 Venta provisional guardada para {numero}: total={total}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo guardar estado provisional de venta para {numero}: {e}")
+
+        # Construir mensaje al cliente con resumen y preguntas (pago / entrega)
+        líneas_texto = ["🛒 Resumen de tu pedido:"]
+        for ln in lineas:
+            qty = ln['cantidad']
+            name = ln['nombre']
+            lt = ln['line_total']
+            líneas_texto.append(f"• {qty} x {name} — ${lt}")
+
+        líneas_texto.append(f"\n💰 Total a pagar: ${total:.2f} MXN")
+        líneas_texto.append("\n¿Cómo prefieres pagar? Responde 'efectivo' (pago en entrega) o 'transferencia' (te pediré datos bancarios).")
+        líneas_texto.append("¿Cómo recibirás tu pedido? Responde 'domicilio' (lo llevamos) o 'recoger' (pasas por el producto).")
+        líneas_texto.append("\nPuedes responder ambas en una sola línea, por ejemplo: 'transferencia, domicilio'.")
+
+        mensaje_cliente = "\n".join(líneas_texto)
+
+        enviar_mensaje(numero, mensaje_cliente, config)
+        registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", mensaje_cliente, config, incoming_saved=incoming_saved)
+
+        return mensaje_cliente
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en cerrar_venta para {numero}: {e}")
+        app.logger.error(traceback.format_exc())
+        # Notificar al cliente de forma segura
+        msg = "Lo siento, hubo un error procesando tu pedido. Por favor intenta de nuevo en un momento."
+        try:
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra error]", msg, config, incoming_saved=incoming_saved)
+        except Exception:
+            pass
+        return None
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
