@@ -6522,6 +6522,34 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     'telefono': save_cita.get('telefono'),
                     'detalles_servicio': save_cita.get('detalles_servicio') or {}
                 }
+
+                # Validate before saving
+                completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                if not completos:
+                    app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
+                    try:
+                        # Try to enrich using message + historial extractor
+                        enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
+                        if enriquecido and isinstance(enriquecido, dict):
+                            # Merge only missing fields (do not overwrite existing valid values)
+                            if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
+                                info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
+                            if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
+                                info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
+                            if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
+                                info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
+                            if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
+                                info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
+                            # also merge detalles_servicio if present
+                            if enriquecido.get('detalles_servicio'):
+                                info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
+                            app.logger.info(f"🔁 Info cita enriquecida: {json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']})}")
+                        else:
+                            app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
+                    except Exception as _e:
+                        app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
+
+                # Final attempt to save (may still return None -> handled as before)
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")

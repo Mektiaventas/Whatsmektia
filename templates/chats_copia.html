@@ -1,0 +1,840 @@
+﻿{% extends "base.html" %}
+{% block title %}Conversaciones{% endblock %}
+
+{% block content %}
+{% set host = request.host.split(':')[0] %}
+{% set parts = host.split('.') %}
+{% set subdomain = '' %}
+{% if parts|length > 2 %}
+    {% set first = parts[0].lower() %}
+    {% if first.startswith('www') %}
+        {% set subdomain = parts[1] %}
+    {% else %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% elif parts|length == 2 %}
+    {% set first = parts[0].lower() %}
+    {% if not first.startswith('www') %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% else %}
+    {% set subdomain = '' %}
+{% endif %}
+{% set negocio_nombre = subdomain|capitalize if subdomain else (tenant_config.negocio_nombre or 'Mektia') %}
+
+<div class="chat-list-header">
+    <h2>Conversaciones - {{ negocio_nombre }}</h2>
+</div>
+<div class="chat-layout-v2">
+    <!-- Lado izquierdo: Lista -->
+    <aside class="chat-list-v2">
+        <div class="chat-list-tools">
+            <button class="add-contact-btn">+ Agregar Contacto</button>
+            <input type="text" placeholder="Buscar chats..." class="search-input">
+        </div>
+
+        <div class="chat-items">
+            {% for chat in chats %}
+            <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
+                        </div>
+                        {% set bandera = chat.numero | bandera %}
+                        {% if bandera %}
+                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                        {% endif %}
+                        <span class="alias-view" data-num="{{ chat.numero }}">
+                            {{ chat.nombre_mostrado }}
+                        </span>
+                        <span class="alias-edit" style="display:none;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                        </span>
+                        {% if is_admin%}
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
+                            ✏️
+                        </button>
+                        {% endif %}
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-num">{{ chat.numero }}</span>
+                        <span class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha|format_time_24h }}
+                            {% endif %}
+                        </span>
+                    </div>
+                    <div class="card-msg">
+                        {% if chat.ultimo_mensaje %}
+                        {% if chat.tipo_mensaje == 'imagen' %}
+                        📷 Imagen
+                        {% else %}
+                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+                        {% endif %}
+                        {% else %}
+                        Sin mensajes
+                        {% endif %}
+                    </div>
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </aside>
+
+    <!-- Centro: Mensajes -->
+    <section class="chat-panel-v2">
+        {% if selected %}
+        <div class="chat-panel-header" data-num="{{ selected }}">
+            <div class="chat-header-info">
+                <div class="chat-title">
+                    <span class="alias-view">
+                        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
+                    </span>
+                    <span class="alias-edit" style="display:none;">
+                        {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
+                        <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}"
+                               data-num="{{ selected }}" maxlength="100">
+                    </span>
+                    {% if is_admin %}
+                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
+                        ✏️
+                    </button>
+                    {% endif %}
+                </div>
+                <span class="chat-number">{{ selected }}</span>
+            </div>
+
+            <div class="chat-controls">
+                <span class="badge {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}bg-success{% else %}bg-warning{% endif %}">
+                    {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                    🤖 IA ACTIVADA
+                    {% else %}
+                    👤 MODO MANUAL
+                    {% endif %}
+                </span>
+                <form action="/toggle_ai/{{ selected }}" method="POST">
+                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'off' }}">
+                        IA {{ 'ON' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'OFF' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="chat-panel-header">
+            <span>Selecciona un chat</span>
+        </div>
+        {% endif %}
+        <div class="msgs-wrap-v2" id="msgs">
+            {% if mensajes %}
+            {% for msg in mensajes %}
+            {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
+                <div class="message-content">
+                    {% if msg.es_imagen and msg.imagen_url %}
+                    <div class="image-message">
+                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
+                        {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                        <div class="image-caption">
+                            {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                            <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+                        {% if msg.transcripcion_audio %}
+                        <div class="audio-transcription">
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                        </div>
+                        {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+                        <div class="audio-transcription">
+                            <strong>Mensaje:</strong> {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="text-message">
+                        {{ msg.mensaje }}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+            </div>
+            {% endif %}
+
+            {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+            <div class="msg-box msg-manual">
+                <div class="message-content">
+                    <div class="manual-indicator">📤 Mensaje enviado:</div>
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
+                </div>
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+            </div>
+            {% endif %}
+
+            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-ai">
+                <div class="message-content">
+                    <div class="text-message">
+                        {{ msg.respuesta }}
+                    </div>
+                </div>
+                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            <div class="no-chat-selected">
+                <p>Selecciona un chat para ver mensajes.</p>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if selected %}
+        {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
+        <form method="POST" action="/send-manual" class="reply-form">
+            <input type="hidden" name="numero" value="{{ selected }}">
+            <div class="input-group">
+
+                <!-- botón de emoji: añadir clase coherente con CSS y mantener el id -->
+                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn">😊</button>
+
+                <!-- Emoji Picker Container (hidden by default) -->
+                <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
+                    <!-- Los emojis se llenan por JS -->
+                </div>
+                <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
+                <button type="submit" class="send-btn">Enviar</button>
+            </div>
+        </form>
+        {% else %}
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}
+        {% endif %}
+    </section>
+
+    <aside class="sidebar-right">
+        {% if selected %}
+        <div class="sidebar-section">
+            <h3>Acciones</h3>
+            {% if is_admin %}
+            <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
+                <button type="submit" class="delete-btn">
+                    🗑️ Eliminar Chat
+                </button>
+            </form>
+            {% endif %}
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Información</h3>
+            <div class="chat-info-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total mensajes:</span>
+                    <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Última actividad:</span>
+                    <span class="stat-value">
+                        {% if mensajes and mensajes[-1].timestamp %}
+                        {{ mensajes[-1].timestamp|format_time_24h }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </aside>
+</div>
+
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
+<style>
+
+    .card-avatar {
+        width: 8%;
+        height: 8%;
+    }
+
+    .card-content {
+        color: white;
+    }
+
+    .emoji-picker-list {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        min-width: 220px;
+        max-width: 320px;
+        max-height: 180px;
+        overflow-y: auto;
+        padding: 8px;
+        display: none;
+        background: white;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        position: absolute !important;
+        z-index: 1000 !important;
+        bottom: 50px;
+        left: 10px;
+    }
+
+    .emoji-pick-btn {
+        font-size: 22px;
+        margin: 2px;
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 5px;
+        border-radius: 4px;
+        transition: background-color 0.2s;
+    }
+
+
+        .emoji-pick-btn:hover {
+            background-color: #f0f0f0;
+        }
+
+    .input-group {
+        position: relative;
+        display: flex;
+        align-items: center;
+    }
+
+    .msg-manual {
+        left: 20%
+    }
+</style>
+
+<script>
+/* Small helpers */
+function coalesce(...args) {
+    for (let i = 0; i < args.length; i++) {
+        const v = args[i];
+        if (v !== undefined && v !== null) return v;
+    }
+    return null;
+}
+
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+}
+
+function truncate(str, n) {
+    if (!str) return '';
+    return str.length > n ? str.substring(0, n) + '...' : str;
+}
+
+function formatClientTime(serverTs) {
+    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+    if (isNaN(d.getTime())) d = new Date();
+    const day = d.getDate();
+    const month = d.toLocaleString('es-MX', { month: 'short' });
+    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${day}-${month} ${time}`;
+}
+
+/* State */
+let chatAutoRefresh = true;
+let refreshIntervalMs = 2000;
+let messagePollIntervalMs = 1200;
+let selectedChatId = {{ selected|tojson }}; // injected by server; may be null
+let lastChatsTimestamp = 0;
+let lastMessageIdForSelected = 0;
+let isEditingAlias = false;
+let aliasTimers = new Map();
+let chatsIntervalHandle = null;
+let messagesIntervalHandle = null;
+
+/* Deduplication set (initialized from DOM on poll init) */
+let seenMessageKeys = new Set();
+
+/* ===================== CHAT-LIST ===================== */
+
+function actualizarListaChats() {
+    if (!chatAutoRefresh) return;
+    fetch('/chats/data', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !data.chats) return;
+            const ts = Number(data.timestamp) || Date.now();
+            if (ts <= lastChatsTimestamp) return;
+            lastChatsTimestamp = ts;
+            actualizarIncrementalChats(data.chats);
+        })
+        .catch(err => console.error('Error actualizando lista de chats:', err));
+}
+
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+
+    chats.forEach(chat => {
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
+            }
+        } else {
+            const tmp = document.createElement('div');
+
+            // safe optional builder
+            const hasBuilder = typeof crearNuevoChatHTML === 'function';
+            tmp.innerHTML = hasBuilder
+                ? crearNuevoChatHTML(chat)
+                : `
+                <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                    <div class="card-content">
+                        <div class="card-title-row">
+                            <div class="card-avatar-section">
+                                <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
+                            </div>
+                            <span class="alias-view">${chat.nombre_mostrado}</span>
+                        </div>
+                        <div class="card-meta-row">
+                            <span class="card-num">${chat.numero}</span>
+                            <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
+                        </div>
+                        <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
+                    </div>
+                </a>`;
+
+            const el = tmp.firstElementChild;
+            if (!el) return;
+            container.insertBefore(el, container.firstElementChild);
+            const editBtn = el.querySelector('.edit-alias-btn');
+            if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
+        }
+    });
+
+    existing.forEach((node) => node.remove());
+}
+
+function actualizarChatExistente(elemento, chat) {
+    const aliasView = elemento.querySelector('.alias-view');
+    if (aliasView && aliasView.textContent.trim() !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+    const timeEl = elemento.querySelector('.card-time');
+    if (timeEl && chat.ultima_fecha) timeEl.textContent = formatClientTime(chat.ultima_fecha);
+    const msgEl = elemento.querySelector('.card-msg');
+    const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
+    if (msgEl && msgEl.textContent.trim() !== previewText) {
+        msgEl.textContent = previewText;
+        elemento.classList.add('new-message');
+        setTimeout(() => elemento.classList.remove('new-message'), 1200);
+    }
+}
+
+/* ===================== MESSAGES POLLING & DEDUPE ===================== */
+
+/**
+ * Build stable key for a message
+ */
+function buildMessageKeyFor(m) {
+    const id = coalesce(m.id, m[0], m['id']);
+    if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
+        return 'id:' + String(id);
+    }
+    const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+    let ts = coalesce(m.ts_ms, m.ts, 0);
+    if (!ts && m.timestamp) {
+        const parsed = Date.parse(m.timestamp);
+        ts = isNaN(parsed) ? 0 : parsed;
+    }
+    ts = Number(ts) || 0;
+    const rounded = Math.floor(ts / 1000);
+    return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
+}
+
+/**
+
+    if (!messagesIntervalHandle) {
+        messagesIntervalHandle = setInterval(() => {
+            if (!selectedChatId || document.hidden) return;
+            pollSelectedMessages();
+        }, messagePollIntervalMs);
+    }
+}
+
+/**
+ * Poll selected chat messages and append only new ones
+ */
+function pollSelectedMessages() {
+    const after = Number(lastMessageIdForSelected) || 0;
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
+            const maxId = data.messages.reduce((m, mm) => {
+                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
+                return id > m ? id : m;
+            }, lastMessageIdForSelected);
+            if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
+            appendUserMessagesToPanel(data.messages);
+        })
+        .catch(err => console.error('Error polling messages:', err));
+}
+
+/**
+ * Append only new user messages using seenMessageKeys
+ */
+function appendUserMessagesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    let appended = false;
+
+    for (const m of messages) {
+        const key = buildMessageKeyFor(m);
+        if (!key) continue;
+        if (seenMessageKeys.has(key)) {
+            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+            continue;
+        }
+
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+        if (!content || (respuesta && respuesta.trim().length > 0)) {
+            if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            seenMessageKeys.add(key);
+            continue;
+        }
+
+        let ts = coalesce(m.ts_ms, 0);
+        if (!ts && m.timestamp) {
+            const parsed = Date.parse(m.timestamp);
+            ts = isNaN(parsed) ? Date.now() : parsed;
+        }
+        ts = Number(ts) || Date.now();
+
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-user';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+
+        container.appendChild(div);
+        appended = true;
+        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        seenMessageKeys.add(key);
+    }
+
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
+}
+
+
+
+/* ===================== ALIAS EDITING & EMOJI ===================== */
+
+function enhanceAliasButtons() {
+    document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+        btn.removeEventListener('click', onEditAliasClick);
+        btn.addEventListener('click', onEditAliasClick);
+    });
+}
+function onEditAliasClick(e) { e.preventDefault(); e.stopPropagation(); const btn = e.currentTarget; const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content'); activarEdicionAlias(parent); }
+function activarEdicionAlias(parent) {
+    if (!parent) return;
+    const view = parent.querySelector('.alias-view');
+    const edit = parent.querySelector('.alias-edit');
+    if (!view || !edit) return;
+    const input = edit.querySelector('input[type=text]');
+    if (!input) return;
+    view.style.display = 'none'; edit.style.display = 'flex'; input.focus(); input.select(); isEditingAlias = true;
+    const finish = () => {
+        const nuevo = (input.value || '').trim();
+        edit.style.display = 'none'; view.style.display = '';
+        if (!nuevo) return;
+        view.textContent = nuevo;
+        fetch(`/contactos/${input.dataset.num}/alias`, { method: 'POST', body: new URLSearchParams({ alias: nuevo }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
+            .catch(err => console.warn('Error guardando alias:', err)).finally(() => { isEditingAlias = false; });
+    };
+    input.onblur = () => setTimeout(finish, 0);
+    input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
+}
+
+    (function addEmojiButtonFallback() {
+        const EMOJIS_FALLBACK = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        function buildPickerInto(container) {
+            try {
+                if (!container) return container;
+                if (container.dataset.built === '1') return container;
+                container.innerHTML = EMOJIS_FALLBACK.map(e =>
+                    `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+                ).join('');
+                container.dataset.built = '1';
+            } catch (err) {
+                console.error('buildPickerInto error', err);
+            }
+            return container;
+        }
+
+        function togglePickerForButton(btn) {
+            try {
+                const form = btn.closest && btn.closest('form');
+                let picker = form && form.querySelector('.emoji-picker-list');
+                if (!picker) picker = document.getElementById('emoji-picker-list') || document.querySelector('.emoji-picker-list');
+
+                // If the picker exists but is empty, build it immediately so it's not a blank box.
+                if (picker && (!picker.dataset || picker.dataset.built !== '1')) {
+                    buildPickerInto(picker);
+                }
+
+                // if ensurePicker is available (from setupEmojiPicker) prefer it to build/attach picker
+                if (!picker && typeof ensurePicker === 'function') picker = ensurePicker(btn);
+
+                if (!picker) return;
+                const isVisible = picker.style.display === 'block';
+                picker.style.display = isVisible ? 'none' : 'block';
+                picker._targetInput = (form && form.querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
+            } catch (err) {
+                console.error('emoji fallback error', err);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('emoji-pick-btn');
+            if (btn) {
+                // remove any previous bound handler to avoid duplicates
+                btn.removeEventListener('__emoji_fallback_click__', null);
+                btn.addEventListener('click', function handler(ev) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    togglePickerForButton(this);
+                }, false);
+            }
+        });
+    })();
+
+function setupEmojiPicker() {
+    const EMOJIS = ['😊','😂','😍','👍','🙏','😎','🥳','😢','😡','🎉','💬','❤️','🔥','🤔','🙌','😅','😉','😇','😜','🤖'];
+
+    function buildPicker(container) {
+        if (container.dataset.built === '1') return container;
+        container.innerHTML = EMOJIS.map(e =>
+            `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+        ).join('');
+        container.dataset.built = '1';
+        return container;
+    }
+
+    function ensurePicker(trigger) {
+        const form = trigger.closest('form') || document.body;
+        let picker = form.querySelector('.emoji-picker-list');
+        if (!picker) {
+            picker = document.createElement('div');
+            picker.className = 'emoji-picker-list';
+            picker.style.position = 'absolute';
+            picker.style.display = 'none';
+            picker.style.zIndex = 10000;
+            picker.style.background = 'white';
+            picker.style.border = '1px solid #ccc';
+            picker.style.borderRadius = '8px';
+            picker.style.padding = '6px';
+            picker.style.maxWidth = '320px';
+            picker.style.maxHeight = '180px';
+            picker.style.overflowY = 'auto';
+            const attachTo = form.querySelector('.input-group') || form;
+            attachTo.appendChild(picker);
+        }
+        buildPicker(picker);
+        return picker;
+    }
+
+    // delegated
+    document.addEventListener('click', function (ev) {
+        try {
+            const tgt = ev.target;
+            const trigger = tgt.closest ? tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
+            if (trigger) {
+                ev.preventDefault(); ev.stopPropagation();
+                const picker = ensurePicker(trigger);
+                const isVisible = picker.style.display === 'block';
+                if (isVisible) { picker.style.display = 'none'; return; }
+                const rect = trigger.getBoundingClientRect();
+                const parent = picker.offsetParent || document.body;
+                const parentRect = parent.getBoundingClientRect();
+                const topVal = rect.top - parentRect.top - picker.offsetHeight - 8;
+                if (topVal > 0) picker.style.top = topVal + 'px';
+                else picker.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+                let left = rect.left - parentRect.left;
+                const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
+                if (left > maxLeft) left = Math.max(8, maxLeft);
+                picker.style.left = left + 'px';
+                picker.style.display = 'block';
+                picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
+                return;
+            }
+
+            const emojiBtn = tgt.closest ? tgt.closest('.emoji-option') : null;
+            if (emojiBtn) {
+                ev.preventDefault(); ev.stopPropagation();
+                const picker = emojiBtn.closest('.emoji-picker-list');
+                const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
+                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+                if (input) {
+                    const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+                    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
+                    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+                    const pos = start + emoji.length;
+                    input.selectionStart = input.selectionEnd = pos;
+                    input.focus();
+                }
+                if (picker) picker.style.display = 'none';
+                return;
+            }
+
+            const insidePicker = tgt.closest && !!tgt.closest('.emoji-picker-list');
+            const isTrigger = tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
+            if (!insidePicker && !isTrigger) {
+                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+            }
+        } catch (err) {
+            console.error('emoji handler error', err);
+        }
+    }, false);
+
+    document.addEventListener('keydown', function (ev) {
+        if (ev.key === 'Escape') document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+    });
+
+    console.debug('setupEmojiPicker initialized');
+}
+
+/* ===================== AUDIO & UI HELPERS ===================== */
+
+function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
+
+function toggleAudio(id, btn) {
+    const audio = document.getElementById(id);
+    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
+    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
+    if (!audio) return;
+    if (audio.paused) {
+        audio.play().then(() => {
+            btn.textContent = '⏸️';
+            audio.ontimeupdate = () => {
+                if (audio.duration) {
+                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
+                    if (durSpan) {
+                        const m = Math.floor(audio.currentTime / 60);
+                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                        durSpan.textContent = `${m}:${s}`;
+                    }
+                }
+            };
+        }).catch(console.error);
+    } else {
+        audio.pause();
+        btn.textContent = '▶️';
+    }
+}
+function seekAudio(id, progressBar, evt) {
+    const audio = document.getElementById(id);
+    const inner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = evt.clientX - rect.left;
+    if (audio && audio.duration) {
+        audio.currentTime = (clickX / rect.width) * audio.duration;
+        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+    }
+}
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM cargado - inicializando componentes');
+        enhanceAliasButtons();
+
+        // Guarded init for setupEmojiPicker (llama inmediatamente si ya existe,
+        // si no, espera brevemente hasta 3s a que se defina).
+        try {
+            if (typeof setupEmojiPicker === 'function') {
+                setupEmojiPicker();
+            } else {
+                const __emojiInitInterval = setInterval(() => {
+                    if (typeof setupEmojiPicker === 'function') {
+                        clearInterval(__emojiInitInterval);
+                        setupEmojiPicker();
+                    }
+                }, 50);
+                setTimeout(() => clearInterval(__emojiInitInterval), 3000);
+            }
+        } catch (err) {
+            console.error('Error initializing emoji picker:', err);
+        }
+
+        // Start automatic chat-list refresh (opcional: comentar si no quieres auto-refresh)
+        if (document.querySelector('.chat-items')) {
+            actualizarListaChats(); // initial load
+            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                chatAutoRefresh = false;
+            } else {
+                chatAutoRefresh = true;
+                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                    chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+                }
+                if (selectedChatId && !messagesIntervalHandle) {
+                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}
