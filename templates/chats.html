@@ -293,6 +293,7 @@
     .card-content {
         color: white;
     }
+
     .emoji-picker-list {
         box-shadow: 0 2px 8px rgba(0,0,0,0.15);
         min-width: 220px;
@@ -387,6 +388,15 @@ let messagesIntervalHandle = null;
         }
     });
 });
+
+/* ===================== SMALL HELPER: coalesce ===================== */
+function coalesce(...args) {
+    for (let i = 0; i < args.length; i++) {
+        const v = args[i];
+        if (v !== undefined && v !== null) return v;
+    }
+    return null;
+}
 
 /* ===================== CHATS LIST: incremental update ===================== */
 
@@ -491,7 +501,7 @@ function pollSelectedMessages() {
             if (data.messages.length === 0) return;
             // update lastMessageId from server max id early to avoid race
             const maxId = data.messages.reduce((m, mm) => {
-                const id = Number(mm.id ?? mm[0] ?? mm['id'] ?? 0) || 0;
+                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
                 return id > m ? id : m;
             }, lastMessageIdForSelected);
             if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
@@ -521,7 +531,7 @@ function appendUserMessagesToPanel(messages) {
     }
 
     for (const m of messages) {
-        const id = Number(m.id ?? m[0] ?? m['id'] ?? 0) || 0;
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
         if (!id) continue;
 
         // Skip if already in DOM by id
@@ -530,8 +540,8 @@ function appendUserMessagesToPanel(messages) {
             continue;
         }
 
-        const content = String(m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? '').trim();
-        const respuesta = String(m.respuesta ?? m['respuesta'] ?? '') || '';
+        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '') ) || '';
 
         // Only consider pure incoming user messages (has content and no respuesta yet)
         if (!content || (respuesta && respuesta.trim().length > 0)) {
@@ -540,7 +550,7 @@ function appendUserMessagesToPanel(messages) {
         }
 
         // determine timestamp (prefer numeric ms)
-        let ts = m.ts_ms || 0;
+        let ts = coalesce(m.ts_ms, 0);
         if (!ts && m.timestamp) {
             const parsed = Date.parse(m.timestamp);
             ts = isNaN(parsed) ? Date.now() : parsed;
@@ -595,16 +605,16 @@ async function actualizarMensajesManual(container) {
 
         const wasAtBottom = (msgsContainer.scrollHeight - msgsContainer.clientHeight) <= msgsContainer.scrollTop + 60;
         for (const m of msgs) {
-            const id = Number(m.id ?? m[0] ?? m['id'] || 0);
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
             if (!id) continue;
             if (msgsContainer.querySelector(`[data-msg-id="${id}"]`)) continue;
-            const content = m.content || m['content'] || m.mensaje || m['mensaje'] || m.respuesta || m[2] || '';
-            const ts = m.ts_ms || (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now());
+            const content = coalesce(m.content, m['content'], m.mensaje, m['mensaje'], m.respuesta, m[2], '');
+            const ts = coalesce(m.ts_ms, (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now()));
             const cls = (m.respuesta && !m.mensaje) ? 'msg-box msg-ai' : 'msg-box msg-user';
             const div = document.createElement('div');
             div.className = cls;
             div.setAttribute('data-msg-id', String(id));
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(String(content))}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
             msgsContainer.appendChild(div);
         }
         if (wasAtBottom) msgsContainer.scrollTop = msgsContainer.scrollHeight;
@@ -795,22 +805,5 @@ function activarEdicionAlias(parent) {
 function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
 function toggleAudio(id, btn) { const audio = document.getElementById(id); const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar'); const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration'); if (!audio) return; if (audio.paused) { audio.play().then(() => { btn.textContent = '⏸️'; audio.ontimeupdate = () => { if (audio.duration) { if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%'; if (durSpan) { const m = Math.floor(audio.currentTime / 60); const s = Math.floor(audio.currentTime % 60).toString().padStart(2,'0'); durSpan.textContent = `${m}:${s}`; } } }; }).catch(console.error); } else { audio.pause(); btn.textContent = '▶️'; } }
 function seekAudio(id, progressBar, evt) { const audio = document.getElementById(id); const inner = progressBar.querySelector('.audio-progress-bar'); const rect = progressBar.getBoundingClientRect(); const clickX = evt.clientX - rect.left; if (audio && audio.duration) { audio.currentTime = (clickX / rect.width) * audio.duration; if (inner) inner.style.width = (clickX / rect.width) * 100 + '%'; } }
-    // Debug para el botón de emojis
-    console.log('Script cargado - verificando botón de emojis');
-    const emojiBtn = document.getElementById('emoji-pick-btn');
-    console.log('Botón encontrado:', emojiBtn);
-
-    if (emojiBtn) {
-        emojiBtn.addEventListener('click', function (e) {
-            e.preventDefault();
-            console.log('Botón de emoji clickeado');
-            const picker = document.getElementById('emoji-picker-list');
-            console.log('Picker encontrado:', picker);
-            if (picker) {
-                picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
-                console.log('Picker display:', picker.style.display);
-            }
-        });
-    }
 </script>
 {% endblock %}
