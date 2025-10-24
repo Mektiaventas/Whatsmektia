@@ -3197,18 +3197,40 @@ def guardar_cita(info_cita, config=None):
         debe_agendar = False
 
         if info_cita.get('fecha_sugerida'):
-            try:
-                fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
-                fecha_actual = datetime.now().date()
-                diff_days = (fecha_cita - fecha_actual).days
-                if diff_days >= 0:
-                    debe_agendar = True
-                    app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
-                else:
-                    app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
-            except Exception as e:
-                app.logger.error(f"Error procesando fecha: {e}")
+                try:
+                    fecha_raw = info_cita.get('fecha_sugerida')
+                    fecha_cita = None
+                    # intentar parse robusto con dateutil (acepta 'YYYY-MM-DD', '2025-10-24T..', etc.)
+                    try:
+                        from dateutil import parser as _parser
+                        if isinstance(fecha_raw, datetime):
+                            fecha_cita = fecha_raw.date()
+                        else:
+                            # default con timezone México para evitar desfases
+                            parsed = _parser.parse(str(fecha_raw), default=datetime.now(tz_mx))
+                            fecha_cita = parsed.date()
+                    except Exception:
+                        # fallback: si viene en formato YYYY-MM-DD simple
+                        try:
+                            fecha_cita = datetime.strptime(str(fecha_raw), '%Y-%m-%d').date()
+                        except Exception:
+                            fecha_cita = None
 
+                    if fecha_cita:
+                        # usar fecha actual en zona tz_mx para comparación correcta
+                        fecha_actual = datetime.now(tz_mx).date()
+                        diff_days = (fecha_cita - fecha_actual).days
+                        if diff_days >= 0:
+                            debe_agendar = True
+                            app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
+                        else:
+                            app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
+                    else:
+                        app.logger.info(f"ℹ️ No se pudo interpretar fecha_sugerida='{fecha_raw}' como fecha válida; no se agenda automáticamente")
+                except Exception as e:
+                    app.logger.error(f"Error procesando fecha: {e}")
+
+        # Si debe_agendar sigue True, el resto del flujo permanece igual...
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
@@ -3225,6 +3247,7 @@ def guardar_cita(info_cita, config=None):
                         app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
+
 
         # 6) Notificaciones al administrador (kept behavior)
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -3409,23 +3432,49 @@ def extraer_servicio_del_mensaje(mensaje, config=None):
         return None
 
 def extraer_fecha_del_mensaje(mensaje):
-    """Extrae fechas relativas simples del mensaje"""
-    mensaje_lower = mensaje.lower()
-    
-    hoy = datetime.now()
-    
-    if 'mañana' in mensaje_lower:
-        return (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
-    elif 'pasado mañana' in mensaje_lower:
-        return (hoy + timedelta(days=2)).strftime('%Y-%m-%d')
-    elif 'lunes' in mensaje_lower:
-        # Calcular próximo lunes
-        dias_hasta_lunes = (7 - hoy.weekday()) % 7
-        if dias_hasta_lunes == 0:
-            dias_hasta_lunes = 7
-        return (hoy + timedelta(days=dias_hasta_lunes)).strftime('%Y-%m-%d')
-    # Agregar más patrones según necesites
-    
+    """Extrae fechas relativas simples del mensaje y devuelve YYYY-MM-DD o None"""
+    mensaje_lower = (mensaje or "").lower()
+
+    hoy_dt = datetime.now(tz_mx).date()
+
+    # Manejar "hoy"
+    if 'hoy' in mensaje_lower:
+        return hoy_dt.strftime('%Y-%m-%d')
+
+    if 'mañana' in mensaje_lower or 'manana' in mensaje_lower:
+        return (hoy_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+    if 'pasado mañana' in mensaje_lower or 'pasadomanana' in mensaje_lower:
+        return (hoy_dt + timedelta(days=2)).strftime('%Y-%m-%d')
+
+    # Días de la semana: calcular próximo día mencionado
+    dias_semana = {
+        'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2,
+        'jueves': 3, 'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6
+    }
+    for nombre, target_weekday in dias_semana.items():
+        if nombre in mensaje_lower:
+            hoy_weekday = hoy_dt.weekday()
+            dias_hasta = (target_weekday - hoy_weekday) % 7
+            if dias_hasta == 0:
+                dias_hasta = 7
+            return (hoy_dt + timedelta(days=dias_hasta)).strftime('%Y-%m-%d')
+
+    # Intentar parsear fechas explícitas comunes (dd/mm/yyyy, yyyy-mm-dd, etc.)
+    try:
+        # usar dateutil parser si está disponible
+        from dateutil import parser as _parser
+        # buscar un token que parezca fecha
+        m = re.search(r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})', mensaje)
+        if m:
+            parsed = _parser.parse(m.group(1), dayfirst=True, default=datetime.now(tz_mx))
+            return parsed.date().strftime('%Y-%m-%d')
+        # ISO-like
+        m2 = re.search(r'(\d{4}-\d{2}-\d{2})', mensaje)
+        if m2:
+            return m2.group(1)
+    except Exception:
+        pass
+
     return None
 
 def extraer_nombre_del_mensaje(mensaje):
