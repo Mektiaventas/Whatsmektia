@@ -358,10 +358,28 @@ let aliasTimers = new Map();
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
 
-    document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado - inicializando componentes');
     enhanceAliasButtons();
-    setupEmojiPicker();
+
+    // Guarded init for setupEmojiPicker to avoid "setupEmojiPicker is not defined"
+    try {
+        if (typeof setupEmojiPicker === 'function') {
+            setupEmojiPicker();
+        } else {
+            // fallback: poll briefly in case the function is defined later during parsing
+            const __emojiInitInterval = setInterval(() => {
+                if (typeof setupEmojiPicker === 'function') {
+                    clearInterval(__emojiInitInterval);
+                    setupEmojiPicker();
+                }
+            }, 50);
+            // safety timeout to avoid infinite polling
+            setTimeout(() => clearInterval(__emojiInitInterval), 3000);
+        }
+    } catch (err) {
+        console.error('Error initializing emoji picker:', err);
+    }
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
