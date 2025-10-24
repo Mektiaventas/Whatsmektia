@@ -84,14 +84,14 @@
         justify-content: flex-start;
     }
 
+    /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 4px 8px; /* slimmer padding to appear thinner */
+        padding: 6px 10px;
         border-radius: 8px;
         border-left: 6px solid #1f4e79;
         width: auto;
-        flex: 0 0 160px; /* fixed, narrow column (~160px) */
-        max-width: 160px;
+        flex: 1 1 calc(50%-0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
         display: flex;
         flex-direction: column;
         gap: 0.15rem;
@@ -156,20 +156,12 @@
         }
 
 
-        .stat-card {
-            /* On small screens let them expand full width for readability */
-            flex: 1 1 100%;
-            max-width: 100%;
-            padding: 8px 10px;
+        .stat-card > div {
+            font-size: 1.1rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
-
-            .stat-card > div {
-                font-size: 1.1rem;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-    }
 
         .tabs a {
             padding: 8px 12px;
