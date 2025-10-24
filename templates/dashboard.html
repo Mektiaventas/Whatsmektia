@@ -414,25 +414,26 @@
                 data: {
                     labels: dailyLabels,
                     datasets: [{
-                        label: 'Conversaciones nuevas por mes',
-                        data: dailyValues,
-                        borderColor: '#1f4e79',
-                        backgroundColor: 'rgba(31,78,121,0.15)',
-                        fill: true,
-                        tension: 0.2,
-                        pointRadius: 4
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { display: false }, datalabels: { display: false } },
-                    scales: {
-                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
-                    }
-                }
-            });
+
+                                    label: 'Conversaciones nuevas (últimos 90 días)',
+                                    data: dailyValues,
+                                    borderColor: '#1f4e79',
+                                    backgroundColor: 'rgba(31,78,121,0.15)',
+                                    fill: true,
+                                    tension: 0.2,
+                                    pointRadius: 4
+                                }]
+                        },
+                            options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false }, datalabels: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+                                x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                            }
+                        }
+                        });
 
         } catch (err) {
             console.error('Failed to load conversaciones data', err);
