@@ -495,35 +495,6 @@ function buildMessageKeyFor(m) {
 }
 
 /**
- * Initialize messages polling state and seen keys from DOM
- */
-function initSelectedMessagesPolling() {
-    const nodes = Array.from(document.querySelectorAll('#msgs .msg-box[data-msg-id]'));
-    lastMessageIdForSelected = nodes.reduce((max, n) => {
-        const v = Number(n.dataset.msgId) || 0;
-        return v > max ? v : max;
-    }, 0);
-
-    // Build seenMessageKeys from DOM (covers messages without id)
-    seenMessageKeys = new Set();
-    const shownNodes = Array.from(document.querySelectorAll('#msgs .msg-box'));
-    shownNodes.forEach(n => {
-        const id = n.dataset.msgId;
-        if (id) {
-            seenMessageKeys.add('id:' + String(id));
-        } else {
-            const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
-            let ts = Number(n.dataset.tsMs || n.dataset.ts || 0) || 0;
-            if (!ts) {
-                const meta = n.querySelector('.msg-meta') ? n.querySelector('.msg-meta').textContent : '';
-                const parsed = Date.parse(meta.replace('-', ' '));
-                ts = isNaN(parsed) ? 0 : parsed;
-            }
-            const rounded = Math.floor(Number(ts || 0) / 1000);
-            const key = 'text:' + normalizeText(txt) + '|ts:' + String(rounded);
-            seenMessageKeys.add(key);
-        }
-    });
 
     if (!messagesIntervalHandle) {
         messagesIntervalHandle = setInterval(() => {
@@ -604,43 +575,7 @@ function appendUserMessagesToPanel(messages) {
     }
 }
 
-/* Manual update helper (uses coalesce) */
-async function actualizarMensajesManual(container) {
-    try {
-        const msgsContainer = container || document.getElementById('msgs');
-        if (!msgsContainer) return;
-        const nodes = msgsContainer.querySelectorAll('[data-msg-id]');
-        let maxId = 0;
-        nodes.forEach(n => { const v = Number(n.dataset.msgId) || 0; if (v > maxId) maxId = v; });
-        const after = maxId;
-        const url = `/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`;
-        const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-        if (!res.ok) return;
-        const data = await res.json().catch(() => null);
-        if (!data || !Array.isArray(data.messages)) return;
-        const msgs = data.messages;
-        if (msgs.length === 0) return;
 
-        const wasAtBottom = (msgsContainer.scrollHeight - msgsContainer.clientHeight) <= msgsContainer.scrollTop + 60;
-        for (const m of msgs) {
-            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            if (!id) continue;
-            if (msgsContainer.querySelector(`[data-msg-id="${id}"]`)) continue;
-            const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], m.respuesta, m[2], ''));
-            const ts = Number(coalesce(m.ts_ms, (m.timestamp ? (Date.parse(m.timestamp) || Date.now()) : Date.now())));
-            const cls = (m.respuesta && !m.mensaje) ? 'msg-box msg-ai' : 'msg-box msg-user';
-            const div = document.createElement('div');
-            div.className = cls;
-            div.setAttribute('data-msg-id', String(id));
-            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(String(content))}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
-            msgsContainer.appendChild(div);
-        }
-        if (wasAtBottom) msgsContainer.scrollTop = msgsContainer.scrollHeight;
-    } catch (err) {
-        console.error('Error updating messages (manual):', err);
-    }
-}
 
 /* ===================== ALIAS EDITING & EMOJI ===================== */
 
