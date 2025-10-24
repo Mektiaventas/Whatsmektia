@@ -278,10 +278,12 @@
                         </span>
 
                     </div>
-                    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
-                    {% if chat.sin_leer > 0 %}
-                    <span class="card-unread">{{ chat.sin_leer }}</span>
-                    {% endif %}
+                    <div class="card-msg">
+                        {{ chat.ultimo_mensaje or "&nbsp;" }}{% if chat.sin_leer > 0 %}
+                        <span class="card-unread">{{ chat.sin_leer }}</span>
+                        {% endif %}
+                    </div>
+                    
                 </div>
             </a>
             {% endfor %}
