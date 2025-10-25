@@ -407,29 +407,29 @@ function actualizarListaChats() {
         .catch(err => console.error('Error actualizando lista de chats:', err));
 }
 
-    function actualizarIncrementalChats(chats) {
-        const container = document.querySelector('.chat-items');
-        if (!container) return;
-        const existing = new Map();
-        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-        // Iterate in reverse so insertBefore keeps server order (most recent first)
-        for (let i = chats.length - 1; i >= 0; i--) {
-            const chat = chats[i];
-            const num = chat.numero;
-            const node = existing.get(num);
-            if (node) {
-                actualizarChatExistente(node, chat);
-                existing.delete(num);
-                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                    container.insertBefore(node, container.firstElementChild);
-                }
-            } else {
-                const tmp = document.createElement('div');
-                const hasBuilder = typeof crearNuevoChatHTML === 'function';
-                tmp.innerHTML = hasBuilder
-                    ? crearNuevoChatHTML(chat)
-                    : `
+    chats.forEach(chat => {
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
+            }
+        } else {
+            const tmp = document.createElement('div');
+
+            // safe optional builder
+            const hasBuilder = typeof crearNuevoChatHTML === 'function';
+            tmp.innerHTML = hasBuilder
+                ? crearNuevoChatHTML(chat)
+                : `
                 <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                     <div class="card-content">
                         <div class="card-title-row">
@@ -445,27 +445,19 @@ function actualizarListaChats() {
                         <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                     </div>
                 </a>`;
-                const el = tmp.firstElementChild;
-                if (!el) continue;
-                container.insertBefore(el, container.firstElementChild);
-                const editBtn = el.querySelector('.edit-alias-btn');
-                if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
-                el.classList.add('new-message');
-                setTimeout(() => el.classList.remove('new-message'), 1400);
-            }
+
+            const el = tmp.firstElementChild;
+            if (!el) return;
+            container.insertBefore(el, container.firstElementChild);
+            const editBtn = el.querySelector('.edit-alias-btn');
+            if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
         }
+    });
 
-        existing.forEach((node) => node.remove());
-    }
-
-    // Add this small scroll-to-bottom when initial chat list is loaded (place inside your DOMContentLoaded block,
-    // after calling actualizarListaChats() or right after initial load)
-    try {
-        const msgsEl = document.getElementById('msgs');
-        if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
-    } catch (e) {
-        console.warn('Initial scroll to bottom failed:', e);
-    }
+    existing.forEach((node) => node.remove());
+}
 
 function actualizarChatExistente(elemento, chat) {
     const aliasView = elemento.querySelector('.alias-view');

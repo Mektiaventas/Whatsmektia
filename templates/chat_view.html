@@ -231,11 +231,14 @@
 
         // Initialize lastMessageId from DOM rendered messages to avoid duplicates
         function initLastMessageFromDOM(container) {
-            // After initLastMessageFromDOM(container);
             try {
-                if (container) setTimeout(() => scrollToBottom(container), 50);
+                if (!container) return;
+                const nodes = container.querySelectorAll('[data-msg-id]');
+                let max = lastMessageId || 0;
+                nodes.forEach(n => { const v = Number(n.dataset.msgId) || 0; if (v > max) max = v; });
+                lastMessageId = max;
             } catch (e) {
-                console.warn('Initial scroll to bottom failed in chat_view:', e);
+                console.warn('initLastMessageFromDOM error:', e);
             }
         }
 
