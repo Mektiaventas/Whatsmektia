@@ -6711,7 +6711,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
         #COMPRAR PRODUCTO
         if intent == "COMPRAR_PRODUCTO":
-            try:
+            try: 
                 # Normalizar posibles nombres de campo desde la decisión de la IA
                 items = decision.get('items') or decision.get('productos') or decision.get('items_list') or []
                 # Si IA devolvió un solo item como dict, convertir a lista
