@@ -6495,20 +6495,18 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
 
 def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
     """
-    Usa la IA para:
-      - Obtener el historial de la conversación.
-      - Extraer una lista de productos (sku o nombre) con cantidad por cada uno.
-      - Extraer método de pago, dirección, nombre del cliente y si el cliente CONFIRMÓ el pedido.
-      - Calcular precio_unitario y precio_total por item (usando catálogo si es posible) y precio_total_global.
-      - Si la IA indica que el pedido está listo para procesarse (ready_to_notify true),
-        y no se ha notificado antes, enviar alerta al asesor en turno y al número fijo.
-    Retorna: texto de respuesta generado por la IA (string) o None.
+    Igual que antes pero:
+     - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
+     - Si el método de pago es 'transferencia', además de notificar a asesores,
+       llama a enviar_datos_transferencia(numero, config) para enviar al cliente
+       los datos bancarios, y añade el bloque de transferencia al mensaje de alerta.
+    Devuelve: respuesta_text (string) o None.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # 1) Obtener historial cronológico y último mensaje
+        # 1) Obtener historial y último mensaje
         historial = obtener_historial(numero, limite=limite_historial, config=config) or []
         ultimo = (historial[-1].get('mensaje') or "").strip() if historial else ""
         partes = []
@@ -6519,7 +6517,7 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # 2) Prompt claro para extracción estructurada (pide lista de productos y flag ready_to_notify)
+        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
         prompt = f"""
 Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
 devuelve SOLO un JSON con la siguiente estructura EXACTA:
@@ -6528,29 +6526,22 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
   "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
   "productos": [
     {{
-      "sku_o_nombre": "CIANI OHE 305",       // texto tal como el usuario lo nominó (preferible SKU si existe)
-      "cantidad": 4,                         // entero
-      "precio_unitario": 300.0,             // número (opcional si no está disponible)
-      "precio_total_item": 1200.0           // número (opcional, IA puede calcular)
+      "sku_o_nombre": "CIANI OHE 305",
+      "cantidad": 4,
+      "precio_unitario": 300.0,
+      "precio_total_item": 1200.0
     }}
-    // puede haber múltiples items
   ],
   "metodo_pago": "tarjeta" | "transferencia" | "efectivo" | null,
   "direccion": "Texto de dirección completa" | null,
   "nombre_cliente": "Nombre si se detecta" | null,
-  "precio_total": 1200.0 | null,           // suma total si la IA puede calcularla
-  "ready_to_notify": true|false,           // TRUE solo si el cliente ya confirmó y es momento de notificar al asesor
+  "precio_total": 1200.0 | null,
+  "ready_to_notify": true|false,
   "confidence": 0.0-1.0
 }}
 
-Reglas importantes:
-- NO inventes precios ni SKUs que no estén en el catálogo si existe un catálogo; si no encuentras precio unitario pon null.
-- Si detectas cantidades múltiples, incluye todos los productos que el usuario indicó.
-- Estima precio_total si tienes precios unitarios; si no, puedes dejar precio_total null.
-- Determina ready_to_notify = true únicamente si el usuario ya confirmó explícitamente o la IA tiene alta confianza (>=0.9).
-- Mantén respuesta_text breve y orientada (por ejemplo: "Perfecto — tengo 4x CIANI OHE 305. ¿Confirmas dirección y método de pago?").
+Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
 """
-
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": modelo,
@@ -6559,7 +6550,6 @@ Reglas importantes:
             "temperature": 0.0,
             "max_tokens": max_tokens
         }
-
         resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
         resp.raise_for_status()
         data = resp.json()
@@ -6568,15 +6558,10 @@ Reglas importantes:
             raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
-        # Extraer JSON del texto (IA debe devolver JSON)
         match = re.search(r'(\{.*\})', raw, re.DOTALL)
         if not match:
             app.logger.warning(f"⚠️ comprar_producto: IA no devolvió JSON estructurado. Raw: {raw[:1000]}")
-            # Fallback: enviar la respuesta cruda al usuario (si existe)
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
-            if fallback_text:
-                enviar_mensaje(numero, fallback_text, config)
-                registrar_respuesta_bot(numero, ultimo, fallback_text, config, incoming_saved=False)
             return fallback_text or None
 
         try:
@@ -6594,12 +6579,10 @@ Reglas importantes:
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
 
-        # 3) Normalizar y enriquecer productos usando catálogo cuando sea posible
-        precios_catalogo = obtener_todos_los_precios(config) or []
+        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
         suma_total = 0.0
         any_price_known = False
-
         for p in productos:
             try:
                 name_raw = (p.get('sku_o_nombre') or p.get('nombre') or p.get('sku') or '').strip()
@@ -6607,19 +6590,16 @@ Reglas importantes:
                 if qty <= 0:
                     qty = 1
                 pu = None
-                # Preferir precio_unitario que entregue la IA
                 if p.get('precio_unitario') not in (None, '', 0):
                     try:
                         pu = float(p.get('precio_unitario'))
                     except Exception:
                         pu = None
 
-                # Si no hay precio_unitario, intentar buscar en catálogo por SKU o nombre
                 producto_db = None
                 if name_raw:
                     producto_db = obtener_producto_por_sku_o_nombre(name_raw, config)
                 if not pu and producto_db:
-                    # Preferir precio_menudeo o precio o costo
                     cand = producto_db.get('precio_menudeo') or producto_db.get('precio') or producto_db.get('costo') or producto_db.get('precio_mayoreo')
                     try:
                         if cand not in (None, ''):
@@ -6627,14 +6607,12 @@ Reglas importantes:
                     except Exception:
                         pu = None
 
-                # Calcular precio_total_item si se puede
                 precio_total_item = None
                 if pu is not None:
                     precio_total_item = round(pu * qty, 2)
                     suma_total += precio_total_item
                     any_price_known = True
                 else:
-                    # si IA proporcionó precio_total por item
                     if p.get('precio_total_item') not in (None, ''):
                         try:
                             precio_total_item = float(re.sub(r'[^\d.]', '', str(p.get('precio_total_item'))))
@@ -6654,7 +6632,6 @@ Reglas importantes:
                 app.logger.warning(f"⚠️ comprar_producto: error procesando item {p}: {e}")
                 continue
 
-        # Si IA dio precio_total explícito y nosotros no calculamos ninguno, usarlo
         precio_total_calc = round(suma_total, 2) if any_price_known else (float(precio_total_ia) if precio_total_ia not in (None, '') else None)
 
         datos_compra = {
@@ -6670,7 +6647,34 @@ Reglas importantes:
 
         app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
 
-        # 4) Evitar notificar repetidamente: comprobar estado existente
+        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
+        try:
+            resumen_prompt = f"""
+Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
+para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
+No incluyas números de teléfono ni direcciones completas en el resumen.
+
+HISTORIAL:
+{historial_text}
+
+PRODUCTOS DETECTADOS:
+{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
+
+Devuelve únicamente el resumen de 2-4 líneas en español.
+"""
+            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
+            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
+            rsum.raise_for_status()
+            sum_data = rsum.json()
+            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
+            if isinstance(contexto_resumido, list):
+                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
+            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
+            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
+
+        # 5) Evitar re-notificaciones
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
         try:
@@ -6680,16 +6684,14 @@ Reglas importantes:
         except Exception:
             already_notified = False
 
-        # 5) Decisión de notificar: la IA decide ready_to_notify (no usar keywords aquí).
+        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
         if datos_compra['ready_to_notify'] and not already_notified and datos_compra['metodo_pago'] and datos_compra['direccion'] and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
                 asesor = obtener_siguiente_asesor(config)
                 asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
-
-                # Nombre a mostrar del cliente (si existe)
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config) or (datos_compra.get('nombre_cliente') or 'No especificado')
 
-                # Construir resumen legible
+                # Construir líneas de items legibles
                 lineas_items = []
                 for it in productos_norm:
                     qty = it.get('cantidad') or 1
@@ -6703,10 +6705,25 @@ Reglas importantes:
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                contexto_resumido = historial_text
-                if len(contexto_resumido) > 1200:
-                    contexto_resumido = contexto_resumido[-1200:]
+                # Si método de pago transferencia, preparar bloque de transferencia y enviar al cliente
+                transfer_block_for_alert = ""
+                try:
+                    if datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower():
+                        # 1) Enviar los datos de transferencia al cliente (usar la función ya existente)
+                        try:
+                            enviar_datos_transferencia(numero, config=config)
+                            app.logger.info(f"✅ Datos de transferencia enviados al cliente {numero}")
+                        except Exception as ee:
+                            app.logger.warning(f"⚠️ No se pudieron enviar datos de transferencia al cliente: {ee}")
 
+                        # 2) Añadir los datos al mensaje de alerta (para que el asesor los vea)
+                        cfg_full = load_config(config)
+                        negocio_cfg = cfg_full.get('negocio', {}) if cfg_full else {}
+                        transfer_block_for_alert = "\n\nDatos de transferencia (según configuración):\n" + negocio_transfer_block(negocio_cfg)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ error preparando bloque de transferencia para alerta: {e}")
+
+                # Construir mensaje de alerta con el resumen generado por la IA
                 mensaje_alerta = (
                     f"🔔 *Pedido confirmado por cliente*\n\n"
                     f"👤 *Cliente:* {cliente_mostrado}\n"
@@ -6716,10 +6733,14 @@ Reglas importantes:
                     f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
-                    f"💬 *Contexto (resumido):*\n{contexto_resumido}\n\n"
-                    "Por favor, contactar al cliente para procesar pago y entrega."
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
+                if transfer_block_for_alert:
+                    mensaje_alerta += f"{transfer_block_for_alert}\n\n"
 
+                mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
+
+                # Enviar a asesor y al número fijo
                 targets = []
                 if asesor_tel:
                     targets.append(asesor_tel)
@@ -6739,10 +6760,10 @@ Reglas importantes:
                     'timestamp': datetime.now().isoformat()
                 }
                 actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
+
             except Exception as e:
                 app.logger.error(f"🔴 Error notificando asesores tras compra confirmada: {e}")
         else:
-            # Si IA no considera listo o ya notificado, loggear
             if already_notified:
                 app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
             elif not datos_compra['ready_to_notify']:
@@ -6750,10 +6771,9 @@ Reglas importantes:
             else:
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
-        # 6) Registrar la respuesta para el usuario (si la IA entregó respuesta_text)
+        # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-        # 7) Devolver la respuesta que se envió (o la generada) para uso del flujo llamante
         return respuesta_text or None
 
     except requests.exceptions.RequestException as e:
