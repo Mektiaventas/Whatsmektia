@@ -6493,6 +6493,80 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
         app.logger.error(f"🔴 Error inesperado en manejar_guardado_cita_unificado: {e}")
         return True  # Mantener comportamiento anterior: consumir la intención y devolver True
 
+def comprar_producto(numero, config=None, limite_historial=6, modelo="deepseek-chat", max_tokens=300):
+    """
+    Obtiene el historial de la conversación y consulta la IA para generar
+    una respuesta orientada a la compra/confirmación de producto.
+    - numero: número del chat (string)
+    - config: tenant config (si None usa obtener_configuracion_por_host())
+    - limite_historial: cuántos mensajes recuperar (cronológico)
+    - modelo: modelo en DEEPSEEK_API_URL
+    - max_tokens: tokens máximos para la respuesta
+    Retorna: texto de la respuesta (string) o None en caso de error.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        # 1) Obtener historial y último mensaje
+        historial = obtener_historial(numero, limite=limite_historial, config=config) or []
+        ultimo = ""
+        partes = []
+        for h in historial:
+            if h.get('mensaje'):
+                partes.append(f"Usuario: {h.get('mensaje')}")
+            if h.get('respuesta'):
+                partes.append(f"Asistente: {h.get('respuesta')}")
+        if historial:
+            ultimo = (historial[-1].get('mensaje') or "").strip()
+
+        historial_text = "\n".join(partes)
+        if not historial_text:
+            historial_text = f"Usuario: {ultimo}" if ultimo else "Sin historial previo."
+
+        # 2) Prompt específico para flujo de compra
+        prompt = f"""
+Eres un asistente breve y orientado a ventas. Usa el historial de conversación y el último mensaje para:
+- Detectar si el usuario quiere comprar un producto.
+- Si hay ambigüedad, pide SKU y cantidad.
+- Si ya hay SKU/cantidad, confirma precio, método de pago y dirección.
+Mantén la respuesta en español, corta (1-4 líneas) y enfocada en siguiente paso práctico para completar la compra.
+
+HISTORIAL:
+{historial_text}
+
+ÚLTIMO MENSAJE:
+{ultimo}
+"""
+
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": modelo,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.2,
+            "max_tokens": max_tokens
+        }
+
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+
+        text = data['choices'][0]['message']['content']
+        # Normalizar si viene como lista/estructura
+        if isinstance(text, list):
+            text = " ".join([(t.get('text') if isinstance(t, dict) else str(t)) for t in text])
+        text = re.sub(r'\n\s+\n', '\n\n', str(text)).strip()
+        return text or None
+
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"🔴 comprar_producto - request error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            app.logger.error(f"🔴 API body: {e.response.text[:1000]}")
+        return None
+    except Exception as e:
+        app.logger.error(f"🔴 comprar_producto error: {e}")
+        return None
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -6681,8 +6755,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
+        #Comprar producto
+        if intent == "COMPRAR_PRODUCTO":
+            comprar_producto_text = comprar_producto(numero, config=config)
+            if comprar_producto_text:
+                enviar_mensaje(numero, comprar_producto_text, config)
+                registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
+                return True
         # GUARDAR CITA
-        if save_cita or intent == "COMPRAR_PRODUCTO":
+        if save_cita:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
         # ENVIAR IMAGEN
