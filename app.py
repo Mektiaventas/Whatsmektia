@@ -5221,7 +5221,63 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
 
         if notificar_asesor and telefono:
             try:
-                texto_asesor = f"ℹ️ Se compartió tu contacto con cliente {numero_cliente}. Por favor, estate atento para contactarlo si corresponde."
+                # Obtener nombre mostrado del cliente
+                cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config) or numero_cliente
+
+                # Preparar historial para resumen
+                historial = obtener_historial(numero_cliente, limite=8, config=config) or []
+                partes = []
+                for h in historial:
+                    if h.get('mensaje'):
+                        partes.append(f"Usuario: {h.get('mensaje')}")
+                    if h.get('respuesta'):
+                        partes.append(f"Asistente: {h.get('respuesta')}")
+                historial_text = "\n".join(partes) or "Sin historial previo."
+
+                # Preguntar a la IA por un resumen breve (1-3 líneas)
+                resumen = None
+                try:
+                    prompt = f"""
+Resume en 1-3 líneas en español, con lenguaje natural, el contexto principal de la conversación
+del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
+No incluyas números de teléfono ni direcciones.
+
+HISTORIAL:
+{historial_text}
+
+Devuelve únicamente el resumen breve (1-3 líneas).
+"""
+                    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+                    payload = {
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                        "max_tokens": 200
+                    }
+                    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
+                    r.raise_for_status()
+                    d = r.json()
+                    raw = d['choices'][0]['message']['content']
+                    if isinstance(raw, list):
+                        raw = " ".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
+                    resumen = str(raw).strip()
+                    # Keep it compact
+                    resumen = re.sub(r'\s*\n\s*', ' ', resumen)[:400]
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo generar resumen IA para asesor: {e}")
+                    # Fallback: usar primer/último mensaje corto
+                    if historial:
+                        ultimo = historial[-1].get('mensaje') or ''
+                        resumen = (ultimo[:200] + '...') if len(ultimo) > 200 else ultimo
+                    else:
+                        resumen = "Sin historial disponible."
+
+                texto_asesor = (
+                    f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
+                    f"🔎 Resumen rápido del chat para que lo atiendas:\n{resumen}\n\n"
+                    "Por favor, estate atento para contactarlo si corresponde."
+                )
+
                 enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
             except Exception as e:
@@ -6746,9 +6802,13 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     targets.append(asesor_tel)
                 targets.append("5214493432744")
 
+                # collect successful targets to decide kanban move
+                notified_targets = []
                 for t in targets:
                     try:
-                        enviar_mensaje(t, mensaje_alerta, config)
+                        sent = enviar_mensaje(t, mensaje_alerta, config)
+                        if sent:
+                            notified_targets.append(t)
                         app.logger.info(f"✅ Alerta de pedido enviada a {t}")
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
@@ -6760,6 +6820,17 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     'timestamp': datetime.now().isoformat()
                 }
                 actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
+
+                # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
+                try:
+                    if notified_targets:
+                        # 4 = 'Resueltos' as created by crear_tablas_kanban default
+                        actualizar_columna_chat(numero, 4, config)
+                        app.logger.info(f"✅ Chat {numero} movido a 'Resueltos' (columna 4) tras notificación de pedido")
+                    else:
+                        app.logger.info(f"ℹ️ comprar_producto: no se notificó a ningún objetivo; no se moverá el Kanban para {numero}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo mover chat a columna 'Resueltos' para {numero}: {e}")
 
             except Exception as e:
                 app.logger.error(f"🔴 Error notificando asesores tras compra confirmada: {e}")
@@ -6799,21 +6870,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-
-        # === Shortcut: catálogo/pdf/flyer ===
-        catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
-        if any(k in texto_norm for k in catalog_keywords):
-            app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
-            try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # registrar respuesta evitando duplicados
-                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
-                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
-                # continue to AI flow as fallback
-
         # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
@@ -6885,7 +6941,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6963,7 +7019,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
-
+        if intent == "ENVIAR_CATALOGO":
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                # continue to AI flow as fallback
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
