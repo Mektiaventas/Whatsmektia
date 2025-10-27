@@ -6394,7 +6394,104 @@ def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=
         app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
         return False
 
+def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config):
+    """
+    Extrae y ejecuta la lógica que antes estaba inline dentro de:
+        if save_cita or intent == "COMPRAR_PRODUCTO":
+    Retorna True siempre que el flujo fue procesado (igual comportamiento previo).
+    """
+    try:
+        # Ensure we have a mutable dict to work with (IA may return null)
+        if not isinstance(save_cita, dict):
+            save_cita = {}
 
+        # Always ensure phone is present
+        save_cita.setdefault('telefono', numero)
+
+        info_cita = {
+            'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
+            'fecha_sugerida': save_cita.get('fecha_sugerida'),
+            'hora_sugerida': save_cita.get('hora_sugerida'),
+            'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
+            'telefono': save_cita.get('telefono'),
+            'detalles_servicio': save_cita.get('detalles_servicio') or {}
+        }
+
+        # Validate before saving
+        try:
+            completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        except Exception as _e:
+            app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
+            completos, faltantes = False, ['validacion_error']
+
+        if not completos:
+            app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
+            try:
+                enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
+                if enriquecido and isinstance(enriquecido, dict):
+                    # Merge only missing fields (do not overwrite existing valid values)
+                    if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
+                        info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
+                    if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
+                        info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
+                    if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
+                        info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
+                    if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
+                        info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
+                    if enriquecido.get('detalles_servicio'):
+                        info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
+                    app.logger.info("🔁 Info cita enriquecida: %s", json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']}))
+                else:
+                    app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
+            except Exception as _e:
+                app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
+
+        # Final attempt to save (may still return None -> handled as before)
+        try:
+            cita_id = guardar_cita(info_cita, config)
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
+            cita_id = None
+
+        if cita_id:
+            app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            try:
+                enviar_alerta_cita_administrador(info_cita, cita_id, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ enviar_alerta_cita_administrador falló: {e}")
+        else:
+            try:
+                completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
+            except Exception:
+                completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
+
+            preguntas = []
+            if 'servicio' in (faltantes2 or []):
+                preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
+            if 'fecha' in (faltantes2 or []):
+                preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
+            if 'hora' in (faltantes2 or []):
+                preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
+            if 'nombre' in (faltantes2 or []):
+                preguntas.append("¿Cuál es tu nombre completo?")
+            if not preguntas:
+                preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
+
+            follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
+            follow_up += "\n\nResponde con los datos cuando puedas."
+
+            enviar_mensaje(numero, follow_up, config)
+            registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
+
+            app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error inesperado en manejar_guardado_cita_unificado: {e}")
+        return True  # Mantener comportamiento anterior: consumir la intención y devolver True
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
@@ -6586,87 +6683,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
         # GUARDAR CITA
         if save_cita or intent == "COMPRAR_PRODUCTO":
-            try:
-                # Ensure we have a mutable dict to work with (IA may return null)
-                if not isinstance(save_cita, dict):
-                    save_cita = {}
-
-                # Always ensure phone is present
-                save_cita.setdefault('telefono', numero)
-
-                info_cita = {
-                    'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
-                    'fecha_sugerida': save_cita.get('fecha_sugerida'),
-                    'hora_sugerida': save_cita.get('hora_sugerida'),
-                    'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
-                    'telefono': save_cita.get('telefono'),
-                    'detalles_servicio': save_cita.get('detalles_servicio') or {}
-                }
-
-                # Validate before saving
-                try:
-                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                except Exception as _e:
-                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
-                    completos, faltantes = False, ['validacion_error']
-
-                if not completos:
-                    app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
-                    try:
-                        enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
-                        if enriquecido and isinstance(enriquecido, dict):
-                            # Merge only missing fields (do not overwrite existing valid values)
-                            if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
-                                info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
-                            if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
-                                info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
-                            if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
-                                info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
-                            if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
-                                info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
-                            if enriquecido.get('detalles_servicio'):
-                                info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
-                            app.logger.info(f"🔁 Info cita enriquecida: {json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']})}")
-                        else:
-                            app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
-                    except Exception as _e:
-                        app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
-
-                # Final attempt to save (may still return None -> handled as before)
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
-                    if respuesta_text:
-                        enviar_mensaje(numero, respuesta_text, config)
-                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                else:
-                    try:
-                        completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
-                    except Exception:
-                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
-
-                    preguntas = []
-                    if 'servicio' in (faltantes2 or []):
-                        preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
-                    if 'fecha' in (faltantes2 or []):
-                        preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
-                    if 'hora' in (faltantes2 or []):
-                        preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
-                    if 'nombre' in (faltantes2 or []):
-                        preguntas.append("¿Cuál es tu nombre completo?")
-                    if not preguntas:
-                        preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
-
-                    follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
-                    follow_up += "\n\nResponde con los datos cuando puedas."
-
-                    enviar_mensaje(numero, follow_up, config)
-                    registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
-
-                    app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
-            except Exception as e:
-                app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
+            manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
