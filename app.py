@@ -6708,22 +6708,70 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
+
         #COMPRAR PRODUCTO
         if intent == "COMPRAR_PRODUCTO":
             try:
-                items = decision.get('items') or decision.get('productos') or decision.get('line_items') or []
-                # normalize single item to list
-                if items and not isinstance(items, (list, tuple)):
+                # Normalizar posibles nombres de campo desde la decisión de la IA
+                items = decision.get('items') or decision.get('productos') or decision.get('items_list') or []
+                # Si IA devolvió un solo item como dict, convertir a lista
+                if isinstance(items, dict):
                     items = [items]
-                app.logger.info(f"🛒 Intent PRODUCTO detected, calling cerrar_venta() for {numero} with items={items}")
-                cerrar_venta(numero, items, config=config, texto_original=texto, incoming_saved=incoming_saved)
+
+                # Si no hay items, intentar construir uno a partir de campos sueltos
+                if not items:
+                    sku = decision.get('sku') or decision.get('producto') or decision.get('query') or decision.get('modelo') or decision.get('servicio')
+                    cantidad = decision.get('cantidad') or decision.get('qty') or decision.get('cantidad', 1)
+                    if sku:
+                        try:
+                            cantidad = int(cantidad)
+                        except Exception:
+                            cantidad = 1
+                        items = [{'sku': sku, 'cantidad': cantidad}]
+
+                # Asegurar que items es lista de dicts con al menos 'sku'/'query' y 'cantidad'
+                normalized = []
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    qty = it.get('cantidad') or it.get('qty') or 1
+                    try:
+                        qty = int(qty)
+                    except Exception:
+                        qty = 1
+                    # preferir claves sku/query/modelo/servicio
+                    q = (it.get('sku') or it.get('query') or it.get('modelo') or it.get('servicio') or '').strip()
+                    if not q:
+                        continue
+                    normalized.append({'sku': q, 'cantidad': qty})
+
+                if not normalized:
+                    app.logger.info("ℹ️ COMPRAR_PRODUCTO: no se detectaron items válidos desde la decisión IA; pidiendo aclaración.")
+                    msg = "No detecté los productos a comprar. Indica SKU o nombre y la cantidad, por ejemplo: '2 x SKU123'."
+                    enviar_mensaje(numero, msg, config)
+                    registrar_respuesta_bot(numero, texto, msg, config, incoming_saved=incoming_saved)
+                    return True
+
+                # Llamar a cerrar_venta que calcula totales, guarda estado provisional y envía resumen al cliente.
+                mensaje_cliente = cerrar_venta(numero, normalized, config=config, texto_original=texto, incoming_saved=incoming_saved)
+
+                # cerrar_venta ya envía el mensaje y registra la respuesta; solo confirmar que se manejó.
+                if mensaje_cliente:
+                    app.logger.info(f"✅ COMPRAR_PRODUCTO procesado para {numero}")
+                    return True
+                else:
+                    app.logger.warning(f"⚠️ COMPRAR_PRODUCTO: cerrar_venta devolvió None para {numero}")
+                    return False
+
             except Exception as e:
-                app.logger.error(f"🔴 Error calling cerrar_venta for intent PRODUCTO: {e}")
-                # fallback: send IA textual response if exists
-                if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
-                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
-            return True
+                app.logger.error(f"🔴 Error manejando COMPRAR_PRODUCTO: {e}")
+                app.logger.error(traceback.format_exc())
+                try:
+                    enviar_mensaje(numero, "Lo siento, hubo un error procesando tu compra. Intenta de nuevo más tarde.", config)
+                    registrar_respuesta_bot(numero, texto, "Lo siento, hubo un error procesando tu compra.", config, incoming_saved=incoming_saved)
+                except:
+                    pass
+                return False
         # GUARDAR CITA
         if save_cita:
             try:
