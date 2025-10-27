@@ -6708,8 +6708,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
+        #COMPRAR PRODUCTO
+        if intent == "COMPRAR_PRODUCTO":
+            try:
+                items = decision.get('items') or decision.get('productos') or decision.get('line_items') or []
+                # normalize single item to list
+                if items and not isinstance(items, (list, tuple)):
+                    items = [items]
+                app.logger.info(f"🛒 Intent PRODUCTO detected, calling cerrar_venta() for {numero} with items={items}")
+                cerrar_venta(numero, items, config=config, texto_original=texto, incoming_saved=incoming_saved)
+            except Exception as e:
+                app.logger.error(f"🔴 Error calling cerrar_venta for intent PRODUCTO: {e}")
+                # fallback: send IA textual response if exists
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            return True
         # GUARDAR CITA
-        if save_cita or intent == "COMPRAR_PRODUCTO":
+        if save_cita:
             try:
                 # Ensure we have a mutable dict to work with (IA may return null)
                 if not isinstance(save_cita, dict):
