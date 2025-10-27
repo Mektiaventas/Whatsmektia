@@ -6892,7 +6892,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             except Exception:
                 continue
         datos_IA=obtener_datos_de_transferencia(config) or []
-        datos_IA = []
         for y in datos_IA:
             try:
                 datos_IA.append({
