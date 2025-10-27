@@ -6891,6 +6891,16 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
+        datos_IA=obtener_datos_de_transferencia(config) or []
+        datos_IA = []
+        for y in datos_IA:
+            try:
+                datos_IA.append({
+                    "Nombre_IA": (p.get('ia_nombre') or '').strip(),
+                    "nombre_negocio": (p.get('negocio_nombre') or '').strip(),
+                })
+            except Exception:
+                continue
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
@@ -6921,6 +6931,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
+-Tienes estos datos acerca de tu nombre y el del negocio : {json.dumps(datos_IA, ensure_ascii=False)}.
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
