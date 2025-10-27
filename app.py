@@ -6908,6 +6908,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         try:
             ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
             negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
+            direccion =(cfg_full.get('direccion') or "")
+            correo = (cfg_full.get('correo') or "")
+            numero = (cfg_full.get('telefono') or "")
         except Exception:
             ia_nombre = "Asistente"
             negocio_nombre = ""
@@ -6936,6 +6939,9 @@ que el servidor debe ejecutar. Dispones de:
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 - Tu nombre de asistente configurado (ia_nombre): {ia_nombre}
+- Dirección del negocio (negocio_direccion): {direccion}
+- Correo del negocio (negocio_correo): {correo}
+- Teléfono del negocio (negocio_telefono): {numero}
 - Nombre del negocio (negocio_nombre): {negocio_nombre}
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
