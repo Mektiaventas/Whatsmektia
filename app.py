@@ -6935,7 +6935,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO_PDF_TEMARIO_FLYER"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -7013,7 +7013,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
-        if intent == "ENVIAR_CATALOGO":
+        if intent == "ENVIAR_CATALOGO_PDF_TEMARIO_FLYER":
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
                 # registrar respuesta evitando duplicados
