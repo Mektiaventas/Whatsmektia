@@ -6753,9 +6753,6 @@ Reglas importantes:
         # 6) Registrar la respuesta para el usuario (si la IA entregó respuesta_text)
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-            enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, ultimo, respuesta_text, config, incoming_saved=False)
-
         # 7) Devolver la respuesta que se envió (o la generada) para uso del flujo llamante
         return respuesta_text or None
 
