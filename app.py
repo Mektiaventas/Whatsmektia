@@ -6496,11 +6496,10 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
 def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
     """
     Igual que antes pero:
-     - Acepta en el JSON retornado por la IA una clave adicional 'confirmado' o 'vamos'.
-       Si su valor es 'si'/'sí'/true entonces se forzará el envío de la notificación (siempre que
-       los datos obligatorios estén presentes y no se haya notificado antes).
-     - Los datos de transferencia se envían al cliente una sola vez: se comprueba
-       en estados_conversacion si ya fueron enviados y, si no, se envían y se marca.
+     - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
+     - Si el método de pago es 'transferencia', además de notificar a asesores,
+       llama a enviar_datos_transferencia(numero, config) para enviar al cliente
+       los datos bancarios, y añade el bloque de transferencia al mensaje de alerta.
     Devuelve: respuesta_text (string) o None.
     """
     if config is None:
@@ -6518,7 +6517,7 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # 2) Llamada IA: extraer pedido estructurado
+        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
         prompt = f"""
 Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
 devuelve SOLO un JSON con la siguiente estructura EXACTA:
@@ -6538,9 +6537,7 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
   "nombre_cliente": "Nombre si se detecta" | null,
   "precio_total": 1200.0 | null,
   "ready_to_notify": true|false,
-  "confidence": 0.0-1.0,
-  "confirmado": "si" | "no" | null,   # OPCIONAL: si viene 'si' se considera confirmación explícita (campo nuevo)
-  "vamos": "si" | "no" | null         # OPCIONAL: alias aceptable para 'confirmado'
+  "confidence": 0.0-1.0
 }}
 
 Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
@@ -6573,7 +6570,6 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
             app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
             return None
 
-        # Campos básicos
         respuesta_text = extracted.get('respuesta_text') or ""
         productos = extracted.get('productos') or []
         metodo_pago = extracted.get('metodo_pago')
@@ -6583,18 +6579,7 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
 
-        # Nuevo: campo de confirmación explícita ('confirmado' o 'vamos')
-        confirmado_raw = extracted.get('confirmado') or extracted.get('vamos') or ''
-        confirmado_flag = False
-        try:
-            if isinstance(confirmado_raw, bool):
-                confirmado_flag = bool(confirmado_raw)
-            elif confirmado_raw:
-                confirmado_flag = str(confirmado_raw).strip().lower() in ('si', 'sí', 's', 'yes', 'true', '1')
-        except Exception:
-            confirmado_flag = False
-
-        # 3) Normalizar/enriquecer productos y calcular totales
+        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
         suma_total = 0.0
         any_price_known = False
@@ -6657,13 +6642,12 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
             "nombre_cliente": nombre_cliente or None,
             "numero_cliente": numero,
             "ready_to_notify": ready_to_notify,
-            "confidence": confidence,
-            "confirmado": confirmado_flag
+            "confidence": confidence
         }
 
-        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence, 'confirmado': confirmado_flag}, ensure_ascii=False)}")
+        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
 
-        # 4) Generar resumen de contexto por IA (opcional)
+        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
             resumen_prompt = f"""
 Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
@@ -6693,23 +6677,15 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         # 5) Evitar re-notificaciones
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
-        estado_datos = {}
         try:
             if estado_actual and estado_actual.get('datos') and isinstance(estado_actual.get('datos'), dict):
-                estado_datos = estado_actual.get('datos') or {}
-                if estado_datos.get('pedido_notificado'):
+                if estado_actual['datos'].get('pedido_notificado'):
                     already_notified = True
         except Exception:
             already_notified = False
-            estado_datos = {}
 
-        # 6) Decisión de notificar:
-        datos_completos_para_notif = datos_compra['metodo_pago'] and datos_compra['direccion'] and datos_compra['precio_total'] is not None and len(productos_norm) > 0
-
-        # If IA marked ready_to_notify OR the IA-provided "confirmado" flag is true, proceed (if datos completos)
-        force_by_confirmado = datos_compra.get('confirmado', False)
-
-        if (datos_compra['ready_to_notify'] or force_by_confirmado) and not already_notified and datos_completos_para_notif:
+        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
+        if datos_compra['ready_to_notify'] and not already_notified and datos_compra['metodo_pago'] and datos_compra['direccion'] and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
                 asesor = obtener_siguiente_asesor(config)
                 asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
@@ -6723,38 +6699,22 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     pu = it.get('precio_unitario')
                     pt = it.get('precio_total_item')
                     if pu is not None:
-                        # ensure precio_total_item exists (might not if we computed total later)
-                        if pt is None:
-                            pt = round(pu * qty, 2)
                         lineas_items.append(f"• {qty} x {nombre} @ ${pu:,.2f} = ${pt:,.2f}")
                     elif pt is not None:
                         lineas_items.append(f"• {qty} x {nombre} = ${pt:,.2f}")
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                # Si método de pago transferencia, preparar bloque de transferencia y enviar al cliente UNA SOLA VEZ
+                # Si método de pago transferencia, preparar bloque de transferencia y enviar al cliente
                 transfer_block_for_alert = ""
                 try:
                     if datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower():
-                        transferencia_ya_enviada = bool(estado_datos.get('transferencia_enviada'))
-                        if not transferencia_ya_enviada:
-                            # 1) Enviar los datos de transferencia al cliente (usar la función ya existente)
-                            try:
-                                enviar_datos_transferencia(numero, config=config)
-                                app.logger.info(f"✅ Datos de transferencia enviados al cliente {numero}")
-                                # Marcar en el estado conversacion que ya fueron enviados
-                                estado_datos['transferencia_enviada'] = True
-                                estado_datos['transferencia_enviada_ts'] = datetime.now().isoformat()
-                                # Persistir sin sobrescribir otros campos importantes (guardamos el objeto completo)
-                                try:
-                                    actualizar_estado_conversacion(numero, estado_actual['contexto'] if estado_actual else "EN_PEDIDO", "transferencia_enviada", estado_datos, config)
-                                except Exception as _e:
-                                    # fallback: guardar con contexto EN_PEDIDO
-                                    actualizar_estado_conversacion(numero, "EN_PEDIDO", "transferencia_enviada", estado_datos, config)
-                            except Exception as ee:
-                                app.logger.warning(f"⚠️ No se pudieron enviar datos de transferencia al cliente: {ee}")
-                        else:
-                            app.logger.info(f"ℹ️ Datos de transferencia ya enviados anteriormente para {numero}; omitiendo reenvío.")
+                        # 1) Enviar los datos de transferencia al cliente (usar la función ya existente)
+                        try:
+                            enviar_datos_transferencia(numero, config=config)
+                            app.logger.info(f"✅ Datos de transferencia enviados al cliente {numero}")
+                        except Exception as ee:
+                            app.logger.warning(f"⚠️ No se pudieron enviar datos de transferencia al cliente: {ee}")
 
                         # 2) Añadir los datos al mensaje de alerta (para que el asesor los vea)
                         cfg_full = load_config(config)
@@ -6793,13 +6753,12 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
 
-                # Marcar estado para evitar re-notificaciones (incluir bandera transferencia si aplica)
-                nuevo_estado = estado_datos.copy() if isinstance(estado_datos, dict) else {}
-                nuevo_estado.update({
+                # Marcar estado para evitar re-notificaciones
+                nuevo_estado = {
                     'pedido_confirmado': datos_compra,
                     'pedido_notificado': True,
                     'timestamp': datetime.now().isoformat()
-                })
+                }
                 actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
 
             except Exception as e:
@@ -6807,8 +6766,8 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         else:
             if already_notified:
                 app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
-            elif not datos_compra['ready_to_notify'] and not confirmado_flag:
-                app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify ni hubo 'confirmado' -> esperando más confirmación.")
+            elif not datos_compra['ready_to_notify']:
+                app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
             else:
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
