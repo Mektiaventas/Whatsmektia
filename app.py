@@ -3602,29 +3602,6 @@ def publicar_pdf_configuracion():
         flash('❌ Error procesando el archivo', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
-def _ensure_chat_meta_fecha_column(config=None):
-    """Ensure chat_meta has 'fecha_actualizacion' TIMESTAMP column (best-effort)."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cur = conn.cursor()
-        try:
-            cur.execute("SHOW COLUMNS FROM chat_meta LIKE 'fecha_actualizacion'")
-            if cur.fetchone() is None:
-                cur.execute(
-                    "ALTER TABLE chat_meta "
-                    "ADD COLUMN fecha_actualizacion TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP"
-                )
-                conn.commit()
-                app.logger.info("🔧 Columna 'fecha_actualizacion' creada en chat_meta")
-        finally:
-            cur.close()
-            conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ _ensure_chat_meta_fecha_column: could not ensure column: {e}")
-
-
 def _ensure_cliente_plan_columns():
     """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
     try:
@@ -6915,6 +6892,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             except Exception:
                 continue
         datos_IA=obtener_datos_de_transferencia(config) or []
+        datos_IA = []
         for y in datos_IA:
             try:
                 datos_IA.append({
@@ -9180,15 +9158,6 @@ def reparar_contactos():
 
 def actualizar_kanban(numero=None, columna_id=None, config=None):
     # Actualiza la base de datos si se pasan parámetros
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    # Ensure column exists before using it
-    try:
-        _ensure_chat_meta_fecha_column(config)
-    except Exception:
-        pass
-
     if numero and columna_id:
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -9203,7 +9172,6 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
         conn.close()
     # No emitas ningún evento aquí
 
-
 def actualizar_kanban_inmediato(numero, config=None):
     """Updates the Kanban board immediately when a message is received.
 
@@ -9216,13 +9184,6 @@ def actualizar_kanban_inmediato(numero, config=None):
         config = obtener_configuracion_por_host()
 
     try:
-        # Ensure chat_meta and the fecha_actualizacion column exist
-        crear_tablas_kanban(config)
-        try:
-            _ensure_chat_meta_fecha_column(config)
-        except Exception:
-            pass
-
         # Ensure chat_meta exists
         meta = obtener_chat_meta(numero, config)
         if not meta:
@@ -9256,7 +9217,7 @@ def actualizar_kanban_inmediato(numero, config=None):
                 nueva_columna = 2
                 app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
 
-        # Persist update to chat_meta (safe: fecha_actualizacion column ensured above)
+        # Persist update to chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id)
             VALUES (%s, %s)
