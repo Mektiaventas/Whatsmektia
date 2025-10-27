@@ -6739,7 +6739,23 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
             already_notified = False
 
         # 6) Notificar solo si IA indicó ready_to_notify y datos completos
-        if datos_compra['ready_to_notify'] and not already_notified and datos_compra['metodo_pago'] and datos_compra['direccion'] and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
+        # NOTE: treat transferencias as an intent to buy — allow notification even if ready_to_notify==False,
+        # so advisors get alerted when user confirmed transfer and required fields exist.
+        should_notify = False
+        try:
+            if datos_compra.get('ready_to_notify'):
+                should_notify = True
+            else:
+                # If payment method is transfer and essential fields are present, notify anyway
+                mp = datos_compra.get('metodo_pago') or ''
+                if mp and 'transfer' in str(mp).lower():
+                    if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
+                        should_notify = True
+                        app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
+        except Exception:
+            should_notify = False
+
+        if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
                 asesor = obtener_siguiente_asesor(config)
                 asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
@@ -6815,7 +6831,7 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         else:
             if already_notified:
                 app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
-            elif not datos_compra['ready_to_notify']:
+            elif not datos_compra['ready_to_notify'] and not (datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower()):
                 app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
             else:
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
