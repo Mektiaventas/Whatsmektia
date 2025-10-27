@@ -6735,7 +6735,8 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
                     f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
-
+                if transfer_block_for_alert:
+                    mensaje_alerta += f"{transfer_block_for_alert}\n\n"
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
 
