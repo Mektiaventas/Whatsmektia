@@ -6497,12 +6497,11 @@ def comprar_producto(numero, config=None, limite_historial=6, modelo="deepseek-c
     """
     Obtiene el historial de la conversación y consulta la IA para generar
     una respuesta orientada a la compra/confirmación de producto.
-    - numero: número del chat (string)
-    - config: tenant config (si None usa obtener_configuracion_por_host())
-    - limite_historial: cuántos mensajes recuperar (cronológico)
-    - modelo: modelo en DEEPSEEK_API_URL
-    - max_tokens: tokens máximos para la respuesta
-    Retorna: texto de la respuesta (string) o None en caso de error.
+    Adicional:
+    - Extrae SKU, precio, método de pago y dirección en un JSON (variables).
+    - Si todos esos datos están presentes, notifica por WhatsApp al asesor en turno
+      y al número 5214493432744 (mismo formato usado en el repo) con contexto y datos.
+    - Retorna la respuesta textual de la IA (string) o None en caso de error.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -6524,7 +6523,7 @@ def comprar_producto(numero, config=None, limite_historial=6, modelo="deepseek-c
         if not historial_text:
             historial_text = f"Usuario: {ultimo}" if ultimo else "Sin historial previo."
 
-        # 2) Prompt específico para flujo de compra
+        # 2) Prompt específico para flujo de compra (respuesta principal)
         prompt = f"""
 Eres un asistente breve y orientado a ventas. Usa el historial de conversación y el último mensaje para:
 - Detectar si el usuario quiere comprar un producto.
@@ -6555,8 +6554,144 @@ HISTORIAL:
         # Normalizar si viene como lista/estructura
         if isinstance(text, list):
             text = " ".join([(t.get('text') if isinstance(t, dict) else str(t)) for t in text])
-        text = re.sub(r'\n\s+\n', '\n\n', str(text)).strip()
-        return text or None
+        respuesta_text = re.sub(r'\n\s+\n', '\n\n', str(text)).strip()
+
+        # -------------------------
+        # 3) EXTRAER DATOS ESTRUCTURADOS (SKU, precio, metodo_pago, direccion, nombre_cliente)
+        # -------------------------
+        try:
+            extractor_prompt = f"""
+Extrae en JSON las siguientes claves del contexto: sku, precio, metodo_pago, direccion, nombre_cliente.
+Usa SOLO la información disponible en este HISTORIAL y ÚLTIMO MENSAJE. Si algún campo no está presente, déjalo como null.
+Devuelve únicamente un objeto JSON con el siguiente formato:
+{{"sku": "...", "precio": "...", "metodo_pago": "...", "direccion": "...", "nombre_cliente": "..."}}
+
+HISTORIAL:
+{historial_text}
+
+ÚLTIMO MENSAJE:
+{ultimo}
+"""
+            payload_ex = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": extractor_prompt}],
+                "temperature": 0.0,
+                "max_tokens": 300
+            }
+            resp_ex = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_ex, timeout=20)
+            resp_ex.raise_for_status()
+            data_ex = resp_ex.json()
+            raw_ex = data_ex['choices'][0]['message']['content']
+            if isinstance(raw_ex, list):
+                raw_ex = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ex])
+            raw_ex = str(raw_ex).strip()
+
+            # Extraer el JSON del texto devuelto por la IA
+            match = re.search(r'(\{.*\})', raw_ex, re.DOTALL)
+            extracted = {}
+            if match:
+                try:
+                    extracted = json.loads(match.group(1))
+                except Exception as e:
+                    app.logger.warning(f"⚠️ comprar_producto: fallo parseando JSON de extractor: {e} RAW: {raw_ex[:500]}")
+            else:
+                app.logger.info("ℹ️ comprar_producto: el extractor IA no devolvió JSON claramente; fallback a búsqueda simple.")
+
+            # Normalizar keys y valores
+            sku = (extracted.get('sku') if isinstance(extracted.get('sku'), str) else None) if extracted else None
+            precio = (extracted.get('precio') if isinstance(extracted.get('precio'), str) else None) if extracted else None
+            metodo_pago = (extracted.get('metodo_pago') if isinstance(extracted.get('metodo_pago'), str) else None) if extracted else None
+            direccion = (extracted.get('direccion') if isinstance(extracted.get('direccion'), str) else None) if extracted else None
+            nombre_cliente = (extracted.get('nombre_cliente') if isinstance(extracted.get('nombre_cliente'), str) else None) if extracted else None
+
+            # Fallbacks sencillos si extractor no dio resultado: intentar heurísticas locales
+            if not sku:
+                sku = buscar_sku_en_texto(ultimo + " " + historial_text, obtener_todos_los_precios(config) or []) or None
+
+            if not precio:
+                # buscar patrones de precio en el último mensaje (ej. $1200, 1200.00)
+                m = re.search(r'\$?\s*([0-9]{1,3}(?:[.,][0-9]{3})*(?:[.,][0-9]{2})?)', ultimo)
+                if m:
+                    precio = m.group(1).replace(',', '')
+
+            if not metodo_pago:
+                txt = (ultimo + " " + historial_text).lower()
+                if 'efectivo' in txt or 'pago al entregar' in txt or 'pago al recibir' in txt:
+                    metodo_pago = 'efectivo'
+                elif 'transfer' in txt or 'clabe' in txt or 'transferencia' in txt:
+                    metodo_pago = 'transferencia'
+                elif 'tarjeta' in txt or 'card' in txt or 'visa' in txt or 'mastercard' in txt:
+                    metodo_pago = 'tarjeta'
+
+            if not direccion:
+                # heurística simple: buscar palabras típicas
+                m_addr = re.search(r'(calle|av\.?|avenida|colonia|col\.\s|cp\s|c\.p\.)[:\s]*([A-Za-z0-9\-\s\.,#]{8,200})', historial_text + " " + ultimo, re.IGNORECASE)
+                if m_addr:
+                    direccion = m_addr.group(0)
+
+            # Construir JSON con los datos extraídos
+            datos_compra = {
+                "sku": sku or None,
+                "precio": precio or None,
+                "metodo_pago": metodo_pago or None,
+                "direccion": direccion or None,
+                "nombre_cliente": nombre_cliente or None,
+                "numero_cliente": numero
+            }
+
+            app.logger.info(f"🔍 comprar_producto - datos extraidos: {json.dumps(datos_compra, ensure_ascii=False)}")
+
+            # 4) Si todos los campos obligatorios están presentes -> notificar a asesor y al número específico
+            required_ok = all([datos_compra.get('sku'), datos_compra.get('precio'), datos_compra.get('metodo_pago'), datos_compra.get('direccion')])
+            if required_ok:
+                try:
+                    asesor = obtener_siguiente_asesor(config)
+                    asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
+
+                    # Construir mensaje con contexto resumido
+                    contexto_resumido = historial_text
+                    if len(contexto_resumido) > 1200:
+                        contexto_resumido = contexto_resumido[-1200:]  # truncar a últimos 1200 chars
+
+                    mensaje_alerta = (
+                        f"🔔 *Nuevo pedido/compra detectado*\n\n"
+                        f"👤 *Cliente:* {datos_compra.get('nombre_cliente') or 'No especificado'}\n"
+                        f"📞 *Número:* {numero}\n\n"
+                        f"🧾 *Datos de compra:*\n"
+                        f"• SKU: {datos_compra.get('sku')}\n"
+                        f"• Precio: {datos_compra.get('precio')}\n"
+                        f"• Método de pago: {datos_compra.get('metodo_pago')}\n"
+                        f"• Dirección: {datos_compra.get('direccion')}\n\n"
+                        f"💬 *Contexto (resumido):*\n{contexto_resumido}\n\n"
+                        "Por favor, contacta al cliente para completar la compra."
+                    )
+
+                    # Enviar al asesor en turno (si existe) y al número fijo (convertir a formato internacional si ya usas '521' prefijo)
+                    targets = []
+                    if asesor_tel:
+                        targets.append(asesor_tel)
+                    # Especificado en la petición: 449 343 2744 -> usar formato con prefijo nacional (repo usa 5214493432744)
+                    targets.append("5214493432744")
+
+                    for t in targets:
+                        try:
+                            enviar_mensaje(t, mensaje_alerta, config)
+                            app.logger.info(f"✅ Alerta de compra enviada a {t}")
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
+
+                except Exception as e:
+                    app.logger.error(f"🔴 Error notificando asesores tras compra: {e}")
+
+            # Guardar (temporal) los datos en el log y devolverlos junto con la respuesta si se desea
+            # No se persisten en BD aquí por defecto, pero se registran para trazabilidad
+            app.logger.debug(f"💾 comprar_producto - JSON datos_compra: {json.dumps(datos_compra, ensure_ascii=False)}")
+
+        except Exception as e:
+            app.logger.warning(f"⚠️ comprar_producto - extracción auxiliar falló: {e}")
+
+        # 5) Retornar la respuesta de la IA (seguimos enviando fuera de esta función donde corresponda)
+        return respuesta_text or None
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 comprar_producto - request error: {e}")
