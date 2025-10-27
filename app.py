@@ -5211,7 +5211,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}\n\n¿Quieres que te conecte ahora?"
+        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}"
         enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
         if enviado:
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
@@ -5238,7 +5238,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
                 resumen = None
                 try:
                     prompt = f"""
-Resume en 1-3 líneas en español, con lenguaje natural, el contexto principal de la conversación
+Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
 del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
 No incluyas números de teléfono ni direcciones.
 
@@ -6553,9 +6553,7 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
     """
     Igual que antes pero:
      - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
-     - Si el método de pago es 'transferencia', además de notificar a asesores,
-       llama a enviar_datos_transferencia(numero, config) para enviar al cliente
-       los datos bancarios, y añade el bloque de transferencia al mensaje de alerta.
+     - NOTA: ya no hace acciones adicionales cuando el método de pago es 'transferencia'.
     Devuelve: respuesta_text (string) o None.
     """
     if config is None:
@@ -6761,24 +6759,6 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                # Si método de pago transferencia, preparar bloque de transferencia y enviar al cliente
-                transfer_block_for_alert = ""
-                try:
-                    if datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower():
-                        # 1) Enviar los datos de transferencia al cliente (usar la función ya existente)
-                        try:
-                            enviar_datos_transferencia(numero, config=config)
-                            app.logger.info(f"✅ Datos de transferencia enviados al cliente {numero}")
-                        except Exception as ee:
-                            app.logger.warning(f"⚠️ No se pudieron enviar datos de transferencia al cliente: {ee}")
-
-                        # 2) Añadir los datos al mensaje de alerta (para que el asesor los vea)
-                        cfg_full = load_config(config)
-                        negocio_cfg = cfg_full.get('negocio', {}) if cfg_full else {}
-                        transfer_block_for_alert = "\n\nDatos de transferencia (según configuración):\n" + negocio_transfer_block(negocio_cfg)
-                except Exception as e:
-                    app.logger.warning(f"⚠️ error preparando bloque de transferencia para alerta: {e}")
-
                 # Construir mensaje de alerta con el resumen generado por la IA
                 mensaje_alerta = (
                     f"🔔 *Pedido confirmado por cliente*\n\n"
@@ -6791,8 +6771,6 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
                     f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
-                if transfer_block_for_alert:
-                    mensaje_alerta += f"{transfer_block_for_alert}\n\n"
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
 
