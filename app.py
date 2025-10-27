@@ -6541,6 +6541,7 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
 }}
 
 Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
+ready_to_notify debe ser true SOLO si el usuario ya confirmo que quiere que se le notifique (ej. "sí quiero comprar", "adelante con el pedido", etc).
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
