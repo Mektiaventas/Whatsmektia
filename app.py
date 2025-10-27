@@ -6734,7 +6734,7 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         try:
             if estado_actual and estado_actual.get('datos') and isinstance(estado_actual.get('datos'), dict):
                 if estado_actual['datos'].get('pedido_notificado'):
-                    already_notified = True
+                    already_notified = False
         except Exception:
             already_notified = False
 
