@@ -13,7 +13,7 @@ import pytz
 import os
 import logging
 import json 
-import base64
+import base64 
 import argparse
 import math
 import mysql.connector
@@ -3197,18 +3197,40 @@ def guardar_cita(info_cita, config=None):
         debe_agendar = False
 
         if info_cita.get('fecha_sugerida'):
-            try:
-                fecha_cita = datetime.strptime(info_cita.get('fecha_sugerida'), '%Y-%m-%d').date()
-                fecha_actual = datetime.now().date()
-                diff_days = (fecha_cita - fecha_actual).days
-                if diff_days >= 0:
-                    debe_agendar = True
-                    app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
-                else:
-                    app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
-            except Exception as e:
-                app.logger.error(f"Error procesando fecha: {e}")
+                try:
+                    fecha_raw = info_cita.get('fecha_sugerida')
+                    fecha_cita = None
+                    # intentar parse robusto con dateutil (acepta 'YYYY-MM-DD', '2025-10-24T..', etc.)
+                    try:
+                        from dateutil import parser as _parser
+                        if isinstance(fecha_raw, datetime):
+                            fecha_cita = fecha_raw.date()
+                        else:
+                            # default con timezone México para evitar desfases
+                            parsed = _parser.parse(str(fecha_raw), default=datetime.now(tz_mx))
+                            fecha_cita = parsed.date()
+                    except Exception:
+                        # fallback: si viene en formato YYYY-MM-DD simple
+                        try:
+                            fecha_cita = datetime.strptime(str(fecha_raw), '%Y-%m-%d').date()
+                        except Exception:
+                            fecha_cita = None
 
+                    if fecha_cita:
+                        # usar fecha actual en zona tz_mx para comparación correcta
+                        fecha_actual = datetime.now(tz_mx).date()
+                        diff_days = (fecha_cita - fecha_actual).days
+                        if diff_days >= 0:
+                            debe_agendar = True
+                            app.logger.info(f"✅ Cita para fecha válida ({fecha_cita}), se agendará en Calendar (diff_days={diff_days})")
+                        else:
+                            app.logger.info(f"ℹ️ Cita para fecha pasada ({fecha_cita}), no se agendará en Calendar (diff_days={diff_days})")
+                    else:
+                        app.logger.info(f"ℹ️ No se pudo interpretar fecha_sugerida='{fecha_raw}' como fecha válida; no se agenda automáticamente")
+                except Exception as e:
+                    app.logger.error(f"Error procesando fecha: {e}")
+
+        # Si debe_agendar sigue True, el resto del flujo permanece igual...
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
@@ -3225,6 +3247,7 @@ def guardar_cita(info_cita, config=None):
                         app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
+
 
         # 6) Notificaciones al administrador (kept behavior)
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -3409,23 +3432,49 @@ def extraer_servicio_del_mensaje(mensaje, config=None):
         return None
 
 def extraer_fecha_del_mensaje(mensaje):
-    """Extrae fechas relativas simples del mensaje"""
-    mensaje_lower = mensaje.lower()
-    
-    hoy = datetime.now()
-    
-    if 'mañana' in mensaje_lower:
-        return (hoy + timedelta(days=1)).strftime('%Y-%m-%d')
-    elif 'pasado mañana' in mensaje_lower:
-        return (hoy + timedelta(days=2)).strftime('%Y-%m-%d')
-    elif 'lunes' in mensaje_lower:
-        # Calcular próximo lunes
-        dias_hasta_lunes = (7 - hoy.weekday()) % 7
-        if dias_hasta_lunes == 0:
-            dias_hasta_lunes = 7
-        return (hoy + timedelta(days=dias_hasta_lunes)).strftime('%Y-%m-%d')
-    # Agregar más patrones según necesites
-    
+    """Extrae fechas relativas simples del mensaje y devuelve YYYY-MM-DD o None"""
+    mensaje_lower = (mensaje or "").lower()
+
+    hoy_dt = datetime.now(tz_mx).date()
+
+    # Manejar "hoy"
+    if 'hoy' in mensaje_lower:
+        return hoy_dt.strftime('%Y-%m-%d')
+
+    if 'mañana' in mensaje_lower or 'manana' in mensaje_lower:
+        return (hoy_dt + timedelta(days=1)).strftime('%Y-%m-%d')
+    if 'pasado mañana' in mensaje_lower or 'pasadomanana' in mensaje_lower:
+        return (hoy_dt + timedelta(days=2)).strftime('%Y-%m-%d')
+
+    # Días de la semana: calcular próximo día mencionado
+    dias_semana = {
+        'lunes': 0, 'martes': 1, 'miércoles': 2, 'miercoles': 2,
+        'jueves': 3, 'viernes': 4, 'sábado': 5, 'sabado': 5, 'domingo': 6
+    }
+    for nombre, target_weekday in dias_semana.items():
+        if nombre in mensaje_lower:
+            hoy_weekday = hoy_dt.weekday()
+            dias_hasta = (target_weekday - hoy_weekday) % 7
+            if dias_hasta == 0:
+                dias_hasta = 7
+            return (hoy_dt + timedelta(days=dias_hasta)).strftime('%Y-%m-%d')
+
+    # Intentar parsear fechas explícitas comunes (dd/mm/yyyy, yyyy-mm-dd, etc.)
+    try:
+        # usar dateutil parser si está disponible
+        from dateutil import parser as _parser
+        # buscar un token que parezca fecha
+        m = re.search(r'(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4})', mensaje)
+        if m:
+            parsed = _parser.parse(m.group(1), dayfirst=True, default=datetime.now(tz_mx))
+            return parsed.date().strftime('%Y-%m-%d')
+        # ISO-like
+        m2 = re.search(r'(\d{4}-\d{2}-\d{2})', mensaje)
+        if m2:
+            return m2.group(1)
+    except Exception:
+        pass
+
     return None
 
 def extraer_nombre_del_mensaje(mensaje):
@@ -6102,6 +6151,30 @@ def actualizar_info_contacto_desde_webhook(numero, nombre_contacto, config=None)
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto desde webhook: {e}")
 
+@app.route('/chats/<numero>/marcar-leido', methods=['POST'])
+def marcar_leido_chat(numero):
+    """
+    Marca como 'leído' todos los mensajes entrantes (respuesta IS NULL) de un chat.
+    Esto pone `respuesta = ''` para que la columna sin_leer calculada en kanban_data pase a 0.
+    """
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE conversaciones
+               SET respuesta = ''
+             WHERE numero = %s AND respuesta IS NULL
+        """, (numero,))
+        updated = cursor.rowcount
+        conn.commit()
+        cursor.close()
+        conn.close()
+        return jsonify({'success': True, 'updated': updated})
+    except Exception as e:
+        app.logger.error(f"🔴 Error marcando mensajes como leídos para {numero}: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/notificaciones')
 def ver_notificaciones():
     """Endpoint para ver notificaciones de pedidos y citas con información ampliada"""
@@ -6321,6 +6394,132 @@ def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=
         app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
         return False
 
+def cerrar_venta(numero, items, config=None, texto_original=None, incoming_saved=False):
+    """
+    Inicia / cierra la venta propuesta por chat.
+    - numero: número del cliente (string)
+    - items: lista de dicts [{'sku'|'query': '...', 'cantidad': N}, ...]
+      - Se intenta resolver cada item por SKU/modelo/servicio.
+    - config: optional tenant config
+    - texto_original: mensaje del usuario que inició la compra (opcional, para tracking)
+    - incoming_saved: si True, registrar_respuesta_bot usará actualizar_respuesta()
+
+    Comportamiento:
+    1) Resuelve cada item a producto en DB y obtiene precio unitario (precio_menudeo, precio, precio_mayoreo o costo).
+    2) Calcula subtotal por línea y total general (Decimal).
+    3) Crea un registro provisional en estados_conversacion con contexto "EN_VENTA".
+    4) Envía al cliente un resumen + pregunta: ¿efectivo/transferencia? ¿domicilio/recoger?
+    5) Devuelve el texto enviado.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        from decimal import Decimal, InvalidOperation
+
+        if not items or not isinstance(items, (list, tuple)):
+            msg = "No detecté los productos. ¿Puedes indicar el SKU o nombre y la cantidad? Ej: '2 x SKU123' o '1 silla escolar'."
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", msg, config, incoming_saved=incoming_saved)
+            return msg
+
+        lineas = []
+        total = Decimal('0.00')
+
+        for it in items:
+            qty = int(it.get('cantidad') or it.get('qty') or 1)
+            query = (it.get('sku') or it.get('query') or it.get('modelo') or it.get('servicio') or '').strip()
+            producto = None
+            if query:
+                try:
+                    producto = obtener_producto_por_sku_o_nombre(query, config)
+                except Exception as e:
+                    app.logger.warning(f"⚠️ obtener_producto_por_sku_o_nombre falló para '{query}': {e}")
+                    producto = None
+
+            # Fallback: if no product found, push as free-text line with price 0
+            precio_unit = Decimal('0.00')
+            nombre = query or 'Producto sin identificar'
+            sku = None
+            if producto:
+                nombre = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or nombre)
+                sku = (producto.get('sku') or '').strip() or None
+                # Prefer price fields in order
+                for key in ('precio_menudeo', 'precio', 'precio_mayoreo', 'costo'):
+                    val = producto.get(key)
+                    if val not in (None, ''):
+                        try:
+                            cleaned = re.sub(r'[^\d.]', '', str(val))
+                            precio_unit = Decimal(cleaned) if cleaned else Decimal('0.00')
+                            break
+                        except (InvalidOperation, Exception):
+                            continue
+
+            linea_total = (precio_unit * Decimal(qty)).quantize(Decimal('0.01'))
+            total += linea_total
+            lineas.append({
+                'nombre': str(nombre),
+                'sku': sku,
+                'cantidad': qty,
+                'precio_unit': f"{precio_unit:.2f}",
+                'line_total': f"{linea_total:.2f}"
+            })
+
+        total = total.quantize(Decimal('0.01'))
+
+        # Preparar provisional de venta (similar estructura a info_cita)
+        detalles = {
+            'items': lineas,
+            'total': f"{total:.2f}",
+            'moneda': 'MXN'
+        }
+        provisional = {
+            'venta_provisional': {
+                'detalle': detalles,
+                'telefono': numero
+            },
+            'timestamp': datetime.now(tz_mx).isoformat()
+        }
+
+        # Guardar estado provisional para continuar la conversación (EN_VENTA)
+        try:
+            actualizar_estado_conversacion(numero, "EN_VENTA", "venta_provisional", provisional, config)
+            app.logger.info(f"🔁 Venta provisional guardada para {numero}: total={total}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo guardar estado provisional de venta para {numero}: {e}")
+
+        # Construir mensaje al cliente con resumen y preguntas (pago / entrega)
+        líneas_texto = ["🛒 Resumen de tu pedido:"]
+        for ln in lineas:
+            qty = ln['cantidad']
+            name = ln['nombre']
+            lt = ln['line_total']
+            líneas_texto.append(f"• {qty} x {name} — ${lt}")
+
+        líneas_texto.append(f"\n💰 Total a pagar: ${total:.2f} MXN")
+        líneas_texto.append("\n¿Cómo prefieres pagar? Responde 'efectivo' (pago en entrega) o 'transferencia' (te pediré datos bancarios).")
+        líneas_texto.append("¿Cómo recibirás tu pedido? Responde 'domicilio' (lo llevamos) o 'recoger' (pasas por el producto).")
+        líneas_texto.append("\nPuedes responder ambas en una sola línea, por ejemplo: 'transferencia, domicilio'.")
+
+        mensaje_cliente = "\n".join(líneas_texto)
+
+        enviar_mensaje(numero, mensaje_cliente, config)
+        registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", mensaje_cliente, config, incoming_saved=incoming_saved)
+
+        return mensaje_cliente
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en cerrar_venta para {numero}: {e}")
+        app.logger.error(traceback.format_exc())
+        # Notificar al cliente de forma segura
+        msg = "Lo siento, hubo un error procesando tu pedido. Por favor intenta de nuevo en un momento."
+        try:
+            enviar_mensaje(numero, msg, config)
+            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra error]", msg, config, incoming_saved=incoming_saved)
+        except Exception:
+            pass
+        return None
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -6420,7 +6619,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6509,11 +6708,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
-
         # GUARDAR CITA
-        if save_cita:
+        if save_cita or intent == "COMPRAR_PRODUCTO":
             try:
+                # Ensure we have a mutable dict to work with (IA may return null)
+                if not isinstance(save_cita, dict):
+                    save_cita = {}
+
+                # Always ensure phone is present
                 save_cita.setdefault('telefono', numero)
+
                 info_cita = {
                     'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
                     'fecha_sugerida': save_cita.get('fecha_sugerida'),
@@ -6522,6 +6726,37 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     'telefono': save_cita.get('telefono'),
                     'detalles_servicio': save_cita.get('detalles_servicio') or {}
                 }
+
+                # Validate before saving
+                try:
+                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
+                except Exception as _e:
+                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
+                    completos, faltantes = False, ['validacion_error']
+
+                if not completos:
+                    app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
+                    try:
+                        enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
+                        if enriquecido and isinstance(enriquecido, dict):
+                            # Merge only missing fields (do not overwrite existing valid values)
+                            if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
+                                info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
+                            if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
+                                info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
+                            if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
+                                info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
+                            if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
+                                info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
+                            if enriquecido.get('detalles_servicio'):
+                                info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
+                            app.logger.info(f"🔁 Info cita enriquecida: {json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']})}")
+                        else:
+                            app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
+                    except Exception as _e:
+                        app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
+
+                # Final attempt to save (may still return None -> handled as before)
                 cita_id = guardar_cita(info_cita, config)
                 if cita_id:
                     app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
@@ -6530,11 +6765,33 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
                     enviar_alerta_cita_administrador(info_cita, cita_id, config)
                 else:
-                    app.logger.warning("⚠️ guardar_cita devolvió None")
+                    try:
+                        completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
+                    except Exception:
+                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
+
+                    preguntas = []
+                    if 'servicio' in (faltantes2 or []):
+                        preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
+                    if 'fecha' in (faltantes2 or []):
+                        preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
+                    if 'hora' in (faltantes2 or []):
+                        preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
+                    if 'nombre' in (faltantes2 or []):
+                        preguntas.append("¿Cuál es tu nombre completo?")
+                    if not preguntas:
+                        preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
+
+                    follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
+                    follow_up += "\n\nResponde con los datos cuando puedas."
+
+                    enviar_mensaje(numero, follow_up, config)
+                    registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
+
+                    app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
             except Exception as e:
                 app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
             return True
-
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
@@ -6572,9 +6829,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            if not sent:
+                # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            else:
+                app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
         # RESPUESTA TEXTUAL POR DEFECTO
         if respuesta_text:
@@ -7202,6 +7463,15 @@ def ver_chat(numero):
         conn.close()
         
         app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
+
+        # Ensure chat_meta exists and move the chat to "En Conversación" when user opens it.
+        # This makes opening the chat immediately reflect the agent activity in the kanban.
+        try:
+            inicializar_chat_meta(numero, config)
+            actualizar_columna_chat(numero, 2, config)  # 2 = "En Conversación"
+            app.logger.info(f"📊 Chat {numero} movido a 'En Conversación' (columna 2) al abrir la vista")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo mover chat a 'En Conversación' al abrir: {e}")
 
         # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
         au = session.get('auth_user') or {}
@@ -8336,20 +8606,123 @@ def dashboard_conversaciones_data():
     Devuelve JSON con:
     - plan_info (si el usuario está autenticado)
     - active_count: número de chats con actividad en las últimas 24h
-    - daily labels/values: número de conversaciones iniciadas por día (period week/month)
+    - labels/values: por día (últimos 90 días si ?period=3months), o comportamiento anterior para week/month
     """
     try:
         config = obtener_configuracion_por_host()
         period = request.args.get('period', 'week')
         now = datetime.now()
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Conteo de conversaciones iniciadas por día:
-        # Una "conversación iniciada" es el mensaje que no tiene otro mensaje
-        # anterior del mismo número dentro de las últimas 24 horas.
+        # Special case: user asked previously '3months' -> now return up to last 90 days,
+        # but start the series at the first day that actually has data within that window.
+        if period == '3months':
+            # Find last day with data
+            try:
+                cursor.execute("SELECT DATE(MAX(timestamp)) FROM conversaciones")
+                row = cursor.fetchone()
+                last_day = None
+                if row and row[0]:
+                    last_day = row[0]
+                    # normalize if returned as string
+                    if isinstance(last_day, str):
+                        last_day = datetime.strptime(last_day, "%Y-%m-%d").date()
+                    else:
+                        try:
+                            last_day = last_day.date() if hasattr(last_day, 'date') else last_day
+                        except Exception:
+                            last_day = datetime.now().date()
+                else:
+                    last_day = datetime.now().date()
+            except Exception:
+                last_day = datetime.now().date()
+
+            # Window lower bound (maximum 90 days back)
+            window_start = last_day - timedelta(days=89)
+
+            # Query: same "conversation started" definition, limited to the date range
+            sql = """
+                SELECT DATE(c1.timestamp) as dia, COUNT(*) as cnt
+                FROM conversaciones c1
+                WHERE DATE(c1.timestamp) BETWEEN %s AND %s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM conversaciones c2
+                    WHERE c2.numero = c1.numero
+                      AND c2.timestamp < c1.timestamp
+                      AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+                  )
+                GROUP BY DATE(c1.timestamp)
+                ORDER BY DATE(c1.timestamp)
+            """
+            cursor.execute(sql, (window_start, last_day))
+            rows = cursor.fetchall()
+
+            # Map counts by date string 'YYYY-MM-DD'
+            counts_map = {}
+            for r in rows:
+                try:
+                    dia = r[0]
+                    if hasattr(dia, 'strftime'):
+                        key = dia.strftime('%Y-%m-%d')
+                    else:
+                        key = str(dia)
+                    cnt = int(r[1] or 0)
+                    counts_map[key] = cnt
+                except Exception:
+                    continue
+
+            # If there are no days with data in the window, return an empty (or single-day) series
+            if not counts_map:
+                labels = []
+                values = []
+            else:
+                # Find earliest date within counts_map (first day that has data)
+                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
+                earliest_with_data = min(parsed_dates)
+
+                # Ensure earliest_with_data is not earlier than window_start
+                if earliest_with_data < window_start:
+                    earliest_with_data = window_start
+
+                # Build labels from earliest_with_data .. last_day (inclusive)
+                labels = []
+                values = []
+                days_range = (last_day - earliest_with_data).days + 1
+                for i in range(days_range):
+                    d = earliest_with_data + timedelta(days=i)
+                    key = d.strftime('%Y-%m-%d')
+                    labels.append(key)
+                    values.append(counts_map.get(key, 0))
+
+            # Chats activos: distinct numero with message in last 24h
+            cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+            active_count_row = cursor.fetchone()
+            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+            cursor.close()
+            conn.close()
+
+            # Plan info if user authenticated
+            plan_info = None
+            try:
+                au = session.get('auth_user')
+                if au and au.get('user'):
+                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
+            except Exception:
+                plan_info = None
+
+            return jsonify({
+                'labels': labels,
+                'values': values,
+                'active_count': active_count,
+                'plan_info': plan_info or {}
+            })
+
+        # --- fallback: previous daily behavior for week/month ---
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
         cursor.execute("""
             SELECT DATE(c1.timestamp) as dia, COUNT(*) as cnt
             FROM conversaciones c1
@@ -8365,19 +8738,16 @@ def dashboard_conversaciones_data():
         """, (start,))
 
         rows = cursor.fetchall()
-        # rows: list of tuples (dia, cnt)
         labels = []
         values = []
         for r in rows:
             dia = r[0]
-            # dia might be date/datetime or string depending on connector
             if hasattr(dia, 'strftime'):
                 labels.append(dia.strftime('%Y-%m-%d'))
             else:
                 labels.append(str(dia))
             values.append(int(r[1] or 0))
 
-        # Chats activos: distinct numero con mensaje en últimas 24h
         cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
         active_count_row = cursor.fetchone()
         active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
@@ -8385,7 +8755,6 @@ def dashboard_conversaciones_data():
         cursor.close()
         conn.close()
 
-        # Plan info si el usuario está autenticado
         plan_info = None
         try:
             au = session.get('auth_user')
@@ -8541,44 +8910,72 @@ def actualizar_kanban(numero=None, columna_id=None, config=None):
     # No emitas ningún evento aquí
 
 def actualizar_kanban_inmediato(numero, config=None):
-    """Updates the Kanban board immediately when a message is received"""
+    """Updates the Kanban board immediately when a message is received.
+
+    Behavior:
+    - If there are any incoming messages without respuesta (respuesta IS NULL)
+      for this numero, set columna = 1 ("Nuevos").
+    - Otherwise fall back to previous logic (existing conversation -> columna 2).
+    """
     if config is None:
         config = obtener_configuracion_por_host()
-    
+
     try:
-        # Ensure contact exists in chat_meta
+        # Ensure chat_meta exists
         meta = obtener_chat_meta(numero, config)
         if not meta:
             inicializar_chat_meta(numero, config)
             app.logger.info(f"✅ Chat meta initialized for {numero}")
-        
-        # Determine appropriate column based on message history
-        historial = obtener_historial(numero, limite=2, config=config)
-        
-        if not historial:
-            # First message ever - put in "Nuevos"
-            nueva_columna = 1
-            app.logger.info(f"📊 First message from {numero} - moving to column 1 (Nuevos)")
-        else:
-            # Existing conversation - put in "En Conversación"
-            nueva_columna = 2
-            app.logger.info(f"📊 New message from {numero} - moving to column 2 (En Conversación)")
-        
-        # Update the database
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # Count unread incoming messages (respuesta IS NULL)
         cursor.execute("""
-            UPDATE chat_meta SET columna_id = %s
-            WHERE numero = %s
-        """, (nueva_columna, numero))
+            SELECT COUNT(*) FROM conversaciones
+            WHERE numero = %s AND respuesta IS NULL
+        """, (numero,))
+        row = cursor.fetchone()
+        sin_leer = int(row[0]) if row and row[0] is not None else 0
+
+        # Decide target column: if any unread -> Nuevos (1). Else En Conversación (2)
+        if sin_leer > 0:
+            nueva_columna = 1
+            app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+        else:
+            # Existing conversation heuristic: put in "En Conversación"
+            # If there's no history at all, still default to Nuevos (1)
+            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
+            total_msgs = int(cursor.fetchone()[0] or 0)
+            if total_msgs == 0:
+                nueva_columna = 1
+                app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
+            else:
+                nueva_columna = 2
+                app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+
+        # Persist update to chat_meta
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, columna_id)
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id), fecha_actualizacion = CURRENT_TIMESTAMP
+        """, (numero, nueva_columna))
         conn.commit()
         cursor.close()
         conn.close()
-        
+
         app.logger.info(f"✅ Kanban updated immediately for {numero} to column {nueva_columna}")
         return True
     except Exception as e:
         app.logger.error(f"❌ Error updating Kanban immediately: {e}")
+        try:
+            cursor.close()
+        except:
+            pass
+        try:
+            conn.close()
+        except:
+            pass
         return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
