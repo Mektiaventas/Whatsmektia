@@ -6541,7 +6541,6 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
 }}
 
 Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
-ready_to_notify debe ser true SOLO si el usuario ya confirmo que quiere que se le notifique (ej. "sí quiero comprar", "adelante con el pedido", etc).
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -6736,8 +6735,7 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
                     f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
-                if transfer_block_for_alert:
-                    mensaje_alerta += f"{transfer_block_for_alert}\n\n"
+
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
 
