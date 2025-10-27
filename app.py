@@ -3733,7 +3733,6 @@ def _ensure_domain_plans_table(conn):
             pass
         app.logger.warning(f"⚠️ _ensure_domain_plans_table: could not ensure table: {e}")
 
-
 def get_plan_for_domain(dominio):
     """
     Busca la fila de domain_plans en la BD de clientes por dominio (o heurísticas).
@@ -6891,16 +6890,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
-        datos_IA=obtener_datos_de_transferencia(config) or []
-        datos_IA = []
-        for y in datos_IA:
-            try:
-                datos_IA.append({
-                    "Nombre_IA": (p.get('ia_nombre') or '').strip(),
-                    "nombre_negocio": (p.get('negocio_nombre') or '').strip(),
-                })
-            except Exception:
-                continue
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
@@ -6914,6 +6903,14 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 continue
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
+
+        # --- NEW: expose the assistant/business display name from configuration to the system prompt ---
+        try:
+            ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
+            negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
+        except Exception:
+            ia_nombre = "Asistente"
+            negocio_nombre = ""
 
         multimodal_info = ""
         if es_imagen:
@@ -6931,13 +6928,15 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
--Tienes estos datos acerca de tu nombre y el del negocio : {json.dumps(datos_IA, ensure_ascii=False)}.
+
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
+- Tu nombre de asistente configurado (ia_nombre): {ia_nombre}
+- Nombre del negocio (negocio_nombre): {negocio_nombre}
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
