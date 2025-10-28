@@ -1679,7 +1679,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
                     servicio.get('catalogo3', '').strip(),
-                    servicio.get('proveedor', '').strip(),
+                    servicio.get('proveedor', '').strip()
                 ]
             
                 # Validar precios
