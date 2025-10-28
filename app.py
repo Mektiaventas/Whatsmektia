@@ -1031,7 +1031,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('catalogo', ''),
                     producto.get('catalogo2', ''),
                     producto.get('catalogo3', ''),
-                    producto.get('proveedor', '')
+                    producto.get('proveedor', ''),
                     producto.get('inscripcion', '0.00'),
                     producto.get('mensualidad', '0.00')
                 ]
@@ -1050,7 +1050,7 @@ def importar_productos_desde_excel(filepath, config=None):
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         status_ws=VALUES(status_ws),
-                        imagen=VALUES(imagen)
+                        imagen=VALUES(imagen),
                         inscripcion=VALUES(inscripcion),
                         mensualidad=VALUES(mensualidad)
                 """, values)
