@@ -296,11 +296,13 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
         {% set idx = i - 1 %}
         {% set nombre = '' %}
         {% set telefono_val = '' %}
+        {% set email_val = '' %}
         {% if asesores_list and idx < asesores_list|length %}
         {% set advisor = asesores_list[idx] %}
         {% if advisor is mapping %}
         {% set nombre = advisor.get('nombre', '') %}
         {% set telefono_val = advisor.get('telefono', '') %}
+        {% set email_val = advisor.get('email', '') %}
         {% endif %}
         {% endif %}
         <div class="asesor-card">
@@ -310,6 +312,9 @@ gratis, inmediato, garantizado, prometo, seguro">{{ datos.palabras_prohibidas or
             <label for="asesor{{ i }}_telefono" style="margin-top:8px;">Asesor {{ i }} - Teléfono</label>
             <input type="tel" id="asesor{{ i }}_telefono" name="asesor{{ i }}_telefono" class="input"
                    value="{{ telefono_val }}" placeholder="Ej: 521449XXXXXXX">
+            <label for="asesor{{ i }}_email" style="margin-top:8px;">Asesor {{ i }} - Correo electrónico</label>
+            <input type="email" id="asesor{{ i }}_email" name="asesor{{ i }}_email" class="input"
+                   value="{{ email_val if (email_val is defined) else '' }}" placeholder="ejemplo@dominio.com">
         </div>
         {% endfor %}
     </div>

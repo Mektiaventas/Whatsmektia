@@ -2980,7 +2980,7 @@ def sanitize_whatsapp_text(text):
 def eliminar_asesores_extras(config=None, allowed_count=2):
     """
     Recorta la lista de asesores guardada en configuracion.asesores_json
-    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono)
+    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono/ email)
     que existan en la tabla y estén por encima del límite.
     """
     if config is None:
@@ -3025,10 +3025,13 @@ def eliminar_asesores_extras(config=None, allowed_count=2):
             if i > allowed_count:
                 name_col = f"asesor{i}_nombre"
                 phone_col = f"asesor{i}_telefono"
+                email_col = f"asesor{i}_email"
                 if name_col in existing:
                     cols_to_null.append(f"{name_col} = NULL")
                 if phone_col in existing:
                     cols_to_null.append(f"{phone_col} = NULL")
+                if email_col in existing:
+                    cols_to_null.append(f"{email_col} = NULL")
 
         if cols_to_null:
             try:
@@ -4175,8 +4178,10 @@ def load_config(config=None):
             -- Asesores de ventas (columnas antiguas para compatibilidad)
             asesor1_nombre VARCHAR(100),
             asesor1_telefono VARCHAR(50),
+            asesor1_email VARCHAR(150),
             asesor2_nombre VARCHAR(100),
             asesor2_telefono VARCHAR(50),
+            asesor2_email VARCHAR(150),
             -- Nueva columna JSON que puede contener lista arbitraria de asesores
             asesores_json TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -4226,27 +4231,39 @@ def load_config(config=None):
             try:
                 parsed = json.loads(asesores_json)
                 if isinstance(parsed, list):
-                    asesores_list = parsed
+                    # Ensure each advisor dict includes nombre, telefono, email keys
+                    for a in parsed:
+                        if isinstance(a, dict):
+                            asesores_list.append({
+                                'nombre': (a.get('nombre') or '').strip(),
+                                'telefono': (a.get('telefono') or '').strip(),
+                                'email': (a.get('email') or '').strip()
+                            })
                     # Build map for backward compatibility (asesor1_nombre, etc.)
                     for idx, a in enumerate(asesores_list, start=1):
                         asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
                         asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
+                        asesores_map[f'asesor{idx}_email'] = a.get('email', '')
             except Exception:
                 app.logger.warning("⚠️ No se pudo parsear asesores_json, fallback a columnas individuales")
         if not asesores_list:
             # Fallback: legacy columns (asesor1, asesor2)
             a1n = (row.get('asesor1_nombre') or '').strip()
             a1t = (row.get('asesor1_telefono') or '').strip()
+            a1e = (row.get('asesor1_email') or '').strip()
             a2n = (row.get('asesor2_nombre') or '').strip()
             a2t = (row.get('asesor2_telefono') or '').strip()
-            if a1n or a1t:
-                asesores_list.append({'nombre': a1n, 'telefono': a1t})
+            a2e = (row.get('asesor2_email') or '').strip()
+            if a1n or a1t or a1e:
+                asesores_list.append({'nombre': a1n, 'telefono': a1t, 'email': a1e})
                 asesores_map['asesor1_nombre'] = a1n
                 asesores_map['asesor1_telefono'] = a1t
-            if a2n or a2t:
-                asesores_list.append({'nombre': a2n, 'telefono': a2t})
+                asesores_map['asesor1_email'] = a1e
+            if a2n or a2t or a2e:
+                asesores_list.append({'nombre': a2n, 'telefono': a2t, 'email': a2e})
                 asesores_map['asesor2_nombre'] = a2n
                 asesores_map['asesor2_telefono'] = a2t
+                asesores_map['asesor2_email'] = a2e
     except Exception as e:
         app.logger.warning(f"⚠️ Error procesando asesores: {e}")
 
@@ -4294,10 +4311,14 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor1_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor1_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_email VARCHAR(150) DEFAULT NULL")
     if 'asesor2_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor2_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_email VARCHAR(150) DEFAULT NULL")
     if 'asesores_json' not in existing_cols:
         alter_statements.append("ADD COLUMN asesores_json TEXT DEFAULT NULL")
 
@@ -4339,8 +4360,10 @@ def save_config(cfg_all, config=None):
             # legacy asesor fields (if provided in ases map)
             'asesor1_nombre': ases.get('asesor1_nombre', None),
             'asesor1_telefono': ases.get('asesor1_telefono', None),
+            'asesor1_email': ases.get('asesor1_email', None),
             'asesor2_nombre': ases.get('asesor2_nombre', None),
             'asesor2_telefono': ases.get('asesor2_telefono', None),
+            'asesor2_email': ases.get('asesor2_email', None),
             'asesores_json': None
         }
 
@@ -4358,11 +4381,13 @@ def save_config(cfg_all, config=None):
             while True:
                 name_key = f'asesor{i}_nombre'
                 phone_key = f'asesor{i}_telefono'
-                if name_key in ases or phone_key in ases:
+                email_key = f'asesor{i}_email'
+                if name_key in ases or phone_key in ases or email_key in ases:
                     name = (ases.get(name_key) or '').strip()
                     phone = (ases.get(phone_key) or '').strip()
-                    if name or phone:
-                        advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    email = (ases.get(email_key) or '').strip()
+                    if name or phone or email:
+                        advisors_compiled.append({'nombre': name, 'telefono': phone, 'email': email})
                     i += 1
                     # prevent infinite loop
                     if i > 20:
@@ -5119,8 +5144,9 @@ def obtener_siguiente_asesor(config=None):
                             if isinstance(a, dict):
                                 nombre = (a.get('nombre') or '').strip()
                                 telefono = (a.get('telefono') or '').strip()
-                                if nombre or telefono:
-                                    ases.append({'nombre': nombre, 'telefono': telefono})
+                                email = (a.get('email') or '').strip()
+                                if nombre or telefono or email:
+                                    ases.append({'nombre': nombre, 'telefono': telefono, 'email': email})
                 except Exception:
                     app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, fallback a columnas legacy")
             if not ases:
@@ -5135,8 +5161,9 @@ def obtener_siguiente_asesor(config=None):
                         idx = int(m.group(1))
                         nombre = (v or '').strip()
                         telefono = (r.get(f'asesor{idx}_telefono') or '').strip()
-                        if nombre or telefono:
-                            temp[idx] = {'nombre': nombre, 'telefono': telefono}
+                        email = (r.get(f'asesor{idx}_email') or '').strip()
+                        if nombre or telefono or email:
+                            temp[idx] = {'nombre': nombre, 'telefono': telefono, 'email': email}
                 for idx in sorted(temp.keys()):
                     ases.append(temp[idx])
             return ases
@@ -8367,14 +8394,17 @@ def configuracion_tab(tab):
             for i in range(1, asesor_count + 1):
                 name_key = f'asesor{i}_nombre'
                 phone_key = f'asesor{i}_telefono'
+                email_key = f'asesor{i}_email'
                 name = request.form.get(name_key, '').strip()
                 phone = request.form.get(phone_key, '').strip()
+                email = request.form.get(email_key, '').strip()
                 # Build legacy map for first two as fallback
                 if i <= 2:
                     advisors_map[f'asesor{i}_nombre'] = name
                     advisors_map[f'asesor{i}_telefono'] = phone
-                if name or phone:
-                    advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    advisors_map[f'asesor{i}_email'] = email
+                if name or phone or email:
+                    advisors_compiled.append({'nombre': name, 'telefono': phone, 'email': email})
 
             cfg['asesores'] = advisors_map  # legacy map
             # supply structured list to be saved by save_config
