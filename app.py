@@ -1115,34 +1115,47 @@ def obtener_imagenes_por_sku(sku, config=None):
 
 @app.route('/uploads/productos/<filename>')
 def serve_product_image(filename):
-    """Sirve imágenes de productos desde la carpeta tenant-aware:
-       uploads/productos/<tenant_slug>/<filename>
-       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
+    """Sirve imágenes tenant-aware desde uploads/productos/<tenant_slug>/<filename>.
+    Mejoras:
+    - No captura las HTTPException (p. ej. abort(404)) para preservar el código correcto.
+    - Registra las rutas candidatas que se revisan para facilitar debug.
+    - Usa send_from_directory apuntando al directorio correcto.
+    """
+    from werkzeug.exceptions import HTTPException
+
     try:
         config = obtener_configuracion_por_host()
         productos_dir, tenant_slug = get_productos_dir_for_config(config)
 
-        # 1) Intentar carpeta tenant específica
-        candidate = os.path.join(productos_dir, filename)
-        if os.path.isfile(candidate):
-            return send_from_directory(productos_dir, filename)
+        candidates = [
+            os.path.join(productos_dir, filename),  # tenant-specific
+            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', filename),  # legacy productos/
+            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)  # root uploads/
+        ]
+        app.logger.debug(f"🔍 serve_product_image candidates={candidates}")
 
-        # 2) Fallback: carpeta legacy uploads/productos/
-        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-        candidate_legacy = os.path.join(legacy_dir, filename)
-        if os.path.isfile(candidate_legacy):
-            return send_from_directory(legacy_dir, filename)
+        # Try each candidate and serve the first that exists
+        for path in candidates:
+            try:
+                if path and os.path.isfile(path):
+                    directory = os.path.dirname(path)
+                    file_basename = os.path.basename(path)
+                    app.logger.info(f"✅ Sirviendo imagen desde: {path}")
+                    return send_from_directory(directory, file_basename)
+            except Exception as _e:
+                # Log and continue trying other candidates
+                app.logger.warning(f"⚠️ Chequeo candidato falló para {path}: {_e}")
+                continue
 
-        # 3) Fallback adicional: raíz de uploads/
-        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-        if os.path.isfile(root_candidate):
-            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-
-        # No encontrado
-        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
+        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug}) candidates_count={len(candidates)}")
         abort(404)
+
+    except HTTPException:
+        # Re-raise HTTP exceptions (como abort(404)) para que Flask devuelva el código correcto
+        raise
     except Exception as e:
         app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
+        app.logger.debug(traceback.format_exc())
         abort(500)
 
 def asociar_imagenes_productos(servicios, imagenes):
