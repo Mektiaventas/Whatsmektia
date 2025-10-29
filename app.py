@@ -7221,8 +7221,29 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                     elif '/' in image_field_raw:
                         img_url = f"/uploads/productos/{image_field_raw.lstrip('/')}"
                     else:
+                        # Relative path (just filename) -> build tenant-relative path
                         img_url = f"/uploads/productos/{tenant_slug}/{image_field_raw}"
-                    images = [img_url]
+                    # Make images list contain absolute public URL (important)
+                    # Build absolute URL using request context if available, otherwise use config.dominio
+                    try:
+                        from flask import has_request_context
+                        if img_url and img_url.startswith('/'):
+                            if has_request_context():
+                                base = request.url_root.rstrip('/')
+                                full_img_url = f"{base}{img_url}"
+                            else:
+                                dominio = (config.get('dominio') or '').rstrip('/')
+                                if dominio.startswith('http://') or dominio.startswith('https://'):
+                                    base = dominio
+                                else:
+                                    base = f"https://{dominio}"
+                                full_img_url = f"{base}{img_url}"
+                        else:
+                            full_img_url = img_url
+                    except Exception:
+                        # As last resort, attempt to construct using https + tenant slug
+                        full_img_url = f"https://{config.get('dominio', tenant_slug)}/uploads/productos/{os.path.basename(img_url or image_field_raw)}"
+                    images = [full_img_url]
                 else:
                     # Fallback: try obtener_imagenes_por_sku
                     if sku:
@@ -7232,60 +7253,40 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                                 first = imgs[0].get('filename') or ''
                                 if first:
                                     image_field_raw = first
-                                    img_url = f"/uploads/productos/{tenant_slug}/{first}"
-                                    images = [img_url]
+                                    full_img_url = f"https://{config.get('dominio')}/uploads/productos/{first}" if config.get('dominio') else f"/uploads/productos/{tenant_slug}/{first}"
+                                    images = [full_img_url]
                         except Exception:
                             images = []
 
                 # If we have an image and we received a numero, send it here using the exact try-block requested
-                        # If we have an image and we received a numero, send it here using the exact try-block requested
-            if images and numero:
-                try:
-                    # Normalize what we pass to enviar_imagen:
-                    # - keep full http(s) URLs as-is (external images)
-                    # - if we built a path like "/uploads/productos/<tenant>/file.jpg" -> pass only the basename
-                    # - if we only have image_field_raw (filename) pass that (preferred)
-                    send_param = None
-                    if img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):
-                        send_param = img_url
-                    elif image_field_raw:
-                        # prefer raw filename when available (the whatsapp client expects filename or tenant-less path)
-                        send_param = image_field_raw
-                    elif img_url and isinstance(img_url, str):
-                        # strip any leading path so enviar_imagen receives just the filename
-                        send_param = os.path.basename(img_url)
+                if images and numero:
+                    try:
+                        # Prefer passing a fully-qualified public URL to enviar_imagen so WhatsApp can fetch it.
+                        # If enviar_imagen expects just a filename in your implementation, this still usually works
+                        # if enviar_imagen detects http(s) and fetches the URL. Using full URL avoids server path resolution issues.
+                        send_param = images[0]
 
-                    # Final sanity: fallback to basename of img_url
-                    if not send_param and img_url:
-                        send_param = os.path.basename(img_url)
+                        # Log what we're about to send for easier debugging
+                        app.logger.info(f"ℹ️ generar_respuesta_catalogo -> enviar_imagen param='{send_param}' (original_image_field='{image_field_raw}') tenant='{tenant_slug}'")
 
-                    # Log what we're about to send for easier debugging
-                    app.logger.info(f"ℹ️ generar_respuesta_catalogo -> enviar_imagen param='{send_param}' (original_img_url='{img_url}') tenant='{tenant_slug}'")
+                        sent = enviar_imagen(numero, send_param, config)
+                        if text:
+                            enviar_mensaje(numero, text, config)
 
-                    sent = enviar_imagen(numero, send_param, config)
-                    if text:
-                        enviar_mensaje(numero, text, config)
+                        # registrar_respuesta_bot debe recibir la URL pública que el cliente espera.
+                        imagen_url_para_guardar = send_param if isinstance(send_param, str) and (send_param.startswith('http://') or send_param.startswith('https://')) else f"/uploads/productos/{os.path.basename(send_param)}"
 
-                    # registrar_respuesta_bot debe recibir la URL pública que el cliente espera.
-                    # Guardamos /uploads/productos/<filename> (tenant-agnostic) para compatibilidad UI.
-                    imagen_url_para_guardar = None
-                    if isinstance(send_param, str) and (send_param.startswith('http://') or send_param.startswith('https://')):
-                        imagen_url_para_guardar = send_param
-                    else:
-                        # use basename so UI route /uploads/productos/<filename> funciona con serve_product_image
-                        imagen_url_para_guardar = f"/uploads/productos/{os.path.basename(send_param)}"
-
-                    registrar_respuesta_bot(
-                        numero, mensaje_usuario, text, config,
-                        imagen_url=(imagen_url_para_guardar),
-                        es_imagen=True,
-                        incoming_saved=incoming_saved
-                    )
-                    # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
-                    return {"text": text, "images": [], "image_sent": True}
-                except Exception as e:
-                    app.logger.error(f"🔴 Error enviando imagen: {e}")
-                    # caemos al retorno normal (no enviar de nuevo)
+                        registrar_respuesta_bot(
+                            numero, mensaje_usuario, text, config,
+                            imagen_url=(imagen_url_para_guardar),
+                            es_imagen=True,
+                            incoming_saved=incoming_saved
+                        )
+                        # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
+                        return {"text": text, "images": [], "image_sent": True}
+                    except Exception as e:
+                        app.logger.error(f"🔴 Error enviando imagen: {e}")
+                        # caemos al retorno normal (no enviar de nuevo)
             else:
                 # no hay match preciso -> no recopilamos imágenes
                 images = []
@@ -7299,7 +7300,6 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
     except Exception as e:
         app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
         return None
-
 # Add below existing helper functions (e.g. after other CREATE TABLE helpers)
 def _ensure_columnas_precios_table(conn):
     cur = conn.cursor()
