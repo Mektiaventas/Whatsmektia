@@ -657,10 +657,10 @@
                          onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                 </div>
                 ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                <span class="alias-view" data-num="${chat.numero}">${chat.nombre_mostrado}</span>
+                <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
                 {% if es_admin %}
                 <span class="alias-edit" style="display:none;">
-                    <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" maxlength="100" style="width:110px;">
+                    <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
                 </span>
                 {% endif %}
                 <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
@@ -724,27 +724,33 @@
 
     function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
     // === Edit alias helper (improved) ===
-    // === Edit alias helper (improved) ===
     function activarEdicionAlias(parent) {
         if (!parent) return;
-        // buscar el contenedor de tarjeta por si el botón está en distintas estructuras DOM
         const card = parent.closest('.kanban-card, .kanban-chat-link, .card-content') || parent;
         const viewElement = card.querySelector('.alias-view');
         const editElement = card.querySelector('.alias-edit');
         if (!viewElement || !editElement) return;
 
-        const original = (viewElement.textContent || '').trim();
+        // prefer structured data if available
+        const displayed = (viewElement.textContent || '').trim();
+        const fullname = (viewElement.dataset && viewElement.dataset.nombre) ? (viewElement.dataset.nombre || '').trim() : '';
+        const original = fullname || displayed;
+
         const input = editElement.querySelector('input[type=text]');
         if (!input) return;
 
-        // Asegurar que el input tenga data-num (por si fue creado dinámicamente)
         if (!input.dataset.num || input.dataset.num.trim() === '') {
             const numFromView = viewElement.dataset.num || card.dataset.chatNum || input.getAttribute('data-num') || '';
             if (numFromView) input.dataset.num = numFromView;
         }
 
-        // Inicializar el valor del input con el nombre visible si está vacío
-        if (!input.value || input.value.trim() === '') input.value = original;
+        // choose initial input value: alias -> nombre -> numero
+        const aliasFromDataset = (input.dataset && input.dataset.alias) ? (input.dataset.alias || '').trim() : '';
+        const candidate = aliasFromDataset || (input.value || '').trim() || fullname || input.dataset.num || '';
+        input.value = candidate;
+
+        // mark editing so auto-refresh won't overwrite
+        card.classList.add('alias-editing');
 
         viewElement.style.display = 'none';
         editElement.style.display = 'flex';
@@ -754,16 +760,30 @@
         let submitted = false;
 
         function finishAndRestore(valueToShow) {
+            try { card.classList.remove('alias-editing'); } catch (e) { }
             editElement.style.display = 'none';
-            // si valueToShow es undefined o null, restaurar el original guardado
-            viewElement.textContent = (valueToShow !== undefined && valueToShow !== null) ? valueToShow : original;
+
+            // If valueToShow is empty or equals phone, but we have a fullname, prefer fullname
+            let show = valueToShow;
+            if ((!show || String(show).trim() === '') && fullname) show = fullname;
+            // final fallback: the displayed original
+            if (!show) show = original;
+
+            viewElement.textContent = show;
+            // update dataset.alias to keep consistency (if value equals fullname, clear alias dataset)
+            try {
+                if (input && input.dataset) {
+                    if (String(show).trim() === (fullname || '').trim()) input.dataset.alias = '';
+                    else input.dataset.alias = String(show).trim();
+                }
+            } catch (e) { }
             viewElement.style.display = '';
         }
 
         function terminar() {
             const nuevo = (input.value || '').trim();
 
-            // Si no hubo cambio o quedó vacío, restaurar original y no llamar al servidor
+            // If nothing changed or empty, restore original (prefer fullname)
             if (nuevo === '' || nuevo === original) {
                 finishAndRestore(original);
                 return;
@@ -784,12 +804,10 @@
                 })
                 .catch(err => {
                     console.warn('Error guardando alias:', err);
-                    // En caso de error dejar el alias original visible
                     finishAndRestore(original);
                 });
         }
 
-        // onblur: darle un tick para evitar conflicto con Enter que dispara blur+keydown
         input.onblur = () => {
             setTimeout(() => {
                 if (!submitted) terminar();
@@ -798,7 +816,11 @@
 
         input.onkeydown = e => {
             if (e.key === 'Enter') { e.preventDefault(); terminar(); }
-            if (e.key === 'Escape') { editElement.style.display = 'none'; viewElement.style.display = ''; }
+            if (e.key === 'Escape') {
+                try { card.classList.remove('alias-editing'); } catch (ee) { }
+                editElement.style.display = 'none';
+                viewElement.style.display = '';
+            }
         };
     }
 
