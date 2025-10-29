@@ -6791,6 +6791,7 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
             try:
                 asesor = obtener_siguiente_asesor(config)
                 asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
+                asesor_email = asesor.get('email') if asesor and isinstance(asesor, dict) else None
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config) or (datos_compra.get('nombre_cliente') or 'No especificado')
 
                 # Construir líneas de items legibles
@@ -6821,6 +6822,34 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
+                if asesor_email:
+                    try:
+                        service = autenticar_google_calendar(config)
+                        if service:
+                            # Crear evento mínimo para notificar al asesor por email
+                            now_dt = datetime.now(tz_mx)
+                            start_iso = now_dt.isoformat()
+                            end_iso = (now_dt + timedelta(hours=1)).isoformat()
+                            event_for_asesor = {
+                                'summary': f"Notificación: pedido de {cliente_mostrado}",
+                                'location': config.get('direccion', ''),
+                                'description': f"{contexto_resumido}\n\nDetalles del pedido enviado por WhatsApp.\nNúmero cliente: {numero}",
+                                'start': {'dateTime': start_iso, 'timeZone': 'America/Mexico_City'},
+                                'end': {'dateTime': end_iso, 'timeZone': 'America/Mexico_City'},
+                                'attendees': [{'email': asesor_email}],
+                                'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 10}]}
+                            }
+                            try:
+                                # Insertar en primary y notificar asistentes (sendUpdates='all')
+                                primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+                                created_evt = service.events().insert(calendarId=primary_calendar, body=event_for_asesor, sendUpdates='all').execute()
+                                app.logger.info(f"✅ Evento Calendar creado para asesor {asesor_email}: {created_evt.get('htmlLink')}")
+                            except Exception as e_evt:
+                                app.logger.warning(f"⚠️ No se pudo crear evento Calendar para asesor {asesor_email}: {e_evt}")
+                        else:
+                            app.logger.warning("⚠️ autenticar_google_calendar devolvió None, no se creó evento para asesor")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Error intentando notificar a asesor por Calendar ({asesor_email}): {e}")
 
                 # Enviar a asesor y al número fijo
                 targets = []
