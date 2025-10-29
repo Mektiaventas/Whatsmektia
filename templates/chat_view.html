@@ -38,7 +38,13 @@
                     <input type="text" value="{{ chat[2] or '' }}" data-num="{{ chat[1] }}" maxlength="100" style="width: 180px;">
                 </span>
 
-                <button type="button" class="edit-alias-btn" data-num="{{ chat[1] }}" title="Editar nombre" style="background:none;border:0;cursor:pointer;font-size:14px;margin-left:6px;">
+                <!-- Inline onclick added as a robust, immediate call -->
+                <button type="button"
+                        class="edit-alias-btn"
+                        data-num="{{ chat[1] }}"
+                        title="Editar nombre"
+                        style="background:none;border:0;cursor:pointer;font-size:14px;margin-left:6px;"
+                        onclick="activarEdicionAlias(this.closest('.card-title-row'))">
                     ✏️
                 </button>
 
@@ -107,7 +113,7 @@
 
         function activarEdicionAlias(parent) {
             if (!parent) return;
-            console.debug('activarEdicionAlias called for parent:', parent);
+            console.log('activarEdicionAlias called for parent:', parent);
             const view = parent.querySelector('.alias-view');
             const edit = parent.querySelector('.alias-edit');
             if (!view || !edit) return;
@@ -163,6 +169,7 @@
         }
 
         function onEditAliasClick(e) {
+            console.log('onEditAliasClick fired', e);
             e.preventDefault(); e.stopPropagation();
             const btn = e.currentTarget || this;
             const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
@@ -170,9 +177,14 @@
         }
         function enhanceAliasButtons() {
             const buttons = Array.from(document.querySelectorAll('.edit-alias-btn'));
+            console.log('enhanceAliasButtons found', buttons.length, 'buttons');
             buttons.forEach(btn => {
                 try { btn.removeEventListener('click', onEditAliasClick); } catch (e) {}
                 btn.addEventListener('click', onEditAliasClick);
+
+                // Also bind pointerdown/touchstart for immediate responsiveness on touch devices
+                try { btn.removeEventListener('pointerdown', onEditAliasClick); } catch (e) {}
+                btn.addEventListener('pointerdown', onEditAliasClick, { passive: true });
             });
         }
 
@@ -180,7 +192,7 @@
             const container = document.getElementById('mensajes-container');
             initLastMessageFromDOM(container);
             try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
-            try { console.debug('edit-alias-btn count at ready:', document.querySelectorAll('.edit-alias-btn').length); } catch (e) {}
+            try { console.log('edit-alias-btn count at ready:', document.querySelectorAll('.edit-alias-btn').length); } catch (e) {}
 
             // Auto-refresh page every 500ms unless user is editing alias or page is hidden.
             // Be aware: full page reload will reset scroll and any transient client state.
