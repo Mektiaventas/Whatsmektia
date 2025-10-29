@@ -810,8 +810,7 @@ function seekAudio(id, progressBar, evt) {
         console.log('DOM cargado - inicializando componentes');
         enhanceAliasButtons();
 
-        // Guarded init for setupEmojiPicker (llama inmediatamente si ya existe,
-        // si no, espera brevemente hasta 3s a que se defina).
+        // Emoji picker init (unchanged)
         try {
             if (typeof setupEmojiPicker === 'function') {
                 setupEmojiPicker();
@@ -828,12 +827,57 @@ function seekAudio(id, progressBar, evt) {
             console.error('Error initializing emoji picker:', err);
         }
 
-        // Start automatic chat-list refresh (opcional: comentar si no quieres auto-refresh)
+        // Start automatic chat-list refresh (initial load + interval)
         if (document.querySelector('.chat-items')) {
-            actualizarListaChats(); // initial load
+            actualizarListaChats(); // initial load for left column
             if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
         }
 
+        // --- New: initialize message panel state from DOM and start poll when chat selected ---
+        function initMessagesStateFromDOM() {
+            try {
+                const msgsContainer = document.getElementById('msgs');
+                if (!msgsContainer) return;
+                // find highest numeric message id in DOM and populate seenMessageKeys
+                const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+                let maxId = Number(lastMessageIdForSelected) || 0;
+                nodes.forEach(n => {
+                    const idAttr = n.getAttribute('data-msg-id');
+                    const id = Number(idAttr) || 0;
+                    if (id) {
+                        maxId = Math.max(maxId, id);
+                        // Build a simple key for existing DOM messages (id-based)
+                        seenMessageKeys.add('id:' + String(id));
+                    } else {
+                        // fallback: key by text+timestamp if no numeric id
+                        const txt = (n.querySelector('.text-message') && n.querySelector('.text-message').textContent) || '';
+                        const ts = n.getAttribute('data-ts-ms') || Date.parse(n.querySelector('.msg-meta')?.textContent || '') || 0;
+                        const key = 'text:' + normalizeText(txt) + '|ts:' + String(Math.floor(Number(ts) / 1000));
+                        if (key) seenMessageKeys.add(key);
+                    }
+                });
+                lastMessageIdForSelected = maxId;
+                console.debug('messages state initialized', { lastMessageIdForSelected, seenCount: seenMessageKeys.size });
+            } catch (e) {
+                console.warn('initMessagesStateFromDOM failed', e);
+            }
+        }
+
+        // If a chat is selected on load, initialize and start polling immediately
+        try {
+            if (selectedChatId) {
+                initMessagesStateFromDOM();
+                if (!messagesIntervalHandle) {
+                    // immediate poll to get any new messages since lastMessageIdForSelected
+                    pollSelectedMessages();
+                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
+                }
+            }
+        } catch (e) {
+            console.warn('Could not start messages polling on load:', e);
+        }
+
+        // visibilitychange: keep existing behavior but ensure message polling is started/stopped sensibly
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
                 chatAutoRefresh = false;
@@ -843,6 +887,7 @@ function seekAudio(id, progressBar, evt) {
                     chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
                 }
                 if (selectedChatId && !messagesIntervalHandle) {
+                    initMessagesStateFromDOM();
                     messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
                 }
             }
