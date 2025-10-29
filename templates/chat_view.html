@@ -294,6 +294,25 @@
                 const mensajesContainer = document.getElementById('mensajes-container');
                 actualizarMensajes(mensajesContainer);
             }, refreshInterval);
+            function onEditAliasClick(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const btn = e.currentTarget || this;
+                const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
+                activarEdicionAlias(parent);
+            }
+            function enhanceAliasButtons() {
+                document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                    try {
+                        btn.removeEventListener('click', onEditAliasClick);
+                    } catch (e) { }
+                    btn.addEventListener('click', onEditAliasClick);
+                });
+            }
+            // call it on DOM ready (if you already have a DOMContentLoaded listener, call enhanceAliasButtons() there)
+            document.addEventListener('DOMContentLoaded', () => {
+                try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
+            });
         });
     </script>
 </body>
