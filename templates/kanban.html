@@ -724,16 +724,26 @@
 
     function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
     // === Edit alias helper (improved) ===
+    // === Edit alias helper (improved) ===
     function activarEdicionAlias(parent) {
-        const viewElement = parent.querySelector('.alias-view');
-        const editElement = parent.querySelector('.alias-edit');
+        if (!parent) return;
+        // buscar el contenedor de tarjeta por si el botón está en distintas estructuras DOM
+        const card = parent.closest('.kanban-card, .kanban-chat-link, .card-content') || parent;
+        const viewElement = card.querySelector('.alias-view');
+        const editElement = card.querySelector('.alias-edit');
         if (!viewElement || !editElement) return;
 
         const original = (viewElement.textContent || '').trim();
         const input = editElement.querySelector('input[type=text]');
         if (!input) return;
 
-        // Ensure input shows a sensible initial value
+        // Asegurar que el input tenga data-num (por si fue creado dinámicamente)
+        if (!input.dataset.num || input.dataset.num.trim() === '') {
+            const numFromView = viewElement.dataset.num || card.dataset.chatNum || input.getAttribute('data-num') || '';
+            if (numFromView) input.dataset.num = numFromView;
+        }
+
+        // Inicializar el valor del input con el nombre visible si está vacío
         if (!input.value || input.value.trim() === '') input.value = original;
 
         viewElement.style.display = 'none';
@@ -745,7 +755,8 @@
 
         function finishAndRestore(valueToShow) {
             editElement.style.display = 'none';
-            viewElement.textContent = (valueToShow !== undefined && valueToShow !== null) ? valueToShow : input.dataset.num;
+            // si valueToShow es undefined o null, restaurar el original guardado
+            viewElement.textContent = (valueToShow !== undefined && valueToShow !== null) ? valueToShow : original;
             viewElement.style.display = '';
         }
 
@@ -759,7 +770,7 @@
             }
 
             submitted = true;
-            fetch(`/contactos/${input.dataset.num}/alias`, {
+            fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
                 method: 'POST',
                 body: new URLSearchParams({ alias: nuevo }),
                 headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
