@@ -2979,10 +2979,23 @@ def sanitize_whatsapp_text(text):
 
 def eliminar_asesores_extras(config=None, allowed_count=2):
     """
-    Recorta la lista de asesores guardada en configuracion.asesores_json
-    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono/ email)
-    que existan en la tabla y estén por encima del límite.
+    Actualmente deshabilitado por defecto: evita recortar automáticamente la lista de asesores
+    para que no se borren/NULLifiquen columnas en la tabla configuracion.
+    Para re-habilitar el recorte automático pon la variable de entorno ENABLE_TRIM_ASESORES=true
+    y reinicia la aplicación.
+
+    Si ENABLE_TRIM_ASESORES == 'true' entonces se ejecuta la lógica original (fallbacks y NULL legacy cols).
     """
+    # Guard por defecto: NO recortar asesores a menos que se habilite explícitamente
+    if os.getenv("ENABLE_TRIM_ASESORES", "false").lower() != "true":
+        try:
+            cfg = config or obtener_configuracion_por_host()
+            app.logger.info(f"ℹ️ eliminar_asesores_extras SKIPPED (env ENABLE_TRIM_ASESORES != 'true') for {cfg.get('dominio') if isinstance(cfg, dict) else cfg}")
+        except Exception:
+            app.logger.info("ℹ️ eliminar_asesores_extras SKIPPED (env ENABLE_TRIM_ASESORES != 'true')")
+        return
+
+    # --- Si se habilita, ejecutar la lógica existente (mantengo la implementación previa) ---
     if config is None:
         config = obtener_configuracion_por_host()
     try:
