@@ -1115,47 +1115,34 @@ def obtener_imagenes_por_sku(sku, config=None):
 
 @app.route('/uploads/productos/<filename>')
 def serve_product_image(filename):
-    """Sirve imágenes tenant-aware desde uploads/productos/<tenant_slug>/<filename>.
-    Mejoras:
-    - No captura las HTTPException (p. ej. abort(404)) para preservar el código correcto.
-    - Registra las rutas candidatas que se revisan para facilitar debug.
-    - Usa send_from_directory apuntando al directorio correcto.
-    """
-    from werkzeug.exceptions import HTTPException
-
+    """Sirve imágenes de productos desde la carpeta tenant-aware:
+       uploads/productos/<tenant_slug>/<filename>
+       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
     try:
         config = obtener_configuracion_por_host()
         productos_dir, tenant_slug = get_productos_dir_for_config(config)
 
-        candidates = [
-            os.path.join(productos_dir, filename),  # tenant-specific
-            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', filename),  # legacy productos/
-            os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)  # root uploads/
-        ]
-        app.logger.debug(f"🔍 serve_product_image candidates={candidates}")
+        # 1) Intentar carpeta tenant específica
+        candidate = os.path.join(productos_dir, filename)
+        if os.path.isfile(candidate):
+            return send_from_directory(productos_dir, filename)
 
-        # Try each candidate and serve the first that exists
-        for path in candidates:
-            try:
-                if path and os.path.isfile(path):
-                    directory = os.path.dirname(path)
-                    file_basename = os.path.basename(path)
-                    app.logger.info(f"✅ Sirviendo imagen desde: {path}")
-                    return send_from_directory(directory, file_basename)
-            except Exception as _e:
-                # Log and continue trying other candidates
-                app.logger.warning(f"⚠️ Chequeo candidato falló para {path}: {_e}")
-                continue
+        # 2) Fallback: carpeta legacy uploads/productos/
+        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+        candidate_legacy = os.path.join(legacy_dir, filename)
+        if os.path.isfile(candidate_legacy):
+            return send_from_directory(legacy_dir, filename)
 
-        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug}) candidates_count={len(candidates)}")
+        # 3) Fallback adicional: raíz de uploads/
+        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+        if os.path.isfile(root_candidate):
+            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
+
+        # No encontrado
+        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
         abort(404)
-
-    except HTTPException:
-        # Re-raise HTTP exceptions (como abort(404)) para que Flask devuelva el código correcto
-        raise
     except Exception as e:
         app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
-        app.logger.debug(traceback.format_exc())
         abort(500)
 
 def asociar_imagenes_productos(servicios, imagenes):
@@ -7097,52 +7084,61 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         app.logger.error(traceback.format_exc())
         return None
 
-# Helper: generate a catalog-aware short reply using DeepSeek
-def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20, allow_images=False):
+def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20, allow_images=False, numero=None, incoming_saved=False):
     """
-    Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo proporcionado.
-    Devuelve dict { "text": "<respuesta>", "images": ["<url|filename>", ...] }.
-
-    Cambio: para evitar enviar imágenes de productos distintos,
-    si se detecta un producto específico (SKU/modelo/servicio) solo se devolverán
-    las imágenes asociadas a ese item. Si no se detecta item exacto, NO se devuelven imágenes.
+    Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo.
+    Comportamiento nuevo:
+      - Si `allow_images==True` y se detecta UN producto específico en el mensaje, la función intentará
+        ENVIAR la imagen asociada al producto usando exactamente el bloque de envío solicitado por el usuario.
+      - Para mantener compatibilidad con el flujo actual, cuando la imagen es enviada aquí la función devuelve
+        {"text": "<respuesta>", "images": [], "image_sent": True} para evitar que el caller vuelva a reenviarla.
+    Parámetros añadidos (opcionales, backward-compatible):
+      - numero: número del chat (para poder enviar la imagen desde aquí)
+      - incoming_saved: boolean que se pasa a registrar_respuesta_bot
     """
     try:
         if config is None:
             config = obtener_configuracion_por_host()
 
-        # If we don't have a textual resumen, build a compact one
+        # Build texto_catalogo si hace falta
         if not texto_catalogo and catalog_list:
-            precios = obtener_todos_los_precios(config) or []
-            texto_catalogo = build_texto_catalogo(precios, limit=40)
-
-        catalog_list = []
-        for p in precios:
             try:
-                catalog_list.append({
-                    "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
-                    "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
-                    "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
-                    "inscripcion": str(p.get('inscripcion') or ""),
-                    "mensualidad": str(p.get('mensualidad') or ""),
-                    "imagen": str(p.get('imagen') or ""),
-                    "descripcion": str(p.get('descripcion') or "")
-                })
+                precios = obtener_todos_los_precios(config) or []
+                texto_catalogo = build_texto_catalogo(precios, limit=40)
             except Exception:
-                continue
+                texto_catalogo = ""
+
+        # Normalizar/garantizar estructura de catalog_list si viene vacío
+        if not catalog_list:
+            try:
+                precios = obtener_todos_los_precios(config) or []
+                catalog_list = []
+                for p in precios:
+                    try:
+                        catalog_list.append({
+                            "sku": (p.get('sku') or '').strip(),
+                            "servicio": (p.get('servicio') or p.get('modelo') or p.get('subcategoria') or p.get('categoria') or '').strip(),
+                            "modelo": (p.get('modelo') or '').strip(),
+                            "descripcion": (p.get('descripcion') or '').strip(),
+                            "imagen": (p.get('imagen') or '').strip(),
+                            "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or "")
+                        })
+                    except Exception:
+                        continue
+            except Exception:
+                catalog_list = catalog_list or []
 
         system_prompt = (
             "Eres un asistente orientado a responder preguntas sobre productos y servicios. "
             "Dispones de un catálogo que NO debes inventar: utiliza SOLO los ítems tal como aparecen. "
             "Cuando correspondan, menciona SKU, modelo o nombre exacto del catálogo; si el usuario pide detalles técnicos, "
-            "proporciona la descripción y modelo exactos que estén en el catálogo. Responde en español, con máximo 8 líneas, "
+            "proporciona la descripción y modelo exactos que estén en el catálogo. Responde en español, con máximo 6 líneas, "
             "sin incluir teléfonos ni datos sensibles."
         )
 
         user_msg = (
             f"USUARIO: {mensaje_usuario}\n\n"
-            f"CATÁLOGO {catalog_list} \n\n"
+            f"CATÁLOGO (resumen):\n{texto_catalogo or 'No hay catálogo cargado.'}\n\n"
             "Instrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
             "precios o comparación, usa únicamente la información del catálogo. Si no encuentras el ítem, díselo y ofrece buscar similar."
         )
@@ -7165,7 +7161,6 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         if isinstance(raw, list):
             raw = "".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
         text = str(raw).strip()
-        # Normalize whitespace
         text = re.sub(r'\s*\n\s*', '\n', text).strip()
         if not text:
             return None
@@ -7178,27 +7173,27 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
 
         images = []
 
-        # Decide best_item from mensaje_usuario (strict matching) to avoid broad token matches
-        def _find_best_item_by_strict_match(msg, catalog):
+        # Helper: strict best-item search to avoid broad token matches
+        def _find_best_item_strict(msg, catalog):
             if not msg or not catalog:
                 return None
             m = msg.lower()
-            # 1) exact SKU substring
+            # SKU exact
             for it in catalog:
                 sku = (it.get('sku') or '').strip().lower()
                 if sku and sku in m:
                     return it
-            # 2) exact modelo
+            # modelo exact
             for it in catalog:
                 modelo_i = (it.get('modelo') or '').strip().lower()
                 if modelo_i and modelo_i in m:
                     return it
-            # 3) exact servicio/name
+            # servicio exact
             for it in catalog:
                 servicio = (it.get('servicio') or '').strip().lower()
                 if servicio and servicio in m:
                     return it
-            # 4) word-boundary match for modelo or servicio (avoid tiny tokens)
+            # word-boundary token match (avoid tiny tokens)
             tokens = set(re.findall(r'\b\w{3,}\b', m))
             for it in catalog:
                 modelo_i = (it.get('modelo') or '').strip().lower()
@@ -7209,51 +7204,66 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                     return it
             return None
 
-        # Only collect images when explicitly allowed AND we can identify a single product precisely
+        # Collect images ONLY if allowed and we can identify a single product precisely
         if allow_images:
-            best_item = _find_best_item_by_strict_match(mensaje_usuario or "", catalog_list or [])
+            best_item = _find_best_item_strict(mensaje_usuario or "", catalog_list or [])
             if best_item:
-                # Prefer explicit imagen field on the item
-                imagen = (best_item.get('imagen') or '').strip()
+                # Determine image field raw (as stored) and normalized URL for enviar_imagen
+                image_field_raw = (best_item.get('imagen') or '').strip()
                 sku = (best_item.get('sku') or '').strip()
-                seen = set()
-                if imagen:
-                    img_target = imagen
-                    if img_target.startswith('http://') or img_target.startswith('https://'):
-                        url = img_target
-                    elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
-                        url = img_target if img_target.startswith('/') else '/' + img_target
-                    elif '/' in img_target:
-                        url = f"/uploads/productos/{img_target.lstrip('/')}"
+                img_url = None
+                # If explicit imagen value present, normalize it to a URL the app can serve
+                if image_field_raw:
+                    if image_field_raw.startswith('http://') or image_field_raw.startswith('https://'):
+                        img_url = image_field_raw
+                    elif image_field_raw.startswith('/uploads/') or image_field_raw.startswith('uploads/'):
+                        img_url = image_field_raw if image_field_raw.startswith('/') else '/' + image_field_raw
+                    elif '/' in image_field_raw:
+                        img_url = f"/uploads/productos/{image_field_raw.lstrip('/')}"
                     else:
-                        url = f"/uploads/productos/{tenant_slug}/{img_target}"
-                    images.append(url); seen.add(url)
-                # If item has no direct imagen value, try DB table imagenes_productos by SKU
-                if not images and sku:
+                        img_url = f"/uploads/productos/{tenant_slug}/{image_field_raw}"
+                    images = [img_url]
+                else:
+                    # Fallback: try obtener_imagenes_por_sku
+                    if sku:
+                        try:
+                            imgs = obtener_imagenes_por_sku(sku, config=config) or []
+                            if imgs:
+                                first = imgs[0].get('filename') or ''
+                                if first:
+                                    image_field_raw = first
+                                    img_url = f"/uploads/productos/{tenant_slug}/{first}"
+                                    images = [img_url]
+                        except Exception:
+                            images = []
+
+                # If we have an image and we received a numero, send it here using the exact try-block requested
+                if images and numero:
                     try:
-                        imgs = obtener_imagenes_por_sku(sku, config=config) or []
-                        for ir in imgs:
-                            fname = ir.get('filename') or ''
-                            if not fname:
-                                continue
-                            url = f"/uploads/productos/{tenant_slug}/{fname}"
-                            if url not in seen:
-                                images.append(url); seen.add(url)
-                                # send at most 2 images for the specific product
-                                if len(images) >= 2:
-                                    break
+                        # usar img_url para enviar - registrar_respuesta_bot decidirá cómo guardar la ruta
+                        sent = enviar_imagen(numero, img_url, config)
+                        if text:
+                            enviar_mensaje(numero, text, config)
+                        registrar_respuesta_bot(
+                            numero, mensaje_usuario, text, config,
+                            imagen_url=(img_url if isinstance(img_url, str) and img_url.startswith('http') else f"/uploads/productos/{image_field_raw}"),
+                            es_imagen=True,
+                            incoming_saved=incoming_saved
+                        )
+                        # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
+                        return {"text": text, "images": [], "image_sent": True}
                     except Exception as e:
-                        app.logger.warning(f"⚠️ obtener_imagenes_por_sku falló para sku={sku}: {e}")
+                        app.logger.error(f"🔴 Error enviando imagen: {e}")
+                        # caemos al retorno normal (no enviar de nuevo)
             else:
-                # If we cannot pick a single best item, do NOT send images to avoid unrelated products.
-                app.logger.info("ℹ️ No se detectó un producto único al pedir imágenes -> no se recopilan imágenes para evitar ruido.")
+                # no hay match preciso -> no recopilamos imágenes
                 images = []
 
-        # Ensure limit (safety)
+        # Safety limit
         if images and len(images) > 4:
             images = images[:4]
 
-        return {"text": text, "images": images}
+        return {"text": text, "images": images, "image_sent": False}
 
     except Exception as e:
         app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
