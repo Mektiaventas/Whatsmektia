@@ -7088,7 +7088,9 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
 def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20):
     """
     Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo proporcionado.
-    Devuelve texto plano (string) o None si falla.
+    Ahora devuelve un dict con:
+      { "text": "<respuesta>", "images": ["<url|filename>", ...] }
+    o una simple cadena (compatibilidad) en caso de fallo.
     """
     try:
         if config is None:
@@ -7137,7 +7139,55 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         text = str(raw).strip()
         # Normalize whitespace and keep first reasonable chunk
         text = re.sub(r'\s*\n\s*', '\n', text).strip()
-        return text or None
+        if not text:
+            return None
+
+        # Try to detect which catalog items are mentioned (prefer message_usuario then AI text)
+        search_space = (mensaje_usuario or "") + " || " + (text or "")
+        ss_low = search_space.lower()
+
+        images = []
+        seen = set()
+        # catalog_list entries expected to have keys: sku, servicio, descripcion, imagen
+        for item in (catalog_list or []):
+            try:
+                sku = (item.get('sku') or '').strip()
+                servicio = (item.get('servicio') or '').strip()
+                descripcion = (item.get('descripcion') or '').strip()
+                imagen = (item.get('imagen') or '').strip()
+                match = False
+                if sku and sku.lower() in ss_low:
+                    match = True
+                elif servicio and servicio.lower() in ss_low:
+                    match = True
+                else:
+                    # check tokens from servicio (avoid tiny words)
+                    tokens = [t for t in re.split(r'\W+', servicio.lower()) if len(t) > 2]
+                    for t in tokens:
+                        if t and t in ss_low:
+                            match = True
+                            break
+                if match and imagen:
+                    # Normalize image target:
+                    img_target = imagen
+                    if img_target.startswith('http://') or img_target.startswith('https://'):
+                        url = img_target
+                    elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
+                        url = img_target if img_target.startswith('/') else '/' + img_target
+                    else:
+                        # treat as filename -> build route that the app serves
+                        url = f"/uploads/productos/{img_target}"
+                    if url not in seen:
+                        images.append(url)
+                        seen.add(url)
+                # stop collecting after a small number to avoid flooding (e.g. 4 images)
+                if len(images) >= 4:
+                    break
+            except Exception:
+                continue
+
+        # Return structured result so caller can both send text and images
+        return {"text": text, "images": images}
 
     except Exception as e:
         app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
@@ -7432,9 +7482,30 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             try:
                 respuesta_catalogo = generar_respuesta_catalogo(texto or "", catalog_list, texto_catalogo, config=config)
                 if respuesta_catalogo:
-                    respuesta_final = aplicar_restricciones(respuesta_catalogo, numero, config)
-                    enviar_mensaje(numero, respuesta_final, config)
-                    registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
+                    # respuesta_catalogo can be a dict {"text": "...", "images": [...] } or a plain string (legacy)
+                    if isinstance(respuesta_catalogo, dict):
+                        text_part = respuesta_catalogo.get('text') or respuesta_catalogo.get('respuesta') or ''
+                        images_part = respuesta_catalogo.get('images') or []
+                    else:
+                        text_part = str(respuesta_catalogo)
+                        images_part = []
+
+                    # Send text first (if any)
+                    if text_part:
+                        respuesta_final = aplicar_restricciones(text_part, numero, config)
+                        enviar_mensaje(numero, respuesta_final, config)
+                        registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
+
+                    # Then send images (if any) — log each image as a bot response image
+                    for img_target in images_part:
+                        try:
+                            # enviar_imagen accepts either URL or filename; our generator yields a usable path/URL
+                            enviar_imagen(numero, img_target, config)
+                            # Persist a record that the bot sent an image
+                            guardar_respuesta_imagen(numero, img_target, config, nota='[Imagen catálogo enviada]')
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo enviar imagen de catálogo {img_target}: {e}")
+
                     return True
                 # Fallback: if AI helper failed, fallthrough to generic respuesta_text below
             except Exception as e:
