@@ -7084,35 +7084,66 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         app.logger.error(traceback.format_exc())
         return None
 
-# Added helper to fetch catalog only when needed
-def fetch_catalog_for_prompt(config=None, limit=40):
+# Helper: generate a catalog-aware short reply using DeepSeek
+def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20):
     """
-    Return a tuple (catalog_list, texto_catalogo, precios) prepared for prompts.
-    This centralizes catalog loading so we can call it only when intent requires it.
+    Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo proporcionado.
+    Devuelve texto plano (string) o None si falla.
     """
-    if config is None:
-        config = obtener_configuracion_por_host()
-    precios = obtener_todos_los_precios(config) or []
-    texto_catalogo = build_texto_catalogo(precios, limit=limit)
-    catalog_list = []
-    for p in precios:
-        try:
-            catalog_list.append({
-                "sku": (p.get('sku') or '').strip(),
-                "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
-                "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
-                "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
-                "inscripcion": str(p.get('inscripcion') or ""),
-                "mensualidad": str(p.get('mensualidad') or ""),
-                "imagen": str(p.get('imagen') or ""),
-                "descripcion": str(p.get('descripcion') or "")
-            })
-        except Exception:
-            continue
-    return catalog_list, texto_catalogo, precios
+    try:
+        if config is None:
+            config = obtener_configuracion_por_host()
+
+        # If we don't have a textual resumen, build a compact one
+        if not texto_catalogo and catalog_list:
+            try:
+                precios = obtener_todos_los_precios(config) or []
+                texto_catalogo = build_texto_catalogo(precios, limit=20)
+            except Exception:
+                texto_catalogo = ""
+
+        system_prompt = (
+            "Eres un asistente orientado a responder preguntas sobre productos y servicios. "
+            "Dispones de un catálogo que NO debes inventar: utiliza SOLO los ítems tal como aparecen. "
+            "Cuando correspondan, menciona SKU o nombre exacto del catálogo; si no hay coincidencia exacta, "
+            "ofrece alternativas o pregunta para precisar la búsqueda. Responde en español, con máximo 6 líneas, "
+            "sin incluir teléfonos ni datos sensibles."
+        )
+
+        user_msg = (
+            f"USUARIO: {mensaje_usuario}\n\n"
+            f"CATÁLOGO (resumen):\n{texto_catalogo or 'No hay catálogo cargado.'}\n\n"
+            "Instrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
+            "precios o comparación, usa únicamente la información del catálogo. Si no encuentras el ítem, díselo y ofrece buscar similar."
+        )
+
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": modelo,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_msg}
+            ],
+            "temperature": 0.2,
+            "max_tokens": max_tokens
+        }
+
+        r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=timeout)
+        r.raise_for_status()
+        d = r.json()
+        raw = d['choices'][0]['message']['content']
+        if isinstance(raw, list):
+            raw = "".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
+        text = str(raw).strip()
+        # Normalize whitespace and keep first reasonable chunk
+        text = re.sub(r'\s*\n\s*', '\n', text).strip()
+        return text or None
+
+    except Exception as e:
+        app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
+        return None
 
 
-# Patch: call intent detector first and fetch catalog only when needed
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -7126,7 +7157,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-        # --- Preparar contexto mínimo (historial) ---
+        # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -7135,63 +7166,54 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
 
-        # --- DETECT INTENT first (light or IA-based) to decide if we must include the full catalog ---
-        intent_type = None
-        try:
-            # detectar_intencion_mejorado returns {"intencion": "...", ...} or fallback
-            intent_res = detectar_intencion_mejorado(texto or "", numero, historial=historial, config=config)
-            if isinstance(intent_res, dict):
-                intent_type = (intent_res.get('intencion') or '').upper()
-        except Exception as e:
-            app.logger.debug(f"🔍 Intent detection failed (falling back to keyword): {e}")
-            intent_type = None
+        precios = obtener_todos_los_precios(config) or []
+        texto_catalogo = build_texto_catalogo(precios, limit=40)
 
-        # Fallback keyword heuristic if detector failed
-        if not intent_type:
-            kw = (texto or "").lower()
-            if any(k in kw for k in ['catálogo', 'catalogo', 'precio', 'precio', '¿qué tienes', 'qué tienes', 'servicios', 'productos']):
-                intent_type = "CONSULTAR_SERVICIOS"
-
-        # Only fetch full catalog when user intent indicates service/product info or buying
         catalog_list = []
-        texto_catalogo = ""
-        precios = []
-        if intent_type in ("CONSULTAR_SERVICIOS", "COMPRAR_PRODUCTO"):
-            catalog_list, texto_catalogo, precios = fetch_catalog_for_prompt(config=config, limit=40)
-        else:
-            # keep small textual summary available (cheap) but avoid sending large structured catalog
-            precios = None
-            texto_catalogo = None
-
+        for p in precios:
+            try:
+                catalog_list.append({
+                    "sku": (p.get('sku') or '').strip(),
+                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
+                    "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
+                    "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
+                    "inscripcion": str(p.get('inscripcion') or ""),
+                    "mensualidad": str(p.get('mensualidad') or ""),
+                    "imagen": str(p.get('imagen') or ""),
+                    "descripcion": str(p.get('descripcion') or "")
+                })
+            except Exception:
+                continue
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
             try:
                 transfer_list.append({
-                    "cuenta_bancaria": (t.get('transferencia_numero') or '').strip(),
-                    "nombre_transferencia": (t.get('transferencia_nombre') or '').strip(),
-                    "banco_transferencia": str(t.get('transferencia_banco') or "")
+                    "cuenta_bancaria": (p.get('transferencia_numero') or '').strip(),
+                    "nombre_transferencia": (p.get('transferencia_nombre') or '').strip(),
+                    "banco_transferencia": str(p.get('transferencia_banco') or "")
                 })
             except Exception:
                 continue
-
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
-
+         # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
         try:
             negocio_cfg = (cfg_full.get('negocio') or {})  # may be {}
             negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
             negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
+            # Truncate to keep prompt/token usage reasonable
             MAX_CFG_CHARS = 5000
             negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
             negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
         except Exception:
             negocio_descripcion_short = ""
             negocio_que_hace_short = ""
-
+        # --- NEW: expose the assistant/business display name from configuration to the system prompt ---
         try:
             ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
             negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
+            
         except Exception:
             ia_nombre = "Asistente"
             negocio_nombre = ""
@@ -7216,7 +7238,7 @@ que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
-- Catálogo (estructura JSON con sku, servicio, precios): se incluye solo cuando el usuario solicita información de productos o compra.
+- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 - Tu nombre de asistente configurado (ia_nombre): {ia_nombre}
@@ -7225,24 +7247,30 @@ que el servidor debe ejecutar. Dispones de:
 - Cual es tu rol (que_hace): {negocio_que_hace_short}
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
-
+1) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+2) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+3) El JSON debe tener estas claves mínimas:
+   - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
+   - respuesta_text: string
+   - image: filename_or_url_or_null
+   - document: url_or_null
+   - save_cita: object|null
+   - notify_asesor: boolean
+   - followups: [ ... ]
+   - confidence: 0.0-1.0
+   - source: "catalog" | "none"
+4) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+5) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
-        # Build user content: include catalog only if we fetched it above
         user_content = {
             "mensaje_actual": texto or "",
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "transferencias": transfer_list
+            "transferencias": transfer_list,
+            "catalogo_texto_resumen": texto_catalogo
         }
-        if catalog_list:
-            user_content["catalogo"] = catalog_list
-            user_content["catalogo_texto_resumen"] = texto_catalogo
-        else:
-            # lightweight hint so model doesn't expect full catalog
-            user_content["catalogo"] = []
-            user_content["catalogo_texto_resumen"] = ""
 
         payload_messages = [
             {"role": "system", "content": system_prompt},
@@ -7304,8 +7332,19 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
-
-
+                # NEW: If intent indicates product/service info, generate a catalog-aware textual reply
+        if intent == "INFORMACION_SERVICIOS_O_PRODUCTOS":
+            # Ensure we have a catalog; catalog_list and texto_catalogo were prepared above
+            try:
+                respuesta_catalogo = generar_respuesta_catalogo(texto or "", catalog_list, texto_catalogo, config=config)
+                if respuesta_catalogo:
+                    respuesta_final = aplicar_restricciones(respuesta_catalogo, numero, config)
+                    enviar_mensaje(numero, respuesta_final, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
+                    return True
+                # Fallback: if AI helper failed, fallthrough to generic respuesta_text below
+            except Exception as e:
+                app.logger.warning(f"⚠️ Error generando respuesta de catálogo: {e}")
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
