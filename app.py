@@ -7599,8 +7599,21 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     specific_product_asked = True
 
                 # Call generator allowing images only when a specific product was requested or inferred
-                respuesta_catalogo = generar_respuesta_catalogo(texto or "", catalog_list, texto_catalogo, config=config, allow_images=specific_product_asked)
+                respuesta_catalogo = generar_respuesta_catalogo(
+                    texto or "",
+                    catalog_list,
+                    texto_catalogo,
+                    config=config,
+                    allow_images=specific_product_asked,
+                    numero=numero,
+                    incoming_saved=incoming_saved
+                )
                 if respuesta_catalogo:
+                    # If the generator already sent the image/text itself, respect that and skip re-send
+                    if isinstance(respuesta_catalogo, dict) and respuesta_catalogo.get('image_sent'):
+                        app.logger.info("ℹ️ generar_respuesta_catalogo ya envió la imagen/texto; omitiendo re-envío desde procesar_mensaje_unificado.")
+                        return True
+
                     # respuesta_catalogo can be a dict {"text": "...", "images": [...] } or a plain string (legacy)
                     if isinstance(respuesta_catalogo, dict):
                         text_part = respuesta_catalogo.get('text') or respuesta_catalogo.get('respuesta') or ''
