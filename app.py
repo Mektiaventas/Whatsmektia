@@ -7238,23 +7238,54 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                             images = []
 
                 # If we have an image and we received a numero, send it here using the exact try-block requested
-                if images and numero:
-                    try:
-                        # usar img_url para enviar - registrar_respuesta_bot decidirá cómo guardar la ruta
-                        sent = enviar_imagen(numero, img_url, config)
-                        if text:
-                            enviar_mensaje(numero, text, config)
-                        registrar_respuesta_bot(
-                            numero, mensaje_usuario, text, config,
-                            imagen_url=(img_url if isinstance(img_url, str) and img_url.startswith('http') else f"/uploads/productos/{image_field_raw}"),
-                            es_imagen=True,
-                            incoming_saved=incoming_saved
-                        )
-                        # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
-                        return {"text": text, "images": [], "image_sent": True}
-                    except Exception as e:
-                        app.logger.error(f"🔴 Error enviando imagen: {e}")
-                        # caemos al retorno normal (no enviar de nuevo)
+                        # If we have an image and we received a numero, send it here using the exact try-block requested
+            if images and numero:
+                try:
+                    # Normalize what we pass to enviar_imagen:
+                    # - keep full http(s) URLs as-is (external images)
+                    # - if we built a path like "/uploads/productos/<tenant>/file.jpg" -> pass only the basename
+                    # - if we only have image_field_raw (filename) pass that (preferred)
+                    send_param = None
+                    if img_url and isinstance(img_url, str) and (img_url.startswith('http://') or img_url.startswith('https://')):
+                        send_param = img_url
+                    elif image_field_raw:
+                        # prefer raw filename when available (the whatsapp client expects filename or tenant-less path)
+                        send_param = image_field_raw
+                    elif img_url and isinstance(img_url, str):
+                        # strip any leading path so enviar_imagen receives just the filename
+                        send_param = os.path.basename(img_url)
+
+                    # Final sanity: fallback to basename of img_url
+                    if not send_param and img_url:
+                        send_param = os.path.basename(img_url)
+
+                    # Log what we're about to send for easier debugging
+                    app.logger.info(f"ℹ️ generar_respuesta_catalogo -> enviar_imagen param='{send_param}' (original_img_url='{img_url}') tenant='{tenant_slug}'")
+
+                    sent = enviar_imagen(numero, send_param, config)
+                    if text:
+                        enviar_mensaje(numero, text, config)
+
+                    # registrar_respuesta_bot debe recibir la URL pública que el cliente espera.
+                    # Guardamos /uploads/productos/<filename> (tenant-agnostic) para compatibilidad UI.
+                    imagen_url_para_guardar = None
+                    if isinstance(send_param, str) and (send_param.startswith('http://') or send_param.startswith('https://')):
+                        imagen_url_para_guardar = send_param
+                    else:
+                        # use basename so UI route /uploads/productos/<filename> funciona con serve_product_image
+                        imagen_url_para_guardar = f"/uploads/productos/{os.path.basename(send_param)}"
+
+                    registrar_respuesta_bot(
+                        numero, mensaje_usuario, text, config,
+                        imagen_url=(imagen_url_para_guardar),
+                        es_imagen=True,
+                        incoming_saved=incoming_saved
+                    )
+                    # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
+                    return {"text": text, "images": [], "image_sent": True}
+                except Exception as e:
+                    app.logger.error(f"🔴 Error enviando imagen: {e}")
+                    # caemos al retorno normal (no enviar de nuevo)
             else:
                 # no hay match preciso -> no recopilamos imágenes
                 images = []
