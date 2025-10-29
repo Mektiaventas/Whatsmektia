@@ -7142,6 +7142,12 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         if not text:
             return None
 
+        # compute tenant slug once so URLs point to correct tenant folder
+        try:
+            _, tenant_slug = get_productos_dir_for_config(config)
+        except Exception:
+            tenant_slug = 'default'
+
         # Try to detect which catalog items are mentioned (prefer message_usuario then AI text)
         search_space = (mensaje_usuario or "") + " || " + (text or "")
         ss_low = search_space.lower()
@@ -7174,9 +7180,12 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                         url = img_target
                     elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
                         url = img_target if img_target.startswith('/') else '/' + img_target
+                    elif '/' in img_target:
+                        # probably already contains tenant/filename -> ensure leading slash and prefix /uploads/productos/
+                        url = f"/uploads/productos/{img_target.lstrip('/')}"
                     else:
-                        # treat as filename -> build route that the app serves
-                        url = f"/uploads/productos/{img_target}"
+                        # treat as filename -> build tenant-aware route that the app serves
+                        url = f"/uploads/productos/{tenant_slug}/{img_target}"
                     if url not in seen:
                         images.append(url)
                         seen.add(url)
