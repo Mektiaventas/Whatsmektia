@@ -19,6 +19,11 @@
         .new-message {
             animation: highlightMessage 1.5s ease-out forwards;
         }
+
+        /* ensure the edit button receives clicks even if layout changes */
+        .edit-alias-btn {
+            pointer-events: auto;
+        }
     </style>
 </head>
 <body>
@@ -269,23 +274,42 @@
             };
         }
 
-        // Explicit binding (mirrors chats.html logic)
+        // Explicit binding (mirrors chats.html logic) with debug output
         function onEditAliasClick(e) {
+            console.debug('onEditAliasClick fired', e);
             e.preventDefault();
             e.stopPropagation();
             const btn = e.currentTarget || this;
+            console.debug('button data-num:', btn && btn.dataset && btn.dataset.num);
             const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
             activarEdicionAlias(parent);
         }
         function enhanceAliasButtons() {
-            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+            const buttons = Array.from(document.querySelectorAll('.edit-alias-btn'));
+            console.debug('enhanceAliasButtons found', buttons.length, 'buttons');
+            buttons.forEach(btn => {
                 try { btn.removeEventListener('click', onEditAliasClick); } catch (e) {}
                 btn.addEventListener('click', onEditAliasClick);
             });
         }
 
+        // Delegated fallback: if explicit binding somehow fails, ensure clicks are detected
+        document.addEventListener('click', function (e) {
+            try {
+                const btn = e.target && e.target.closest && e.target.closest('.edit-alias-btn');
+                if (!btn) return;
+                // If explicit listener already ran, it will handle; but produce debug and call handler as fallback.
+                console.debug('delegated click on edit-alias-btn (fallback)', btn);
+                // call the handler directly to keep behavior consistent
+                onEditAliasClick.call(btn, new MouseEvent('click', { bubbles: true }));
+            } catch (err) {
+                console.error('delegated handler error for edit-alias-btn:', err);
+            }
+        });
+
         // DOMContentLoaded setup
         document.addEventListener('DOMContentLoaded', () => {
+            console.debug('chat_view DOMContentLoaded');
             const container = document.getElementById('mensajes-container');
             initLastMessageFromDOM(container);
 
@@ -297,6 +321,9 @@
 
             // Bind alias edit buttons now that DOM is ready
             try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
+
+            // Extra quick-check: expose buttons count in console for debugging
+            try { console.debug('edit-alias-btn count at ready:', document.querySelectorAll('.edit-alias-btn').length); } catch (e) {}
         });
     </script>
 </body>
