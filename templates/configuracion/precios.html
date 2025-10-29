@@ -25,9 +25,7 @@
 <!-- NUEVO: Menú de navegación persistente -->
 <div class="tab-navigation mb-6">
     <div class="tab-buttons">
-        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
-            🔁 Restablecer columnas
-        </button>
+        
         <button class="btn btn-primary mt-3" id="btn-user-list" onclick="showSection('user-list')">
             <div class="tab-icon">👥</div>
             <div>
@@ -174,6 +172,9 @@
 <!-- Sección: Carga Manual -->
 <div class="section" id="manual-upload" style="display:none;">
     <div class="section-header">
+        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+            🔁 Restablecer columnas
+        </button>
         <h3 class="flex justify-between items-center">
             <span>✏️ {{ precio_edit and 'Editar Producto' or 'Agregar Producto Manualmente' }}</span>
         </h3>
