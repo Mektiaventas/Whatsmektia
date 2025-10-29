@@ -527,16 +527,66 @@ function pollSelectedMessages() {
         .then(data => {
             if (!data || !Array.isArray(data.messages)) return;
             if (data.messages.length === 0) return;
+            // update last id
             const maxId = data.messages.reduce((m, mm) => {
                 const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
                 return id > m ? id : m;
             }, lastMessageIdForSelected);
             if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
+            // append user-sent messages (existing behavior)
             appendUserMessagesToPanel(data.messages);
+            // append AI responses (new)
+            appendAIResponsesToPanel(data.messages);
         })
         .catch(err => console.error('Error polling messages:', err));
 }
+    function appendAIResponsesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
 
+        for (const m of messages) {
+            const aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
+            if (!aiText) continue;
+
+            // dedupe key (prefer numeric id when available)
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let key;
+            if (id) {
+                key = 'ai:id:' + id;
+                // avoid duplicating if already seen by user-appender
+                if (seenMessageKeys.has('id:' + id) || seenMessageKeys.has(key)) continue;
+            } else {
+                let ts = Number(coalesce(m.ts_ms, 0));
+                if (!ts && m.timestamp) {
+                    const parsed = Date.parse(m.timestamp);
+                    ts = isNaN(parsed) ? Date.now() : parsed;
+                }
+                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+                if (seenMessageKeys.has(key)) continue;
+            }
+
+            // create AI message node
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-ai';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta">${formatClientTime(tsVal)}</div>`;
+
+            container.appendChild(div);
+            appended = true;
+
+            // mark as seen
+            seenMessageKeys.add(key);
+            if (id) seenMessageKeys.add('id:' + id);
+        }
+
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
 /**
  * Append only new user messages using seenMessageKeys
  */
