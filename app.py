@@ -7138,7 +7138,7 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
 
         user_msg = (
             f"USUARIO: {mensaje_usuario}\n\n"
-            f"CATÁLOGO (resumen):\n{texto_catalogo or 'No hay catálogo cargado.'}\n\n"
+            f"CATÁLOGO {catalog_list}\n\n"
             "Instrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
             "precios o comparación, usa únicamente la información del catálogo. Si no encuentras el ítem, díselo y ofrece buscar similar."
         )
