@@ -3201,7 +3201,7 @@ def guardar_cita(info_cita, config=None):
         conn.commit()
         cita_id = cursor.lastrowid
 
-        # 5) Google Calendar scheduling (kept behavior)
+        # 5) Google Calendar scheduling (enhanced: also try to schedule in advisor's calendar/email)
         evento_id = None
         debe_agendar = False
 
@@ -3239,11 +3239,134 @@ def guardar_cita(info_cita, config=None):
                 except Exception as e:
                     app.logger.error(f"Error procesando fecha: {e}")
 
-        # Si debe_agendar sigue True, el resto del flujo permanece igual...
+        # If debe_agendar, attempt calendar actions
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
-                evento_id = crear_evento_calendar(service, info_cita, config)
+                try:
+                    # Try to get advisor and their email
+                    asesor = None
+                    try:
+                        asesor = obtener_siguiente_asesor(config)
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo obtener asesor para agendar: {e}")
+                        asesor = None
+
+                    asesor_email = None
+                    if asesor and isinstance(asesor, dict):
+                        asesor_email = (asesor.get('email') or '').strip() or None
+
+                    # Build event body (reuse same fields as crear_evento_calendar)
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    # compute start/end
+                    if not es_porfirianna and info_cita.get('fecha_sugerida') and info_cita.get('hora_sugerida'):
+                        start_time = f"{info_cita['fecha_sugerida']}T{info_cita['hora_sugerida']}:00"
+                        try:
+                            end_time_dt = datetime.strptime(f"{info_cita['fecha_sugerida']} {info_cita['hora_sugerida']}",
+                                                           "%Y-%m-%d %H:%M") + timedelta(hours=1)
+                            end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+                        except Exception:
+                            end_time = (datetime.now() + timedelta(hours=1)).isoformat()
+                    else:
+                        now = datetime.now()
+                        start_time = now.isoformat()
+                        end_time = (now + timedelta(hours=1)).isoformat()
+
+                    detalles_servicio = info_cita.get('detalles_servicio', {})
+                    descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+                    categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+                    precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+
+                    event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {info_cita.get('servicio_solicitado', 'Servicio')} - {info_cita.get('nombre_cliente', 'Cliente')}"
+
+                    event_description = f"""
+📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
+
+🔸 {'Platillo' if es_porfirianna else 'Servicio'}: {info_cita.get('servicio_solicitado', 'No especificado')}
+🔸 Categoría: {categoria_servicio}
+🔸 Precio: ${precio_servicio} {info_cita.get('moneda', 'MXN')}
+🔸 Descripción: {descripcion_servicio}
+
+👤 CLIENTE:
+🔹 Nombre: {info_cita.get('nombre_cliente', 'No especificado')}
+🔹 Teléfono: {info_cita.get('telefono', 'No especificado')}
+🔹 WhatsApp: https://wa.me/{info_cita.get('telefono', '').replace('+', '')}
+
+⏰ FECHA/HORA:
+🕒 Fecha: {info_cita.get('fecha_sugerida', 'No especificada')}
+🕒 Hora: {info_cita.get('hora_sugerida', 'No especificada')}
+🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
+                    """.strip()
+
+                    event = {
+                        'summary': event_title,
+                        'location': config.get('direccion', ''),
+                        'description': event_description,
+                        'start': {
+                            'dateTime': start_time,
+                            'timeZone': 'America/Mexico_City',
+                        },
+                        'end': {
+                            'dateTime': end_time,
+                            'timeZone': 'America/Mexico_City',
+                        },
+                        'reminders': {
+                            'useDefault': False,
+                            'overrides': [
+                                {'method': 'popup', 'minutes': 30},
+                                {'method': 'email', 'minutes': 24 * 60},
+                            ],
+                        },
+                        'colorId': '4' if es_porfirianna else '1',
+                    }
+
+                    primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+
+                    # 1) If advisor email exists, try to create the event directly in advisor's calendar (may fail if no permissions)
+                    if asesor_email:
+                        try:
+                            app.logger.info(f"🌐 Intentando crear evento en calendario del asesor: calendarId='{asesor_email}' (sendUpdates=all)")
+                            created = service.events().insert(calendarId=asesor_email, body=event, sendUpdates='all').execute()
+                            evento_id = created.get('id')
+                            app.logger.info(f'✅ Evento creado en calendario del asesor {asesor_email}: {created.get("htmlLink")}')
+                        except HttpError as he:
+                            app.logger.warning(f"⚠️ No se pudo crear evento en calendarId='{asesor_email}': {he}")
+                            # Fallback: try to create in primary calendar and add advisor as attendee (this will send invite to advisor_email)
+                            try:
+                                event['attendees'] = [{'email': asesor_email}]
+                                app.logger.info(f"🔁 Intentando crear evento en calendarId='{primary_calendar}' y añadir asesor como attendee (sendUpdates=all)")
+                                created = service.events().insert(calendarId=primary_calendar, body=event, sendUpdates='all').execute()
+                                evento_id = created.get('id')
+                                app.logger.info(f'✅ Evento creado en {primary_calendar}: {created.get("htmlLink")} (attendee: {asesor_email})')
+                            except Exception as e2:
+                                app.logger.error(f'🔴 Fallback a primary con attendee falló: {e2}')
+                                evento_id = None
+                        except Exception as e:
+                            app.logger.error(f'🔴 Error inesperado creando evento en calendario del asesor: {e}')
+                            evento_id = None
+                    else:
+                        # 2) No asesor_email -> fall back to crear_evento_calendar which uses configured calendar_email / primary
+                        try:
+                            evento_id = crear_evento_calendar(service, info_cita, config)
+                        except Exception as e:
+                            app.logger.error(f"🔴 crear_evento_calendar falló en fallback: {e}")
+                            evento_id = None
+
+                    # If still no evento_id, try default behavior (crear_evento_calendar) as last resort
+                    if not evento_id:
+                        try:
+                            evento_id = crear_evento_calendar(service, info_cita, config)
+                        except Exception as e:
+                            app.logger.error(f"🔴 Último intento crear_evento_calendar falló: {e}")
+                            evento_id = None
+
+                except Exception as e:
+                    app.logger.error(f"🔴 Error notificando/agendando en Google Calendar para la cita: {e}")
+                    evento_id = None
+
+                # persist evento_id in citas if created
                 if evento_id:
                     try:
                         cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
@@ -3253,10 +3376,11 @@ def guardar_cita(info_cita, config=None):
                             app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
                         cursor.execute('UPDATE citas SET evento_calendar_id = %s WHERE id = %s', (evento_id, cita_id))
                         conn.commit()
-                        app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                        app.logger.info(f"✅ Evento de calendar guardado en cita: {evento_id}")
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
-
+            else:
+                app.logger.warning("⚠️ autenticar_google_calendar devolvió None; no se intentó agendar en Calendar")
 
         # 6) Notificaciones al administrador (kept behavior)
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -7142,7 +7266,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
-
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
