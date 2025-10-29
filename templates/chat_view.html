@@ -72,18 +72,15 @@
         let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
         const telefono = "{{ chat[1] }}";
 
-        // Notification sound setup
-        // Add a file at: static/audio/notify.mp3 (recommended). If not present, uses WebAudio fallback.
+        // Notification sound setup (unchanged)
         const notifSrc = "{{ url_for('static', filename='audio/notify.mp3') }}";
         const _audio = new Audio(notifSrc);
         _audio.preload = 'auto';
         let audioUnlocked = false;
         let audioContext = null;
 
-        // Try to unlock audio on first user interaction
         function tryUnlockAudioOnce() {
             if (audioUnlocked) return;
-            // Play/pause to unlock on gesture
             _audio.play().then(() => {
                 _audio.pause();
                 _audio.currentTime = 0;
@@ -91,12 +88,11 @@
                 document.removeEventListener('click', tryUnlockAudioOnce);
                 document.removeEventListener('keydown', tryUnlockAudioOnce);
             }).catch(() => {
-                // if play fails, prepare WebAudio context on gesture
                 try {
                     audioContext = new (window.AudioContext || window.webkitAudioContext)();
                     const o = audioContext.createOscillator();
                     const g = audioContext.createGain();
-                    o.frequency.value = 0; // silent probe
+                    o.frequency.value = 0;
                     o.connect(g); g.connect(audioContext.destination);
                     o.start(0); o.stop(0);
                     audioUnlocked = true;
@@ -124,43 +120,29 @@
                 o.start();
                 setTimeout(() => { o.stop(); }, 140);
             } catch (e) {
-                // silent fallback
                 console.warn('WebAudio beep failed', e);
             }
         }
 
         function playNotificationSound() {
-            // don't disturb if tab not visible
             if (document.hidden) return;
-            // prefer audio file if unlocked
             if (audioUnlocked) {
                 _audio.currentTime = 0;
-                _audio.play().catch((e) => {
-                    // fallback to WebAudio
-                    playWebAudioBeep();
-                });
+                _audio.play().catch(() => playWebAudioBeep());
             } else {
-                // try direct play (may be blocked) then fallback
                 _audio.currentTime = 0;
-                _audio.play().then(() => {
-                    _audio.pause(); _audio.currentTime = 0;
-                }).catch(() => {
-                    playWebAudioBeep();
-                });
+                _audio.play().then(() => { _audio.pause(); _audio.currentTime = 0; }).catch(() => { playWebAudioBeep(); });
             }
         }
 
-        // Toggle IA (best-effort UI update; server may redirect)
+        // Toggle IA
         function toggleIA() {
             const statusEl = document.getElementById('ia-status');
             const current = statusEl.textContent.trim().toLowerCase();
             const optimistic = current === 'activa' ? 'Desactivada' : 'Activa';
             fetch("/toggle_ai/" + telefono, { method: "POST", credentials: 'same-origin', cache: 'no-store' })
                 .then(resp => {
-                    if (resp.redirected) {
-                        window.location.href = resp.url;
-                        return;
-                    }
+                    if (resp.redirected) { window.location.href = resp.url; return; }
                     return resp.json().catch(() => ({ ia_activa: null }));
                 })
                 .then(body => {
@@ -176,7 +158,7 @@
                 });
         }
 
-        // Append message without duplicating; play sound for incoming messages
+        // DOM helpers for messages (unchanged)
         function appendMessageToDOM(container, normalized) {
             if (!normalized || !normalized.id) return;
             if (container.querySelector(`[data-msg-id="${normalized.id}"]`)) return;
@@ -189,18 +171,14 @@
             container.appendChild(node);
             setTimeout(() => node.classList.remove('new-message'), 1800);
 
-            // Play notification only for incoming messages (common variants)
             const incomingMarkers = ['entrante', 'in', 'incoming', 'entrada'];
             const dir = String(normalized.direction || '').toLowerCase();
-            if (incomingMarkers.includes(dir)) {
-                playNotificationSound();
-            }
+            if (incomingMarkers.includes(dir)) playNotificationSound();
         }
 
         function isScrolledToBottom(el) { return el.scrollHeight - el.clientHeight <= el.scrollTop + 60; }
         function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
 
-        // Robust fetch + normalization + logging
         async function actualizarMensajes(container) {
             if (!chatAutoRefresh) return;
             try {
@@ -210,7 +188,7 @@
                 const data = await res.json().catch(() => null);
                 if (!data || !Array.isArray(data.messages)) return;
                 const msgs = data.messages;
-                if (msgs.length === 0) return;
+                if (!msgs.length) return;
 
                 const wasAtBottom = isScrolledToBottom(container);
                 for (const m of msgs) {
@@ -229,19 +207,16 @@
             }
         }
 
-        // Initialize lastMessageId from DOM rendered messages to avoid duplicates
         function initLastMessageFromDOM(container) {
-            // After initLastMessageFromDOM(container);
-            try {
-                if (container) setTimeout(() => scrollToBottom(container), 50);
-            } catch (e) {
-                console.warn('Initial scroll to bottom failed in chat_view:', e);
-            }
+            try { if (container) setTimeout(() => scrollToBottom(container), 50); }
+            catch (e) { console.warn('Initial scroll to bottom failed in chat_view:', e); }
         }
 
-        // Edit alias helper (adapted from kanban to behave the same)
+        // Edit alias helper
         function activarEdicionAlias(parent) {
             if (!parent) return;
+            // debug line to detect invocation
+            console.debug('activarEdicionAlias called for parent:', parent);
             const view = parent.querySelector('.alias-view');
             const edit = parent.querySelector('.alias-edit');
             if (!view || !edit) return;
@@ -288,47 +263,31 @@
                 }).finally(() => { submitted = false; });
             }
 
-            // onblur: give a tick to avoid conflict with Enter key
-            input.onblur = () => {
-                setTimeout(() => {
-                    if (!submitted) terminar();
-                }, 0);
-            };
-
+            input.onblur = () => { setTimeout(() => { if (!submitted) terminar(); }, 0); };
             input.onkeydown = (ev) => {
                 if (ev.key === 'Enter') { ev.preventDefault(); terminar(); }
                 if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; }
             };
         }
 
-        // Bind helpers for edit buttons (call immediately and on DOMContentLoaded to avoid timing issues)
-        function bindEditAliasButtons() {
+        // DELEGATED click handler for edit-alias-btn (robust to timing)
+        document.addEventListener('click', function (e) {
             try {
-                document.querySelectorAll('.edit-alias-btn').forEach(btn => {
-                    if (btn.dataset.boundAlias === '1') return;
-                    btn.dataset.boundAlias = '1';
-                    btn.addEventListener('click', function (e) {
-                        e.preventDefault(); e.stopPropagation();
-                        // Find the right parent (chat title row or card title row)
-                        const parent = this.closest('.card-title-row') || this.closest('.chat-title') || this.closest('.chatbox') || document.body;
-                        if (!parent) return;
-                        activarEdicionAlias(parent);
-                    });
-                });
+                const btn = e.target.closest && e.target.closest('.edit-alias-btn');
+                if (!btn) return;
+                e.preventDefault(); e.stopPropagation();
+                // walk up to the row containing alias elements
+                const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
+                activarEdicionAlias(parent);
             } catch (err) {
-                console.error('Error binding edit-alias-btn handlers:', err);
+                console.error('Delegated handler error for edit-alias-btn:', err);
             }
-        }
+        });
 
-        // attempt binding now (covers case where DOMContentLoaded already fired)
-        bindEditAliasButtons();
-
-        // Bind handlers after DOM is ready as well
+        // DOMContentLoaded setup
         document.addEventListener('DOMContentLoaded', () => {
             const container = document.getElementById('mensajes-container');
             initLastMessageFromDOM(container);
-
-            bindEditAliasButtons();
 
             // Start incremental refresh loop that uses actualizarMensajes
             setInterval(() => {
