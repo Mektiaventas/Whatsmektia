@@ -7088,11 +7088,11 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
 def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20, allow_images=False):
     """
     Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo proporcionado.
-    Ahora devuelve un dict con:
-      { "text": "<respuesta>", "images": ["<url|filename>", ...] }
-    o una simple cadena (compatibilidad) en caso de fallo.
+    Devuelve dict { "text": "<respuesta>", "images": ["<url|filename>", ...] }.
 
-    IMPORTANT: image collection only runs when allow_images==True.
+    Si se detecta un producto coincidente en catalog_list, inyecta explícitamente modelo+descripcion
+    en el prompt y, si la IA responde de forma demasiado genérica (p. ej. "pide el catálogo en PDF"),
+    se le agrega la descripcion del producto directamente al texto devuelto.
     """
     try:
         if config is None:
@@ -7106,18 +7106,57 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
             except Exception:
                 texto_catalogo = ""
 
+        # Try to pre-find a best-matching catalog item (prefer mensaje_usuario)
+        best_item = None
+        try:
+            search_space = (mensaje_usuario or "").lower()
+            for item in (catalog_list or []):
+                sku = (item.get('sku') or '').strip().lower()
+                modelo_i = (item.get('modelo') or '').strip().lower()
+                servicio = (item.get('servicio') or '').strip().lower()
+                descripcion = (item.get('descripcion') or '').strip().lower()
+                if not sku and not modelo_i and not servicio:
+                    continue
+                if sku and sku in search_space:
+                    best_item = item; break
+                if modelo_i and modelo_i in search_space:
+                    best_item = item; break
+                if servicio and servicio in search_space:
+                    best_item = item; break
+            # If not found directly, also check short-history if available (caller may pass history inside mensaje_usuario)
+        except Exception:
+            best_item = None
+
         system_prompt = (
             "Eres un asistente orientado a responder preguntas sobre productos y servicios. "
             "Dispones de un catálogo que NO debes inventar: utiliza SOLO los ítems tal como aparecen. "
-            "Cuando correspondan, menciona SKU o nombre exacto del catálogo; si no hay coincidencia exacta, "
-            "ofrece alternativas o pregunta para precisar la búsqueda. Responde en español, con máximo 6 líneas, "
+            "Cuando correspondan, menciona SKU, modelo o nombre exacto del catálogo; si el usuario pide detalles técnicos, "
+            "proporciona la descripción y modelo exactos que estén en el catálogo. Responde en español, con máximo 6 líneas, "
             "sin incluir teléfonos ni datos sensibles."
         )
+
+        # If we have a best_item, include its key fields in the user prompt so the model can use them directly
+        extra_context = ""
+        if best_item:
+            mi = best_item
+            modelo_field = (mi.get('modelo') or '').strip()
+            sku_field = (mi.get('sku') or '').strip()
+            desc_field = (mi.get('descripcion') or '').strip()
+            precio_field = mi.get('precio_menudeo') or mi.get('precio') or mi.get('costo') or ''
+            extra_context = (
+                f"\n\n--DETALLES ENCONTRADOS EN EL CATÁLOGO--\n"
+                f"SKU: {sku_field}\n"
+                f"Modelo: {modelo_field}\n"
+                f"Descripción: {desc_field}\n"
+                f"Precio: {precio_field}\n"
+                "Usa exactamente estos valores en tu respuesta si el usuario pregunta por este producto."
+            )
 
         user_msg = (
             f"USUARIO: {mensaje_usuario}\n\n"
             f"CATÁLOGO (resumen):\n{texto_catalogo or 'No hay catálogo cargado.'}\n\n"
-            "Instrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
+            + (extra_context if extra_context else "") +
+            "\n\nInstrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
             "precios o comparación, usa únicamente la información del catálogo. Si no encuentras el ítem, díselo y ofrece buscar similar."
         )
 
@@ -7139,7 +7178,7 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         if isinstance(raw, list):
             raw = "".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
         text = str(raw).strip()
-        # Normalize whitespace and keep first reasonable chunk
+        # Normalize whitespace
         text = re.sub(r'\s*\n\s*', '\n', text).strip()
         if not text:
             return None
@@ -7153,11 +7192,9 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         images = []
         # Only attempt to collect images when explicitly allowed (user asked a specific product)
         if allow_images:
-            # Try to detect which catalog items are mentioned (prefer message_usuario then AI text)
-            search_space = (mensaje_usuario or "") + " || " + (text or "")
-            ss_low = search_space.lower()
+            search_space_full = (mensaje_usuario or "") + " || " + (text or "")
+            ss_low = search_space_full.lower()
             seen = set()
-            # catalog_list entries expected to have keys: sku, servicio, descripcion, imagen
             for item in (catalog_list or []):
                 try:
                     sku = (item.get('sku') or '').strip()
@@ -7169,36 +7206,51 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
                         match = True
                     elif servicio and servicio.lower() in ss_low:
                         match = True
+                    elif descripcion and len(descripcion) > 3 and descripcion.lower() in ss_low:
+                        match = True
                     else:
-                        # check tokens from servicio (avoid tiny words)
                         tokens = [t for t in re.split(r'\W+', servicio.lower()) if len(t) > 2]
                         for t in tokens:
                             if t and t in ss_low:
                                 match = True
                                 break
                     if match and imagen:
-                        # Normalize image target:
                         img_target = imagen
                         if img_target.startswith('http://') or img_target.startswith('https://'):
                             url = img_target
                         elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
                             url = img_target if img_target.startswith('/') else '/' + img_target
                         elif '/' in img_target:
-                            # probably already contains tenant/filename -> ensure leading slash and prefix /uploads/productos/
                             url = f"/uploads/productos/{img_target.lstrip('/')}"
                         else:
-                            # treat as filename -> build tenant-aware route that the app serves
                             url = f"/uploads/productos/{tenant_slug}/{img_target}"
                         if url not in seen:
-                            images.append(url)
-                            seen.add(url)
-                    # stop collecting after a small number to avoid flooding (e.g. 4 images)
+                            images.append(url); seen.add(url)
                     if len(images) >= 4:
                         break
                 except Exception:
                     continue
 
-        # Return structured result so caller can both send text and images
+        # If we detected a best_item, ensure description is included — if AI skipped it, append it.
+        if best_item:
+            desc_check = (best_item.get('descripcion') or '').strip()
+            modelo_check = (best_item.get('modelo') or '').strip()
+            # If AI reply does not already include the modelo or a substantial part of descripción, append it.
+            lower_text = (text or "").lower()
+            needs_append = False
+            if desc_check and desc_check.lower() not in lower_text:
+                needs_append = True
+            if modelo_check and modelo_check.lower() not in lower_text:
+                needs_append = True
+            if needs_append:
+                appended = "\n\nDETALLES DEL PRODUCTO (del catálogo):\n"
+                if modelo_check:
+                    appended += f"- Modelo: {modelo_check}\n"
+                if desc_check:
+                    # keep description reasonably short (avoid huge dumps)
+                    appended += f"- Descripción: {desc_check[:1000]}\n"
+                text = text + appended
+
         return {"text": text, "images": images}
 
     except Exception as e:
