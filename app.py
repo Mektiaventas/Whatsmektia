@@ -875,6 +875,12 @@ def importar_productos_desde_excel(filepath, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
+        # Ensure subscription columns exist before attempting inserts that reference them
+        try:
+            _ensure_precios_subscription_columns(config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ _ensure_precios_subscription_columns execution failed: {e}")
+
         # Crear tabla para metadatos de imágenes si no existe
         try:
             cursor.execute("""
@@ -7084,222 +7090,6 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         app.logger.error(traceback.format_exc())
         return None
 
-def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20, allow_images=False, numero=None, incoming_saved=False):
-    """
-    Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo.
-    Comportamiento nuevo:
-      - Si `allow_images==True` y se detecta UN producto específico en el mensaje, la función intentará
-        ENVIAR la imagen asociada al producto usando exactamente el bloque de envío solicitado por el usuario.
-      - Para mantener compatibilidad con el flujo actual, cuando la imagen es enviada aquí la función devuelve
-        {"text": "<respuesta>", "images": [], "image_sent": True} para evitar que el caller vuelva a reenviarla.
-    Parámetros añadidos (opcionales, backward-compatible):
-      - numero: número del chat (para poder enviar la imagen desde aquí)
-      - incoming_saved: boolean que se pasa a registrar_respuesta_bot
-    """
-    try:
-        if config is None:
-            config = obtener_configuracion_por_host()
-
-        # Build texto_catalogo si hace falta
-        if not texto_catalogo and catalog_list:
-            try:
-                precios = obtener_todos_los_precios(config) or []
-                texto_catalogo = build_texto_catalogo(precios, limit=40)
-            except Exception:
-                texto_catalogo = ""
-
-        # Normalizar/garantizar estructura de catalog_list si viene vacío
-        if not catalog_list:
-            try:
-                precios = obtener_todos_los_precios(config) or []
-                catalog_list = []
-                for p in precios:
-                    try:
-                        catalog_list.append({
-                            "sku": (p.get('sku') or '').strip(),
-                            "servicio": (p.get('servicio') or p.get('modelo') or p.get('subcategoria') or p.get('categoria') or '').strip(),
-                            "modelo": (p.get('modelo') or '').strip(),
-                            "descripcion": (p.get('descripcion') or '').strip(),
-                            "imagen": (p.get('imagen') or '').strip(),
-                            "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or "")
-                        })
-                    except Exception:
-                        continue
-            except Exception:
-                catalog_list = catalog_list or []
-
-        system_prompt = (
-            "Eres un asistente orientado a responder preguntas sobre productos y servicios. "
-            "Dispones de un catálogo que NO debes inventar: utiliza SOLO los ítems tal como aparecen. "
-            "Cuando correspondan, menciona SKU, modelo o nombre exacto del catálogo; si el usuario pide detalles técnicos, "
-            "proporciona la descripción y modelo exactos que estén en el catálogo. Responde en español, con máximo 6 líneas, "
-            "sin incluir teléfonos ni datos sensibles."
-        )
-
-        user_msg = (
-            f"USUARIO: {mensaje_usuario}\n\n"
-            f"CATÁLOGO {catalog_list}\n\n"
-            "Instrucción: Da una respuesta breve y útil basada en el catálogo. Si el usuario pregunta por disponibilidad, "
-            "precios o comparación, usa únicamente la información del catálogo. Si no encuentras el ítem, díselo y ofrece buscar similar."
-        )
-
-        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": modelo,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_msg}
-            ],
-            "temperature": 0.2,
-            "max_tokens": max_tokens
-        }
-
-        r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=timeout)
-        r.raise_for_status()
-        d = r.json()
-        raw = d['choices'][0]['message']['content']
-        if isinstance(raw, list):
-            raw = "".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
-        text = str(raw).strip()
-        text = re.sub(r'\s*\n\s*', '\n', text).strip()
-        if not text:
-            return None
-
-        # compute tenant slug once so URLs point to correct tenant folder
-        try:
-            _, tenant_slug = get_productos_dir_for_config(config)
-        except Exception:
-            tenant_slug = 'default'
-
-        images = []
-
-        # Helper: strict best-item search to avoid broad token matches
-        def _find_best_item_strict(msg, catalog):
-            if not msg or not catalog:
-                return None
-            m = msg.lower()
-            # SKU exact
-            for it in catalog:
-                sku = (it.get('sku') or '').strip().lower()
-                if sku and sku in m:
-                    return it
-            # modelo exact
-            for it in catalog:
-                modelo_i = (it.get('modelo') or '').strip().lower()
-                if modelo_i and modelo_i in m:
-                    return it
-            # servicio exact
-            for it in catalog:
-                servicio = (it.get('servicio') or '').strip().lower()
-                if servicio and servicio in m:
-                    return it
-            # word-boundary token match (avoid tiny tokens)
-            tokens = set(re.findall(r'\b\w{3,}\b', m))
-            for it in catalog:
-                modelo_i = (it.get('modelo') or '').strip().lower()
-                servicio = (it.get('servicio') or '').strip().lower()
-                if modelo_i and any(t == modelo_i or t in modelo_i.split() for t in tokens):
-                    return it
-                if servicio and any(t == servicio or t in servicio.split() for t in tokens):
-                    return it
-            return None
-
-        # Collect images ONLY if allowed and we can identify a single product precisely
-        if allow_images:
-            best_item = _find_best_item_strict(mensaje_usuario or "", catalog_list or [])
-            if best_item:
-                # Determine image field raw (as stored) and normalized URL for enviar_imagen
-                image_field_raw = (best_item.get('imagen') or '').strip()
-                sku = (best_item.get('sku') or '').strip()
-                img_url = None
-                # If explicit imagen value present, normalize it to a URL the app can serve
-                if image_field_raw:
-                    if image_field_raw.startswith('http://') or image_field_raw.startswith('https://'):
-                        img_url = image_field_raw
-                    elif image_field_raw.startswith('/uploads/') or image_field_raw.startswith('uploads/'):
-                        img_url = image_field_raw if image_field_raw.startswith('/') else '/' + image_field_raw
-                    elif '/' in image_field_raw:
-                        img_url = f"/uploads/productos/{image_field_raw.lstrip('/')}"
-                    else:
-                        # Relative path (just filename) -> build tenant-relative path
-                        img_url = f"/uploads/productos/{tenant_slug}/{image_field_raw}"
-                    # Make images list contain absolute public URL (important)
-                    # Build absolute URL using request context if available, otherwise use config.dominio
-                    try:
-                        from flask import has_request_context
-                        if img_url and img_url.startswith('/'):
-                            if has_request_context():
-                                base = request.url_root.rstrip('/')
-                                full_img_url = f"{base}{img_url}"
-                            else:
-                                dominio = (config.get('dominio') or '').rstrip('/')
-                                if dominio.startswith('http://') or dominio.startswith('https://'):
-                                    base = dominio
-                                else:
-                                    base = f"https://{dominio}"
-                                full_img_url = f"{base}{img_url}"
-                        else:
-                            full_img_url = img_url
-                    except Exception:
-                        # As last resort, attempt to construct using https + tenant slug
-                        full_img_url = f"https://{config.get('dominio', tenant_slug)}/uploads/productos/{os.path.basename(img_url or image_field_raw)}"
-                    images = [full_img_url]
-                else:
-                    # Fallback: try obtener_imagenes_por_sku
-                    if sku:
-                        try:
-                            imgs = obtener_imagenes_por_sku(sku, config=config) or []
-                            if imgs:
-                                first = imgs[0].get('filename') or ''
-                                if first:
-                                    image_field_raw = first
-                                    full_img_url = f"https://{config.get('dominio')}/uploads/productos/{first}" if config.get('dominio') else f"/uploads/productos/{tenant_slug}/{first}"
-                                    images = [full_img_url]
-                        except Exception:
-                            images = []
-
-                # If we have an image and we received a numero, send it here using the exact try-block requested
-                if images and numero:
-                    try:
-                        # Prefer passing a fully-qualified public URL to enviar_imagen so WhatsApp can fetch it.
-                        # If enviar_imagen expects just a filename in your implementation, this still usually works
-                        # if enviar_imagen detects http(s) and fetches the URL. Using full URL avoids server path resolution issues.
-                        send_param = images[0]
-
-                        # Log what we're about to send for easier debugging
-                        app.logger.info(f"ℹ️ generar_respuesta_catalogo -> enviar_imagen param='{send_param}' (original_image_field='{image_field_raw}') tenant='{tenant_slug}'")
-
-                        sent = enviar_imagen(numero, send_param, config)
-                        if text:
-                            enviar_mensaje(numero, text, config)
-
-                        # registrar_respuesta_bot debe recibir la URL pública que el cliente espera.
-                        imagen_url_para_guardar = send_param if isinstance(send_param, str) and (send_param.startswith('http://') or send_param.startswith('https://')) else f"/uploads/productos/{os.path.basename(send_param)}"
-
-                        registrar_respuesta_bot(
-                            numero, mensaje_usuario, text, config,
-                            imagen_url=(imagen_url_para_guardar),
-                            es_imagen=True,
-                            incoming_saved=incoming_saved
-                        )
-                        # ya enviamos la(s) imagen(es) desde aquí: evitar que el caller re-envíe duplicadas
-                        return {"text": text, "images": [], "image_sent": True}
-                    except Exception as e:
-                        app.logger.error(f"🔴 Error enviando imagen: {e}")
-                        # caemos al retorno normal (no enviar de nuevo)
-            else:
-                # no hay match preciso -> no recopilamos imágenes
-                images = []
-
-        # Safety limit
-        if images and len(images) > 4:
-            images = images[:4]
-
-        return {"text": text, "images": images, "image_sent": False}
-
-    except Exception as e:
-        app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
-        return None
 # Add below existing helper functions (e.g. after other CREATE TABLE helpers)
 def _ensure_columnas_precios_table(conn):
     cur = conn.cursor()
@@ -7408,6 +7198,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
+        #aqui pon el codigo
         # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
@@ -7416,7 +7207,62 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
+                # --- DeepSeek prompt: detectar si el mensaje solicita información de producto ---
+        producto_aplica = "NO_APLICA"
+        try:
+            # Build a minimal, strict prompt that forces the model to answer ONLY with SI_APLICA or NO_APLICA
+            ds_prompt = (
+                "Tu única tarea: leyendo el historial de conversación y el mensaje actual, "
+                "decide SI el cliente está pidiendo información sobre un producto (precio, disponibilidad, catálogo, SKU, características, fotos, etc.).\n\n"
+                "RESPONDE SOLO CON UNA PALABRA EXACTA: SI_APLICA  o  NO_APLICA\n"
+                "No añadas explicaciones, ejemplos, ni signos adicionales.\n\n"
+                "HISTORIAL:\n"
+                f"{historial_text.strip()}\n\n"
+                "MENSAJE ACTUAL:\n"
+                f"{texto or ''}\n\n"
+                "Si el usuario solicita precio, catálogo, SKU, características técnicas, imágenes del producto, disponibilidad, comparación entre modelos o cómo comprar un producto, responde SI_APLICA. En cualquier otro caso responde NO_APLICA."
+            )
 
+            headers_ds = {
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload_ds = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": ds_prompt}],
+                "temperature": 0.0,
+                "max_tokens": 16
+            }
+
+            resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
+            resp_ds.raise_for_status()
+            ds_data = resp_ds.json()
+            raw_ds = ds_data['choices'][0]['message']['content']
+            if isinstance(raw_ds, list):
+                raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
+            raw_ds = (raw_ds or "").strip().upper()
+
+            m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds)
+            if m:
+                producto_aplica = m.group(1)
+            else:
+                # If model responded unexpectedly, apply a conservative fallback
+                producto_aplica = "SI_APLICA" if any(
+                    kw in (texto or "").lower() for kw in
+                    ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', '¿tiene', 'foto', 'imagen', '¿cuánto', 'cotización', 'precio?', 'precio ']
+                ) else "NO_APLICA"
+
+            app.logger.info(f"🔎 DeepSeek product-detector -> {producto_aplica} (raw: {raw_ds[:200]})")
+        except Exception as e:
+            app.logger.warning(f"⚠️ DeepSeek detection failed: {e}; using keyword fallback")
+            # Simple fallback: look for product-related tokens in message + history
+            combined = (texto or "") + "\n" + (historial_text or "")
+            if any(kw in combined.lower() for kw in ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', 'foto', 'imagen', 'cotización', 'precio?', '¿cuánto']):
+                producto_aplica = "SI_APLICA"
+            else:
+                producto_aplica = "NO_APLICA"
+            app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
+        # --- end DeepSeek product detection ---
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
@@ -7448,7 +7294,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 continue
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
-         # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
+                 # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
         try:
             negocio_cfg = (cfg_full.get('negocio') or {})  # may be {}
             negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
@@ -7468,7 +7314,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         except Exception:
             ia_nombre = "Asistente"
             negocio_nombre = ""
-
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -7485,22 +7330,20 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
-
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 - Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
-- Tu nombre de asistente configurado (ia_nombre): {ia_nombre}
-- Nombre del negocio (negocio_nombre): {negocio_nombre}
-- Breve descripción del negocio (descripcion): {negocio_descripcion_short}
-- Cual es tu rol (que_hace): {negocio_que_hace_short}
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
-1) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
-2) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-3) El JSON debe tener estas claves mínimas:
+1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
+2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
+3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
+4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+6) El JSON debe tener estas claves mínimas:
    - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
@@ -7510,8 +7353,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - followups: [ ... ]
    - confidence: 0.0-1.0
    - source: "catalog" | "none"
-4) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-5) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         user_content = {
@@ -7522,6 +7365,11 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             "transferencias": transfer_list,
             "catalogo_texto_resumen": texto_catalogo
         }
+        if producto_aplica == "SI_APLICA":
+            user_content["catalogo"] = catalog_list
+            app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
+        else:
+            app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
 
         payload_messages = [
             {"role": "system", "content": system_prompt},
@@ -7564,113 +7412,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
 
-                # SECURITY: validate catalogue-based actions as before
-        if source == "catalog" and decision.get('save_cita'):
-            svc = decision['save_cita'].get('servicio_solicitado') or ""
-            svc_lower = svc.strip().lower()
-            found = False
-            # if we didn't fetch precios earlier, load minimal catalog for validation
-            if not catalog_list:
-                catalog_list_tmp, _, _ = fetch_catalog_for_prompt(config=config, limit=200)
-            else:
-                catalog_list_tmp = catalog_list
-            for item in catalog_list_tmp:
-                if item.get('sku', '').strip().lower() == svc_lower or item.get('subcategoria', '').strip().lower() == svc_lower:
-                    found = True
-                    break
-            if not found:
-                app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
-                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
-                registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
-                return True
-
-                # NEW: If intent indicates product/service info, generate a catalog-aware textual reply
-        if intent == "INFORMACION_SERVICIOS_O_PRODUCTOS":
-            # Ensure we have a catalog; catalog_list and texto_catalogo were prepared above
-            try:
-                # Determine if the user asked about a specific product (SKU or product name),
-                # including checking the recent conversation history so follow-ups like
-                # "Me puedes mostrar la imagen porfavor?" get resolved to the previously mentioned product.
-                specific_product_asked = False
-                sku_found = None
-
-                try:
-                    # 1) Directly in the current text
-                    sku_found = buscar_sku_en_texto(texto or "", precios)
-                except Exception:
-                    sku_found = None
-
-                if not sku_found:
-                    try:
-                        # 2) Try to resolve by exact product lookup by name/model in the current text
-                        prod_match = obtener_producto_por_sku_o_nombre(texto or "", config)
-                        if prod_match:
-                            sku_found = (prod_match.get('sku') or prod_match.get('modelo') or '').strip()
-                    except Exception:
-                        prod_match = None
-
-                if not sku_found:
-                    try:
-                        # 3) If still not found, search recent historial for mentions (helps follow-ups)
-                        hist_text = ""
-                        for h in historial[-4:]:
-                            if h.get('mensaje'):
-                                hist_text += " " + str(h.get('mensaje'))
-                            if h.get('respuesta'):
-                                hist_text += " " + str(h.get('respuesta'))
-                        sku_found = buscar_sku_en_texto(hist_text, precios) or None
-                        if not sku_found:
-                            prod_match_hist = obtener_producto_por_sku_o_nombre(hist_text, config)
-                            if prod_match_hist:
-                                sku_found = (prod_match_hist.get('sku') or prod_match_hist.get('modelo') or '').strip()
-                    except Exception:
-                        sku_found = None
-
-                if sku_found:
-                    specific_product_asked = True
-
-                # Call generator allowing images only when a specific product was requested or inferred
-                respuesta_catalogo = generar_respuesta_catalogo(
-                    texto or "",
-                    catalog_list,
-                    texto_catalogo,
-                    config=config,
-                    allow_images=specific_product_asked,
-                    numero=numero,
-                    incoming_saved=incoming_saved
-                )
-                if respuesta_catalogo:
-                    # If the generator already sent the image/text itself, respect that and skip re-send
-                    if isinstance(respuesta_catalogo, dict) and respuesta_catalogo.get('image_sent'):
-                        app.logger.info("ℹ️ generar_respuesta_catalogo ya envió la imagen/texto; omitiendo re-envío desde procesar_mensaje_unificado.")
-                        return True
-
-                    # respuesta_catalogo can be a dict {"text": "...", "images": [...] } or a plain string (legacy)
-                    if isinstance(respuesta_catalogo, dict):
-                        text_part = respuesta_catalogo.get('text') or respuesta_catalogo.get('respuesta') or ''
-                        images_part = respuesta_catalogo.get('images') or []
-                    else:
-                        text_part = str(respuesta_catalogo)
-                        images_part = []
-
-                    # Send text first (if any)
-                    if text_part:
-                        respuesta_final = aplicar_restricciones(text_part, numero, config)
-                        enviar_mensaje(numero, respuesta_final, config)
-                        registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
-
-                    # Then send images (if any and allowed) — log each image as a bot response image
-                    for img_target in images_part:
-                        try:
-                            enviar_imagen(numero, img_target, config)
-                            guardar_respuesta_imagen(numero, img_target, config, nota='[Imagen catálogo enviada]')
-                        except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo enviar imagen de catálogo {img_target}: {e}")
-
-                    return True
-                # Fallback: if AI helper failed, fallthrough to generic respuesta_text below
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error generando respuesta de catálogo: {e}")
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
@@ -7685,16 +7426,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
-        if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
-            try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # registrar respuesta evitando duplicados
-                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
-                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
-                # continue to AI flow as fallback
+
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
@@ -7705,7 +7437,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
-        #Comprar producto
+        # GUARDAR CITA
+                #Comprar producto
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
@@ -7716,6 +7449,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         if save_cita:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
+        if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                # continue to AI flow as fallback
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
@@ -7742,6 +7485,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
+
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)

@@ -6588,7 +6588,26 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 continue
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
-
+                 # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
+        try:
+            negocio_cfg = (cfg_full.get('negocio') or {})  # may be {}
+            negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
+            negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
+            # Truncate to keep prompt/token usage reasonable
+            MAX_CFG_CHARS = 5000
+            negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
+            negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
+        except Exception:
+            negocio_descripcion_short = ""
+            negocio_que_hace_short = ""
+        # --- NEW: expose the assistant/business display name from configuration to the system prompt ---
+        try:
+            ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
+            negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
+            
+        except Exception:
+            ia_nombre = "Asistente"
+            negocio_nombre = ""
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -6619,7 +6638,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION"]
+   - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -6709,89 +6728,27 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
         # GUARDAR CITA
-        if save_cita or intent == "COMPRAR_PRODUCTO":
-            try:
-                # Ensure we have a mutable dict to work with (IA may return null)
-                if not isinstance(save_cita, dict):
-                    save_cita = {}
-
-                # Always ensure phone is present
-                save_cita.setdefault('telefono', numero)
-
-                info_cita = {
-                    'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
-                    'fecha_sugerida': save_cita.get('fecha_sugerida'),
-                    'hora_sugerida': save_cita.get('hora_sugerida'),
-                    'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
-                    'telefono': save_cita.get('telefono'),
-                    'detalles_servicio': save_cita.get('detalles_servicio') or {}
-                }
-
-                # Validate before saving
-                try:
-                    completos, faltantes = validar_datos_cita_completos(info_cita, config)
-                except Exception as _e:
-                    app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
-                    completos, faltantes = False, ['validacion_error']
-
-                if not completos:
-                    app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
-                    try:
-                        enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
-                        if enriquecido and isinstance(enriquecido, dict):
-                            # Merge only missing fields (do not overwrite existing valid values)
-                            if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
-                                info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
-                            if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
-                                info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
-                            if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
-                                info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
-                            if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
-                                info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
-                            if enriquecido.get('detalles_servicio'):
-                                info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
-                            app.logger.info(f"🔁 Info cita enriquecida: {json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']})}")
-                        else:
-                            app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
-                    except Exception as _e:
-                        app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
-
-                # Final attempt to save (may still return None -> handled as before)
-                cita_id = guardar_cita(info_cita, config)
-                if cita_id:
-                    app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
-                    if respuesta_text:
-                        enviar_mensaje(numero, respuesta_text, config)
-                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
-                    enviar_alerta_cita_administrador(info_cita, cita_id, config)
-                else:
-                    try:
-                        completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
-                    except Exception:
-                        completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
-
-                    preguntas = []
-                    if 'servicio' in (faltantes2 or []):
-                        preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
-                    if 'fecha' in (faltantes2 or []):
-                        preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
-                    if 'hora' in (faltantes2 or []):
-                        preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
-                    if 'nombre' in (faltantes2 or []):
-                        preguntas.append("¿Cuál es tu nombre completo?")
-                    if not preguntas:
-                        preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
-
-                    follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
-                    follow_up += "\n\nResponde con los datos cuando puedas."
-
-                    enviar_mensaje(numero, follow_up, config)
-                    registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
-
-                    app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
-            except Exception as e:
-                app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
+                #Comprar producto
+        if intent == "COMPRAR_PRODUCTO":
+            comprar_producto_text = comprar_producto(numero, config=config)
+            if comprar_producto_text:
+                enviar_mensaje(numero, comprar_producto_text, config)
+                registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
+                return True
+        # GUARDAR CITA
+        if save_cita:
+            manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
+        if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                # continue to AI flow as fallback
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
