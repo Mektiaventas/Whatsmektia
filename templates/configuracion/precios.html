@@ -168,13 +168,13 @@
         </div>
     </div>
 </div>
-
+<button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+    🔁 Restablecer columnas
+</button>
 <!-- Sección: Carga Manual -->
 <div class="section" id="manual-upload" style="display:none;">
     <div class="section-header">
-        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
-            🔁 Restablecer columnas
-        </button>
+        
         <h3 class="flex justify-between items-center">
             <span>✏️ {{ precio_edit and 'Editar Producto' or 'Agregar Producto Manualmente' }}</span>
         </h3>
