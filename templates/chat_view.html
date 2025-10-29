@@ -212,10 +212,9 @@
             catch (e) { console.warn('Initial scroll to bottom failed in chat_view:', e); }
         }
 
-        // Edit alias helper
+        // Edit alias helper (same behavior as chats.html)
         function activarEdicionAlias(parent) {
             if (!parent) return;
-            // debug line to detect invocation
             console.debug('activarEdicionAlias called for parent:', parent);
             const view = parent.querySelector('.alias-view');
             const edit = parent.querySelector('.alias-edit');
@@ -270,19 +269,20 @@
             };
         }
 
-        // DELEGATED click handler for edit-alias-btn (robust to timing)
-        document.addEventListener('click', function (e) {
-            try {
-                const btn = e.target.closest && e.target.closest('.edit-alias-btn');
-                if (!btn) return;
-                e.preventDefault(); e.stopPropagation();
-                // walk up to the row containing alias elements
-                const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
-                activarEdicionAlias(parent);
-            } catch (err) {
-                console.error('Delegated handler error for edit-alias-btn:', err);
-            }
-        });
+        // Explicit binding (mirrors chats.html logic)
+        function onEditAliasClick(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            const btn = e.currentTarget || this;
+            const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
+            activarEdicionAlias(parent);
+        }
+        function enhanceAliasButtons() {
+            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                try { btn.removeEventListener('click', onEditAliasClick); } catch (e) {}
+                btn.addEventListener('click', onEditAliasClick);
+            });
+        }
 
         // DOMContentLoaded setup
         document.addEventListener('DOMContentLoaded', () => {
@@ -294,25 +294,9 @@
                 const mensajesContainer = document.getElementById('mensajes-container');
                 actualizarMensajes(mensajesContainer);
             }, refreshInterval);
-            function onEditAliasClick(e) {
-                e.preventDefault();
-                e.stopPropagation();
-                const btn = e.currentTarget || this;
-                const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
-                activarEdicionAlias(parent);
-            }
-            function enhanceAliasButtons() {
-                document.querySelectorAll('.edit-alias-btn').forEach(btn => {
-                    try {
-                        btn.removeEventListener('click', onEditAliasClick);
-                    } catch (e) { }
-                    btn.addEventListener('click', onEditAliasClick);
-                });
-            }
-            // call it on DOM ready (if you already have a DOMContentLoaded listener, call enhanceAliasButtons() there)
-            document.addEventListener('DOMContentLoaded', () => {
-                try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
-            });
+
+            // Bind alias edit buttons now that DOM is ready
+            try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
         });
     </script>
 </body>
