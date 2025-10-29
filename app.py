@@ -1989,6 +1989,7 @@ def eliminar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'columna_destino': columna_destino})
 
+
 @app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
 def actualizar_icono_columna(columna_id):
     config = obtener_configuracion_por_host()
@@ -1996,9 +1997,32 @@ def actualizar_icono_columna(columna_id):
     icono = (data.get('icono') or '').strip()
     if not icono:
         return jsonify({'error': 'Icono vacío'}), 400
+
+    # Quick safety guard: refuse absurdly large payloads (prevents abuse / extreme DB writes)
+    MAX_ICON_PAYLOAD = int(os.getenv("MAX_ICON_PAYLOAD", "20000"))  # characters
+    if len(icono) > MAX_ICON_PAYLOAD:
+        app.logger.warning(f"⚠️ Icon payload too large ({len(icono)} chars) for columna_id={columna_id}; max allowed {MAX_ICON_PAYLOAD}")
+        return jsonify({'error': 'Icon payload too large'}), 413
+
     conn = get_db_connection(config)
     cursor = conn.cursor()
     try:
+        # Ensure the column exists and supports large values (defensive check)
+        try:
+            cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
+            col = cursor.fetchone()
+            if col:
+                col_type = col[1].lower() if len(col) > 1 and col[1] else ''
+                if 'text' not in col_type and 'blob' not in col_type:
+                    try:
+                        cursor.execute("ALTER TABLE kanban_columnas MODIFY COLUMN icono TEXT DEFAULT NULL")
+                        conn.commit()
+                        app.logger.info("🔧 Upgraded kanban_columnas.icono to TEXT on-the-fly")
+                    except Exception:
+                        app.logger.warning("⚠️ Could not ALTER kanban_columnas.icono to TEXT (insufficient privileges?)")
+        except Exception:
+            pass
+
         cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
         conn.commit()
         return jsonify({'success': True})
@@ -2022,14 +2046,25 @@ def crear_tablas_kanban(config=None):
                 nombre VARCHAR(100) NOT NULL,
                 orden INT NOT NULL DEFAULT 0,
                 color VARCHAR(20) DEFAULT '#007bff',
-                icono VARCHAR(512) DEFAULT NULL
+                icono TEXT DEFAULT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        # Asegurar columna icono si tabla ya existía
+        # Ensure icono column exists and is TEXT (to support long data URLs)
         try:
             cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
-            if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono VARCHAR(512) DEFAULT NULL")
+            col = cursor.fetchone()
+            if col is None:
+                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono TEXT DEFAULT NULL")
+            else:
+                # If the column exists but is a short VARCHAR, alter to TEXT to avoid data-too-long errors
+                col_type = col[1].lower() if len(col) > 1 and col[1] else ''
+                if 'varchar' in col_type and not ('text' in col_type):
+                    try:
+                        cursor.execute("ALTER TABLE kanban_columnas MODIFY COLUMN icono TEXT DEFAULT NULL")
+                        app.logger.info("🔧 Modified kanban_columnas.icono to TEXT to support longer icon data")
+                    except Exception as _:
+                        # If MODIFY fails (permissions etc.), continue but warn
+                        app.logger.warning("⚠️ Could not modify kanban_columnas.icono to TEXT (insufficient privileges?)")
         except Exception as _:
             pass
 
@@ -9484,11 +9519,11 @@ def actualizar_columna_chat(numero, columna_id, config=None):
                 color = '#6c757d'
                 cursor.execute(
                     "INSERT INTO kanban_columnas (nombre, orden, color, icono) VALUES (%s, %s, %s, %s)",
-                    ('Cerrados', next_ord, color, default_icon)
+                    ('Vendidos', next_ord, color, default_icon)
                 )
                 conn.commit()
                 columna_id = cursor.lastrowid
-                app.logger.info(f"✅ Created missing 'Cerrados' column id={columna_id} in DB {config.get('db_name')}")
+                app.logger.info(f"✅ Created missing 'Vendidos' column id={columna_id} in DB {config.get('db_name')}")
 
         # 2) Perform the update now that columna_id is guaranteed to exist
         cursor.execute("""
