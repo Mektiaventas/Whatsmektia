@@ -68,7 +68,7 @@
     </div>
 
     <script>
-        // Minimal client-side logic: scroll to bottom and alias editing (no audio, no polling)
+        // Minimal client-side logic: scroll to bottom and alias editing (no audio)
         function isScrolledToBottom(el) {
             return el.scrollHeight - el.clientHeight <= el.scrollTop + 60;
         }
@@ -102,7 +102,9 @@
                 });
         }
 
-        // Alias editing (copied behavior from chats.html)
+        // Alias editing (copied behavior from chats.html) with guard flag
+        let isEditingAlias = false;
+
         function activarEdicionAlias(parent) {
             if (!parent) return;
             console.debug('activarEdicionAlias called for parent:', parent);
@@ -115,6 +117,7 @@
             const original = (view.textContent || '').trim();
             if (!input.value || input.value.trim() === '') input.value = original;
 
+            isEditingAlias = true;
             view.style.display = 'none';
             edit.style.display = 'inline-flex';
             input.focus();
@@ -126,6 +129,8 @@
                 edit.style.display = 'none';
                 view.textContent = (typeof valueToShow !== 'undefined' && valueToShow !== null) ? valueToShow : input.dataset.num;
                 view.style.display = '';
+                // release guard
+                isEditingAlias = false;
             }
 
             function terminar() {
@@ -153,7 +158,7 @@
             input.onblur = () => { setTimeout(() => { if (!submitted) terminar(); }, 0); };
             input.onkeydown = (ev) => {
                 if (ev.key === 'Enter') { ev.preventDefault(); terminar(); }
-                if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; }
+                if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; }
             };
         }
 
@@ -176,6 +181,14 @@
             initLastMessageFromDOM(container);
             try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
             try { console.debug('edit-alias-btn count at ready:', document.querySelectorAll('.edit-alias-btn').length); } catch (e) {}
+
+            // Auto-refresh page every 500ms unless user is editing alias or page is hidden.
+            // Be aware: full page reload will reset scroll and any transient client state.
+            setInterval(() => {
+                if (document.hidden) return;                // avoid reloading in background
+                if (isEditingAlias) return;                 // don't interrupt alias editing
+                window.location.reload();
+            }, 500);
         });
     </script>
 </body>
