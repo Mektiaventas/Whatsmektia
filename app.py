@@ -9429,17 +9429,79 @@ def actualizar_kanban_inmediato(numero, config=None):
         return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
-        if config is None:
-            config = obtener_configuracion_por_host()
+    """
+    Safely update chat_meta.columna_id for a given chat.
+    - Verifies the target columna_id exists in kanban_columnas.
+    - If it doesn't exist, tries to find a column named like 'Resueltos'.
+    - If still not found, creates a new 'Resueltos' column and uses its id.
+    This prevents foreign-key errors when code attempts to move chats to a hard-coded id
+    that may have been deleted in that tenant DB.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    conn = None
+    cursor = None
+    try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # 1) If the target column id does not exist, attempt fallbacks
+        cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_id,))
+        if cursor.fetchone() is None:
+            app.logger.warning(f"⚠️ Target kanban_columnas id={columna_id} not found in DB {config.get('db_name')}. Attempting fallback lookup/create.")
+
+            # Try to find a column named 'Resueltos' (case-insensitive, tolerant)
+            cursor.execute("SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE LOWER(%s) LIMIT 1", ('%resueltos%',))
+            row = cursor.fetchone()
+            if row:
+                new_col_id = row[0]
+                app.logger.info(f"ℹ️ Fallback: found 'Cerrados' column id={new_col_id}. Using it instead of requested id={columna_id}.")
+                columna_id = new_col_id
+            else:
+                # Create a new 'Resueltos' column at the end
+                try:
+                    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
+                    next_ord_row = cursor.fetchone()
+                    next_ord = int(next_ord_row[0]) if next_ord_row and next_ord_row[0] is not None else 1
+                except Exception:
+                    next_ord = 1
+
+                default_icon = '/static/icons/default-avatar.png'
+                color = '#6c757d'
+                cursor.execute(
+                    "INSERT INTO kanban_columnas (nombre, orden, color, icono) VALUES (%s, %s, %s, %s)",
+                    ('Cerrados', next_ord, color, default_icon)
+                )
+                conn.commit()
+                columna_id = cursor.lastrowid
+                app.logger.info(f"✅ Created missing 'Cerrados' column id={columna_id} in DB {config.get('db_name')}")
+
+        # 2) Perform the update now that columna_id is guaranteed to exist
         cursor.execute("""
             UPDATE chat_meta SET columna_id = %s 
             WHERE numero = %s;
         """, (columna_id, numero))
         conn.commit()
-        cursor.close()
-        conn.close()
+        app.logger.info(f"✅ Chat {numero} columna updated to {columna_id} in DB {config.get('db_name')}")
+
+    except Exception as e:
+        # Log the underlying DB error for diagnostics
+        app.logger.error(f"❌ actualizar_columna_chat failed for numero={numero} columna_id={columna_id} on DB {config.get('db_name')}: {e}")
+        try:
+            if conn:
+                conn.rollback()
+        except:
+            pass
+        raise
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except:
+            pass
 
 def actualizar_info_contacto(numero, config=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
