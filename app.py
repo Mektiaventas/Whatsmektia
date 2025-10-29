@@ -7629,7 +7629,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if sku_found:
                     specific_product_asked = True
 
-                # Call generator allowing images only when a specific product was requested or inferred
+                 # Call generator allowing images only when a specific product was requested or inferred
+                app.logger.info("🔍 Antes de generar_respuesta_catalogo: texto(short)=%s", (texto or "")[:120])
                 respuesta_catalogo = generar_respuesta_catalogo(
                     texto or "",
                     catalog_list,
@@ -7639,38 +7640,22 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     numero=numero,
                     incoming_saved=incoming_saved
                 )
+                app.logger.info("🔍 generar_respuesta_catalogo returned: %s", str(type(respuesta_catalogo)))
+                if isinstance(respuesta_catalogo, dict):
+                    app.logger.info("🔍 respuesta_catalogo keys: %s", list(respuesta_catalogo.keys()))
+                    # Log detailed image info if present
+                    try:
+                        app.logger.info("🔍 respuesta_catalogo preview: text=%s images=%s image_sent=%s",
+                                        (respuesta_catalogo.get('text') or '')[:200],
+                                        respuesta_catalogo.get('images'),
+                                        respuesta_catalogo.get('image_sent'))
+                    except Exception as _:
+                        app.logger.info("🔍 respuesta_catalogo preview logging failed")
                 if respuesta_catalogo:
                     # If the generator already sent the image/text itself, respect that and skip re-send
                     if isinstance(respuesta_catalogo, dict) and respuesta_catalogo.get('image_sent'):
                         app.logger.info("ℹ️ generar_respuesta_catalogo ya envió la imagen/texto; omitiendo re-envío desde procesar_mensaje_unificado.")
                         return True
-
-                    # respuesta_catalogo can be a dict {"text": "...", "images": [...] } or a plain string (legacy)
-                    if isinstance(respuesta_catalogo, dict):
-                        text_part = respuesta_catalogo.get('text') or respuesta_catalogo.get('respuesta') or ''
-                        images_part = respuesta_catalogo.get('images') or []
-                    else:
-                        text_part = str(respuesta_catalogo)
-                        images_part = []
-
-                    # Send text first (if any)
-                    if text_part:
-                        respuesta_final = aplicar_restricciones(text_part, numero, config)
-                        enviar_mensaje(numero, respuesta_final, config)
-                        registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
-
-                    # Then send images (if any and allowed) — log each image as a bot response image
-                    for img_target in images_part:
-                        try:
-                            enviar_imagen(numero, img_target, config)
-                            guardar_respuesta_imagen(numero, img_target, config, nota='[Imagen catálogo enviada]')
-                        except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo enviar imagen de catálogo {img_target}: {e}")
-
-                    return True
-                # Fallback: if AI helper failed, fallthrough to generic respuesta_text below
-            except Exception as e:
-                app.logger.warning(f"⚠️ Error generando respuesta de catálogo: {e}")
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
