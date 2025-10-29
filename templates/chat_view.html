@@ -19,7 +19,6 @@
         .new-message {
             animation: highlightMessage 1.5s ease-out forwards;
         }
-
         /* ensure the edit button receives clicks even if layout changes */
         .edit-alias-btn {
             pointer-events: auto;
@@ -31,7 +30,6 @@
         <a href="{{ url_for('chats') }}">← Volver</a>
     </div>
     <div class="chatbox">
-        <!-- Replace the existing <h2> and nearby IA button with this block -->
         <div class="chat-title">
             <div class="card-title-row" style="align-items:center; gap:8px;">
                 <span class="alias-view">{{ chat[2] or chat[1] }}</span>
@@ -49,18 +47,17 @@
         </div>
 
         <button id="btn-toggle-ia" onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
-        <button id="btn-toggle-ia" onclick="toggleIA()">IA: <span id="ia-status">{{ 'Activa' if chat[3] else 'Desactivada' }}</span></button>
         <form method="POST" action="{{ url_for('guardar_nota', telefono=chat[1]) }}">
             <textarea name="nota" placeholder="Añadir nota..." maxlength="600">{{ chat[4] }}</textarea>
             <button type="submit">Guardar Nota</button>
         </form>
+
         <div class="mensajes" id="mensajes-container" aria-live="polite" role="log">
             {% for msg in mensajes %}
             <div class="{{ 'msg-in' if msg[3]=='entrante' else 'msg-out' }}" data-msg-id="{{ msg[0] }}">{{ msg[2] }}</div>
             {% endfor %}
         </div>
 
-        <!-- Añadir campo para enviar mensaje manual -->
         <div class="mensaje-manual">
             <form method="POST" action="/send-manual" class="form-mensaje" id="form-manual">
                 <input type="hidden" name="numero" value="{{ chat[1] }}">
@@ -71,79 +68,22 @@
     </div>
 
     <script>
-        // Configuration
-        let chatAutoRefresh = true;
-        const refreshInterval = 800; // ms
-        let lastMessageId = {{ mensajes[-1][0] if mensajes else 0 }};
-        const telefono = "{{ chat[1] }}";
-
-        // Notification sound setup (unchanged)
-        const notifSrc = "{{ url_for('static', filename='audio/notify.mp3') }}";
-        const _audio = new Audio(notifSrc);
-        _audio.preload = 'auto';
-        let audioUnlocked = false;
-        let audioContext = null;
-
-        function tryUnlockAudioOnce() {
-            if (audioUnlocked) return;
-            _audio.play().then(() => {
-                _audio.pause();
-                _audio.currentTime = 0;
-                audioUnlocked = true;
-                document.removeEventListener('click', tryUnlockAudioOnce);
-                document.removeEventListener('keydown', tryUnlockAudioOnce);
-            }).catch(() => {
-                try {
-                    audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                    const o = audioContext.createOscillator();
-                    const g = audioContext.createGain();
-                    o.frequency.value = 0;
-                    o.connect(g); g.connect(audioContext.destination);
-                    o.start(0); o.stop(0);
-                    audioUnlocked = true;
-                    document.removeEventListener('click', tryUnlockAudioOnce);
-                    document.removeEventListener('keydown', tryUnlockAudioOnce);
-                } catch (e) {
-                    // ignore
-                }
-            });
+        // Minimal client-side logic: scroll to bottom and alias editing (no audio, no polling)
+        function isScrolledToBottom(el) {
+            return el.scrollHeight - el.clientHeight <= el.scrollTop + 60;
         }
-        document.addEventListener('click', tryUnlockAudioOnce);
-        document.addEventListener('keydown', tryUnlockAudioOnce);
+        function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
 
-        function playWebAudioBeep() {
-            try {
-                if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const ctx = audioContext;
-                const o = ctx.createOscillator();
-                const g = ctx.createGain();
-                o.type = 'sine';
-                o.frequency.value = 1000;
-                g.gain.value = 0.08;
-                o.connect(g);
-                g.connect(ctx.destination);
-                o.start();
-                setTimeout(() => { o.stop(); }, 140);
-            } catch (e) {
-                console.warn('WebAudio beep failed', e);
-            }
+        function initLastMessageFromDOM(container) {
+            try { if (container) setTimeout(() => scrollToBottom(container), 50); }
+            catch (e) { console.warn('Initial scroll to bottom failed in chat_view:', e); }
         }
 
-        function playNotificationSound() {
-            if (document.hidden) return;
-            if (audioUnlocked) {
-                _audio.currentTime = 0;
-                _audio.play().catch(() => playWebAudioBeep());
-            } else {
-                _audio.currentTime = 0;
-                _audio.play().then(() => { _audio.pause(); _audio.currentTime = 0; }).catch(() => { playWebAudioBeep(); });
-            }
-        }
-
-        // Toggle IA
+        // Toggle IA - keep existing network call
         function toggleIA() {
+            const telefono = "{{ chat[1] }}";
             const statusEl = document.getElementById('ia-status');
-            const current = statusEl.textContent.trim().toLowerCase();
+            const current = statusEl ? statusEl.textContent.trim().toLowerCase() : '';
             const optimistic = current === 'activa' ? 'Desactivada' : 'Activa';
             fetch("/toggle_ai/" + telefono, { method: "POST", credentials: 'same-origin', cache: 'no-store' })
                 .then(resp => {
@@ -156,68 +96,13 @@
                     } else {
                         statusEl.textContent = optimistic;
                     }
-                })
-                .catch(err => {
+                }).catch(err => {
                     console.warn('toggleIA error:', err);
-                    statusEl.textContent = optimistic;
+                    if (statusEl) statusEl.textContent = optimistic;
                 });
         }
 
-        // DOM helpers for messages (unchanged)
-        function appendMessageToDOM(container, normalized) {
-            if (!normalized || !normalized.id) return;
-            if (container.querySelector(`[data-msg-id="${normalized.id}"]`)) return;
-
-            const node = document.createElement('div');
-            node.className = (String(normalized.direction).toLowerCase() === 'entrante') ? 'msg-in msg-box' : 'msg-out msg-box';
-            node.dataset.msgId = normalized.id;
-            node.textContent = normalized.content || '';
-            node.classList.add('new-message');
-            container.appendChild(node);
-            setTimeout(() => node.classList.remove('new-message'), 1800);
-
-            const incomingMarkers = ['entrante', 'in', 'incoming', 'entrada'];
-            const dir = String(normalized.direction || '').toLowerCase();
-            if (incomingMarkers.includes(dir)) playNotificationSound();
-        }
-
-        function isScrolledToBottom(el) { return el.scrollHeight - el.clientHeight <= el.scrollTop + 60; }
-        function scrollToBottom(el) { el.scrollTop = el.scrollHeight; }
-
-        async function actualizarMensajes(container) {
-            if (!chatAutoRefresh) return;
-            try {
-                const url = `/chat/${encodeURIComponent(telefono)}/messages?after=${lastMessageId}`;
-                const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
-                if (!res.ok) return;
-                const data = await res.json().catch(() => null);
-                if (!data || !Array.isArray(data.messages)) return;
-                const msgs = data.messages;
-                if (!msgs.length) return;
-
-                const wasAtBottom = isScrolledToBottom(container);
-                for (const m of msgs) {
-                    const normalized = {
-                        id: Number(m.id ?? m[0] ?? m['id'] ?? 0),
-                        content: (m.content ?? m['content'] ?? m.mensaje ?? m['mensaje'] ?? m.respuesta ?? m[2] ?? ''),
-                        direction: (m.direction ?? m['direction'] ?? m.direccion ?? m['direccion'] ?? (m[3] ?? null))
-                    };
-                    if (!normalized.id) continue;
-                    appendMessageToDOM(container, normalized);
-                    lastMessageId = Math.max(lastMessageId, normalized.id);
-                }
-                if (wasAtBottom) scrollToBottom(container);
-            } catch (err) {
-                console.error('Error updating messages:', err);
-            }
-        }
-
-        function initLastMessageFromDOM(container) {
-            try { if (container) setTimeout(() => scrollToBottom(container), 50); }
-            catch (e) { console.warn('Initial scroll to bottom failed in chat_view:', e); }
-        }
-
-        // Edit alias helper (same behavior as chats.html)
+        // Alias editing (copied behavior from chats.html)
         function activarEdicionAlias(parent) {
             if (!parent) return;
             console.debug('activarEdicionAlias called for parent:', parent);
@@ -245,12 +130,10 @@
 
             function terminar() {
                 const nuevo = (input.value || '').trim();
-
                 if (nuevo === '' || nuevo === original) {
                     finishAndRestore(original);
                     return;
                 }
-
                 submitted = true;
                 fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
                     method: 'POST',
@@ -274,55 +157,24 @@
             };
         }
 
-        // Explicit binding (mirrors chats.html logic) with debug output
         function onEditAliasClick(e) {
-            console.debug('onEditAliasClick fired', e);
-            e.preventDefault();
-            e.stopPropagation();
+            e.preventDefault(); e.stopPropagation();
             const btn = e.currentTarget || this;
-            console.debug('button data-num:', btn && btn.dataset && btn.dataset.num);
             const parent = btn.closest('.card-title-row') || btn.closest('.chat-title') || btn.closest('.chatbox') || document.body;
             activarEdicionAlias(parent);
         }
         function enhanceAliasButtons() {
             const buttons = Array.from(document.querySelectorAll('.edit-alias-btn'));
-            console.debug('enhanceAliasButtons found', buttons.length, 'buttons');
             buttons.forEach(btn => {
                 try { btn.removeEventListener('click', onEditAliasClick); } catch (e) {}
                 btn.addEventListener('click', onEditAliasClick);
             });
         }
 
-        // Delegated fallback: if explicit binding somehow fails, ensure clicks are detected
-        document.addEventListener('click', function (e) {
-            try {
-                const btn = e.target && e.target.closest && e.target.closest('.edit-alias-btn');
-                if (!btn) return;
-                // If explicit listener already ran, it will handle; but produce debug and call handler as fallback.
-                console.debug('delegated click on edit-alias-btn (fallback)', btn);
-                // call the handler directly to keep behavior consistent
-                onEditAliasClick.call(btn, new MouseEvent('click', { bubbles: true }));
-            } catch (err) {
-                console.error('delegated handler error for edit-alias-btn:', err);
-            }
-        });
-
-        // DOMContentLoaded setup
         document.addEventListener('DOMContentLoaded', () => {
-            console.debug('chat_view DOMContentLoaded');
             const container = document.getElementById('mensajes-container');
             initLastMessageFromDOM(container);
-
-            // Start incremental refresh loop that uses actualizarMensajes
-            setInterval(() => {
-                const mensajesContainer = document.getElementById('mensajes-container');
-                actualizarMensajes(mensajesContainer);
-            }, refreshInterval);
-
-            // Bind alias edit buttons now that DOM is ready
             try { enhanceAliasButtons(); } catch (e) { console.warn('enhanceAliasButtons failed', e); }
-
-            // Extra quick-check: expose buttons count in console for debugging
             try { console.debug('edit-alias-btn count at ready:', document.querySelectorAll('.edit-alias-btn').length); } catch (e) {}
         });
     </script>
