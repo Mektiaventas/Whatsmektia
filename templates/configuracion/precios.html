@@ -931,34 +931,20 @@
 <script>
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
-        // Hide all sections
         const sections = document.querySelectorAll('.section');
-        sections.forEach(section => {
-            section.style.display = 'none';
-        });
-
-        // Remove active class from all buttons
+        sections.forEach(section => section.style.display = 'none');
         const buttons = document.querySelectorAll('.btn, .btn-primario, .btn-primary');
-        buttons.forEach(button => {
-            button.classList.remove('active');
-        });
-
-        // Show the requested section
+        buttons.forEach(button => button.classList.remove('active'));
         const targetSection = document.getElementById(sectionId);
         if (targetSection) {
             targetSection.style.display = 'block';
-            // Scroll to the section (but not to the very top)
             window.scrollTo({
                 top: document.querySelector('.tab-navigation').offsetTop + 60,
                 behavior: 'smooth'
             });
         }
-
-        // Highlight the active button
         const activeButton = document.getElementById(`btn-${sectionId}`);
-        if (activeButton) {
-            activeButton.classList.add('active');
-        }
+        if (activeButton) activeButton.classList.add('active');
     }
 
     // Image input toggle function
@@ -966,15 +952,14 @@
         const tipo = document.getElementById('imagen-tipo').value;
         const archivoContainer = document.getElementById('imagen-archivo-container');
         const urlContainer = document.getElementById('imagen-url-container');
-
         if (tipo === 'archivo') {
             archivoContainer.style.display = 'block';
             urlContainer.style.display = 'none';
-            document.getElementById('imagen_url').value = '';
+            const iu = document.getElementById('imagen_url'); if (iu) iu.value = '';
         } else {
             archivoContainer.style.display = 'none';
             urlContainer.style.display = 'block';
-            document.getElementById('imagen').value = '';
+            const f = document.getElementById('imagen'); if (f) f.value = '';
         }
     }
     // Toggle a column based on the header button clicked
@@ -994,25 +979,46 @@
 
     // Toggle column by table element and column index
     function toggleColumn(table, colIndex) {
-        // Determine current state by looking at first body row cell
         const firstRow = table.querySelector('tbody tr');
         if (!firstRow) return;
         const cell = firstRow.children[colIndex];
         const isHidden = cell && (cell.style.display === 'none' || cell.classList.contains('hidden'));
         const newDisplay = isHidden ? '' : 'none';
-
-        // Apply to all rows (thead, tbody)
         const rows = table.querySelectorAll('thead tr, tbody tr');
         rows.forEach(row => {
             const c = row.children[colIndex];
             if (c) c.style.display = newDisplay;
         });
-
-        // Persist state to localStorage per table (user/admin)
         const tableId = table.getAttribute('data-table') || 'table';
-        persistHiddenColumn(tableId, colIndex, !isHidden);
+        // Update localStorage map + persist to server
+        try {
+            const key = `precios_hidden_cols_${tableId}`;
+            const raw = localStorage.getItem(key);
+            let map = raw ? JSON.parse(raw) : {};
+            if (!isHidden) map[colIndex] = true;
+            else delete map[colIndex];
+            localStorage.setItem(key, JSON.stringify(map));
+            // Send to server (best-effort)
+            persistHiddenColumnsToServer(tableId, map);
+        } catch (e) {
+            console.warn('Could not persist column visibility locally:', e);
+        }
     }
-
+    function persistHiddenColumnsToServer(tableId, map) {
+        try {
+            fetch('/configuracion/precios/columnas', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ table: tableId, hidden: map }),
+                credentials: 'same-origin'
+            }).catch(err => {
+                // best-effort: if network fails, leave localStorage as fallback
+                console.warn('Warning: could not persist hidden columns to server:', err);
+            });
+        } catch (e) {
+            console.warn('Error in persistHiddenColumnsToServer:', e);
+        }
+    }
     // Persist hidden columns set for a table in localStorage
     function persistHiddenColumn(tableId, colIndex, hidden) {
         try {
@@ -1032,63 +1038,109 @@
     }
 
     // Apply stored hidden columns to all tables on load
-    function applyStoredHiddenColumns() {
+    async function applyStoredHiddenColumns() {
         try {
             const tables = document.querySelectorAll('table[data-table]');
-            tables.forEach(table => {
-                const tableId = table.getAttribute('data-table');
+            for (const table of tables) {
+                const tableId = table.getAttribute('data-table') || 'table';
+                // Try server
+                try {
+                    const res = await fetch(`/configuracion/precios/columnas?table=${encodeURIComponent(tableId)}`, { credentials: 'same-origin' });
+                    if (res.ok) {
+                        const data = await res.json();
+                        const map = data.hidden || {};
+                        Object.keys(map).forEach(idxStr => {
+                            const idx = parseInt(idxStr, 10);
+                            if (isNaN(idx)) return;
+                            const rows = table.querySelectorAll('thead tr, tbody tr');
+                            rows.forEach(row => {
+                                const c = row.children[idx];
+                                if (c) c.style.display = 'none';
+                            });
+                            const headerCell = table.querySelector('thead tr').children[idx];
+                            if (headerCell) {
+                                const btn = headerCell.querySelector('.col-toggle');
+                                if (btn) btn.setAttribute('aria-pressed', 'true');
+                            }
+                        });
+                        // Also persist to localStorage for offline UX
+                        localStorage.setItem(`precios_hidden_cols_${tableId}`, JSON.stringify(map));
+                        continue;
+                    }
+                } catch (e) {
+                    // server failed, fall back to localStorage below
+                }
+                // fallback: localStorage
                 const key = `precios_hidden_cols_${tableId}`;
                 const raw = localStorage.getItem(key);
                 const map = raw ? JSON.parse(raw) : {};
-                if (!map) return;
                 Object.keys(map).forEach(idxStr => {
                     const idx = parseInt(idxStr, 10);
                     if (isNaN(idx)) return;
-                    // hide column
                     const rows = table.querySelectorAll('thead tr, tbody tr');
                     rows.forEach(row => {
                         const c = row.children[idx];
                         if (c) c.style.display = 'none';
                     });
-                    // set aria-pressed on header button if exists
                     const headerCell = table.querySelector('thead tr').children[idx];
                     if (headerCell) {
                         const btn = headerCell.querySelector('.col-toggle');
                         if (btn) btn.setAttribute('aria-pressed', 'true');
                     }
                 });
+            }
+        } catch (e) {
+            console.warn('Error applying stored hidden columns:', e);
+        }
+    }
+    async function resetColumns() {
+        if (!confirm('¿Restablecer visibilidad de columnas para esta vista? Esto mostrará todas las columnas hasta que vuelvas a ocultarlas.')) return;
+        // Clear server-side for all tables for this tenant
+        try {
+            await fetch('/configuracion/precios/columnas/restablecer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}), credentials: 'same-origin'
             });
         } catch (e) {
-            console.warn('Error applying stored column visibility: ', e);
+            console.warn('Could not clear server-side column settings:', e);
         }
+        // Clear UI and localStorage
+        document.querySelectorAll('table[data-table]').forEach(table => {
+            const rows = table.querySelectorAll('thead tr, tbody tr');
+            const colsCount = table.querySelector('thead tr').children.length;
+            for (let cidx = 0; cidx < colsCount; cidx++) {
+                rows.forEach(row => {
+                    const c = row.children[cidx];
+                    if (c) c.style.display = '';
+                });
+                const headerCell = table.querySelector('thead tr').children[cidx];
+                if (headerCell) {
+                    const btn = headerCell.querySelector('.col-toggle');
+                    if (btn) btn.setAttribute('aria-pressed', 'false');
+                }
+            }
+            const tableId = table.getAttribute('data-table') || 'table';
+            try { localStorage.removeItem(`precios_hidden_cols_${tableId}`); } catch (e) { }
+        });
+        alert('Columnas restablecidas.');
     }
     // On document ready
     document.addEventListener('DOMContentLoaded', function () {
-        console.log("DOM loaded - initializing tab navigation");
-
         // Default to the user-list (client prices) section
         let initialSection = 'user-list';
-
-        {%if precio_edit %}
-        // If editing a product, go directly to manual upload
+        {% if precio_edit %}
         initialSection = 'manual-upload';
         {% endif %}
-
-        // Check for URL parameters
         const urlParams = new URLSearchParams(window.location.search);
         const section = urlParams.get('section');
-        if (section) {
-            initialSection = section;
-        }
-
-        // Show the initial section
+        if (section) initialSection = section;
         showSection(initialSection);
-
-        // Make sure the imagen-url-container is hidden initially
         const urlContainer = document.getElementById('imagen-url-container');
-        if (urlContainer) {
-            urlContainer.style.display = 'none';
-        }
+        if (urlContainer) urlContainer.style.display = 'none';
+
+        // Apply stored column visibility
+        applyStoredHiddenColumns();
     });
 </script>
 {% endblock %}

@@ -7143,6 +7143,100 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         app.logger.warning(f"⚠️ generar_respuesta_catalogo falló: {e}")
         return None
 
+# Add below existing helper functions (e.g. after other CREATE TABLE helpers)
+def _ensure_columnas_precios_table(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS columnas_precios (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                tenant VARCHAR(255) NOT NULL,
+                table_name VARCHAR(64) NOT NULL,
+                hidden_json JSON DEFAULT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_tenant_table (tenant, table_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except:
+            pass
+    finally:
+        cur.close()
+
+@app.route('/configuracion/precios/columnas', methods=['GET'])
+def get_columnas_precios():
+    """Return saved hidden columns for current tenant + table (query param 'table')"""
+    config = obtener_configuracion_por_host()
+    table = request.args.get('table', 'user')
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT hidden_json FROM columnas_precios WHERE tenant=%s AND table_name=%s LIMIT 1",
+                    (config.get('dominio'), table))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        hidden = {}
+        if row and row.get('hidden_json'):
+            try:
+                hidden = json.loads(row['hidden_json'])
+            except Exception:
+                hidden = {}
+        return jsonify({'hidden': hidden})
+    except Exception as e:
+        app.logger.warning(f"⚠️ get_columnas_precios error: {e}")
+        return jsonify({'hidden': {}})
+
+@app.route('/configuracion/precios/columnas', methods=['POST'])
+def save_columnas_precios():
+    """Save hidden columns state for current tenant + table"""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table = (data.get('table') or 'user')
+    hidden = data.get('hidden') or {}
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO columnas_precios (tenant, table_name, hidden_json, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE hidden_json = VALUES(hidden_json), updated_at = NOW()
+        """, (config.get('dominio'), table, json.dumps(hidden, ensure_ascii=False)))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"🔴 save_columnas_precios error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
+def reset_columnas_precios():
+    """Reset (clear) saved hidden columns for current tenant.
+       If JSON body contains 'table' it clears only that table; otherwise clears all tenant entries."""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table = data.get('table')
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor()
+        if table:
+            cur.execute("DELETE FROM columnas_precios WHERE tenant=%s AND table_name=%s", (config.get('dominio'), table))
+        else:
+            cur.execute("DELETE FROM columnas_precios WHERE tenant=%s", (config.get('dominio'),))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"🔴 reset_columnas_precios error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,

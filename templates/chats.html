@@ -39,10 +39,10 @@
                 <div class="card-content">
                     <div class="card-title-row">
                         <!---<div class="card-avatar-section">
-        <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
-             class="card-avatar" alt="Avatar"
-             onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-    </div>-->
+                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
+                        </div>-->
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
