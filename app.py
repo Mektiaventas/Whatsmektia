@@ -7488,11 +7488,54 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
+
                 # NEW: If intent indicates product/service info, generate a catalog-aware textual reply
         if intent == "INFORMACION_SERVICIOS_O_PRODUCTOS":
             # Ensure we have a catalog; catalog_list and texto_catalogo were prepared above
             try:
-                respuesta_catalogo = generar_respuesta_catalogo(texto or "", catalog_list, texto_catalogo, config=config)
+                # Determine if the user asked about a specific product (SKU or product name),
+                # including checking the recent conversation history so follow-ups like
+                # "Me puedes mostrar la imagen porfavor?" get resolved to the previously mentioned product.
+                specific_product_asked = False
+                sku_found = None
+
+                try:
+                    # 1) Directly in the current text
+                    sku_found = buscar_sku_en_texto(texto or "", precios)
+                except Exception:
+                    sku_found = None
+
+                if not sku_found:
+                    try:
+                        # 2) Try to resolve by exact product lookup by name/model in the current text
+                        prod_match = obtener_producto_por_sku_o_nombre(texto or "", config)
+                        if prod_match:
+                            sku_found = (prod_match.get('sku') or prod_match.get('modelo') or '').strip()
+                    except Exception:
+                        prod_match = None
+
+                if not sku_found:
+                    try:
+                        # 3) If still not found, search recent historial for mentions (helps follow-ups)
+                        hist_text = ""
+                        for h in historial[-4:]:
+                            if h.get('mensaje'):
+                                hist_text += " " + str(h.get('mensaje'))
+                            if h.get('respuesta'):
+                                hist_text += " " + str(h.get('respuesta'))
+                        sku_found = buscar_sku_en_texto(hist_text, precios) or None
+                        if not sku_found:
+                            prod_match_hist = obtener_producto_por_sku_o_nombre(hist_text, config)
+                            if prod_match_hist:
+                                sku_found = (prod_match_hist.get('sku') or prod_match_hist.get('modelo') or '').strip()
+                    except Exception:
+                        sku_found = None
+
+                if sku_found:
+                    specific_product_asked = True
+
+                # Call generator allowing images only when a specific product was requested or inferred
+                respuesta_catalogo = generar_respuesta_catalogo(texto or "", catalog_list, texto_catalogo, config=config, allow_images=specific_product_asked)
                 if respuesta_catalogo:
                     # respuesta_catalogo can be a dict {"text": "...", "images": [...] } or a plain string (legacy)
                     if isinstance(respuesta_catalogo, dict):
@@ -7508,12 +7551,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         enviar_mensaje(numero, respuesta_final, config)
                         registrar_respuesta_bot(numero, texto, respuesta_final, config, incoming_saved=incoming_saved)
 
-                    # Then send images (if any) — log each image as a bot response image
+                    # Then send images (if any and allowed) — log each image as a bot response image
                     for img_target in images_part:
                         try:
-                            # enviar_imagen accepts either URL or filename; our generator yields a usable path/URL
                             enviar_imagen(numero, img_target, config)
-                            # Persist a record that the bot sent an image
                             guardar_respuesta_imagen(numero, img_target, config, nota='[Imagen catálogo enviada]')
                         except Exception as e:
                             app.logger.warning(f"⚠️ No se pudo enviar imagen de catálogo {img_target}: {e}")
