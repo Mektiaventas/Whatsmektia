@@ -99,7 +99,12 @@
                                data-num="{{ selected }}" maxlength="100">
                     </span>
                     {% if is_admin %}
-                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
+                    <button type="button"
+                            class="edit-alias-btn"
+                            data-num="{{ selected }}"
+                            title="Editar nombre"
+                            onclick="activarEdicionAlias(this.closest('.card-title-row') || this.closest('.chat-title') || this.closest('.card-content'))"
+                            onpointerdown="activarEdicionAlias(this.closest('.card-title-row') || this.closest('.chat-title') || this.closest('.card-content'))">
                         ✏️
                     </button>
                     {% endif %}
