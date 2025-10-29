@@ -7085,12 +7085,14 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
         return None
 
 # Helper: generate a catalog-aware short reply using DeepSeek
-def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20):
+def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, config=None, modelo="deepseek-chat", max_tokens=300, timeout=20, allow_images=False):
     """
     Pide a la IA una respuesta breve (1-6 líneas) orientada al usuario usando el catálogo proporcionado.
     Ahora devuelve un dict con:
       { "text": "<respuesta>", "images": ["<url|filename>", ...] }
     o una simple cadena (compatibilidad) en caso de fallo.
+
+    IMPORTANT: image collection only runs when allow_images==True.
     """
     try:
         if config is None:
@@ -7148,52 +7150,53 @@ def generar_respuesta_catalogo(mensaje_usuario, catalog_list, texto_catalogo, co
         except Exception:
             tenant_slug = 'default'
 
-        # Try to detect which catalog items are mentioned (prefer message_usuario then AI text)
-        search_space = (mensaje_usuario or "") + " || " + (text or "")
-        ss_low = search_space.lower()
-
         images = []
-        seen = set()
-        # catalog_list entries expected to have keys: sku, servicio, descripcion, imagen
-        for item in (catalog_list or []):
-            try:
-                sku = (item.get('sku') or '').strip()
-                servicio = (item.get('servicio') or '').strip()
-                descripcion = (item.get('descripcion') or '').strip()
-                imagen = (item.get('imagen') or '').strip()
-                match = False
-                if sku and sku.lower() in ss_low:
-                    match = True
-                elif servicio and servicio.lower() in ss_low:
-                    match = True
-                else:
-                    # check tokens from servicio (avoid tiny words)
-                    tokens = [t for t in re.split(r'\W+', servicio.lower()) if len(t) > 2]
-                    for t in tokens:
-                        if t and t in ss_low:
-                            match = True
-                            break
-                if match and imagen:
-                    # Normalize image target:
-                    img_target = imagen
-                    if img_target.startswith('http://') or img_target.startswith('https://'):
-                        url = img_target
-                    elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
-                        url = img_target if img_target.startswith('/') else '/' + img_target
-                    elif '/' in img_target:
-                        # probably already contains tenant/filename -> ensure leading slash and prefix /uploads/productos/
-                        url = f"/uploads/productos/{img_target.lstrip('/')}"
+        # Only attempt to collect images when explicitly allowed (user asked a specific product)
+        if allow_images:
+            # Try to detect which catalog items are mentioned (prefer message_usuario then AI text)
+            search_space = (mensaje_usuario or "") + " || " + (text or "")
+            ss_low = search_space.lower()
+            seen = set()
+            # catalog_list entries expected to have keys: sku, servicio, descripcion, imagen
+            for item in (catalog_list or []):
+                try:
+                    sku = (item.get('sku') or '').strip()
+                    servicio = (item.get('servicio') or '').strip()
+                    descripcion = (item.get('descripcion') or '').strip()
+                    imagen = (item.get('imagen') or '').strip()
+                    match = False
+                    if sku and sku.lower() in ss_low:
+                        match = True
+                    elif servicio and servicio.lower() in ss_low:
+                        match = True
                     else:
-                        # treat as filename -> build tenant-aware route that the app serves
-                        url = f"/uploads/productos/{tenant_slug}/{img_target}"
-                    if url not in seen:
-                        images.append(url)
-                        seen.add(url)
-                # stop collecting after a small number to avoid flooding (e.g. 4 images)
-                if len(images) >= 4:
-                    break
-            except Exception:
-                continue
+                        # check tokens from servicio (avoid tiny words)
+                        tokens = [t for t in re.split(r'\W+', servicio.lower()) if len(t) > 2]
+                        for t in tokens:
+                            if t and t in ss_low:
+                                match = True
+                                break
+                    if match and imagen:
+                        # Normalize image target:
+                        img_target = imagen
+                        if img_target.startswith('http://') or img_target.startswith('https://'):
+                            url = img_target
+                        elif img_target.startswith('/uploads/') or img_target.startswith('uploads/'):
+                            url = img_target if img_target.startswith('/') else '/' + img_target
+                        elif '/' in img_target:
+                            # probably already contains tenant/filename -> ensure leading slash and prefix /uploads/productos/
+                            url = f"/uploads/productos/{img_target.lstrip('/')}"
+                        else:
+                            # treat as filename -> build tenant-aware route that the app serves
+                            url = f"/uploads/productos/{tenant_slug}/{img_target}"
+                        if url not in seen:
+                            images.append(url)
+                            seen.add(url)
+                    # stop collecting after a small number to avoid flooding (e.g. 4 images)
+                    if len(images) >= 4:
+                        break
+                except Exception:
+                    continue
 
         # Return structured result so caller can both send text and images
         return {"text": text, "images": images}
