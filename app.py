@@ -7457,7 +7457,7 @@ que el servidor debe ejecutar. Dispones de:
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
