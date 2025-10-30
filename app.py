@@ -130,7 +130,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
         'dominio': 'ofitodo.mektia.com'
     },
-    '1011': {  # Número de Ofitodo
+    '1011': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
@@ -139,7 +139,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
         'dominio': 'maindsteel.mektia.com'
     },
-    '1012': {  # Número de Drasgo
+    '1012': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
@@ -148,13 +148,13 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
         'dominio': 'drasgo.mektia.com'
     },
-    '1013': {  # Número de Lacse
+    '1013': {  # Número de Ofitodo - CORREGIDO
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
         'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
         'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("LACSE_DB_NAME"),                  
+        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
         'dominio': 'lacse.mektia.com'
     }
 }
@@ -7356,7 +7356,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Esta funcion se encarga de procesar un mensaje entrante y determinar el camino a seguir
+    Flujo unificado para procesar un mensaje entrante.
+    incoming_saved: boolean indicating the webhook already persisted the incoming message
+                    (so callers can avoid double-saving). Default False for backward compatibility.
     """
     try:
         if config is None:
@@ -7511,7 +7513,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) El JSON debe tener estas claves mínimas:
-   - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF","ANALIZAR_IMAGEN"]
+   - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -7605,6 +7607,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
         # GUARDAR CITA
+                #Comprar producto
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
@@ -7625,10 +7628,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
-        if intent == "ANALIZAR_IMAGEN":
-            sent = analizar_imagen_y_responder(msg, numero, texto, config, imagen_base64=imagen_base64, incoming_saved=incoming_saved)
-            if sent:
-                return True
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
@@ -7644,6 +7643,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
+
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
@@ -7654,6 +7654,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
+
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
@@ -7709,6 +7710,7 @@ def enviar_datos_transferencia(numero, config=None):
 
         # Construir bloque de transferencia (usa la función ya existente)
         texto_transferencia = negocio_transfer_block(negocio)
+
         # Si no hay datos específicos, intentar leer fila completa de configuracion (fallback)
         if not texto_transferencia or 'no hay datos' in texto_transferencia.lower():
             # Try obtener datos directos desde DB as fallback
@@ -7746,100 +7748,33 @@ def enviar_datos_transferencia(numero, config=None):
         app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, imagen_base64=None):
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Si imagen_base64 (data:...) o imagen_url (http/https/data:/uploads/...) se proporciona,
-    intenta persistir la imagen en uploads/productos/<tenant_slug>/ y reescribe imagen_url a la ruta pública.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
+    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
+        # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
-        # Resolve tenant products dir
-        try:
-            productos_dir, tenant_slug = get_productos_dir_for_config(config)
-        except Exception:
-            productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-            tenant_slug = 'default'
-        os.makedirs(productos_dir, exist_ok=True)
-
-        # If we have a base64 image (data URI or raw base64), persist it locally
-        saved_local = False
-        if imagen_base64:
-            try:
-                img_data = imagen_base64
-                # If comes as dict or object with 'base64' key (compatibility with other code)
-                if isinstance(img_data, dict) and img_data.get('base64'):
-                    img_data = img_data.get('base64')
-                img_data = str(img_data).strip()
-                # If data URI, extract mime and payload
-                m = re.match(r'data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)', img_data, re.DOTALL)
-                if m:
-                    mime = m.group(1)
-                    payload = m.group(2)
-                    ext = mime.split('/')[-1]
-                else:
-                    # no data URI: assume jpeg
-                    payload = img_data
-                    ext = 'jpg'
-                payload = payload.encode('utf-8') if isinstance(payload, str) else payload
-                binary = base64.b64decode(payload)
-                fname = f"{int(time.time())}_{secure_filename(numero)}.{ext}"
-                local_path = os.path.join(productos_dir, fname)
-                with open(local_path, 'wb') as f:
-                    f.write(binary)
-                imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
-                saved_local = True
-                app.logger.info(f"✅ Saved image from base64 to {local_path} -> imagen_url={imagen_url}")
-            except Exception as e:
-                app.logger.warning(f"⚠️ Failed to save base64 image locally: {e}")
-
-        # If imagen_url is an external http(s) link, try to download it to tenant uploads
-        if not saved_local and imagen_url and isinstance(imagen_url, str) and imagen_url.startswith(('http://', 'https://')):
-            try:
-                parsed = urlparse(imagen_url)
-                basename = os.path.basename(parsed.path) or f"img_{int(time.time())}.jpg"
-                fname = f"{int(time.time())}_{secure_filename(basename)}"
-                local_path = os.path.join(productos_dir, fname)
-                resp = requests.get(imagen_url, timeout=10, stream=True)
-                resp.raise_for_status()
-                with open(local_path, 'wb') as f:
-                    for chunk in resp.iter_content(1024 * 8):
-                        if not chunk:
-                            break
-                        f.write(chunk)
-                imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
-                app.logger.info(f"✅ Downloaded external image to {local_path} and set imagen_url={imagen_url}")
-                saved_local = True
-            except Exception as e:
-                app.logger.warning(f"⚠️ Could not download external image {imagen_url}: {e} - keeping original URL")
-
-        # If imagen_url is local absolute path (filesystem) and not a public path, try to make public path
-        if imagen_url and imagen_url.startswith(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER)):
-            try:
-                # get basename and set tenant public path
-                basename = os.path.basename(imagen_url)
-                imagen_url = f"/uploads/productos/{tenant_slug}/{basename}"
-                app.logger.info(f"ℹ️ Rewrote local filesystem image path to public url: {imagen_url}")
-            except Exception:
-                pass
-
-        # Ensure contact exists
+        # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero} (imagen_url set? {'yes' if imagen_url else 'no'}) at {datetime.now(tz_mx).isoformat()}")
+        # Add detailed logging before saving the message
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen))
 
-        # Get inserted message id
+        # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -7848,9 +7783,9 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (imagen_url={imagen_url})")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
 
-        # Update kanban immediately
+        # Ensure Kanban reflects the new incoming message immediately.
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
@@ -10050,64 +9985,54 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         return meta['columna_id'] if meta else 1
 
 def obtener_contexto_consulta(numero, config=None):
+    """
+    Devuelve un bloque de texto con contexto breve del cliente para alertas/handoff.
+    - Incluye nombre mostrado (alias/nombre) y últimos mensajes (hasta 8).
+    - Retorna una cadena (truncada) y nunca lanza excepción.
+    """
     if config is None:
-        config = obtener_configuracion_por_host()
-    
+        try:
+            config = obtener_configuracion_por_host()
+        except Exception:
+            config = NUMEROS_CONFIG.get('524495486142')
+
     try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Obtener los últimos mensajes para entender el contexto
-        cursor.execute("""
-            SELECT mensaje, respuesta 
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp DESC 
-            LIMIT 5
-        """, (numero,))
-        
-        mensajes = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        if not mensajes:
-            return "No hay historial de conversación reciente."
-        
-        # Analizar el contexto de la conversación
-        contexto = ""
-        
-        # Buscar menciones de servicios/proyectos
-        servicios_mencionados = []
-        for msg in mensajes:
-            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
-            for servicio in servicios_clave:
-                if servicio in mensaje_texto and servicio not in servicios_mencionados:
-                    servicios_mencionados.append(servicio) 
-        
-        if servicios_mencionados:
-            contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
-        
-        # Extraer información específica del último mensaje, lo que significa que es reciente, si no es reciente, no tiene sentido
-        ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
-        if len(ultimo_mensaje) > 15: 
-            contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
-        
-        # Intentar detectar urgencia o tipo de consulta
-        palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
-        if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
-            contexto += "🚨 *Tono:* Urgente\n"
-        
-        return contexto if contexto else "No se detectó contexto relevante."
-        
-    except Exception as e:
-        app.logger.error(f"Error obteniendo contexto: {e}")
-        return "Error al obtener contexto"
+        nombre = obtener_nombre_mostrado_por_numero(numero, config) or numero
+    except Exception:
+        nombre = numero
+
+    try:
+        historial = obtener_historial(numero, limite=8, config=config) or []
+    except Exception:
+        historial = []
+
+    partes = []
+    for h in historial:
+        try:
+            if h.get('mensaje'):
+                partes.append(f"Usuario: {h.get('mensaje')}")
+            if h.get('respuesta'):
+                partes.append(f"Asistente: {h.get('respuesta')}")
+        except Exception:
+            continue
+
+    if not partes:
+        contexto = f"Cliente: {nombre}\n(No hay historial disponible.)"
+    else:
+        contexto = f"Cliente: {nombre}\nÚltimas interacciones:\n" + "\n".join(partes)
+
+    # Truncar para evitar payloads muy grandes (safety)
+    MAX_CHARS = 4000
+    if len(contexto) > MAX_CHARS:
+        contexto = contexto[:MAX_CHARS - 3] + "..."
+
+    return contexto
 
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
     start_good_morning_scheduler()
-    # Verificar tablas en todas las bases de datos
+    # Verificar tablas en todas las bases de datos 
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
