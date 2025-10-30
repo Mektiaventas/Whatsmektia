@@ -136,6 +136,24 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
         'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
         'dominio': 'maindsteel.mektia.com'
+    },
+    '1012': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("DRASGO_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
+        'dominio': 'drasgo.mektia.com'
+    },
+    '1013': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
+        'dominio': 'lacse.mektia.com'
     }
 }
 
@@ -7976,6 +7994,12 @@ def obtener_configuracion_por_host():
         if 'maindsteel' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['1011']
+        if 'drasgo' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1012']
+        if 'lacse' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1013']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
