@@ -7275,8 +7275,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             combined = (texto or "") + "\n" + (historial_text or "")
             if any(kw in combined.lower() for kw in ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', 'foto', 'imagen', 'cotización', 'precio?', '¿cuánto']):
                 producto_aplica = "SI_APLICA"
+                app.logger.info("🔎 Fallback product-detector -> SI_APLICA")
             else:
                 producto_aplica = "NO_APLICA"
+                app.logger.info("🔎 Fallback product-detector -> NO_APLICA")
             app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
         # --- end DeepSeek product detection ---
         precios = obtener_todos_los_precios(config) or []
