@@ -130,7 +130,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
         'dominio': 'ofitodo.mektia.com'
     },
-    '1011': {  # Número de Ofitodo - CORREGIDO
+    '1011': {  # Número de Ofitodo
         'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
@@ -139,7 +139,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
         'dominio': 'maindsteel.mektia.com'
     },
-    '1012': {  # Número de Ofitodo - CORREGIDO
+    '1012': {  # Número de Drasgo
         'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
@@ -148,13 +148,13 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
         'dominio': 'drasgo.mektia.com'
     },
-    '1013': {  # Número de Ofitodo - CORREGIDO
+    '1013': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
         'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
         'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
         'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
+        'db_name': os.getenv("LACSE_DB_NAME"),                  
         'dominio': 'lacse.mektia.com'
     }
 }
@@ -7705,7 +7705,6 @@ def enviar_datos_transferencia(numero, config=None):
 
         # Construir bloque de transferencia (usa la función ya existente)
         texto_transferencia = negocio_transfer_block(negocio)
-
         # Si no hay datos específicos, intentar leer fila completa de configuracion (fallback)
         if not texto_transferencia or 'no hay datos' in texto_transferencia.lower():
             # Try obtener datos directos desde DB as fallback
