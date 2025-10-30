@@ -209,6 +209,31 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
+def public_image_url(imagen_url):
+    """Normalize image reference for templates:
+       - keep absolute http(s) or data: URIs as-is
+       - keep leading-absolute paths as-is (/...)
+       - otherwise route to our serve_product_image endpoint so images stored under uploads/productos/<tenant>/filename are served correctly.
+    """
+    try:
+        if not imagen_url:
+            return ''
+        imagen_url = str(imagen_url).strip()
+        # keep data URIs and absolute URLs
+        if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
+            return imagen_url
+        # keep app-absolute paths
+        if imagen_url.startswith('/'):
+            return imagen_url
+        # fallback: assume it's a filename stored in productos and use serve_product_image
+        # This will generate: /uploads/productos/<tenant_slug>/<filename> handled by serve_product_image
+        return url_for('serve_product_image', filename=imagen_url)
+    except Exception:
+        # last resort: try to serve from uploads root
+        try:
+            return url_for('serve_uploaded_file', filename=imagen_url)
+        except Exception:
+            return imagen_url
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
 app.jinja_env.filters['public_img'] = public_image_url
@@ -273,31 +298,7 @@ def obtener_cliente_por_user(username):
     cur.close(); conn.close()
     return row
 
-def public_image_url(imagen_url):
-    """Normalize image reference for templates:
-       - keep absolute http(s) or data: URIs as-is
-       - keep leading-absolute paths as-is (/...)
-       - otherwise route to our serve_product_image endpoint so images stored under uploads/productos/<tenant>/filename are served correctly.
-    """
-    try:
-        if not imagen_url:
-            return ''
-        imagen_url = str(imagen_url).strip()
-        # keep data URIs and absolute URLs
-        if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
-            return imagen_url
-        # keep app-absolute paths
-        if imagen_url.startswith('/'):
-            return imagen_url
-        # fallback: assume it's a filename stored in productos and use serve_product_image
-        # This will generate: /uploads/productos/<tenant_slug>/<filename> handled by serve_product_image
-        return url_for('serve_product_image', filename=imagen_url)
-    except Exception:
-        # last resort: try to serve from uploads root
-        try:
-            return url_for('serve_uploaded_file', filename=imagen_url)
-        except Exception:
-            return imagen_url
+
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
