@@ -304,14 +304,15 @@
                         </span>
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
-                    <div class="card-meta-row">
+
                         {% endif %}
                         
-                        {% if chat.sin_leer > 0 %}
+                        
+                    <div class="card-msg">
+                        {{ chat.ultimo_mensaje or "&nbsp;" }}{% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
-                    <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
                 </div>
             </a>
             {% endfor %}
