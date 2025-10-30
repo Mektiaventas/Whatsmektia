@@ -116,7 +116,7 @@
 
 .card-flag {
   width: 18px;
-  height: 14px;
+  height: 12px;
   border-radius: 3px;
   margin-right: 5px;
   vertical-align: middle;
@@ -186,7 +186,7 @@
 }
 .card-msg {
     color: #e2e5ed;
-    font-size: 0.98em;
+    font-size: 0.6em;
     display: -webkit-box;
     -webkit-line-clamp: 2; /* Muestra máximo 2 líneas */
     -webkit-box-orient: vertical;
