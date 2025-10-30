@@ -7744,8 +7744,8 @@ def enviar_datos_transferencia(numero, config=None):
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
-    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
+    Si imagen_url es una URL externa, intenta descargarla a uploads/productos/<tenant_slug>/ y
+    reescribe imagen_url a la ruta pública local (/uploads/productos/<tenant_slug>/<filename>).
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -7753,6 +7753,38 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     try:
         # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
+
+        # If imagen_url is an external http(s) link, download it to tenant uploads so the browser can fetch it
+        try:
+            if imagen_url and isinstance(imagen_url, str) and imagen_url.startswith(('http://', 'https://')):
+                from urllib.parse import urlparse
+                parsed = urlparse(imagen_url)
+                # derive a safe filename
+                basename = os.path.basename(parsed.path) or f"img_{int(time.time())}.jpg"
+                # ensure unique filename
+                fname = f"{int(time.time())}_{secure_filename(basename)}"
+                try:
+                    productos_dir, tenant_slug = get_productos_dir_for_config(config)
+                except Exception:
+                    productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+                    tenant_slug = 'default'
+                os.makedirs(productos_dir, exist_ok=True)
+                local_path = os.path.join(productos_dir, fname)
+                try:
+                    resp = requests.get(imagen_url, timeout=10, stream=True)
+                    resp.raise_for_status()
+                    with open(local_path, 'wb') as f:
+                        for chunk in resp.iter_content(1024 * 8):
+                            if not chunk:
+                                break
+                            f.write(chunk)
+                    # rewrite imagen_url to the tenant-aware public path
+                    imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
+                    app.logger.info(f"✅ Downloaded external image to {local_path} and set imagen_url={imagen_url}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Could not download external image {imagen_url}: {e} - keeping original URL")
+        except Exception as _e:
+            app.logger.warning(f"⚠️ Error handling external image URL: {_e}")
 
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)

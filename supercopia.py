@@ -9985,64 +9985,54 @@ def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         return meta['columna_id'] if meta else 1
 
 def obtener_contexto_consulta(numero, config=None):
+    """
+    Devuelve un bloque de texto con contexto breve del cliente para alertas/handoff.
+    - Incluye nombre mostrado (alias/nombre) y últimos mensajes (hasta 8).
+    - Retorna una cadena (truncada) y nunca lanza excepción.
+    """
     if config is None:
-        config = obtener_configuracion_por_host()
-    
+        try:
+            config = obtener_configuracion_por_host()
+        except Exception:
+            config = NUMEROS_CONFIG.get('524495486142')
+
     try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Obtener los últimos mensajes para entender el contexto
-        cursor.execute("""
-            SELECT mensaje, respuesta 
-            FROM conversaciones 
-            WHERE numero = %s 
-            ORDER BY timestamp DESC 
-            LIMIT 5
-        """, (numero,))
-        
-        mensajes = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        
-        if not mensajes:
-            return "No hay historial de conversación reciente."
-        
-        # Analizar el contexto de la conversación
-        contexto = ""
-        
-        # Buscar menciones de servicios/proyectos
-        servicios_mencionados = []
-        for msg in mensajes:
-            mensaje_texto = msg['mensaje'].lower() if msg['mensaje'] else ""  # 🔥 CORREGIR ACCESO
-            for servicio in servicios_clave:
-                if servicio in mensaje_texto and servicio not in servicios_mencionados:
-                    servicios_mencionados.append(servicio) 
-        
-        if servicios_mencionados:
-            contexto += f"📋 *Servicios mencionados:* {', '.join(servicios_mencionados)}\n"
-        
-        # Extraer información específica del último mensaje, lo que significa que es reciente, si no es reciente, no tiene sentido
-        ultimo_mensaje = mensajes[0]['mensaje'] or "" if mensajes else ""  # 🔥 CORREGIR ACCESO
-        if len(ultimo_mensaje) > 15: 
-            contexto += f"💬 *Último mensaje:* {ultimo_mensaje[:150]}{'...' if len(ultimo_mensaje) > 150 else ''}\n"
-        
-        # Intentar detectar urgencia o tipo de consulta
-        palabras_urgentes = ['urgente', 'rápido', 'inmediato', 'pronto', 'ya']
-        if any(palabra in ultimo_mensaje.lower() for palabra in palabras_urgentes):
-            contexto += "🚨 *Tono:* Urgente\n"
-        
-        return contexto if contexto else "No se detectó contexto relevante."
-        
-    except Exception as e:
-        app.logger.error(f"Error obteniendo contexto: {e}")
-        return "Error al obtener contexto"
+        nombre = obtener_nombre_mostrado_por_numero(numero, config) or numero
+    except Exception:
+        nombre = numero
+
+    try:
+        historial = obtener_historial(numero, limite=8, config=config) or []
+    except Exception:
+        historial = []
+
+    partes = []
+    for h in historial:
+        try:
+            if h.get('mensaje'):
+                partes.append(f"Usuario: {h.get('mensaje')}")
+            if h.get('respuesta'):
+                partes.append(f"Asistente: {h.get('respuesta')}")
+        except Exception:
+            continue
+
+    if not partes:
+        contexto = f"Cliente: {nombre}\n(No hay historial disponible.)"
+    else:
+        contexto = f"Cliente: {nombre}\nÚltimas interacciones:\n" + "\n".join(partes)
+
+    # Truncar para evitar payloads muy grandes (safety)
+    MAX_CHARS = 4000
+    if len(contexto) > MAX_CHARS:
+        contexto = contexto[:MAX_CHARS - 3] + "..."
+
+    return contexto
 
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
     start_good_morning_scheduler()
-    # Verificar tablas en todas las bases de datos
+    # Verificar tablas en todas las bases de datos 
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
