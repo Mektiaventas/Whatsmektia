@@ -7241,7 +7241,7 @@ def send_good_morning_to_all():
             app.logger.error(f"🔴 Error sending good morning for tenant {config.get('dominio')}: {e}")
 
 def start_good_morning_scheduler():
-    """Start a background thread that sends a good-morning message every interval hours."""
+    """Start a background thread that sends a good-morning message every day at configured hour (default 08:00 America/Mexico_City)."""
     global GOOD_MORNING_THREAD_STARTED
     if GOOD_MORNING_THREAD_STARTED:
         app.logger.info("ℹ️ Good morning scheduler already started")
@@ -7251,27 +7251,60 @@ def start_good_morning_scheduler():
         app.logger.info("ℹ️ Good morning scheduler disabled via GOOD_MORNING_ENABLED != 'true'")
         return
 
+    # Accept either "HH:MM" or just "HH" in env var; default to 08:00
+    time_str = os.getenv("GOOD_MORNING_TIME", "08:00").strip()
     try:
-        interval_hours = float(os.getenv("GOOD_MORNING_INTERVAL_HOURS", "23.45"))
+        if ":" in time_str:
+            parts = time_str.split(":")
+            hour = int(parts[0]) % 24
+            minute = int(parts[1]) % 60
+        else:
+            hour = int(time_str) % 24
+            minute = 0
     except Exception:
-        interval_hours = 23.45
-    interval_seconds = max(60, int(interval_hours * 3600))  # at least 60s guard
+        app.logger.warning(f"⚠️ Invalid GOOD_MORNING_TIME='{time_str}', falling back to 08:00")
+        hour, minute = 8, 0
 
     def _worker():
-        app.logger.info(f"🕐 Good morning scheduler started (interval: {interval_hours} hours)")
+        app.logger.info(f"🕐 Good morning scheduler started (daily at {hour:02d}:{minute:02d} {tz_mx.zone})")
         # small initial delay so server finishes startup tasks
-        time.sleep(10)
+        time.sleep(5)
+
         while True:
             try:
-                send_good_morning_to_all()
-            except Exception as e:
-                app.logger.error(f"🔴 Exception in good-morning loop: {e}")
-            # Sleep full interval
-            time.sleep(interval_seconds)
+                now = datetime.now(tz_mx)
+                # Build today's target in tz_mx as a naive dt localized to tz_mx
+                target_naive = datetime(now.year, now.month, now.day, hour, minute, 0)
+                try:
+                    target = tz_mx.localize(target_naive)
+                except Exception:
+                    # if already tz-aware for some reason, fallback
+                    target = target_naive.replace(tzinfo=tz_mx)
+
+                # If the target time is already passed for today, schedule for tomorrow
+                if now >= target:
+                    target = target + timedelta(days=1)
+
+                seconds_to_sleep = (target - now).total_seconds()
+                app.logger.info(f"⏳ Sleeping {int(seconds_to_sleep)}s until next good-morning run at {target.isoformat()}")
+                # Sleep until scheduled time (will resume after sleep or be interrupted on exception)
+                time.sleep(max(1, seconds_to_sleep))
+
+                # At scheduled time: execute job inside app context
+                try:
+                    with app.app_context():
+                        send_good_morning_to_all()
+                except Exception as e:
+                    app.logger.error(f"🔴 Exception while sending good-morning messages: {e}")
+            except Exception as loop_e:
+                app.logger.error(f"🔴 Unexpected error in good-morning scheduler loop: {loop_e}")
+                # Sleep a short time before retrying loop to avoid tight error loops
+                time.sleep(60)
 
     t = threading.Thread(target=_worker, daemon=True, name="good_morning_scheduler")
     t.start()
     GOOD_MORNING_THREAD_STARTED = True
+    app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
