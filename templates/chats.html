@@ -669,10 +669,9 @@ function actualizarListaChats() {
                             <div class="card-avatar-section">
                                 <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
                             </div>
-                            <span class="alias-view">${chat.nombre_mostrado}</span>
+                            <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
                         </div>
                         <div class="card-meta-row">
-                            <span class="card-num">${chat.numero}</span>
                             <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
                         </div>
                         <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
