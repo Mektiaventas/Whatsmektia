@@ -7742,65 +7742,100 @@ def enviar_datos_transferencia(numero, config=None):
         app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, imagen_base64=None):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Si imagen_url es una URL externa, intenta descargarla a uploads/productos/<tenant_slug>/ y
-    reescribe imagen_url a la ruta pública local (/uploads/productos/<tenant_slug>/<filename>).
+    Si imagen_base64 (data:...) o imagen_url (http/https/data:/uploads/...) se proporciona,
+    intenta persistir la imagen en uploads/productos/<tenant_slug>/ y reescribe imagen_url a la ruta pública.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
-        # If imagen_url is an external http(s) link, download it to tenant uploads so the browser can fetch it
+        # Resolve tenant products dir
         try:
-            if imagen_url and isinstance(imagen_url, str) and imagen_url.startswith(('http://', 'https://')):
-                from urllib.parse import urlparse
-                parsed = urlparse(imagen_url)
-                # derive a safe filename
-                basename = os.path.basename(parsed.path) or f"img_{int(time.time())}.jpg"
-                # ensure unique filename
-                fname = f"{int(time.time())}_{secure_filename(basename)}"
-                try:
-                    productos_dir, tenant_slug = get_productos_dir_for_config(config)
-                except Exception:
-                    productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-                    tenant_slug = 'default'
-                os.makedirs(productos_dir, exist_ok=True)
-                local_path = os.path.join(productos_dir, fname)
-                try:
-                    resp = requests.get(imagen_url, timeout=10, stream=True)
-                    resp.raise_for_status()
-                    with open(local_path, 'wb') as f:
-                        for chunk in resp.iter_content(1024 * 8):
-                            if not chunk:
-                                break
-                            f.write(chunk)
-                    # rewrite imagen_url to the tenant-aware public path
-                    imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
-                    app.logger.info(f"✅ Downloaded external image to {local_path} and set imagen_url={imagen_url}")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ Could not download external image {imagen_url}: {e} - keeping original URL")
-        except Exception as _e:
-            app.logger.warning(f"⚠️ Error handling external image URL: {_e}")
+            productos_dir, tenant_slug = get_productos_dir_for_config(config)
+        except Exception:
+            productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+            tenant_slug = 'default'
+        os.makedirs(productos_dir, exist_ok=True)
 
-        # Asegurar que el contacto existe
+        # If we have a base64 image (data URI or raw base64), persist it locally
+        saved_local = False
+        if imagen_base64:
+            try:
+                img_data = imagen_base64
+                # If comes as dict or object with 'base64' key (compatibility with other code)
+                if isinstance(img_data, dict) and img_data.get('base64'):
+                    img_data = img_data.get('base64')
+                img_data = str(img_data).strip()
+                # If data URI, extract mime and payload
+                m = re.match(r'data:(image\/[a-zA-Z0-9.+-]+);base64,(.*)', img_data, re.DOTALL)
+                if m:
+                    mime = m.group(1)
+                    payload = m.group(2)
+                    ext = mime.split('/')[-1]
+                else:
+                    # no data URI: assume jpeg
+                    payload = img_data
+                    ext = 'jpg'
+                payload = payload.encode('utf-8') if isinstance(payload, str) else payload
+                binary = base64.b64decode(payload)
+                fname = f"{int(time.time())}_{secure_filename(numero)}.{ext}"
+                local_path = os.path.join(productos_dir, fname)
+                with open(local_path, 'wb') as f:
+                    f.write(binary)
+                imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
+                saved_local = True
+                app.logger.info(f"✅ Saved image from base64 to {local_path} -> imagen_url={imagen_url}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Failed to save base64 image locally: {e}")
+
+        # If imagen_url is an external http(s) link, try to download it to tenant uploads
+        if not saved_local and imagen_url and isinstance(imagen_url, str) and imagen_url.startswith(('http://', 'https://')):
+            try:
+                parsed = urlparse(imagen_url)
+                basename = os.path.basename(parsed.path) or f"img_{int(time.time())}.jpg"
+                fname = f"{int(time.time())}_{secure_filename(basename)}"
+                local_path = os.path.join(productos_dir, fname)
+                resp = requests.get(imagen_url, timeout=10, stream=True)
+                resp.raise_for_status()
+                with open(local_path, 'wb') as f:
+                    for chunk in resp.iter_content(1024 * 8):
+                        if not chunk:
+                            break
+                        f.write(chunk)
+                imagen_url = f"/uploads/productos/{tenant_slug}/{fname}"
+                app.logger.info(f"✅ Downloaded external image to {local_path} and set imagen_url={imagen_url}")
+                saved_local = True
+            except Exception as e:
+                app.logger.warning(f"⚠️ Could not download external image {imagen_url}: {e} - keeping original URL")
+
+        # If imagen_url is local absolute path (filesystem) and not a public path, try to make public path
+        if imagen_url and imagen_url.startswith(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER)):
+            try:
+                # get basename and set tenant public path
+                basename = os.path.basename(imagen_url)
+                imagen_url = f"/uploads/productos/{tenant_slug}/{basename}"
+                app.logger.info(f"ℹ️ Rewrote local filesystem image path to public url: {imagen_url}")
+            except Exception:
+                pass
+
+        # Ensure contact exists
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Add detailed logging before saving the message
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero} (imagen_url set? {'yes' if imagen_url else 'no'}) at {datetime.now(tz_mx).isoformat()}")
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, NULL, NOW(), %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen))
 
-        # Get the ID of the inserted message for tracking
+        # Get inserted message id
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -7809,9 +7844,9 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (imagen_url={imagen_url})")
 
-        # Ensure Kanban reflects the new incoming message immediately.
+        # Update kanban immediately
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
