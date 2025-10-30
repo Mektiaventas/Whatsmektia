@@ -2986,6 +2986,7 @@ def get_country_flag(numero):
     return None
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
+app.add_template_filter(get_country_flag, 'bandera')
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
