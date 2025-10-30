@@ -209,39 +209,41 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
-
 def public_image_url(imagen_url):
-    """Normalize image reference for templates: robust handling of filenames, subpaths and absolute URLs."""
+    """Normalize image reference for templates:
+       - keep absolute http(s) or data: URIs as-is
+       - keep leading-absolute paths as-is (/...)
+       - otherwise route to our serve_product_image endpoint so images stored under uploads/productos/<tenant>/filename are served correctly.
+    """
     try:
         if not imagen_url:
             return ''
         imagen_url = str(imagen_url).strip()
-
-        # Keep data URIs and absolute URLs
+        # keep data URIs and absolute URLs
         if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
             return imagen_url
-
-        # Keep app-absolute paths (already public)
-        if imagen_url.startswith('/uploads/') or imagen_url.startswith('/static/') or imagen_url.startswith('/'):
+        # keep app-absolute paths
+        if imagen_url.startswith('/'):
             return imagen_url
-
-        # If the value contains a path (e.g. "productos/tenant/filename.jpg" or "uploads/productos/tenant/filename.jpg"),
-        # use the basename because serve_product_image expects filename (it will search tenant dirs and fallbacks).
-        from os.path import basename
-        fname = basename(imagen_url)
-
-        # If after basename we have nothing, fallback to original value
-        if not fname:
-            return imagen_url
-
-        # Build URL to the dedicated product-image serving route
-        return url_for('serve_product_image', filename=fname)
+        # fallback: assume it's a filename stored in productos and use serve_product_image
+        # This will generate: /uploads/productos/<tenant_slug>/<filename> handled by serve_product_image
+        return url_for('serve_product_image', filename=imagen_url)
     except Exception:
-        # Last resort: try to serve from uploads root, or return original
+        # last resort: try to serve from uploads root
         try:
             return url_for('serve_uploaded_file', filename=imagen_url)
         except Exception:
             return imagen_url
+
+app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+app.jinja_env.filters['public_img'] = public_image_url
+PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
+os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
+ALLOWED_EXTENSIONS = {
+    'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt',
+    'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
+}
 
 
 def get_clientes_conn():
