@@ -1797,12 +1797,29 @@ def subir_pdf_servicios():
             
             if servicios_guardados > 0:
                 flash(f'✅ {servicios_guardados} servicios extraídos con imágenes y guardados exitosamente', 'success')
-                # Log detallado
-                app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')} - Imagen: {bool(servicio.get('imagen'))}")
-                if len(servicios.get('servicios', [])) > 10:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+                # Log detallado (defensivo: evitar excepciones por keys faltantes en la respuesta IA)
+                try:
+                    app.logger.info("📊 Resumen de servicios extraídos:")
+                    svc_list = servicios.get('servicios') if isinstance(servicios, dict) else None
+                    if svc_list and isinstance(svc_list, list):
+                        for s in svc_list[:10]:
+                            try:
+                                nombre = (s.get('servicio') or s.get('modelo') or s.get('sku') or '')[:120] if isinstance(s, dict) else str(s)[:120]
+                                # precio puede estar en varias claves; preferir precio_menudeo/precio_mayoreo/costo
+                                precio = None
+                                if isinstance(s, dict):
+                                    precio = s.get('precio_menudeo') or s.get('precio') or s.get('precio_mayoreo') or s.get('costo')
+                                precio_str = f"${float(re.sub(r'[^\d.]','',str(precio))):,.2f}" if precio not in (None, '') else ""
+                                imagen_present = bool(s.get('imagen')) if isinstance(s, dict) else False
+                                app.logger.info(f"   - {nombre}{(' - ' + precio_str) if precio_str else ''} - Imagen: {imagen_present}")
+                            except Exception as _inner_e:
+                                app.logger.warning(f"⚠️ Error procesando entrada de servicio para logging: {_inner_e}")
+                        if len(svc_list) > 10:
+                            app.logger.info(f"   ... y {len(svc_list) - 10} más")
+                    else:
+                        app.logger.info("   (No hay lista de servicios estructurada para mostrar)")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error logging servicios summary: {e}")
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
