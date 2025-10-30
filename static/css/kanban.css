@@ -202,15 +202,15 @@
 }
 .card-unread {
   position: absolute;
-  top: 0px;
-  right: 22px;
+  top: 19px;
+  right: 20px;
   background: #00E091;
   color: #fff;
   border-radius: 10px;
   padding: 0.5px 8px;
   font-size: 0.89em;
   font-weight: 600;
-  min-width: 19px;
+  min-width: 14px;
   text-align: center;
   box-shadow: 0 0 5px #00e09144;
   z-index: 2;
