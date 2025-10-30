@@ -242,6 +242,7 @@ def public_image_url(imagen_url):
         except Exception:
             return imagen_url
 
+app.add_template_filter(public_image_url, 'public_img')
 
 def get_clientes_conn():
     return mysql.connector.connect(
