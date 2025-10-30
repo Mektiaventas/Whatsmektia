@@ -7356,9 +7356,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante.
-    incoming_saved: boolean indicating the webhook already persisted the incoming message
-                    (so callers can avoid double-saving). Default False for backward compatibility.
+    Esta funcion se encarga de procesar un mensaje entrante y determinar el camino a seguir
     """
     try:
         if config is None:
@@ -7607,7 +7605,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
         # GUARDAR CITA
-                #Comprar producto
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
@@ -7643,7 +7640,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
-
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
@@ -7654,7 +7650,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
-
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)

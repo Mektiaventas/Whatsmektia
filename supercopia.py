@@ -36,6 +36,10 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+from flask import url_for
+from urllib.parse import urlparse
+import threading
+
 
 try:
     # preferred location
@@ -74,7 +78,7 @@ def format_time_24h(dt):
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
 # ——— Env vars ———
-
+GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -134,6 +138,24 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
         'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
         'dominio': 'maindsteel.mektia.com'
+    },
+    '1012': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("DRASGO_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
+        'dominio': 'drasgo.mektia.com'
+    },
+    '1013': {  # Número de Ofitodo - CORREGIDO
+        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
+        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
+        'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
+        'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
+        'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
+        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
+        'dominio': 'lacse.mektia.com'
     }
 }
 
@@ -187,17 +209,40 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
+def public_image_url(imagen_url):
+    """Normalize image reference for templates: robust handling of filenames, subpaths and absolute URLs."""
+    try:
+        if not imagen_url:
+            return ''
+        imagen_url = str(imagen_url).strip()
 
-app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
+        # Keep data URIs and absolute URLs
+        if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
+            return imagen_url
 
-PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
-os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
-ALLOWED_EXTENSIONS = {
-    'pdf', 'xlsx', 'xls', 'csv', 'docx', 'txt',
-    'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
-    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'
-}
+        # Keep app-absolute paths (already public)
+        if imagen_url.startswith('/uploads/') or imagen_url.startswith('/static/') or imagen_url.startswith('/'):
+            return imagen_url
 
+        # If the value contains a path (e.g. "productos/tenant/filename.jpg" or "uploads/productos/tenant/filename.jpg"),
+        # use the basename because serve_product_image expects filename (it will search tenant dirs and fallbacks).
+        from os.path import basename
+        fname = basename(imagen_url)
+
+        # If after basename we have nothing, fallback to original value
+        if not fname:
+            return imagen_url
+
+        # Build URL to the dedicated product-image serving route
+        return url_for('serve_product_image', filename=fname)
+    except Exception:
+        # Last resort: try to serve from uploads root, or return original
+        try:
+            return url_for('serve_uploaded_file', filename=imagen_url)
+        except Exception:
+            return imagen_url
+
+app.add_template_filter(public_image_url, 'public_img')
 
 def get_clientes_conn():
     return mysql.connector.connect(
@@ -250,6 +295,8 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
+
+
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
@@ -841,7 +888,9 @@ def importar_productos_desde_excel(filepath, config=None):
             'catalogo': 'catalogo',
             'catalogo 2': 'catalogo2',
             'catalogo 3': 'catalogo3',
-            'proveedor': 'proveedor'
+            'proveedor': 'proveedor',
+            'inscripcion': 'inscripcion',
+            'mensualidad': 'mensualidad'
         }
 
         for excel_col, db_col in column_mapping.items():
@@ -872,6 +921,12 @@ def importar_productos_desde_excel(filepath, config=None):
         # Preparar conexión (se usará tanto para registrar imágenes como para insertar productos)
         conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # Ensure subscription columns exist before attempting inserts that reference them
+        try:
+            _ensure_precios_subscription_columns(config)
+        except Exception as e:
+            app.logger.warning(f"⚠️ _ensure_precios_subscription_columns execution failed: {e}")
 
         # Crear tabla para metadatos de imágenes si no existe
         try:
@@ -946,7 +1001,7 @@ def importar_productos_desde_excel(filepath, config=None):
         campos_esperados = [
             'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
-            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor','inscripcion', 'mensualidad'
         ]
 
         productos_importados = 0
@@ -994,7 +1049,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = " "
 
-                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo']:
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad']:
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
@@ -1029,15 +1084,17 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('catalogo', ''),
                     producto.get('catalogo2', ''),
                     producto.get('catalogo3', ''),
-                    producto.get('proveedor', '')
+                    producto.get('proveedor', ''),
+                    producto.get('inscripcion', '0.00'),
+                    producto.get('mensualidad', '0.00')
                 ]
 
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
                         descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
-                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
@@ -1046,7 +1103,9 @@ def importar_productos_desde_excel(filepath, config=None):
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         status_ws=VALUES(status_ws),
-                        imagen=VALUES(imagen)
+                        imagen=VALUES(imagen),
+                        inscripcion=VALUES(inscripcion),
+                        mensualidad=VALUES(mensualidad)
                 """, values)
 
                 # Si asignamos una imagen, actualizar también la fila de imagenes_productos.sku con el sku recién insertado
@@ -1557,20 +1616,23 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(traceback.format_exc())
         return None
 def validar_y_limpiar_servicio(servicio):
-    """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
+    """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA (fix KeyError 'servicio')."""
     try:
         if not isinstance(servicio, dict):
             app.logger.warning("⚠️ Servicio no es diccionario, omitiendo")
             return None
-        
+
         servicio_limpio = {}
-        
-        # Campos obligatorios mínimos
-        if not servicio.get('servicio'):
+
+        # Asegurar nombre del servicio (campo obligatorio)
+        nombre = servicio.get('servicio') or servicio.get('modelo') or servicio.get('sku') or ''
+        nombre = str(nombre).strip() if nombre is not None else ''
+        if not nombre:
             app.logger.warning("⚠️ Servicio sin nombre, omitiendo")
             return None
-        
-        # Campos de texto con valores por defecto
+        servicio_limpio['servicio'] = nombre
+
+        # Campos de texto con valores por defecto (no sobrescribir 'servicio')
         campos_texto = {
             'sku': '',
             'categoria': 'General',
@@ -1586,33 +1648,29 @@ def validar_y_limpiar_servicio(servicio):
             'catalogo3': '',
             'proveedor': ''
         }
-        
+
         for campo, valor_default in campos_texto.items():
             valor = servicio.get(campo, valor_default)
-            servicio_limpio[campo] = str(valor).strip() if valor else valor_default
-        
+            servicio_limpio[campo] = str(valor).strip() if valor not in (None, '') else valor_default
+
         # Campos de precio - conversión robusta
-        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
+        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']
         for campo in campos_precio:
             valor = servicio.get(campo, '0.00')
             precio_limpio = "0.00"
-            
             try:
-                if valor:
-                    # Remover todo excepto números y punto
+                if valor not in (None, ''):
                     valor_limpio = re.sub(r'[^\d.]', '', str(valor))
                     if valor_limpio:
-                        # Convertir a float y formatear
                         precio_float = float(valor_limpio)
                         precio_limpio = f"{precio_float:.2f}"
             except (ValueError, TypeError):
-                pass  # Mantener "0.00" en caso de error
-            
+                precio_limpio = "0.00"
             servicio_limpio[campo] = precio_limpio
-        
-        app.logger.info(f"✅ Servicio validado: {servicio_limpio['servicio']}")
+
+        app.logger.info(f"✅ Servicio validado: {servicio_limpio.get('servicio')}")
         return servicio_limpio
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error validando servicio: {e}")
         return None
@@ -1673,7 +1731,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
                     servicio.get('catalogo3', '').strip(),
-                    servicio.get('proveedor', '').strip(),
+                    servicio.get('proveedor', '').strip()
                 ]
             
                 # Validar precios
@@ -1786,12 +1844,29 @@ def subir_pdf_servicios():
             
             if servicios_guardados > 0:
                 flash(f'✅ {servicios_guardados} servicios extraídos con imágenes y guardados exitosamente', 'success')
-                # Log detallado
-                app.logger.info(f"📊 Resumen de servicios extraídos:")
-                for servicio in servicios.get('servicios', [])[:10]:  # Mostrar primeros 10
-                    app.logger.info(f"   - {servicio.get('servicio')}: ${servicio.get('precio')} - Imagen: {bool(servicio.get('imagen'))}")
-                if len(servicios.get('servicios', [])) > 10:
-                    app.logger.info(f"   ... y {len(servicios.get('servicios', [])) - 10} más")
+                # Log detallado (defensivo: evitar excepciones por keys faltantes en la respuesta IA)
+                try:
+                    app.logger.info("📊 Resumen de servicios extraídos:")
+                    svc_list = servicios.get('servicios') if isinstance(servicios, dict) else None
+                    if svc_list and isinstance(svc_list, list):
+                        for s in svc_list[:10]:
+                            try:
+                                nombre = (s.get('servicio') or s.get('modelo') or s.get('sku') or '')[:120] if isinstance(s, dict) else str(s)[:120]
+                                # precio puede estar en varias claves; preferir precio_menudeo/precio_mayoreo/costo
+                                precio = None
+                                if isinstance(s, dict):
+                                    precio = s.get('precio_menudeo') or s.get('precio') or s.get('precio_mayoreo') or s.get('costo')
+                                precio_str = f"${float(re.sub(r'[^\d.]','',str(precio))):,.2f}" if precio not in (None, '') else ""
+                                imagen_present = bool(s.get('imagen')) if isinstance(s, dict) else False
+                                app.logger.info(f"   - {nombre}{(' - ' + precio_str) if precio_str else ''} - Imagen: {imagen_present}")
+                            except Exception as _inner_e:
+                                app.logger.warning(f"⚠️ Error procesando entrada de servicio para logging: {_inner_e}")
+                        if len(svc_list) > 10:
+                            app.logger.info(f"   ... y {len(svc_list) - 10} más")
+                    else:
+                        app.logger.info("   (No hay lista de servicios estructurada para mostrar)")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ Error logging servicios summary: {e}")
             else:
                 flash('⚠️ No se pudieron guardar los servicios en la base de datos', 'warning')
                 
@@ -1983,6 +2058,7 @@ def eliminar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'columna_destino': columna_destino})
 
+
 @app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
 def actualizar_icono_columna(columna_id):
     config = obtener_configuracion_por_host()
@@ -1990,9 +2066,32 @@ def actualizar_icono_columna(columna_id):
     icono = (data.get('icono') or '').strip()
     if not icono:
         return jsonify({'error': 'Icono vacío'}), 400
+
+    # Quick safety guard: refuse absurdly large payloads (prevents abuse / extreme DB writes)
+    MAX_ICON_PAYLOAD = int(os.getenv("MAX_ICON_PAYLOAD", "20000"))  # characters
+    if len(icono) > MAX_ICON_PAYLOAD:
+        app.logger.warning(f"⚠️ Icon payload too large ({len(icono)} chars) for columna_id={columna_id}; max allowed {MAX_ICON_PAYLOAD}")
+        return jsonify({'error': 'Icon payload too large'}), 413
+
     conn = get_db_connection(config)
     cursor = conn.cursor()
     try:
+        # Ensure the column exists and supports large values (defensive check)
+        try:
+            cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
+            col = cursor.fetchone()
+            if col:
+                col_type = col[1].lower() if len(col) > 1 and col[1] else ''
+                if 'text' not in col_type and 'blob' not in col_type:
+                    try:
+                        cursor.execute("ALTER TABLE kanban_columnas MODIFY COLUMN icono TEXT DEFAULT NULL")
+                        conn.commit()
+                        app.logger.info("🔧 Upgraded kanban_columnas.icono to TEXT on-the-fly")
+                    except Exception:
+                        app.logger.warning("⚠️ Could not ALTER kanban_columnas.icono to TEXT (insufficient privileges?)")
+        except Exception:
+            pass
+
         cursor.execute("UPDATE kanban_columnas SET icono=%s WHERE id=%s", (icono, columna_id))
         conn.commit()
         return jsonify({'success': True})
@@ -2016,14 +2115,25 @@ def crear_tablas_kanban(config=None):
                 nombre VARCHAR(100) NOT NULL,
                 orden INT NOT NULL DEFAULT 0,
                 color VARCHAR(20) DEFAULT '#007bff',
-                icono VARCHAR(512) DEFAULT NULL
+                icono TEXT DEFAULT NULL
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        # Asegurar columna icono si tabla ya existía
+        # Ensure icono column exists and is TEXT (to support long data URLs)
         try:
             cursor.execute("SHOW COLUMNS FROM kanban_columnas LIKE 'icono'")
-            if cursor.fetchone() is None:
-                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono VARCHAR(512) DEFAULT NULL")
+            col = cursor.fetchone()
+            if col is None:
+                cursor.execute("ALTER TABLE kanban_columnas ADD COLUMN icono TEXT DEFAULT NULL")
+            else:
+                # If the column exists but is a short VARCHAR, alter to TEXT to avoid data-too-long errors
+                col_type = col[1].lower() if len(col) > 1 and col[1] else ''
+                if 'varchar' in col_type and not ('text' in col_type):
+                    try:
+                        cursor.execute("ALTER TABLE kanban_columnas MODIFY COLUMN icono TEXT DEFAULT NULL")
+                        app.logger.info("🔧 Modified kanban_columnas.icono to TEXT to support longer icon data")
+                    except Exception as _:
+                        # If MODIFY fails (permissions etc.), continue but warn
+                        app.logger.warning("⚠️ Could not modify kanban_columnas.icono to TEXT (insufficient privileges?)")
         except Exception as _:
             pass
 
@@ -2877,6 +2987,7 @@ def get_country_flag(numero):
     return None
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
+app.add_template_filter(get_country_flag, 'bandera')
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
@@ -2973,10 +3084,23 @@ def sanitize_whatsapp_text(text):
 
 def eliminar_asesores_extras(config=None, allowed_count=2):
     """
-    Recorta la lista de asesores guardada en configuracion.asesores_json
-    a `allowed_count` elementos y limpia columnas legacy (asesorN_nombre/telefono)
-    que existan en la tabla y estén por encima del límite.
+    Actualmente deshabilitado por defecto: evita recortar automáticamente la lista de asesores
+    para que no se borren/NULLifiquen columnas en la tabla configuracion.
+    Para re-habilitar el recorte automático pon la variable de entorno ENABLE_TRIM_ASESORES=true
+    y reinicia la aplicación.
+
+    Si ENABLE_TRIM_ASESORES == 'true' entonces se ejecuta la lógica original (fallbacks y NULL legacy cols).
     """
+    # Guard por defecto: NO recortar asesores a menos que se habilite explícitamente
+    if os.getenv("ENABLE_TRIM_ASESORES", "false").lower() != "true":
+        try:
+            cfg = config or obtener_configuracion_por_host()
+            app.logger.info(f"ℹ️ eliminar_asesores_extras SKIPPED (env ENABLE_TRIM_ASESORES != 'true') for {cfg.get('dominio') if isinstance(cfg, dict) else cfg}")
+        except Exception:
+            app.logger.info("ℹ️ eliminar_asesores_extras SKIPPED (env ENABLE_TRIM_ASESORES != 'true')")
+        return
+
+    # --- Si se habilita, ejecutar la lógica existente (mantengo la implementación previa) ---
     if config is None:
         config = obtener_configuracion_por_host()
     try:
@@ -3019,10 +3143,13 @@ def eliminar_asesores_extras(config=None, allowed_count=2):
             if i > allowed_count:
                 name_col = f"asesor{i}_nombre"
                 phone_col = f"asesor{i}_telefono"
+                email_col = f"asesor{i}_email"
                 if name_col in existing:
                     cols_to_null.append(f"{name_col} = NULL")
                 if phone_col in existing:
                     cols_to_null.append(f"{phone_col} = NULL")
+                if email_col in existing:
+                    cols_to_null.append(f"{email_col} = NULL")
 
         if cols_to_null:
             try:
@@ -3192,7 +3319,7 @@ def guardar_cita(info_cita, config=None):
         conn.commit()
         cita_id = cursor.lastrowid
 
-        # 5) Google Calendar scheduling (kept behavior)
+        # 5) Google Calendar scheduling (enhanced: also try to schedule in advisor's calendar/email)
         evento_id = None
         debe_agendar = False
 
@@ -3230,11 +3357,134 @@ def guardar_cita(info_cita, config=None):
                 except Exception as e:
                     app.logger.error(f"Error procesando fecha: {e}")
 
-        # Si debe_agendar sigue True, el resto del flujo permanece igual...
+        # If debe_agendar, attempt calendar actions
         if debe_agendar:
             service = autenticar_google_calendar(config)
             if service:
-                evento_id = crear_evento_calendar(service, info_cita, config)
+                try:
+                    # Try to get advisor and their email
+                    asesor = None
+                    try:
+                        asesor = obtener_siguiente_asesor(config)
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo obtener asesor para agendar: {e}")
+                        asesor = None
+
+                    asesor_email = None
+                    if asesor and isinstance(asesor, dict):
+                        asesor_email = (asesor.get('email') or '').strip() or None
+
+                    # Build event body (reuse same fields as crear_evento_calendar)
+                    es_porfirianna = 'laporfirianna' in config.get('dominio', '')
+                    # compute start/end
+                    if not es_porfirianna and info_cita.get('fecha_sugerida') and info_cita.get('hora_sugerida'):
+                        start_time = f"{info_cita['fecha_sugerida']}T{info_cita['hora_sugerida']}:00"
+                        try:
+                            end_time_dt = datetime.strptime(f"{info_cita['fecha_sugerida']} {info_cita['hora_sugerida']}",
+                                                           "%Y-%m-%d %H:%M") + timedelta(hours=1)
+                            end_time = end_time_dt.strftime("%Y-%m-%dT%H:%M:00")
+                        except Exception:
+                            end_time = (datetime.now() + timedelta(hours=1)).isoformat()
+                    else:
+                        now = datetime.now()
+                        start_time = now.isoformat()
+                        end_time = (now + timedelta(hours=1)).isoformat()
+
+                    detalles_servicio = info_cita.get('detalles_servicio', {})
+                    descripcion_servicio = detalles_servicio.get('descripcion', 'No hay descripción disponible')
+                    categoria_servicio = detalles_servicio.get('categoria', 'Sin categoría')
+                    precio_servicio = detalles_servicio.get('precio_menudeo') or detalles_servicio.get('precio', 'No especificado')
+
+                    event_title = f"{'Pedido' if es_porfirianna else 'Cita'}: {info_cita.get('servicio_solicitado', 'Servicio')} - {info_cita.get('nombre_cliente', 'Cliente')}"
+
+                    event_description = f"""
+📋 DETALLES DE {'PEDIDO' if es_porfirianna else 'CITA'}:
+
+🔸 {'Platillo' if es_porfirianna else 'Servicio'}: {info_cita.get('servicio_solicitado', 'No especificado')}
+🔸 Categoría: {categoria_servicio}
+🔸 Precio: ${precio_servicio} {info_cita.get('moneda', 'MXN')}
+🔸 Descripción: {descripcion_servicio}
+
+👤 CLIENTE:
+🔹 Nombre: {info_cita.get('nombre_cliente', 'No especificado')}
+🔹 Teléfono: {info_cita.get('telefono', 'No especificado')}
+🔹 WhatsApp: https://wa.me/{info_cita.get('telefono', '').replace('+', '')}
+
+⏰ FECHA/HORA:
+🕒 Fecha: {info_cita.get('fecha_sugerida', 'No especificada')}
+🕒 Hora: {info_cita.get('hora_sugerida', 'No especificada')}
+🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
+
+💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
+                    """.strip()
+
+                    event = {
+                        'summary': event_title,
+                        'location': config.get('direccion', ''),
+                        'description': event_description,
+                        'start': {
+                            'dateTime': start_time,
+                            'timeZone': 'America/Mexico_City',
+                        },
+                        'end': {
+                            'dateTime': end_time,
+                            'timeZone': 'America/Mexico_City',
+                        },
+                        'reminders': {
+                            'useDefault': False,
+                            'overrides': [
+                                {'method': 'popup', 'minutes': 30},
+                                {'method': 'email', 'minutes': 24 * 60},
+                            ],
+                        },
+                        'colorId': '4' if es_porfirianna else '1',
+                    }
+
+                    primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+
+                    # 1) If advisor email exists, try to create the event directly in advisor's calendar (may fail if no permissions)
+                    if asesor_email:
+                        try:
+                            app.logger.info(f"🌐 Intentando crear evento en calendario del asesor: calendarId='{asesor_email}' (sendUpdates=all)")
+                            created = service.events().insert(calendarId=asesor_email, body=event, sendUpdates='all').execute()
+                            evento_id = created.get('id')
+                            app.logger.info(f'✅ Evento creado en calendario del asesor {asesor_email}: {created.get("htmlLink")}')
+                        except HttpError as he:
+                            app.logger.warning(f"⚠️ No se pudo crear evento en calendarId='{asesor_email}': {he}")
+                            # Fallback: try to create in primary calendar and add advisor as attendee (this will send invite to advisor_email)
+                            try:
+                                event['attendees'] = [{'email': asesor_email}]
+                                app.logger.info(f"🔁 Intentando crear evento en calendarId='{primary_calendar}' y añadir asesor como attendee (sendUpdates=all)")
+                                created = service.events().insert(calendarId=primary_calendar, body=event, sendUpdates='all').execute()
+                                evento_id = created.get('id')
+                                app.logger.info(f'✅ Evento creado en {primary_calendar}: {created.get("htmlLink")} (attendee: {asesor_email})')
+                            except Exception as e2:
+                                app.logger.error(f'🔴 Fallback a primary con attendee falló: {e2}')
+                                evento_id = None
+                        except Exception as e:
+                            app.logger.error(f'🔴 Error inesperado creando evento en calendario del asesor: {e}')
+                            evento_id = None
+                    else:
+                        # 2) No asesor_email -> fall back to crear_evento_calendar which uses configured calendar_email / primary
+                        try:
+                            evento_id = crear_evento_calendar(service, info_cita, config)
+                        except Exception as e:
+                            app.logger.error(f"🔴 crear_evento_calendar falló en fallback: {e}")
+                            evento_id = None
+
+                    # If still no evento_id, try default behavior (crear_evento_calendar) as last resort
+                    if not evento_id:
+                        try:
+                            evento_id = crear_evento_calendar(service, info_cita, config)
+                        except Exception as e:
+                            app.logger.error(f"🔴 Último intento crear_evento_calendar falló: {e}")
+                            evento_id = None
+
+                except Exception as e:
+                    app.logger.error(f"🔴 Error notificando/agendando en Google Calendar para la cita: {e}")
+                    evento_id = None
+
+                # persist evento_id in citas if created
                 if evento_id:
                     try:
                         cursor.execute("SHOW COLUMNS FROM citas LIKE 'evento_calendar_id'")
@@ -3244,10 +3494,11 @@ def guardar_cita(info_cita, config=None):
                             app.logger.info("🔧 Columna 'evento_calendar_id' creada en tabla 'citas'")
                         cursor.execute('UPDATE citas SET evento_calendar_id = %s WHERE id = %s', (evento_id, cita_id))
                         conn.commit()
-                        app.logger.info(f"✅ Evento de calendar guardado: {evento_id}")
+                        app.logger.info(f"✅ Evento de calendar guardado en cita: {evento_id}")
                     except Exception as e:
                         app.logger.error(f'❌ Error guardando evento_calendar_id en citas: {e}')
-
+            else:
+                app.logger.warning("⚠️ autenticar_google_calendar devolvió None; no se intentó agendar en Calendar")
 
         # 6) Notificaciones al administrador (kept behavior)
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
@@ -3733,7 +3984,6 @@ def _ensure_domain_plans_table(conn):
             pass
         app.logger.warning(f"⚠️ _ensure_domain_plans_table: could not ensure table: {e}")
 
-
 def get_plan_for_domain(dominio):
     """
     Busca la fila de domain_plans en la BD de clientes por dominio (o heurísticas).
@@ -4170,8 +4420,10 @@ def load_config(config=None):
             -- Asesores de ventas (columnas antiguas para compatibilidad)
             asesor1_nombre VARCHAR(100),
             asesor1_telefono VARCHAR(50),
+            asesor1_email VARCHAR(150),
             asesor2_nombre VARCHAR(100),
             asesor2_telefono VARCHAR(50),
+            asesor2_email VARCHAR(150),
             -- Nueva columna JSON que puede contener lista arbitraria de asesores
             asesores_json TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -4221,27 +4473,39 @@ def load_config(config=None):
             try:
                 parsed = json.loads(asesores_json)
                 if isinstance(parsed, list):
-                    asesores_list = parsed
+                    # Ensure each advisor dict includes nombre, telefono, email keys
+                    for a in parsed:
+                        if isinstance(a, dict):
+                            asesores_list.append({
+                                'nombre': (a.get('nombre') or '').strip(),
+                                'telefono': (a.get('telefono') or '').strip(),
+                                'email': (a.get('email') or '').strip()
+                            })
                     # Build map for backward compatibility (asesor1_nombre, etc.)
                     for idx, a in enumerate(asesores_list, start=1):
                         asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
                         asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
+                        asesores_map[f'asesor{idx}_email'] = a.get('email', '')
             except Exception:
                 app.logger.warning("⚠️ No se pudo parsear asesores_json, fallback a columnas individuales")
         if not asesores_list:
             # Fallback: legacy columns (asesor1, asesor2)
             a1n = (row.get('asesor1_nombre') or '').strip()
             a1t = (row.get('asesor1_telefono') or '').strip()
+            a1e = (row.get('asesor1_email') or '').strip()
             a2n = (row.get('asesor2_nombre') or '').strip()
             a2t = (row.get('asesor2_telefono') or '').strip()
-            if a1n or a1t:
-                asesores_list.append({'nombre': a1n, 'telefono': a1t})
+            a2e = (row.get('asesor2_email') or '').strip()
+            if a1n or a1t or a1e:
+                asesores_list.append({'nombre': a1n, 'telefono': a1t, 'email': a1e})
                 asesores_map['asesor1_nombre'] = a1n
                 asesores_map['asesor1_telefono'] = a1t
-            if a2n or a2t:
-                asesores_list.append({'nombre': a2n, 'telefono': a2t})
+                asesores_map['asesor1_email'] = a1e
+            if a2n or a2t or a2e:
+                asesores_list.append({'nombre': a2n, 'telefono': a2t, 'email': a2e})
                 asesores_map['asesor2_nombre'] = a2n
                 asesores_map['asesor2_telefono'] = a2t
+                asesores_map['asesor2_email'] = a2e
     except Exception as e:
         app.logger.warning(f"⚠️ Error procesando asesores: {e}")
 
@@ -4289,10 +4553,14 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor1_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor1_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor1_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor1_email VARCHAR(150) DEFAULT NULL")
     if 'asesor2_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_telefono VARCHAR(50) DEFAULT NULL")
+    if 'asesor2_email' not in existing_cols:
+        alter_statements.append("ADD COLUMN asesor2_email VARCHAR(150) DEFAULT NULL")
     if 'asesores_json' not in existing_cols:
         alter_statements.append("ADD COLUMN asesores_json TEXT DEFAULT NULL")
 
@@ -4334,8 +4602,10 @@ def save_config(cfg_all, config=None):
             # legacy asesor fields (if provided in ases map)
             'asesor1_nombre': ases.get('asesor1_nombre', None),
             'asesor1_telefono': ases.get('asesor1_telefono', None),
+            'asesor1_email': ases.get('asesor1_email', None),
             'asesor2_nombre': ases.get('asesor2_nombre', None),
             'asesor2_telefono': ases.get('asesor2_telefono', None),
+            'asesor2_email': ases.get('asesor2_email', None),
             'asesores_json': None
         }
 
@@ -4353,11 +4623,13 @@ def save_config(cfg_all, config=None):
             while True:
                 name_key = f'asesor{i}_nombre'
                 phone_key = f'asesor{i}_telefono'
-                if name_key in ases or phone_key in ases:
+                email_key = f'asesor{i}_email'
+                if name_key in ases or phone_key in ases or email_key in ases:
                     name = (ases.get(name_key) or '').strip()
                     phone = (ases.get(phone_key) or '').strip()
-                    if name or phone:
-                        advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    email = (ases.get(email_key) or '').strip()
+                    if name or phone or email:
+                        advisors_compiled.append({'nombre': name, 'telefono': phone, 'email': email})
                     i += 1
                     # prevent infinite loop
                     if i > 20:
@@ -5114,8 +5386,9 @@ def obtener_siguiente_asesor(config=None):
                             if isinstance(a, dict):
                                 nombre = (a.get('nombre') or '').strip()
                                 telefono = (a.get('telefono') or '').strip()
-                                if nombre or telefono:
-                                    ases.append({'nombre': nombre, 'telefono': telefono})
+                                email = (a.get('email') or '').strip()
+                                if nombre or telefono or email:
+                                    ases.append({'nombre': nombre, 'telefono': telefono, 'email': email})
                 except Exception:
                     app.logger.warning("⚠️ obtener_siguiente_asesor: no se pudo parsear asesores_json, fallback a columnas legacy")
             if not ases:
@@ -5130,8 +5403,9 @@ def obtener_siguiente_asesor(config=None):
                         idx = int(m.group(1))
                         nombre = (v or '').strip()
                         telefono = (r.get(f'asesor{idx}_telefono') or '').strip()
-                        if nombre or telefono:
-                            temp[idx] = {'nombre': nombre, 'telefono': telefono}
+                        email = (r.get(f'asesor{idx}_email') or '').strip()
+                        if nombre or telefono or email:
+                            temp[idx] = {'nombre': nombre, 'telefono': telefono, 'email': email}
                 for idx in sorted(temp.keys()):
                     ases.append(temp[idx])
             return ases
@@ -5211,7 +5485,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}\n\n¿Quieres que te conecte ahora?"
+        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}"
         enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
         if enviado:
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
@@ -5221,7 +5495,63 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
 
         if notificar_asesor and telefono:
             try:
-                texto_asesor = f"ℹ️ Se compartió tu contacto con cliente {numero_cliente}. Por favor, estate atento para contactarlo si corresponde."
+                # Obtener nombre mostrado del cliente
+                cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config) or numero_cliente
+
+                # Preparar historial para resumen
+                historial = obtener_historial(numero_cliente, limite=8, config=config) or []
+                partes = []
+                for h in historial:
+                    if h.get('mensaje'):
+                        partes.append(f"Usuario: {h.get('mensaje')}")
+                    if h.get('respuesta'):
+                        partes.append(f"Asistente: {h.get('respuesta')}")
+                historial_text = "\n".join(partes) or "Sin historial previo."
+
+                # Preguntar a la IA por un resumen breve (1-3 líneas)
+                resumen = None
+                try:
+                    prompt = f"""
+Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
+del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
+No incluyas números de teléfono ni direcciones.
+
+HISTORIAL:
+{historial_text}
+
+Devuelve únicamente el resumen breve (1-3 líneas).
+"""
+                    headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+                    payload = {
+                        "model": "deepseek-chat",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2,
+                        "max_tokens": 200
+                    }
+                    r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
+                    r.raise_for_status()
+                    d = r.json()
+                    raw = d['choices'][0]['message']['content']
+                    if isinstance(raw, list):
+                        raw = " ".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
+                    resumen = str(raw).strip()
+                    # Keep it compact
+                    resumen = re.sub(r'\s*\n\s*', ' ', resumen)[:400]
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo generar resumen IA para asesor: {e}")
+                    # Fallback: usar primer/último mensaje corto
+                    if historial:
+                        ultimo = historial[-1].get('mensaje') or ''
+                        resumen = (ultimo[:200] + '...') if len(ultimo) > 200 else ultimo
+                    else:
+                        resumen = "Sin historial disponible."
+
+                texto_asesor = (
+                    f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
+                    f"🔎 Resumen rápido del chat para que lo atiendas:\n{resumen}\n\n"
+                    "Por favor, estate atento para contactarlo si corresponde."
+                )
+
                 enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
             except Exception as e:
@@ -6394,131 +6724,633 @@ def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=
         app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
         return False
 
-def cerrar_venta(numero, items, config=None, texto_original=None, incoming_saved=False):
+def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config):
     """
-    Inicia / cierra la venta propuesta por chat.
-    - numero: número del cliente (string)
-    - items: lista de dicts [{'sku'|'query': '...', 'cantidad': N}, ...]
-      - Se intenta resolver cada item por SKU/modelo/servicio.
-    - config: optional tenant config
-    - texto_original: mensaje del usuario que inició la compra (opcional, para tracking)
-    - incoming_saved: si True, registrar_respuesta_bot usará actualizar_respuesta()
+    Extrae y ejecuta la lógica que antes estaba inline dentro de:
+        if save_cita or intent == "COMPRAR_PRODUCTO":
+    Retorna True siempre que el flujo fue procesado (igual comportamiento previo).
+    """
+    try:
+        # Ensure we have a mutable dict to work with (IA may return null)
+        if not isinstance(save_cita, dict):
+            save_cita = {}
 
-    Comportamiento:
-    1) Resuelve cada item a producto en DB y obtiene precio unitario (precio_menudeo, precio, precio_mayoreo o costo).
-    2) Calcula subtotal por línea y total general (Decimal).
-    3) Crea un registro provisional en estados_conversacion con contexto "EN_VENTA".
-    4) Envía al cliente un resumen + pregunta: ¿efectivo/transferencia? ¿domicilio/recoger?
-    5) Devuelve el texto enviado.
+        # Always ensure phone is present
+        save_cita.setdefault('telefono', numero)
+
+        info_cita = {
+            'servicio_solicitado': save_cita.get('servicio_solicitado') or save_cita.get('servicio') or '',
+            'fecha_sugerida': save_cita.get('fecha_sugerida'),
+            'hora_sugerida': save_cita.get('hora_sugerida'),
+            'nombre_cliente': save_cita.get('nombre_cliente') or save_cita.get('nombre'),
+            'telefono': save_cita.get('telefono'),
+            'detalles_servicio': save_cita.get('detalles_servicio') or {}
+        }
+
+        # Validate before saving
+        try:
+            completos, faltantes = validar_datos_cita_completos(info_cita, config)
+        except Exception as _e:
+            app.logger.warning(f"⚠️ validar_datos_cita_completos falló durante guardado unificado: {_e}")
+            completos, faltantes = False, ['validacion_error']
+
+        if not completos:
+            app.logger.info(f"ℹ️ Datos iniciales incompletos para cita (faltantes: {faltantes}), intentando enriquecer desde mensaje/historial")
+            try:
+                enriquecido = extraer_info_cita_mejorado(texto or "", numero, historial=historial, config=config)
+                if enriquecido and isinstance(enriquecido, dict):
+                    # Merge only missing fields (do not overwrite existing valid values)
+                    if not info_cita.get('servicio_solicitado') and enriquecido.get('servicio_solicitado'):
+                        info_cita['servicio_solicitado'] = enriquecido.get('servicio_solicitado')
+                    if not info_cita.get('fecha_sugerida') and enriquecido.get('fecha_sugerida'):
+                        info_cita['fecha_sugerida'] = enriquecido.get('fecha_sugerida')
+                    if not info_cita.get('hora_sugerida') and enriquecido.get('hora_sugerida'):
+                        info_cita['hora_sugerida'] = enriquecido.get('hora_sugerida')
+                    if not info_cita.get('nombre_cliente') and enriquecido.get('nombre_cliente'):
+                        info_cita['nombre_cliente'] = enriquecido.get('nombre_cliente')
+                    if enriquecido.get('detalles_servicio'):
+                        info_cita.setdefault('detalles_servicio', {}).update(enriquecido.get('detalles_servicio') or {})
+                    app.logger.info("🔁 Info cita enriquecida: %s", json.dumps({k: v for k, v in info_cita.items() if k in ['servicio_solicitado','fecha_sugerida','hora_sugerida','nombre_cliente']}))
+                else:
+                    app.logger.info("⚠️ Enriquecimiento no devolvió datos útiles")
+            except Exception as _e:
+                app.logger.warning(f"⚠️ Enriquecimiento de cita falló: {_e}")
+
+        # Final attempt to save (may still return None -> handled as before)
+        try:
+            cita_id = guardar_cita(info_cita, config)
+        except Exception as e:
+            app.logger.error(f"🔴 Error guardando cita desde unificado: {e}")
+            cita_id = None
+
+        if cita_id:
+            app.logger.info(f"✅ Cita guardada (unificada) ID: {cita_id}")
+            if respuesta_text:
+                enviar_mensaje(numero, respuesta_text, config)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            try:
+                enviar_alerta_cita_administrador(info_cita, cita_id, config)
+            except Exception as e:
+                app.logger.warning(f"⚠️ enviar_alerta_cita_administrador falló: {e}")
+        else:
+            try:
+                completos2, faltantes2 = validar_datos_cita_completos(info_cita, config)
+            except Exception:
+                completos2, faltantes2 = False, ['fecha', 'hora', 'servicio']
+
+            preguntas = []
+            if 'servicio' in (faltantes2 or []):
+                preguntas.append("¿Qué servicio o modelo te interesa? (ej. 'página web', 'silla escolar', SKU o nombre)")
+            if 'fecha' in (faltantes2 or []):
+                preguntas.append("¿Qué fecha prefieres? (ej. 'hoy', 'mañana' o '2025-11-10')")
+            if 'hora' in (faltantes2 or []):
+                preguntas.append("¿A qué hora te acomoda? (ej. 'a las 18:00' o '6pm')")
+            if 'nombre' in (faltantes2 or []):
+                preguntas.append("¿Cuál es tu nombre completo?")
+            if not preguntas:
+                preguntas = ["Faltan datos para completar la cita. ¿Puedes proporcionar la fecha y hora, por favor?"]
+
+            follow_up = "Para agendar necesito lo siguiente:\n\n" + "\n".join(f"- {p}" for p in preguntas)
+            follow_up += "\n\nResponde con los datos cuando puedas."
+
+            enviar_mensaje(numero, follow_up, config)
+            registrar_respuesta_bot(numero, texto, follow_up, config, incoming_saved=incoming_saved)
+
+            app.logger.warning("⚠️ guardar_cita devolvió None — se solicitó al usuario los datos faltantes")
+        return True
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error inesperado en manejar_guardado_cita_unificado: {e}")
+        return True  # Mantener comportamiento anterior: consumir la intención y devolver True
+
+def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
+    """
+    Igual que antes pero:
+     - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
+     - NOTA: ya no hace acciones adicionales cuando el método de pago es 'transferencia'.
+    Devuelve: respuesta_text (string) o None.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        from decimal import Decimal, InvalidOperation
+        # 1) Obtener historial y último mensaje
+        historial = obtener_historial(numero, limite=limite_historial, config=config) or []
+        ultimo = (historial[-1].get('mensaje') or "").strip() if historial else ""
+        partes = []
+        for h in historial:
+            if h.get('mensaje'):
+                partes.append(f"Usuario: {h.get('mensaje')}")
+            if h.get('respuesta'):
+                partes.append(f"Asistente: {h.get('respuesta')}")
+        historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        if not items or not isinstance(items, (list, tuple)):
-            msg = "No detecté los productos. ¿Puedes indicar el SKU o nombre y la cantidad? Ej: '2 x SKU123' o '1 silla escolar'."
-            enviar_mensaje(numero, msg, config)
-            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", msg, config, incoming_saved=incoming_saved)
-            return msg
+        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
+        prompt = f"""
+Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
+devuelve SOLO un JSON con la siguiente estructura EXACTA:
 
-        lineas = []
-        total = Decimal('0.00')
+{{
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
+  "productos": [
+    {{
+      "sku_o_nombre": "CIANI OHE 305",
+      "cantidad": 4,
+      "precio_unitario": 300.0,
+      "precio_total_item": 1200.0
+    }}
+  ],
+  "metodo_pago": "tarjeta" | "transferencia" | "efectivo" | null,
+  "direccion": "Texto de dirección completa" | null,
+  "nombre_cliente": "Nombre si se detecta" | null,
+  "precio_total": 1200.0 | null,
+  "ready_to_notify": true|false,
+  "confidence": 0.0-1.0
+}}
 
-        for it in items:
-            qty = int(it.get('cantidad') or it.get('qty') or 1)
-            query = (it.get('sku') or it.get('query') or it.get('modelo') or it.get('servicio') or '').strip()
-            producto = None
-            if query:
-                try:
-                    producto = obtener_producto_por_sku_o_nombre(query, config)
-                except Exception as e:
-                    app.logger.warning(f"⚠️ obtener_producto_por_sku_o_nombre falló para '{query}': {e}")
-                    producto = None
-
-            # Fallback: if no product found, push as free-text line with price 0
-            precio_unit = Decimal('0.00')
-            nombre = query or 'Producto sin identificar'
-            sku = None
-            if producto:
-                nombre = (producto.get('servicio') or producto.get('modelo') or producto.get('sku') or nombre)
-                sku = (producto.get('sku') or '').strip() or None
-                # Prefer price fields in order
-                for key in ('precio_menudeo', 'precio', 'precio_mayoreo', 'costo'):
-                    val = producto.get(key)
-                    if val not in (None, ''):
-                        try:
-                            cleaned = re.sub(r'[^\d.]', '', str(val))
-                            precio_unit = Decimal(cleaned) if cleaned else Decimal('0.00')
-                            break
-                        except (InvalidOperation, Exception):
-                            continue
-
-            linea_total = (precio_unit * Decimal(qty)).quantize(Decimal('0.01'))
-            total += linea_total
-            lineas.append({
-                'nombre': str(nombre),
-                'sku': sku,
-                'cantidad': qty,
-                'precio_unit': f"{precio_unit:.2f}",
-                'line_total': f"{linea_total:.2f}"
-            })
-
-        total = total.quantize(Decimal('0.01'))
-
-        # Preparar provisional de venta (similar estructura a info_cita)
-        detalles = {
-            'items': lineas,
-            'total': f"{total:.2f}",
-            'moneda': 'MXN'
+Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
+"""
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": modelo,
+            "messages": [{"role": "user", "content": prompt},
+                         {"role": "user", "content": f"HISTORIAL:\n{historial_text}\n\nÚLTIMO MENSAJE:\n{ultimo}"}],
+            "temperature": 0.0,
+            "max_tokens": max_tokens
         }
-        provisional = {
-            'venta_provisional': {
-                'detalle': detalles,
-                'telefono': numero
-            },
-            'timestamp': datetime.now(tz_mx).isoformat()
-        }
+        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data['choices'][0]['message']['content']
+        if isinstance(raw, list):
+            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
+        raw = str(raw).strip()
 
-        # Guardar estado provisional para continuar la conversación (EN_VENTA)
+        match = re.search(r'(\{.*\})', raw, re.DOTALL)
+        if not match:
+            app.logger.warning(f"⚠️ comprar_producto: IA no devolvió JSON estructurado. Raw: {raw[:1000]}")
+            fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
+            return fallback_text or None
+
         try:
-            actualizar_estado_conversacion(numero, "EN_VENTA", "venta_provisional", provisional, config)
-            app.logger.info(f"🔁 Venta provisional guardada para {numero}: total={total}")
+            extracted = json.loads(match.group(1))
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo guardar estado provisional de venta para {numero}: {e}")
+            app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
+            return None
 
-        # Construir mensaje al cliente con resumen y preguntas (pago / entrega)
-        líneas_texto = ["🛒 Resumen de tu pedido:"]
-        for ln in lineas:
-            qty = ln['cantidad']
-            name = ln['nombre']
-            lt = ln['line_total']
-            líneas_texto.append(f"• {qty} x {name} — ${lt}")
+        respuesta_text = extracted.get('respuesta_text') or ""
+        productos = extracted.get('productos') or []
+        metodo_pago = extracted.get('metodo_pago')
+        direccion = extracted.get('direccion')
+        nombre_cliente = extracted.get('nombre_cliente')
+        precio_total_ia = extracted.get('precio_total')
+        ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
+        confidence = float(extracted.get('confidence') or 0.0)
 
-        líneas_texto.append(f"\n💰 Total a pagar: ${total:.2f} MXN")
-        líneas_texto.append("\n¿Cómo prefieres pagar? Responde 'efectivo' (pago en entrega) o 'transferencia' (te pediré datos bancarios).")
-        líneas_texto.append("¿Cómo recibirás tu pedido? Responde 'domicilio' (lo llevamos) o 'recoger' (pasas por el producto).")
-        líneas_texto.append("\nPuedes responder ambas en una sola línea, por ejemplo: 'transferencia, domicilio'.")
+        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
+        productos_norm = []
+        suma_total = 0.0
+        any_price_known = False
+        for p in productos:
+            try:
+                name_raw = (p.get('sku_o_nombre') or p.get('nombre') or p.get('sku') or '').strip()
+                qty = int(p.get('cantidad') or 0)
+                if qty <= 0:
+                    qty = 1
+                pu = None
+                if p.get('precio_unitario') not in (None, '', 0):
+                    try:
+                        pu = float(p.get('precio_unitario'))
+                    except Exception:
+                        pu = None
 
-        mensaje_cliente = "\n".join(líneas_texto)
+                producto_db = None
+                if name_raw:
+                    producto_db = obtener_producto_por_sku_o_nombre(name_raw, config)
+                if not pu and producto_db:
+                    cand = producto_db.get('precio_menudeo') or producto_db.get('precio') or producto_db.get('costo') or producto_db.get('precio_mayoreo')
+                    try:
+                        if cand not in (None, ''):
+                            pu = float(re.sub(r'[^\d.]', '', str(cand)))
+                    except Exception:
+                        pu = None
 
-        enviar_mensaje(numero, mensaje_cliente, config)
-        registrar_respuesta_bot(numero, texto_original or "[Iniciar compra]", mensaje_cliente, config, incoming_saved=incoming_saved)
+                precio_total_item = None
+                if pu is not None:
+                    precio_total_item = round(pu * qty, 2)
+                    suma_total += precio_total_item
+                    any_price_known = True
+                else:
+                    if p.get('precio_total_item') not in (None, ''):
+                        try:
+                            precio_total_item = float(re.sub(r'[^\d.]', '', str(p.get('precio_total_item'))))
+                            suma_total += precio_total_item
+                            any_price_known = True
+                        except Exception:
+                            precio_total_item = None
 
-        return mensaje_cliente
+                productos_norm.append({
+                    "sku_o_nombre": name_raw or None,
+                    "cantidad": qty,
+                    "precio_unitario": pu,
+                    "precio_total_item": precio_total_item,
+                    "catalog_row": producto_db
+                })
+            except Exception as e:
+                app.logger.warning(f"⚠️ comprar_producto: error procesando item {p}: {e}")
+                continue
 
-    except Exception as e:
-        app.logger.error(f"🔴 Error en cerrar_venta para {numero}: {e}")
-        app.logger.error(traceback.format_exc())
-        # Notificar al cliente de forma segura
-        msg = "Lo siento, hubo un error procesando tu pedido. Por favor intenta de nuevo en un momento."
+        precio_total_calc = round(suma_total, 2) if any_price_known else (float(precio_total_ia) if precio_total_ia not in (None, '') else None)
+
+        datos_compra = {
+            "productos": productos_norm,
+            "precio_total": precio_total_calc,
+            "metodo_pago": metodo_pago or None,
+            "direccion": direccion or None,
+            "nombre_cliente": nombre_cliente or None,
+            "numero_cliente": numero,
+            "ready_to_notify": ready_to_notify,
+            "confidence": confidence
+        }
+
+        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
+
+        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
-            enviar_mensaje(numero, msg, config)
-            registrar_respuesta_bot(numero, texto_original or "[Iniciar compra error]", msg, config, incoming_saved=incoming_saved)
+            resumen_prompt = f"""
+Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
+para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
+No incluyas números de teléfono ni direcciones completas en el resumen.
+
+HISTORIAL:
+{historial_text}
+
+PRODUCTOS DETECTADOS:
+{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
+
+Devuelve únicamente el resumen de 2-4 líneas en español.
+"""
+            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
+            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
+            rsum.raise_for_status()
+            sum_data = rsum.json()
+            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
+            if isinstance(contexto_resumido, list):
+                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
+            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
+            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
+
+        # 5) Evitar re-notificaciones
+        estado_actual = obtener_estado_conversacion(numero, config)
+        already_notified = False
+        try:
+            if estado_actual and estado_actual.get('datos') and isinstance(estado_actual.get('datos'), dict):
+                if estado_actual['datos'].get('pedido_notificado'):
+                    already_notified = False
         except Exception:
-            pass
+            already_notified = False
+
+        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
+        # NOTE: treat transferencias as an intent to buy — allow notification even if ready_to_notify==False,
+        # so advisors get alerted when user confirmed transfer and required fields exist.
+        should_notify = False
+        try:
+            if datos_compra.get('ready_to_notify'):
+                should_notify = True
+            else:
+                # If payment method is transfer and essential fields are present, notify anyway
+                mp = datos_compra.get('metodo_pago') or ''
+                if mp and 'transfer' in str(mp).lower():
+                    if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
+                        should_notify = True
+                        app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
+        except Exception:
+            should_notify = False
+
+        if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
+            try:
+                asesor = obtener_siguiente_asesor(config)
+                asesor_tel = asesor.get('telefono') if asesor and isinstance(asesor, dict) else None
+                asesor_email = asesor.get('email') if asesor and isinstance(asesor, dict) else None
+                cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config) or (datos_compra.get('nombre_cliente') or 'No especificado')
+
+                # Construir líneas de items legibles
+                lineas_items = []
+                for it in productos_norm:
+                    qty = it.get('cantidad') or 1
+                    nombre = it.get('sku_o_nombre') or 'Producto'
+                    pu = it.get('precio_unitario')
+                    pt = it.get('precio_total_item')
+                    if pu is not None:
+                        lineas_items.append(f"• {qty} x {nombre} @ ${pu:,.2f} = ${pt:,.2f}")
+                    elif pt is not None:
+                        lineas_items.append(f"• {qty} x {nombre} = ${pt:,.2f}")
+                    else:
+                        lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
+
+                # Construir mensaje de alerta con el resumen generado por la IA
+                mensaje_alerta = (
+                    f"🔔 *Pedido confirmado por cliente*\n\n"
+                    f"👤 *Cliente:* {cliente_mostrado}\n"
+                    f"📞 *Número:* {numero}\n\n"
+                    f"🧾 *Detalles del pedido:*\n"
+                    f"{chr(10).join(lineas_items)}\n\n"
+                    f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
+                    f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
+                    f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
+                )
+
+                mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
+                if asesor_email:
+                    try:
+                        service = autenticar_google_calendar(config)
+                        if service:
+                            # Crear evento mínimo para notificar al asesor por email
+                            now_dt = datetime.now(tz_mx)
+                            start_iso = now_dt.isoformat()
+                            end_iso = (now_dt + timedelta(hours=1)).isoformat()
+                            event_for_asesor = {
+                                'summary': f"Notificación: pedido de {cliente_mostrado}",
+                                'location': config.get('direccion', ''),
+                                'description': f"{contexto_resumido}\n\nDetalles del pedido enviado por WhatsApp.\nNúmero cliente: {numero}",
+                                'start': {'dateTime': start_iso, 'timeZone': 'America/Mexico_City'},
+                                'end': {'dateTime': end_iso, 'timeZone': 'America/Mexico_City'},
+                                'attendees': [{'email': asesor_email}],
+                                'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 10}]}
+                            }
+                            try:
+                                # Insertar en primary y notificar asistentes (sendUpdates='all')
+                                primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+                                created_evt = service.events().insert(calendarId=primary_calendar, body=event_for_asesor, sendUpdates='all').execute()
+                                app.logger.info(f"✅ Evento Calendar creado para asesor {asesor_email}: {created_evt.get('htmlLink')}")
+                            except Exception as e_evt:
+                                app.logger.warning(f"⚠️ No se pudo crear evento Calendar para asesor {asesor_email}: {e_evt}")
+                        else:
+                            app.logger.warning("⚠️ autenticar_google_calendar devolvió None, no se creó evento para asesor")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Error intentando notificar a asesor por Calendar ({asesor_email}): {e}")
+
+                # Enviar a asesor y al número fijo
+                targets = []
+                if asesor_tel:
+                    targets.append(asesor_tel)
+                targets.append("5214493432744")
+
+                # collect successful targets to decide kanban move
+                notified_targets = []
+                for t in targets:
+                    try:
+                        sent = enviar_mensaje(t, mensaje_alerta, config)
+                        if sent:
+                            notified_targets.append(t)
+                        app.logger.info(f"✅ Alerta de pedido enviada a {t}")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
+
+                # Marcar estado para evitar re-notificaciones
+                nuevo_estado = {
+                    'pedido_confirmado': datos_compra,
+                    'pedido_notificado': True,
+                    'timestamp': datetime.now().isoformat()
+                }
+                actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
+
+                # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
+                try:
+                    if notified_targets:
+                        # 4 = 'Resueltos' as created by crear_tablas_kanban default
+                        actualizar_columna_chat(numero, 4, config)
+                        app.logger.info(f"✅ Chat {numero} movido a 'Resueltos' (columna 4) tras notificación de pedido")
+                    else:
+                        app.logger.info(f"ℹ️ comprar_producto: no se notificó a ningún objetivo; no se moverá el Kanban para {numero}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo mover chat a columna 'Resueltos' para {numero}: {e}")
+
+            except Exception as e:
+                app.logger.error(f"🔴 Error notificando asesores tras compra confirmada: {e}")
+        else:
+            if already_notified:
+                app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
+            elif not datos_compra['ready_to_notify'] and not (datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower()):
+                app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
+            else:
+                app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
+
+        # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
+        if respuesta_text:
+            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+        return respuesta_text or None
+
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"🔴 comprar_producto - request error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            app.logger.error(f"🔴 API body: {e.response.text[:1000]}")
         return None
+    except Exception as e:
+        app.logger.error(f"🔴 comprar_producto error: {e}")
+        app.logger.error(traceback.format_exc())
+        return None
+
+# Add below existing helper functions (e.g. after other CREATE TABLE helpers)
+def _ensure_columnas_precios_table(conn):
+    cur = conn.cursor()
+    try:
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS columnas_precios (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                tenant VARCHAR(255) NOT NULL,
+                table_name VARCHAR(64) NOT NULL,
+                hidden_json JSON DEFAULT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uq_tenant_table (tenant, table_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        """)
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except:
+            pass
+    finally:
+        cur.close()
+
+@app.route('/configuracion/precios/columnas', methods=['GET'])
+def get_columnas_precios():
+    """Return saved hidden columns for current tenant + table (query param 'table')"""
+    config = obtener_configuracion_por_host()
+    table = request.args.get('table', 'user')
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor(dictionary=True)
+        cur.execute("SELECT hidden_json FROM columnas_precios WHERE tenant=%s AND table_name=%s LIMIT 1",
+                    (config.get('dominio'), table))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        hidden = {}
+        if row and row.get('hidden_json'):
+            try:
+                hidden = json.loads(row['hidden_json'])
+            except Exception:
+                hidden = {}
+        return jsonify({'hidden': hidden})
+    except Exception as e:
+        app.logger.warning(f"⚠️ get_columnas_precios error: {e}")
+        return jsonify({'hidden': {}})
+
+@app.route('/configuracion/precios/columnas', methods=['POST'])
+def save_columnas_precios():
+    """Save hidden columns state for current tenant + table"""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table = (data.get('table') or 'user')
+    hidden = data.get('hidden') or {}
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO columnas_precios (tenant, table_name, hidden_json, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON DUPLICATE KEY UPDATE hidden_json = VALUES(hidden_json), updated_at = NOW()
+        """, (config.get('dominio'), table, json.dumps(hidden, ensure_ascii=False)))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"🔴 save_columnas_precios error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
+def reset_columnas_precios():
+    """Reset (clear) saved hidden columns for current tenant.
+       If JSON body contains 'table' it clears only that table; otherwise clears all tenant entries."""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table = data.get('table')
+    try:
+        conn = get_db_connection(config)
+        _ensure_columnas_precios_table(conn)
+        cur = conn.cursor()
+        if table:
+            cur.execute("DELETE FROM columnas_precios WHERE tenant=%s AND table_name=%s", (config.get('dominio'), table))
+        else:
+            cur.execute("DELETE FROM columnas_precios WHERE tenant=%s", (config.get('dominio'),))
+        conn.commit()
+        cur.close()
+        conn.close()
+        return jsonify({'success': True})
+    except Exception as e:
+        app.logger.error(f"🔴 reset_columnas_precios error: {e}")
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+def send_good_morning_to_tenant(config):
+    """Send the good morning message to all advisors configured for the given tenant."""
+    try:
+        cfg = load_config(config)
+        asesores = cfg.get('asesores_list') or []
+        if not asesores:
+            app.logger.info(f"ℹ️ No advisors configured for tenant {config.get('dominio')}")
+            return
+
+        negocio_nombre = (cfg.get('negocio') or {}).get('negocio_nombre') or config.get('dominio') or ''
+        default_msg = f"¡Buenos días! Les deseo un excelente día de trabajo{(' en ' + negocio_nombre) if negocio_nombre else ''}."
+        message = os.getenv("GOOD_MORNING_MESSAGE", default_msg)
+
+        for a in asesores:
+            telefono = (a.get('telefono') or '').strip()
+            if not telefono:
+                app.logger.warning(f"⚠️ Advisor without phone in tenant {config.get('dominio')}: {a}")
+                continue
+            try:
+                enviar_mensaje(telefono, message, config)
+                app.logger.info(f"✅ Good morning sent to advisor {telefono} (tenant={config.get('dominio')})")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Failed to send good morning to {telefono} (tenant={config.get('dominio')}): {e}")
+    except Exception as e:
+        app.logger.error(f"🔴 send_good_morning_to_tenant error for {config.get('dominio')}: {e}")
+
+def send_good_morning_to_all():
+    """Iterate all tenants and send the good morning message to their advisors."""
+    app.logger.info("🔔 Running scheduled good-morning job for all tenants...")
+    for tenant_key, config in NUMEROS_CONFIG.items():
+        try:
+            # Use app context because enviar_mensaje / DB functions rely on it
+            with app.app_context():
+                send_good_morning_to_tenant(config)
+        except Exception as e:
+            app.logger.error(f"🔴 Error sending good morning for tenant {config.get('dominio')}: {e}")
+
+def start_good_morning_scheduler():
+    """Start a background thread that sends a good-morning message every day at configured hour (default 08:00 America/Mexico_City)."""
+    global GOOD_MORNING_THREAD_STARTED
+    if GOOD_MORNING_THREAD_STARTED:
+        app.logger.info("ℹ️ Good morning scheduler already started")
+        return
+
+    if os.getenv("GOOD_MORNING_ENABLED", "true").lower() != "true":
+        app.logger.info("ℹ️ Good morning scheduler disabled via GOOD_MORNING_ENABLED != 'true'")
+        return
+
+    # Accept either "HH:MM" or just "HH" in env var; default to 08:00
+    time_str = os.getenv("GOOD_MORNING_TIME", "08:00").strip()
+    try:
+        if ":" in time_str:
+            parts = time_str.split(":")
+            hour = int(parts[0]) % 24
+            minute = int(parts[1]) % 60
+        else:
+            hour = int(time_str) % 24
+            minute = 0
+    except Exception:
+        app.logger.warning(f"⚠️ Invalid GOOD_MORNING_TIME='{time_str}', falling back to 08:00")
+        hour, minute = 8, 0
+
+    def _worker():
+        app.logger.info(f"🕐 Good morning scheduler started (daily at {hour:02d}:{minute:02d} {tz_mx.zone})")
+        # small initial delay so server finishes startup tasks
+        time.sleep(5)
+
+        while True:
+            try:
+                now = datetime.now(tz_mx)
+                # Build today's target in tz_mx as a naive dt localized to tz_mx
+                target_naive = datetime(now.year, now.month, now.day, hour, minute, 0)
+                try:
+                    target = tz_mx.localize(target_naive)
+                except Exception:
+                    # if already tz-aware for some reason, fallback
+                    target = target_naive.replace(tzinfo=tz_mx)
+
+                # If the target time is already passed for today, schedule for tomorrow
+                if now >= target:
+                    target = target + timedelta(days=1)
+
+                seconds_to_sleep = (target - now).total_seconds()
+                app.logger.info(f"⏳ Sleeping {int(seconds_to_sleep)}s until next good-morning run at {target.isoformat()}")
+                # Sleep until scheduled time (will resume after sleep or be interrupted on exception)
+                time.sleep(max(1, seconds_to_sleep))
+
+                # At scheduled time: execute job inside app context
+                try:
+                    with app.app_context():
+                        send_good_morning_to_all()
+                except Exception as e:
+                    app.logger.error(f"🔴 Exception while sending good-morning messages: {e}")
+            except Exception as loop_e:
+                app.logger.error(f"🔴 Unexpected error in good-morning scheduler loop: {loop_e}")
+                # Sleep a short time before retrying loop to avoid tight error loops
+                time.sleep(60)
+
+    t = threading.Thread(target=_worker, daemon=True, name="good_morning_scheduler")
+    t.start()
+    GOOD_MORNING_THREAD_STARTED = True
+    app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
@@ -6533,21 +7365,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-
-        # === Shortcut: catálogo/pdf/flyer ===
-        catalog_keywords = ['catálogo', 'catalogo', 'pdf', 'flyer', 'folleto', 'catalog', 'catalogue']
-        if any(k in texto_norm for k in catalog_keywords):
-            app.logger.info(f"📚 Detected catalog request by keyword for {numero}; calling enviar_catalogo()")
-            try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                # registrar respuesta evitando duplicados
-                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
-                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
-                # continue to AI flow as fallback
-
+        #aqui pon el codigo
         # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
@@ -6556,7 +7374,64 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
+                # --- DeepSeek prompt: detectar si el mensaje solicita información de producto ---
+        producto_aplica = "NO_APLICA"
+        try:
+            # Build a minimal, strict prompt that forces the model to answer ONLY with SI_APLICA or NO_APLICA
+            ds_prompt = (
+                "Tu única tarea: leyendo el historial de conversación y el mensaje actual, "
+                "decide SI el cliente está pidiendo información sobre un producto (precio, disponibilidad, catálogo, SKU, características, fotos, etc.).\n\n"
+                "RESPONDE SOLO CON UNA PALABRA EXACTA: SI_APLICA  o  NO_APLICA\n"
+                "No añadas explicaciones, ejemplos, ni signos adicionales.\n\n"
+                "HISTORIAL:\n"
+                f"{historial_text.strip()}\n\n"
+                "MENSAJE ACTUAL:\n"
+                f"{texto or ''}\n\n"
+                "Si el usuario solicita precio, catálogo, SKU, características técnicas, imágenes del producto, disponibilidad, comparación entre modelos o cómo comprar un producto, responde SI_APLICA. En cualquier otro caso responde NO_APLICA."
+            )
 
+            headers_ds = {
+                "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            payload_ds = {
+                "model": "deepseek-chat",
+                "messages": [{"role": "user", "content": ds_prompt}],
+                "temperature": 0.0,
+                "max_tokens": 16
+            }
+
+            resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
+            resp_ds.raise_for_status()
+            ds_data = resp_ds.json()
+            raw_ds = ds_data['choices'][0]['message']['content']
+            if isinstance(raw_ds, list):
+                raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
+            raw_ds = (raw_ds or "").strip().upper()
+
+            m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds)
+            if m:
+                producto_aplica = m.group(1)
+            else:
+                # If model responded unexpectedly, apply a conservative fallback
+                producto_aplica = "SI_APLICA" if any(
+                    kw in (texto or "").lower() for kw in
+                    ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', '¿tiene', 'foto', 'imagen', '¿cuánto', 'cotización', 'precio?', 'precio ']
+                ) else "NO_APLICA"
+
+            app.logger.info(f"🔎 DeepSeek product-detector -> {producto_aplica} (raw: {raw_ds[:200]})")
+        except Exception as e:
+            app.logger.warning(f"⚠️ DeepSeek detection failed: {e}; using keyword fallback")
+            # Simple fallback: look for product-related tokens in message + history
+            combined = (texto or "") + "\n" + (historial_text or "")
+            if any(kw in combined.lower() for kw in ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', 'foto', 'imagen', 'cotización', 'precio?', '¿cuánto']):
+                producto_aplica = "SI_APLICA"
+                app.logger.info("🔎 Fallback product-detector -> SI_APLICA")
+            else:
+                producto_aplica = "NO_APLICA"
+                app.logger.info("🔎 Fallback product-detector -> NO_APLICA")
+            app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
+        # --- end DeepSeek product detection ---
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
@@ -6628,7 +7503,7 @@ que el servidor debe ejecutar. Dispones de:
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-- Asesores (solo nombres, no revelar teléfonos):\n{asesores_block}
+
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
@@ -6656,10 +7531,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             "es_imagen": bool(es_imagen),
             "es_audio": bool(es_audio),
             "transcripcion": transcripcion or "",
-            "catalogo": catalog_list,
             "transferencias": transfer_list,
             "catalogo_texto_resumen": texto_catalogo
         }
+        if producto_aplica == "SI_APLICA":
+            user_content["catalogo"] = catalog_list
+            app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
+        else:
+            app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
 
         payload_messages = [
             {"role": "system", "content": system_prompt},
@@ -7143,6 +8022,12 @@ def obtener_configuracion_por_host():
         if 'maindsteel' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['1011']
+        if 'drasgo' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1012']
+        if 'lacse' in host:
+            app.logger.info("✅ Configuración detectada: Ofitodo")
+            return NUMEROS_CONFIG['1013']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
@@ -8056,14 +8941,17 @@ def configuracion_tab(tab):
             for i in range(1, asesor_count + 1):
                 name_key = f'asesor{i}_nombre'
                 phone_key = f'asesor{i}_telefono'
+                email_key = f'asesor{i}_email'
                 name = request.form.get(name_key, '').strip()
                 phone = request.form.get(phone_key, '').strip()
+                email = request.form.get(email_key, '').strip()
                 # Build legacy map for first two as fallback
                 if i <= 2:
                     advisors_map[f'asesor{i}_nombre'] = name
                     advisors_map[f'asesor{i}_telefono'] = phone
-                if name or phone:
-                    advisors_compiled.append({'nombre': name, 'telefono': phone})
+                    advisors_map[f'asesor{i}_email'] = email
+                if name or phone or email:
+                    advisors_compiled.append({'nombre': name, 'telefono': phone, 'email': email})
 
             cfg['asesores'] = advisors_map  # legacy map
             # supply structured list to be saved by save_config
@@ -8936,17 +9824,79 @@ def actualizar_kanban_inmediato(numero, config=None):
         return False
 
 def actualizar_columna_chat(numero, columna_id, config=None):
-        if config is None:
-            config = obtener_configuracion_por_host()
+    """
+    Safely update chat_meta.columna_id for a given chat.
+    - Verifies the target columna_id exists in kanban_columnas.
+    - If it doesn't exist, tries to find a column named like 'Resueltos'.
+    - If still not found, creates a new 'Resueltos' column and uses its id.
+    This prevents foreign-key errors when code attempts to move chats to a hard-coded id
+    that may have been deleted in that tenant DB.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    conn = None
+    cursor = None
+    try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+
+        # 1) If the target column id does not exist, attempt fallbacks
+        cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_id,))
+        if cursor.fetchone() is None:
+            app.logger.warning(f"⚠️ Target kanban_columnas id={columna_id} not found in DB {config.get('db_name')}. Attempting fallback lookup/create.")
+
+            # Try to find a column named 'Resueltos' (case-insensitive, tolerant)
+            cursor.execute("SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE LOWER(%s) LIMIT 1", ('%resueltos%',))
+            row = cursor.fetchone()
+            if row:
+                new_col_id = row[0]
+                app.logger.info(f"ℹ️ Fallback: found 'Cerrados' column id={new_col_id}. Using it instead of requested id={columna_id}.")
+                columna_id = new_col_id
+            else:
+                # Create a new 'Resueltos' column at the end
+                try:
+                    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
+                    next_ord_row = cursor.fetchone()
+                    next_ord = int(next_ord_row[0]) if next_ord_row and next_ord_row[0] is not None else 1
+                except Exception:
+                    next_ord = 1
+
+                default_icon = '/static/icons/default-avatar.png'
+                color = '#6c757d'
+                cursor.execute(
+                    "INSERT INTO kanban_columnas (nombre, orden, color, icono) VALUES (%s, %s, %s, %s)",
+                    ('Vendidos', next_ord, color, default_icon)
+                )
+                conn.commit()
+                columna_id = cursor.lastrowid
+                app.logger.info(f"✅ Created missing 'Vendidos' column id={columna_id} in DB {config.get('db_name')}")
+
+        # 2) Perform the update now that columna_id is guaranteed to exist
         cursor.execute("""
             UPDATE chat_meta SET columna_id = %s 
             WHERE numero = %s;
         """, (columna_id, numero))
         conn.commit()
-        cursor.close()
-        conn.close()
+        app.logger.info(f"✅ Chat {numero} columna updated to {columna_id} in DB {config.get('db_name')}")
+
+    except Exception as e:
+        # Log the underlying DB error for diagnostics
+        app.logger.error(f"❌ actualizar_columna_chat failed for numero={numero} columna_id={columna_id} on DB {config.get('db_name')}: {e}")
+        try:
+            if conn:
+                conn.rollback()
+        except:
+            pass
+        raise
+    finally:
+        try:
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
+        except:
+            pass
 
 def actualizar_info_contacto(numero, config=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
@@ -9091,7 +10041,7 @@ def obtener_contexto_consulta(numero, config=None):
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
-    
+    start_good_morning_scheduler()
     # Verificar tablas en todas las bases de datos
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
