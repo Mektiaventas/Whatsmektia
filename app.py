@@ -1569,20 +1569,23 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(traceback.format_exc())
         return None
 def validar_y_limpiar_servicio(servicio):
-    """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA"""
+    """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA (fix KeyError 'servicio')."""
     try:
         if not isinstance(servicio, dict):
             app.logger.warning("⚠️ Servicio no es diccionario, omitiendo")
             return None
-        
+
         servicio_limpio = {}
-        
-        # Campos obligatorios mínimos
-        if not servicio.get('servicio'):
+
+        # Asegurar nombre del servicio (campo obligatorio)
+        nombre = servicio.get('servicio') or servicio.get('modelo') or servicio.get('sku') or ''
+        nombre = str(nombre).strip() if nombre is not None else ''
+        if not nombre:
             app.logger.warning("⚠️ Servicio sin nombre, omitiendo")
             return None
-        
-        # Campos de texto con valores por defecto
+        servicio_limpio['servicio'] = nombre
+
+        # Campos de texto con valores por defecto (no sobrescribir 'servicio')
         campos_texto = {
             'sku': '',
             'categoria': 'General',
@@ -1598,33 +1601,29 @@ def validar_y_limpiar_servicio(servicio):
             'catalogo3': '',
             'proveedor': ''
         }
-        
+
         for campo, valor_default in campos_texto.items():
             valor = servicio.get(campo, valor_default)
-            servicio_limpio[campo] = str(valor).strip() if valor else valor_default
-        
+            servicio_limpio[campo] = str(valor).strip() if valor not in (None, '') else valor_default
+
         # Campos de precio - conversión robusta
-        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']  # Agregado "costo"
+        campos_precio = ['precio_mayoreo', 'precio_menudeo', 'costo']
         for campo in campos_precio:
             valor = servicio.get(campo, '0.00')
             precio_limpio = "0.00"
-            
             try:
-                if valor:
-                    # Remover todo excepto números y punto
+                if valor not in (None, ''):
                     valor_limpio = re.sub(r'[^\d.]', '', str(valor))
                     if valor_limpio:
-                        # Convertir a float y formatear
                         precio_float = float(valor_limpio)
                         precio_limpio = f"{precio_float:.2f}"
             except (ValueError, TypeError):
-                pass  # Mantener "0.00" en caso de error
-            
+                precio_limpio = "0.00"
             servicio_limpio[campo] = precio_limpio
-        
-        app.logger.info(f"✅ Servicio validado: {servicio_limpio['servicio']}")
+
+        app.logger.info(f"✅ Servicio validado: {servicio_limpio.get('servicio')}")
         return servicio_limpio
-        
+
     except Exception as e:
         app.logger.error(f"🔴 Error validando servicio: {e}")
         return None
