@@ -184,37 +184,8 @@
     background: #c00;
     border-radius: 50%;
 }
-.card-msg {
-    color: #e2e5ed;
-    font-size: 0.6em;
-    display: -webkit-box;
-    -webkit-line-clamp: 2; /* Muestra máximo 2 líneas */
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: normal; /* Permite saltos de línea */
-    min-height: 2.5em;
-    font-size: 0.95em;
-    font-weight: 400;
-    max-width: 70%;
-    letter-spacing: 0.01em;
-    margin-top: 2px;
-}
-.card-unread {
-  position: absolute;
-  top: 19px;
-  right: 20px;
-  background: #00E091;
-  color: #fff;
-  border-radius: 10px;
-  padding: 0.5px 8px;
-  font-size: 0.89em;
-  font-weight: 600;
-  min-width: 14px;
-  text-align: center;
-  box-shadow: 0 0 5px #00e09144;
-  z-index: 2;
-}
+
+
 .alias-edit input[type="text"] {
   font-size: 1em;
   padding: 2px 7px;
