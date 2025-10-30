@@ -36,6 +36,8 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+from flask import url_for
+from urllib.parse import urlparse
 import threading
 
 
@@ -209,7 +211,7 @@ PREFIJOS_PAIS = {
 }
 
 app.jinja_env.filters['bandera'] = lambda numero: get_country_flag(numero)
-
+app.jinja_env.filters['public_img'] = public_image_url
 PDF_UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads', 'pdfs')
 os.makedirs(PDF_UPLOAD_FOLDER, exist_ok=True)
 ALLOWED_EXTENSIONS = {
@@ -270,6 +272,32 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
+
+def public_image_url(imagen_url):
+    """Normalize image reference for templates:
+       - keep absolute http(s) or data: URIs as-is
+       - keep leading-absolute paths as-is (/...)
+       - otherwise route to our serve_product_image endpoint so images stored under uploads/productos/<tenant>/filename are served correctly.
+    """
+    try:
+        if not imagen_url:
+            return ''
+        imagen_url = str(imagen_url).strip()
+        # keep data URIs and absolute URLs
+        if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
+            return imagen_url
+        # keep app-absolute paths
+        if imagen_url.startswith('/'):
+            return imagen_url
+        # fallback: assume it's a filename stored in productos and use serve_product_image
+        # This will generate: /uploads/productos/<tenant_slug>/<filename> handled by serve_product_image
+        return url_for('serve_product_image', filename=imagen_url)
+    except Exception:
+        # last resort: try to serve from uploads root
+        try:
+            return url_for('serve_uploaded_file', filename=imagen_url)
+        except Exception:
+            return imagen_url
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
