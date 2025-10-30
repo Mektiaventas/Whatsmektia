@@ -36,6 +36,8 @@ from werkzeug.utils import secure_filename
 import bcrypt
 from functools import wraps
 from flask import session, g
+import threading
+
 
 try:
     # preferred location
@@ -74,7 +76,7 @@ def format_time_24h(dt):
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
 # ——— Env vars ———
-
+GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
@@ -7201,6 +7203,76 @@ def reset_columnas_precios():
         app.logger.error(f"🔴 reset_columnas_precios error: {e}")
         return jsonify({'success': False, 'error': str(e)}), 500
 
+def send_good_morning_to_tenant(config):
+    """Send the good morning message to all advisors configured for the given tenant."""
+    try:
+        cfg = load_config(config)
+        asesores = cfg.get('asesores_list') or []
+        if not asesores:
+            app.logger.info(f"ℹ️ No advisors configured for tenant {config.get('dominio')}")
+            return
+
+        negocio_nombre = (cfg.get('negocio') or {}).get('negocio_nombre') or config.get('dominio') or ''
+        default_msg = f"¡Buenos días! Les deseo un excelente día de trabajo{(' en ' + negocio_nombre) if negocio_nombre else ''}."
+        message = os.getenv("GOOD_MORNING_MESSAGE", default_msg)
+
+        for a in asesores:
+            telefono = (a.get('telefono') or '').strip()
+            if not telefono:
+                app.logger.warning(f"⚠️ Advisor without phone in tenant {config.get('dominio')}: {a}")
+                continue
+            try:
+                enviar_mensaje(telefono, message, config)
+                app.logger.info(f"✅ Good morning sent to advisor {telefono} (tenant={config.get('dominio')})")
+            except Exception as e:
+                app.logger.warning(f"⚠️ Failed to send good morning to {telefono} (tenant={config.get('dominio')}): {e}")
+    except Exception as e:
+        app.logger.error(f"🔴 send_good_morning_to_tenant error for {config.get('dominio')}: {e}")
+
+def send_good_morning_to_all():
+    """Iterate all tenants and send the good morning message to their advisors."""
+    app.logger.info("🔔 Running scheduled good-morning job for all tenants...")
+    for tenant_key, config in NUMEROS_CONFIG.items():
+        try:
+            # Use app context because enviar_mensaje / DB functions rely on it
+            with app.app_context():
+                send_good_morning_to_tenant(config)
+        except Exception as e:
+            app.logger.error(f"🔴 Error sending good morning for tenant {config.get('dominio')}: {e}")
+
+def start_good_morning_scheduler():
+    """Start a background thread that sends a good-morning message every interval hours."""
+    global GOOD_MORNING_THREAD_STARTED
+    if GOOD_MORNING_THREAD_STARTED:
+        app.logger.info("ℹ️ Good morning scheduler already started")
+        return
+
+    if os.getenv("GOOD_MORNING_ENABLED", "true").lower() != "true":
+        app.logger.info("ℹ️ Good morning scheduler disabled via GOOD_MORNING_ENABLED != 'true'")
+        return
+
+    try:
+        interval_hours = float(os.getenv("GOOD_MORNING_INTERVAL_HOURS", "23.45"))
+    except Exception:
+        interval_hours = 23.45
+    interval_seconds = max(60, int(interval_hours * 3600))  # at least 60s guard
+
+    def _worker():
+        app.logger.info(f"🕐 Good morning scheduler started (interval: {interval_hours} hours)")
+        # small initial delay so server finishes startup tasks
+        time.sleep(10)
+        while True:
+            try:
+                send_good_morning_to_all()
+            except Exception as e:
+                app.logger.error(f"🔴 Exception in good-morning loop: {e}")
+            # Sleep full interval
+            time.sleep(interval_seconds)
+
+    t = threading.Thread(target=_worker, daemon=True, name="good_morning_scheduler")
+    t.start()
+    GOOD_MORNING_THREAD_STARTED = True
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -9884,7 +9956,7 @@ def obtener_contexto_consulta(numero, config=None):
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
-    
+    start_good_morning_scheduler()
     # Verificar tablas en todas las bases de datos
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
