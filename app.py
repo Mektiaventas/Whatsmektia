@@ -7492,7 +7492,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # --- System prompt (strict rules to avoid hallucinations) ---
         system_prompt = f"""
-Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
+Eres el asistente conversacional de un negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
@@ -7625,6 +7625,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # continue to AI flow as fallback
         if intent == "ANALIZAR_IMAGEN":
             sent = analizar_imagen_y_responder(msg, numero, texto, config, imagen_base64=imagen_base64, incoming_saved=incoming_saved)
+            enviar_mensaje(numero, sent, config)
+            registrar_respuesta_bot(numero, texto, sent, config, incoming_saved=incoming_saved)
             return sent     
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
