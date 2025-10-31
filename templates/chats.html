@@ -203,11 +203,49 @@
             {% endif %}
 
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-ai">
+            <div class="msg-box msg-ai" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
+
+                    {% if msg.respuesta_tipo_mensaje == 'imagen' and msg.respuesta_contenido_extra %}
+                    <div class="image-message">
+                        <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
+                        {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
+                        <div class="image-caption">
+                            {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-bot-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/mpeg">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/ogg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-bot-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-bot-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-bot-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.respuesta_contenido_extra }}" download="audio-respuesta.mp3" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+                        {% if msg.respuesta %}
+                        <div class="audio-transcription">
+                            <strong>Respuesta:</strong> {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
                     <div class="text-message">
                         {{ msg.respuesta }}
                     </div>
+                    {% endif %}
+
                 </div>
                 <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
