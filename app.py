@@ -1585,25 +1585,36 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
         
-        # Validar estructura final
-        if 'productos' in servicios_extraidos and isinstance(servicios_extraidos['productos'], list):
+        # 1. Verificación de seguridad contra None
+        if servicios_extraidos and isinstance(servicios_extraidos, dict):
+            
+            # 2. Busca la llave 'servicios'
+            if 'servicios' in servicios_extraidos and isinstance(servicios_extraidos['servicios'], list):
+                key_a_usar = 'servicios'
+                lista_servicios = servicios_extraidos['servicios']
+            # O busca la llave 'productos'
+            elif 'productos' in servicios_extraidos and isinstance(servicios_extraidos['productos'], list):
+                key_a_usar = 'productos'
+                lista_servicios = servicios_extraidos['productos']
 
-            app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['productos'])} servicios")
-                
+        # Si encontró cualquiera de las dos llaves
+        if key_a_usar:
+            app.logger.info(f"✅ JSON válido: {len(lista_servicios)} elementos encontrados bajo la llave '{key_a_usar}'")
+            
             # Limpiar y validar servicios
             servicios_limpios = []
-            for servicio in servicios_extraidos['productos']:
+            for servicio in lista_servicios:
                 servicio_limpio = validar_y_limpiar_servicio(servicio)
                 if servicio_limpio:
                     servicios_limpios.append(servicio_limpio)
-                
-            servicios_extraidos['productos'] = servicios_limpios
+            
             app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
-                
-            return servicios_extraidos
-        
-        # Si llegamos aquí, todos los métodos fallaron
-        app.logger.error("❌ Todos los métodos de extracción JSON fallaron")
+            
+            # 3. ESTANDARIZA la salida para que SIEMPRE use la llave 'servicios'
+            return {'servicios': servicios_limpios}
+
+        # Si llegamos aquí, todos los métodos fallaron o la estructura era incorrecta
+        app.logger.error("❌ Todos los métodos de extracción JSON fallaron o la estructura es incorrecta")
         app.logger.error(f"📄 Respuesta IA problemática (primeros 1000 chars): {respuesta_ia[:1000]}...")
         return None
             
