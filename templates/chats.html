@@ -217,9 +217,20 @@
             {% if msg.respuesta is not none and msg.respuesta != '' and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai">
                 <div class="message-content">
+                    {% if msg.es_imagen and msg.imagen_url and (not msg.mensaje or msg.mensaje == '') %}
+                    <div class="image-message">
+                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
+                        {% if msg.respuesta and msg.respuesta != '[Imagen enviada]' %}
+                        <div class="image-caption">
+                            {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
                     <div class="text-message">
                         {{ msg.respuesta }}
                     </div>
+                    {% endif %}
                 </div>
                 <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
