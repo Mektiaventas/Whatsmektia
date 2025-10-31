@@ -7498,7 +7498,6 @@ que el servidor debe ejecutar. Dispones de:
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
@@ -7507,7 +7506,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-6) El JSON debe tener estas claves mínimas:
+6) Respuesta texto: debe ser concisa, clara y en español natural. Como la de un empleado hacia un cliente asistiendolo en lo que necesite.
+7) El JSON debe tener estas claves mínimas:
    - intent: one of ["ANALIZAR_IMAGEN","INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
@@ -7517,8 +7517,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - followups: [ ... ]
    - confidence: 0.0-1.0
    - source: "catalog" | "none"
-7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+8) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+9) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         user_content = {
