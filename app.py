@@ -5708,7 +5708,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             SET respuesta = %s,
                 respuesta_tipo_mensaje = %s,
                 respuesta_contenido_extra = %s,
-                timestamp = NOW() 
+                timestamp = UTC_TIMESTAMP() 
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
@@ -5723,7 +5723,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP())
             """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url)) # <-- Usar también la variable sanitizada aquí
         
         conn.commit()
@@ -6055,7 +6055,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
+            VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen))
 
         conn.commit()
