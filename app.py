@@ -1509,7 +1509,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
     
     try:
         # Limitar el texto para evitar tokens excesivos
-        texto_limitado = texto_pdf[:40000]  # Mantenemos un límite razonable
+        texto_limitado = texto_pdf[:150000]  # Mantenemos un límite razonable
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
@@ -1519,14 +1519,14 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         # PROMPT MÁS ESTRICTO Y OPTIMIZADO - con menos caracteres para evitar errores
         if es_porfirianna:
             prompt = f"""Extrae los productos del siguiente texto como JSON:
-{texto_limitado[:15000]}
+{texto_limitado[:150000]}
 Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
-Solo extrae hasta 20 productos principales."""
+"""
         else:
             prompt = f"""Extrae los servicios del siguiente texto como JSON:
-{texto_limitado[:15000]}
+{texto_limitado[:150000]}
 Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_SERVICIO","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"","precio_menudeo":"","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
-Solo extrae hasta 20 servicios principales."""
+"""
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -1538,7 +1538,7 @@ Solo extrae hasta 20 servicios principales."""
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000
+            "max_tokens": 150000
         }
         
         app.logger.info("🔄 Enviando PDF a IA para análisis...")
@@ -1636,7 +1636,7 @@ def validar_y_limpiar_servicio(servicio):
             return None
         servicio_limpio['servicio'] = nombre
 
-        # Campos de texto con valores por defecto (no sobrescribir 'servicio')
+        # Campos de texto con valores por defecto
         campos_texto = {
             'sku': '',
             'categoria': 'General',
