@@ -1520,12 +1520,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         if es_porfirianna:
             prompt = f"""Extrae los productos del siguiente texto como JSON:
 {texto_limitado[:150000]}
-Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
+Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
 """
         else:
             prompt = f"""Extrae los servicios del siguiente texto como JSON:
 {texto_limitado[:150000]}
-Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_SERVICIO","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"","precio_menudeo":"","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
+Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
 """
         
         headers = {
