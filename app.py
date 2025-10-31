@@ -1340,7 +1340,7 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         precios = obtener_todos_los_precios(config) or []
         productos_lines = []
         for p in precios[:1000]:
-            nombre = (p.get('modelo') or p.get('sku') or '')[:120]
+            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
             sku = (p.get('sku') or '').strip()
             precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
             imagen = p.get('imagen') or ''
@@ -6680,7 +6680,6 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
-            public_url=public_url, # <-- AÑADE ESTA LÍNEA
             transcripcion=transcripcion,
             incoming_saved=True
         )
@@ -7349,7 +7348,7 @@ def start_good_morning_scheduler():
     app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
-                               imagen_base64=None, public_url=None, transcripcion=None,
+                               imagen_base64=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante.
@@ -7493,12 +7492,13 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # --- System prompt (strict rules to avoid hallucinations) ---
         system_prompt = f"""
-Eres el asistente conversacional de un negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
+Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
+
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
@@ -7507,9 +7507,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-6) Respuesta texto: debe ser concisa, clara y en español natural. Como la de un empleado hacia un cliente asistiendolo en lo que necesite.
-7) El JSON debe tener estas claves mínimas:
-   - intent: one of ["ANALIZAR_IMAGEN","INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
+6) El JSON debe tener estas claves mínimas:
+   - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
    - document: url_or_null
@@ -7518,8 +7517,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - followups: [ ... ]
    - confidence: 0.0-1.0
    - source: "catalog" | "none"
-8) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-9) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         user_content = {
@@ -7624,17 +7623,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
-        if intent == "ANALIZAR_IMAGEN":
-            sent = analizar_imagen_y_responder(
-                numero=numero,
-                imagen_base64=imagen_base64,
-                caption=texto,
-                public_url=public_url,
-                config=config
-            )
-            enviar_mensaje(numero, sent, config)
-            registrar_respuesta_bot(numero, texto, sent, config, incoming_saved=incoming_saved)
-            return sent     
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
