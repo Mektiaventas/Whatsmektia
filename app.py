@@ -822,7 +822,7 @@ def importar_excel_directo():
         if file and allowed_file(file.filename):
             # Guardar archivo temporalmente
             filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
-            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
             # After file.save(filepath)
             imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
@@ -1800,7 +1800,7 @@ def subir_pdf_servicios():
         if file and allowed_file(file.filename):
             # Guardar archivo
             filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
-            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
             
             app.logger.info(f"📄 PDF guardado: {filepath}")
