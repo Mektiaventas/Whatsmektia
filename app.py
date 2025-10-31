@@ -5678,13 +5678,14 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             UPDATE conversaciones 
             SET respuesta = %s,
                 respuesta_tipo_mensaje = %s,
-                respuesta_contenido_extra = %s
+                respuesta_contenido_extra = %s,
+                timestamp = NOW() 
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
             ORDER BY timestamp DESC 
             LIMIT 1
-        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar)) # <-- Usar la variable sanitizada
+        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar))
         
         # Log results of update
         if cursor.rowcount > 0:
@@ -8389,7 +8390,7 @@ def ver_chat(numero):
         chats = cursor.fetchall()
         # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
-            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
                    -- Incluir la transcripción si está en el campo 'mensaje' y es un audio
                    CASE 
@@ -8459,6 +8460,63 @@ def ver_chat(numero):
         """
         return render_template_string(html, err_id=err_id), 500
        
+@app.route('/chat/<numero>/messages')
+@login_required
+def get_new_messages(numero):
+    """
+    Endpoint para el 'polling' de JavaScript. 
+    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
+    """
+    config = obtener_configuracion_por_host()
+    
+    # Recibir el timestamp en milisegundos y convertir a segundos
+    after_ts_ms = request.args.get('after_ts', 0, type=float)
+    after_ts_sec = after_ts_ms / 1000.0
+    
+    # Convertir a un objeto datetime (asumiendo que el timestamp es UTC)
+    after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Consultar mensajes donde el timestamp (que ahora SÍ se actualiza)
+        # es más reciente que el último timestamp que vio el cliente.
+        cursor.execute("""
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+                   tipo_mensaje, contenido_extra,
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio,
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
+            FROM conversaciones 
+            WHERE numero = %s AND timestamp > %s
+            ORDER BY timestamp ASC;
+        """, (numero, after_dt))
+        
+        new_messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Convertir timestamps a ISO (con zona horaria) para JSON
+        for msg in new_messages:
+            if msg.get('timestamp'):
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
+                else:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                
+                # Convertir a string ISO para JSON
+                msg['timestamp'] = msg['timestamp'].isoformat()
+        
+        return jsonify({'messages': new_messages})
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_new_messages: {e}")
+        return jsonify({'messages': []}), 500
+
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
     """Endpoint para verificar si el correo de Calendar está guardado"""

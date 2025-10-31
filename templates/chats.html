@@ -653,7 +653,7 @@ let refreshIntervalMs = 500;
 let messagePollIntervalMs = 1200;
 let selectedChatId = {{ selected|tojson }}; // injected by server; may be null
 let lastChatsTimestamp = 0;
-let lastMessageIdForSelected = 0;
+let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
 let isEditingAlias = false;
 let aliasTimers = new Map();
 let chatsIntervalHandle = null;
@@ -785,26 +785,40 @@ function buildMessageKeyFor(m) {
 /**
  * Poll selected chat messages and append only new ones
  */
-function pollSelectedMessages() {
-    const after = Number(lastMessageIdForSelected) || 0;
-    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(data => {
-            if (!data || !Array.isArray(data.messages)) return;
-            if (data.messages.length === 0) return;
-            // update last id
-            const maxId = data.messages.reduce((m, mm) => {
-                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
-                return id > m ? id : m;
-            }, lastMessageIdForSelected);
-            if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
-            // append user-sent messages (existing behavior)
-            appendUserMessagesToPanel(data.messages);
-            // append AI responses (new)
-            appendAIResponsesToPanel(data.messages);
-        })
-        .catch(err => console.error('Error polling messages:', err));
-}
+    function pollSelectedMessages() {
+        // Usar el timestamp del último mensaje, o el de ahora si es el primero
+        const after = Number(lastMessageTimestamp) || (Date.now() - 60000); // Poll de los últimos 60s si es 0
+
+        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
+            .then(r => r.json())
+            .then(data => {
+                if (!data || !Array.isArray(data.messages)) return;
+                if (data.messages.length === 0) return;
+
+                let maxTs = lastMessageTimestamp;
+
+                // Iterar y encontrar el timestamp más reciente
+                data.messages.forEach(m => {
+                    let ts = 0;
+                    if (m.timestamp) {
+                        ts = Date.parse(m.timestamp);
+                        if (!isNaN(ts)) {
+                            maxTs = Math.max(maxTs, ts);
+                        }
+                    }
+                });
+
+                // Actualizar el timestamp global (importante: +1ms para evitar re-fetch)
+                if (maxTs > lastMessageTimestamp) {
+                    lastMessageTimestamp = maxTs + 1;
+                }
+
+                // Estas funciones ya manejan la deduplicación
+                appendUserMessagesToPanel(data.messages);
+                appendAIResponsesToPanel(data.messages);
+            })
+            .catch(err => console.error('Error polling messages:', err));
+    }
     function appendAIResponsesToPanel(messages) {
         const container = document.getElementById('msgs');
         if (!container) return;
