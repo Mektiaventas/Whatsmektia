@@ -2442,37 +2442,66 @@ def negocio_contact_block(negocio):
     )
     return block
 
-@app.route('/chat/<telefono>/messages')
-def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID"""
-    after_id = request.args.get('after', 0, type=int)
+@app.route('/chat/<numero>/messages') # Renombramos 'telefono' a 'numero' para consistencia
+@login_required
+def get_new_messages(numero):
+    """
+    Endpoint para el 'polling' de JavaScript. 
+    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
+    """
     config = obtener_configuracion_por_host()
+    
+    # --- CORREGIDO: Buscar por after_ts (timestamp en milisegundos) ---
+    after_ts_ms = request.args.get('after_ts', 0, type=float)
+    after_ts_sec = after_ts_ms / 1000.0
+    
+    # Convertir a un objeto datetime (asumiendo UTC)
+    try:
+        # Usar el timestamp (zona UTC) para la consulta
+        after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+    except Exception:
+        # Fallback: últimos 60 segundos si el timestamp es inválido
+        after_dt = datetime.now(pytz.utc) - timedelta(minutes=1)
 
-    # Guardar y validar el parámetro recibido para evitar consultas inválidas
-    if not telefono or str(telefono).lower() in ('none', 'null', ''):
-        app.logger.warning(f"⚠️ get_chat_messages llamado con telefono inválido: {telefono}")
-        return jsonify({'messages': [], 'timestamp': int(time.time() * 1000)})
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # --- CORREGIDO: Consultar por timestamp > after_dt ---
+        cursor.execute("""
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+                   tipo_mensaje, contenido_extra,
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio,
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
+            FROM conversaciones 
+            WHERE numero = %s AND timestamp > %s
+            ORDER BY timestamp ASC;
+        """, (numero, after_dt))
+        
+        new_messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
 
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-
-    # Consultar solo mensajes más recientes que el ID proporcionado
-    # Usar la columna correcta 'numero' y ordenar por 'timestamp'
-    cursor.execute("""
-        SELECT id, mensaje AS content, timestamp, respuesta
-        FROM conversaciones 
-        WHERE numero = %s AND id > %s
-        ORDER BY timestamp ASC
-    """, (telefono, after_id))
-
-    messages = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify({
-        'messages': messages,
-        'timestamp': int(time.time() * 1000)
-    })
+        # Convertir timestamps a ISO (con zona horaria) para JSON
+        for msg in new_messages:
+            if msg.get('timestamp'):
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
+                else:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                
+                # Convertir a string ISO para JSON (esto es lo que Date.parse() en JS espera)
+                msg['timestamp'] = msg['timestamp'].isoformat()
+        
+        return jsonify({'messages': new_messages})
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_new_messages: {e}")
+        return jsonify({'messages': []}), 500
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
@@ -8472,65 +8501,6 @@ def ver_chat(numero):
         """
         return render_template_string(html, err_id=err_id), 500
        
-@app.route('/chat/<numero>/messages')
-@login_required
-def get_new_messages(numero):
-    """
-    Endpoint para el 'polling' de JavaScript. 
-    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
-    """
-    config = obtener_configuracion_por_host()
-    
-    # --- CORREGIDO: Buscar por after_ts (timestamp en milisegundos) ---
-    after_ts_ms = request.args.get('after_ts', 0, type=float)
-    after_ts_sec = after_ts_ms / 1000.0
-    
-    # Convertir a un objeto datetime (asumiendo UTC)
-    try:
-        after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
-    except Exception:
-        after_dt = datetime.now(pytz.utc) - timedelta(minutes=1) # Fallback
-
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # --- CORREGIDO: Consultar por timestamp > after_dt ---
-        cursor.execute("""
-            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
-                   tipo_mensaje, contenido_extra,
-                   CASE 
-                       WHEN tipo_mensaje = 'audio' THEN mensaje 
-                       ELSE NULL 
-                   END AS transcripcion_audio,
-                   respuesta_tipo_mensaje,
-                   respuesta_contenido_extra
-            FROM conversaciones 
-            WHERE numero = %s AND timestamp > %s
-            ORDER BY timestamp ASC;
-        """, (numero, after_dt))
-        
-        new_messages = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        # Convertir timestamps a ISO (con zona horaria) para JSON
-        for msg in new_messages:
-            if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is None:
-                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
-                else:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-                
-                # Convertir a string ISO para JSON
-                msg['timestamp'] = msg['timestamp'].isoformat()
-        
-        return jsonify({'messages': new_messages})
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en get_new_messages: {e}")
-        return jsonify({'messages': []}), 500
-
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
     """Endpoint para verificar si el correo de Calendar está guardado"""
