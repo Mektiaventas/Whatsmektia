@@ -5664,6 +5664,11 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Sanitizar el 'mensaje' para que coincida con lo guardado por 'guardar_mensaje_inmediato'
+        mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
+        # --- FIN DE LA CORRECCIÓN ---
+        
         # Log before update
         app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
         
@@ -5678,7 +5683,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
               AND respuesta IS NULL 
             ORDER BY timestamp DESC 
             LIMIT 1
-        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje))
+        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar)) # <-- Usar la variable sanitizada
         
         # Log results of update
         if cursor.rowcount > 0:
@@ -5688,7 +5693,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
                 VALUES (%s, %s, %s, %s, %s, NOW())
-            """, (numero, mensaje, respuesta, respuesta_tipo, respuesta_media_url))
+            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url)) # <-- Usar también la variable sanitizada aquí
         
         conn.commit()
         cursor.close()
@@ -5700,7 +5705,8 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
     except Exception as e:
         app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
         # Fallback a guardar conversación normal
-        guardar_conversacion(numero, mensaje, respuesta, config)
+        # Asegurarse de que el fallback también use el mensaje limpio
+        guardar_conversacion(numero, mensaje, respuesta, config, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
         return False
 
 def obtener_asesores_por_user(username, default=2, cap=20):
