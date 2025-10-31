@@ -139,7 +139,7 @@
         <div class="msgs-wrap-v2" id="msgs">
             {% if mensajes %}
             {% for msg in mensajes %}
-            {% if not msg.respuesta and msg.mensaje != '[Mensaje manual desde web]' %}
+            {% if (msg.respuesta is none or msg.respuesta == '') and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
@@ -214,7 +214,7 @@
             </div>
             {% endif %}
 
-            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            {% if msg.respuesta is not none and msg.respuesta != '' and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai">
                 <div class="message-content">
                     <div class="text-message">
