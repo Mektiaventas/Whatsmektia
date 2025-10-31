@@ -239,11 +239,12 @@ def public_image_url(imagen_url):
         # (para chats de usuarios) y si falla, buscar en /uploads/productos/
         try:
             # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
-            return url_for('serve_uploaded_file', filename=fname)
+            
+            return url_for('serve_product_image', filename=fname)
         except Exception:
             # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image' de la línea 1221)
-            try:
-                return url_for('serve_product_image', filename=fname)
+            try: 
+                return url_for('serve_uploaded_file', filename=fname)
             except Exception:
                 # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
                 return imagen_url
@@ -5652,7 +5653,7 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
-def actualizar_respuesta(numero, mensaje, respuesta, config=None):
+def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None):
     """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5664,19 +5665,27 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Sanitizar el 'mensaje' para que coincida con lo guardado por 'guardar_mensaje_inmediato'
+        mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
+        # --- FIN DE LA CORRECCIÓN ---
+        
         # Log before update
         app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
         
         # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
         cursor.execute("""
             UPDATE conversaciones 
-            SET respuesta = %s 
+            SET respuesta = %s,
+                respuesta_tipo_mensaje = %s,
+                respuesta_contenido_extra = %s,
+                timestamp = NOW() 
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
             ORDER BY timestamp DESC 
             LIMIT 1
-        """, (respuesta, numero, mensaje))
+        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar))
         
         # Log results of update
         if cursor.rowcount > 0:
@@ -5684,9 +5693,9 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
         else:
             app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
             cursor.execute("""
-                INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) 
-                VALUES (%s, %s, %s, NOW())
-            """, (numero, mensaje, respuesta))
+                INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
+                VALUES (%s, %s, %s, %s, %s, NOW())
+            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url)) # <-- Usar también la variable sanitizada aquí
         
         conn.commit()
         cursor.close()
@@ -5698,7 +5707,8 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None):
     except Exception as e:
         app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
         # Fallback a guardar conversación normal
-        guardar_conversacion(numero, mensaje, respuesta, config)
+        # Asegurarse de que el fallback también use el mensaje limpio
+        guardar_conversacion(numero, mensaje, respuesta, config, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
         return False
 
 def obtener_asesores_por_user(username, default=2, cap=20):
@@ -5994,7 +6004,7 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
 
-def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False):
+def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, respuesta_tipo='texto', respuesta_media_url=None):
     """Función compatible con la estructura actual de la base de datos.
     Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
     antes de guardarlo."""
@@ -6015,9 +6025,9 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
 
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
-            VALUES (%s, %s, %s, NOW(), %s, %s)
-        """, (numero, mensaje_limpio, respuesta_limpia, imagen_url, es_imagen))
+            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen)
+            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
+        """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen))
 
         conn.commit()
         cursor.close()
@@ -6719,7 +6729,7 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
 
-def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False):
+def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False, respuesta_tipo='texto', respuesta_media_url=None):
     """
     Save the bot response in a way that avoids duplicating the incoming user message.
     - If incoming_saved is True, try to update the existing incoming message row with respuesta using actualizar_respuesta().
@@ -6730,11 +6740,11 @@ def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=
         if incoming_saved:
             try:
                 # Prefer updating the existing incoming message so we don't insert a duplicate user row
-                return actualizar_respuesta(numero, mensaje, respuesta, config)
+                return actualizar_respuesta(numero, mensaje, respuesta, config, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
             except Exception as e:
                 app.logger.warning(f"⚠️ actualizar_respuesta failed, falling back to guardar_conversacion: {e}")
                 # fallback to insert if update fails
-                return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+                return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
         else:
             return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
     except Exception as e:
@@ -7549,6 +7559,9 @@ que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
+- Tu nombre es "{ia_nombre}" y el negocio se llama "{negocio_nombre}".
+- Descripción del negocio: {negocio_descripcion_short}
+- Cual es tu rol?: {negocio_que_hace_short}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
@@ -7681,16 +7694,21 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
+                
+                # --- CORREGIDO ---
+                # Guardar el nombre de archivo o URL cruda (http)
+                # El filtro en chats.html se encargará de construir la URL correcta
+                bot_media_url_to_save = image_field
+                
                 registrar_respuesta_bot(
                     numero, texto, respuesta_text, config,
-                    imagen_url=(image_field if isinstance(image_field, str) and image_field.startswith('http') else f"/uploads/productos/{image_field}"),
-                    es_imagen=True,
-                    incoming_saved=incoming_saved
+                    incoming_saved=incoming_saved,
+                    respuesta_tipo='imagen',
+                    respuesta_media_url=bot_media_url_to_save
                 )
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
-
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
@@ -7707,7 +7725,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
                 enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
@@ -7716,34 +7734,31 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
+        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
-            # Aplicar restricciones de todos modos (ej. palabras prohibidas)
+            # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
-            # --- INICIO DE LA MODIFICACIÓN: RESPONDER CON AUDIO ---
+            # --- INICIO DE LA CORRECCIÓN ---
             if es_audio:
-                # Si el usuario envió un audio, respondemos con audio
+                # Si el usuario envió un audio, intentamos responder con audio
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
-                    # 1. Generar nombre de archivo único
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    
-                    # 2. Convertir texto a voz (desde whatsapp.py)
                     audio_url = texto_a_voz(respuesta_text, filename, config)
                     
                     if audio_url:
-                        # 3. Enviar el mensaje de voz (desde whatsapp.py)
                         sent_audio = enviar_mensaje_voz(numero, audio_url, config)
                         
                         if sent_audio:
-                            # 4. Registrar en DB (guardamos solo el texto de la respuesta)
-                            # La UI de chats.html mostrará este texto
-                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+                            # ÉXITO AUDIO: Enviar y registrar como audio
+                            app.logger.info(f"✅ Respuesta de audio enviada a {numero}")
+                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
                             return True
                         else:
                             app.logger.warning("⚠️ Falló el envío del mensaje de voz. Enviando como texto.")
@@ -7755,12 +7770,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     app.logger.error(traceback.format_exc())
                     # Fallback a enviar texto si algo falla
             
-            # --- FIN DE LA MODIFICACIÓN ---
-
+            # FALLBACK A TEXTO:
+            # (Ocurre si 'es_audio' era False, o si la generación/envío de audio falló)
+            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
+            enviar_mensaje(numero, respuesta_text, config)
+            
+            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
+            registrar_respuesta_bot(
+                numero, texto, respuesta_text, config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  # <-- Corregido
+                respuesta_media_url=None   # <-- Corregido
+            )
+            return True
+            # --- FIN DE LA CORRECCIÓN ---
             # Fallback: Enviar como texto si no era audio o si el audio falló
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
 
     except requests.exceptions.RequestException as e:
@@ -8375,13 +8402,18 @@ def ver_chat(numero):
         chats = cursor.fetchall()
         # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
-            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
                    -- Incluir la transcripción si está en el campo 'mensaje' y es un audio
                    CASE 
                        WHEN tipo_mensaje = 'audio' THEN mensaje 
                        ELSE NULL 
-                   END AS transcripcion_audio
+                   END AS transcripcion_audio,
+                   
+                   -- Nuevas columnas para la respuesta del BOT
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
+                   
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp ASC;
@@ -8440,6 +8472,63 @@ def ver_chat(numero):
         """
         return render_template_string(html, err_id=err_id), 500
        
+@app.route('/chat/<numero>/messages')
+@login_required
+def get_new_messages(numero):
+    """
+    Endpoint para el 'polling' de JavaScript. 
+    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
+    """
+    config = obtener_configuracion_por_host()
+    
+    # Recibir el timestamp en milisegundos y convertir a segundos
+    after_ts_ms = request.args.get('after_ts', 0, type=float)
+    after_ts_sec = after_ts_ms / 1000.0
+    
+    # Convertir a un objeto datetime (asumiendo que el timestamp es UTC)
+    after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Consultar mensajes donde el timestamp (que ahora SÍ se actualiza)
+        # es más reciente que el último timestamp que vio el cliente.
+        cursor.execute("""
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+                   tipo_mensaje, contenido_extra,
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio,
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
+            FROM conversaciones 
+            WHERE numero = %s AND timestamp > %s
+            ORDER BY timestamp ASC;
+        """, (numero, after_dt))
+        
+        new_messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        # Convertir timestamps a ISO (con zona horaria) para JSON
+        for msg in new_messages:
+            if msg.get('timestamp'):
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
+                else:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                
+                # Convertir a string ISO para JSON
+                msg['timestamp'] = msg['timestamp'].isoformat()
+        
+        return jsonify({'messages': new_messages})
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_new_messages: {e}")
+        return jsonify({'messages': []}), 500
+
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
     """Endpoint para verificar si el correo de Calendar está guardado"""

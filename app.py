@@ -8481,19 +8481,21 @@ def get_new_messages(numero):
     """
     config = obtener_configuracion_por_host()
     
-    # Recibir el timestamp en milisegundos y convertir a segundos
+    # --- CORREGIDO: Buscar por after_ts (timestamp en milisegundos) ---
     after_ts_ms = request.args.get('after_ts', 0, type=float)
     after_ts_sec = after_ts_ms / 1000.0
     
-    # Convertir a un objeto datetime (asumiendo que el timestamp es UTC)
-    after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+    # Convertir a un objeto datetime (asumiendo UTC)
+    try:
+        after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+    except Exception:
+        after_dt = datetime.now(pytz.utc) - timedelta(minutes=1) # Fallback
 
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Consultar mensajes donde el timestamp (que ahora SÍ se actualiza)
-        # es más reciente que el último timestamp que vio el cliente.
+        # --- CORREGIDO: Consultar por timestamp > after_dt ---
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
