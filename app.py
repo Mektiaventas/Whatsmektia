@@ -2442,9 +2442,9 @@ def negocio_contact_block(negocio):
     )
     return block
 
-@app.route('/chat/<numero>/messages') # Renombramos 'telefono' a 'numero' para consistencia
+@app.route('/chat/<telefono>/messages')
 @login_required
-def get_new_messages(numero):
+def get_chat_messages(telefono):
     """
     Endpoint para el 'polling' de JavaScript. 
     Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
@@ -2480,7 +2480,7 @@ def get_new_messages(numero):
             FROM conversaciones 
             WHERE numero = %s AND timestamp > %s
             ORDER BY timestamp ASC;
-        """, (numero, after_dt))
+        """, (telefono, after_dt))
         
         new_messages = cursor.fetchall()
         cursor.close()
@@ -2500,7 +2500,7 @@ def get_new_messages(numero):
         return jsonify({'messages': new_messages})
         
     except Exception as e:
-        app.logger.error(f"🔴 Error en get_new_messages: {e}")
+        app.logger.error(f"🔴 Error en get_new_messages (antes get_chat_messages): {e}")
         return jsonify({'messages': []}), 500
 
 @app.route('/autorizar-porfirianna')
