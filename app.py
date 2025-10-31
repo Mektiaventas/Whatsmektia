@@ -7736,28 +7736,25 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
+        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
-            # Aplicar restricciones de todos modos (ej. palabras prohibidas)
+            # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
-            # --- INICIO DE LA MODIFICACIÓN: RESPONDER CON AUDIO ---
+            # --- INICIO DE LA CORRECCIÓN ---
             if es_audio:
-                # Si el usuario envió un audio, respondemos con audio
+                # Si el usuario envió un audio, intentamos responder con audio
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
-                    # 1. Generar nombre de archivo único
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    
-                    # 2. Convertir texto a voz (desde whatsapp.py)
                     audio_url = texto_a_voz(respuesta_text, filename, config)
                     
                     if audio_url:
-                        # 3. Enviar el mensaje de voz (desde whatsapp.py)
                         sent_audio = enviar_mensaje_voz(numero, audio_url, config)
                         
                         if sent_audio:
-                            # 4. Registrar en DB (guardamos solo el texto de la respuesta)
-                            # La UI de chats.html mostrará este texto
+                            # ÉXITO AUDIO: Enviar y registrar como audio
+                            app.logger.info(f"✅ Respuesta de audio enviada a {numero}")
                             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
                             return True
                         else:
@@ -7770,8 +7767,20 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     app.logger.error(traceback.format_exc())
                     # Fallback a enviar texto si algo falla
             
-            # --- FIN DE LA MODIFICACIÓN ---
-
+            # FALLBACK A TEXTO:
+            # (Ocurre si 'es_audio' era False, o si la generación/envío de audio falló)
+            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
+            enviar_mensaje(numero, respuesta_text, config)
+            
+            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
+            registrar_respuesta_bot(
+                numero, texto, respuesta_text, config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  # <-- Corregido
+                respuesta_media_url=None   # <-- Corregido
+            )
+            return True
+            # --- FIN DE LA CORRECCIÓN ---
             # Fallback: Enviar como texto si no era audio o si el audio falló
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             enviar_mensaje(numero, respuesta_text, config)
