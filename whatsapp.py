@@ -91,7 +91,7 @@ def obtener_archivo_whatsapp(media_id, config=None):
         return None, None, None
 
 def obtener_imagen_whatsapp(image_id, config=None):
-    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente"""
+    """Obtiene la imagen de WhatsApp, la convierte a base64 y guarda localmente EN UPLOAD_FOLDER"""
     if config is None:
         try:
             from app import obtener_configuracion_por_host
@@ -127,14 +127,21 @@ def obtener_imagen_whatsapp(image_id, config=None):
             logger.error(f"🔴 Error descargando imagen: {image_response.status_code}")
             return None, None
         
-        # 3. Guardar la imagen en directorio estático para mostrarla en web
-        static_images_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'images', 'whatsapp')
-        os.makedirs(static_images_dir, exist_ok=True)
+        # --- INICIO DE LA CORRECCIÓN ---
+        
+        # 3. Guardar la imagen en UPLOAD_FOLDER (importado de app.py)
+        try:
+            from app import UPLOAD_FOLDER
+        except ImportError:
+            logger.warning("Could not import UPLOAD_FOLDER from app, using fallback path.")
+            UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
+            
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
         
         # Nombre seguro para el archivo
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = secure_filename(f"whatsapp_image_{timestamp}.jpg")
-        filepath = os.path.join(static_images_dir, filename)
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         
         with open(filepath, 'wb') as f:
             f.write(image_response.content)
@@ -143,11 +150,13 @@ def obtener_imagen_whatsapp(image_id, config=None):
         image_base64 = base64.b64encode(image_response.content).decode('utf-8')
         base64_string = f"data:{mime_type};base64,{image_base64}"
         
-        # 5. URL pública para mostrar en web
-        public_url = f"/static/images/whatsapp/{filename}"
+        # 5. URL pública: DEBE SER SOLO EL NOMBRE DEL ARCHIVO
+        public_url = filename
+        
+        # --- FIN DE LA CORRECCIÓN ---
         
         logger.info(f"✅ Imagen guardada: {filepath}")
-        logger.info(f"🌐 URL web: {public_url}")
+        logger.info(f"🌐 URL web (para DB): {public_url}")
         
         return base64_string, public_url
         
