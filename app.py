@@ -1519,7 +1519,7 @@ def analizar_pdf_servicios(texto_pdf, config=None):
 
         prompt = f"""Extrae los servicios del siguiente texto como JSON:
 {texto_limitado[:150000]}
-Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
+Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","descripcion":"descripcion de producto o servicio","precio":"100.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
 Envia maximo 90 servicios.
 """
         
