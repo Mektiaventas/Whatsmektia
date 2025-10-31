@@ -273,11 +273,18 @@ def texto_a_voz(texto, filename, config=None):
             return None
         import os
 
-        base_dir = os.path.dirname(os.path.abspath(__file__))
-        audio_dir = os.path.join(base_dir, 'static', 'audio', 'respuestas')
-        os.makedirs(audio_dir, exist_ok=True)
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Importar UPLOAD_FOLDER desde app.py (la carpeta pública correcta)
+        try:
+            from app import UPLOAD_FOLDER
+        except ImportError:
+            logger.warning("⚠️ No se pudo importar UPLOAD_FOLDER, usando fallback 'uploads/'")
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            UPLOAD_FOLDER = os.path.join(base_dir, 'uploads')
 
-        filepath = os.path.join(audio_dir, f"{filename}.mp3")
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        filepath = os.path.join(UPLOAD_FOLDER, f"{filename}.mp3")
+        # --- FIN DE LA CORRECCIÓN ---
 
         # Generar y guardar MP3
         tts = gTTS(text=texto, lang='es', slow=False)
@@ -300,7 +307,10 @@ def texto_a_voz(texto, filename, config=None):
         if not dominio.startswith('http'):
             dominio = 'https://' + dominio
 
-        audio_url = f"{dominio.rstrip('/')}/static/audio/respuestas/{filename}.mp3"
+        # --- INICIO DE LA CORRECCIÓN DE URL ---
+        # Apuntar a /uploads/ en lugar de /static/audio/respuestas/
+        audio_url = f"{dominio.rstrip('/')}/uploads/{filename}.mp3"
+        # --- FIN DE LA CORRECCIÓN DE URL ---
 
         # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
         try:
