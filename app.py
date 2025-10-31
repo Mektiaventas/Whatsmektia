@@ -1503,20 +1503,22 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
         return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
+    """Usa IA (OpenAI) para analizar el PDF y extraer servicios y precios"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
         # Limitar el texto para evitar tokens excesivos
-        texto_limitado = texto_pdf[:150000]  # Mantenemos un límite razonable
+        # 150,000 caracteres es mucho, gpt-4o tiene un límite de 128k *tokens* (aprox ~400k chars)
+        # pero esto sigue siendo una sola llamada, el límite de *salida* es el problema.
+        texto_limitado = texto_pdf[:150000] 
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
         # Determinar el tipo de negocio para el prompt
         es_porfirianna = 'laporfirianna' in config.get('dominio', '')
         
-        # PROMPT MÁS ESTRICTO Y OPTIMIZADO - con menos caracteres para evitar errores
+        # PROMPT MÁS ESTRICTO Y OPTIMIZADO
         if es_porfirianna:
             prompt = f"""Extrae los productos del siguiente texto como JSON:
 {texto_limitado[:150000]}
@@ -1529,26 +1531,26 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
 """
         
         headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",  # <-- CAMBIO
             "Content-Type": "application/json"
         }
         
-        # Payload simplificado para evitar errores
         payload = {
-            "model": "deepseek-chat",
+            "model": "gpt-4o",  # <-- CAMBIO (Recomendado)
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 8192
+            "max_tokens": 4096,  # <-- CAMBIO (Límite de gpt-4o para salida)
+            "response_format": { "type": "json_object" } # <-- CAMBIO (Modo JSON de OpenAI)
         }
         
-        app.logger.info("🔄 Enviando PDF a IA para análisis...")
+        app.logger.info("🔄 Enviando PDF a OpenAI para análisis...")
         
         # Añadir más logs para diagnóstico
-        app.logger.info(f"🔍 API URL: {DEEPSEEK_API_URL}")
+        app.logger.info(f"🔍 API URL: {OPENAI_API_URL}") # <-- CAMBIO
         app.logger.info(f"🔍 Headers: {json.dumps({k: '***' if k == 'Authorization' else v for k, v in headers.items()})}")
         app.logger.info(f"🔍 Payload: {json.dumps(payload)[:500]}...")
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=180)
+        response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=180) # <-- CAMBIO
         
         # Log detallado de la respuesta para diagnóstico
         app.logger.info(f"🔍 Response status: {response.status_code}")
@@ -1567,6 +1569,10 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
         # INTENTAR MÚLTIPLES MÉTODOS DE EXTRACCIÓN JSON
         servicios_extraidos = None
         
+        # Con el "json_mode" de OpenAI, el regex ya no es necesario,
+        # pero lo mantenemos por si acaso o para otros modelos.
+        # El Método 2 (directo) debería funcionar siempre.
+        
         # Método 1: Buscar JSON con regex
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
@@ -1577,13 +1583,18 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON regex falló: {e}")
         
-        # Método 2: Intentar parsear directamente
+        # Método 2: Intentar parsear directamente (El esperado con json_object)
         if not servicios_extraidos:
             try:
                 servicios_extraidos = json.loads(respuesta_ia)
                 app.logger.info("✅ JSON parseado directamente")
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
+        
+        
+        # --- LÓGICA DE VALIDACIÓN CORREGIDA ---
+        key_a_usar = None       # <-- CAMBIO (Inicializar fuera del if)
+        lista_servicios = []  # <-- CAMBIO (Inicializar fuera del if)
         
         # 1. Verificación de seguridad contra None
         if servicios_extraidos and isinstance(servicios_extraidos, dict):
@@ -1630,6 +1641,7 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA (fix KeyError 'servicio')."""
     try:
