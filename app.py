@@ -7916,7 +7916,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
-            VALUES (%s, %s, NULL, NOW(), %s, %s, %s, %s)
+            VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
         # --- FIN MODIFICADO ---
 
