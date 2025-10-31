@@ -1515,21 +1515,12 @@ def analizar_pdf_servicios(texto_pdf, config=None):
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
-        # Determinar el tipo de negocio para el prompt
-        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-        
         # PROMPT MÁS ESTRICTO Y OPTIMIZADO
-        if es_porfirianna:
-            prompt = f"""Extrae los productos del siguiente texto como JSON:
-{texto_limitado[:150000]}
-Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
-Envia maximo 90 productos.
-"""
-        else:
-            prompt = f"""Extrae los servicios del siguiente texto como JSON:
+
+        prompt = f"""Extrae los servicios del siguiente texto como JSON:
 {texto_limitado[:150000]}
 Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
-Envia maximo 30 servicios.
+Envia maximo 90 servicios.
 """
         
         headers = {
