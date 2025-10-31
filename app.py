@@ -1428,54 +1428,29 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        if tipo_negocio == 'laporfirianna':
-            prompt = f"""
-            Eres un asistente especializado en analizar documentos para restaurantes.
-            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+        prompt = f"""
+        Eres un asistente especializado en analizar documentos.
+        Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
-            CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
+        CONTENIDO DEL ARCHIVO:
+        {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
             
-            Proporciona un análisis en este formato:
+        Proporciona un análisis en este formato:
             
-            📊 **ANÁLISIS DEL DOCUMENTO**
+        📊 **ANÁLISIS DEL DOCUMENTO**
             
-            **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
+        **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
             
-            **Información clave encontrada:**
-            - Platillos/productos principales
-            - Precios (si están disponibles)
-            - Cantidades o inventarios
-            - Fechas o periodos relevantes
+        **Información clave encontrada:**
+        - SKU o identificadores de productos
+        - Precios (si están disponibles), Costos, Inscripciones, mensualidades
+        - Modelos o descripciones de productos
+        - imagenes o referencias visuales (si aplica)
             
-            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+        **Resumen ejecutivo:** [2-3 frases con lo más importante]
             
-            **Recomendaciones:** [Cómo podría usar esta información]
-            """
-        else:
-            prompt = f"""
-            Eres un asistente especializado en analizar documentos para servicios digitales.
-            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
-            
-            CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:80000]}
-            
-            Proporciona un análisis en este formato:
-            
-            📊 **ANÁLISIS DEL DOCUMENTO**
-            
-            **Tipo de contenido detectado:** [Cotización, Requerimientos, Proyecto, etc.]
-            
-            **Información clave encontrada:**
-            - Servicios solicitados
-            - Presupuestos o costos
-            - Especificaciones técnicas
-            - Plazos o fechas importantes
-            
-            **Resumen ejecutivo:** [2-3 frases con lo más importante]
-            
-            **Recomendaciones:** [Siguientes pasos sugeridos]
-            """
+        **Recomendaciones:** [Cómo podría usar esta información]
+        """
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
