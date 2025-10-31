@@ -6687,6 +6687,7 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
+            public_url=public_url,
             transcripcion=transcripcion,
             incoming_saved=True
         )
@@ -7355,7 +7356,7 @@ def start_good_morning_scheduler():
     app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
-                               imagen_base64=None, transcripcion=None,
+                               imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante.
@@ -7367,7 +7368,37 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-        #aqui pon el codigo
+        # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
+        if es_imagen and imagen_base64:
+            app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
+            try:
+                # Llamar a la función de análisis de visión que ya existe en tu código
+                respuesta_vision = analizar_imagen_y_responder(
+                    numero=numero,
+                    imagen_base64=imagen_base64,
+                    caption=texto,  # El texto que acompaña la imagen (o "El usuario envió...")
+                    public_url=public_url,
+                    config=config
+                )
+                
+                if respuesta_vision:
+                    # Si OpenAI respondió, enviar esa respuesta y terminar
+                    enviar_mensaje(numero, respuesta_vision, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
+                    return True  # Termina el procesamiento aquí
+                else:
+                    # Si OpenAI falló, enviar un fallback
+                    app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
+                    fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
+                    enviar_mensaje(numero, fallback_msg, config)
+                    registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
+                    return True # Termina el procesamiento aquí
+
+            except Exception as e:
+                app.logger.error(f"🔴 Error fatal llamando a analizar_imagen_y_responder: {e}")
+                app.logger.error(traceback.format_exc())
+                # No continuar si el análisis de imagen falló
+                return False
         # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
