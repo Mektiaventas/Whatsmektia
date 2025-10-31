@@ -1538,7 +1538,7 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
             "model": "deepseek-chat",
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 150000
+            "max_tokens": 18192
         }
         
         app.logger.info("🔄 Enviando PDF a IA para análisis...")
