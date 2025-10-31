@@ -7720,15 +7720,48 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
-        # RESPUESTA TEXTUAL POR DEFECTO
+        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
+            # Aplicar restricciones de todos modos (ej. palabras prohibidas)
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
+            
+            # --- INICIO DE LA MODIFICACIÓN: RESPONDER CON AUDIO ---
+            if es_audio:
+                # Si el usuario envió un audio, respondemos con audio
+                app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
+                try:
+                    # 1. Generar nombre de archivo único
+                    filename = f"respuesta_{numero}_{int(time.time())}"
+                    
+                    # 2. Convertir texto a voz (desde whatsapp.py)
+                    audio_url = texto_a_voz(respuesta_text, filename, config)
+                    
+                    if audio_url:
+                        # 3. Enviar el mensaje de voz (desde whatsapp.py)
+                        sent_audio = enviar_mensaje_voz(numero, audio_url, config)
+                        
+                        if sent_audio:
+                            # 4. Registrar en DB (guardamos solo el texto de la respuesta)
+                            # La UI de chats.html mostrará este texto
+                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+                            return True
+                        else:
+                            app.logger.warning("⚠️ Falló el envío del mensaje de voz. Enviando como texto.")
+                    else:
+                        app.logger.warning("⚠️ Falló la generación de audio (texto_a_voz). Enviando como texto.")
+                
+                except Exception as e:
+                    app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
+                    app.logger.error(traceback.format_exc())
+                    # Fallback a enviar texto si algo falla
+            
+            # --- FIN DE LA MODIFICACIÓN ---
+
+            # Fallback: Enviar como texto si no era audio o si el audio falló
+            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             enviar_mensaje(numero, respuesta_text, config)
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             return True
-
-        app.logger.info("ℹ️ procesar_mensaje_unificado: no action required by IA decision")
-        return False
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
