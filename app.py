@@ -228,23 +228,30 @@ def public_image_url(imagen_url):
         if imagen_url.startswith('/uploads/') or imagen_url.startswith('/static/') or imagen_url.startswith('/'):
             return imagen_url
 
-        # If the value contains a path (e.g. "productos/tenant/filename.jpg" or "uploads/productos/tenant/filename.jpg"),
-        # use the basename because serve_product_image expects filename (it will search tenant dirs and fallbacks).
         from os.path import basename
         fname = basename(imagen_url)
 
-        # If after basename we have nothing, fallback to original value
         if not fname:
             return imagen_url
 
-        # Build URL to the dedicated product-image serving route
-        return url_for('serve_product_image', filename=fname)
-    except Exception:
-        # Last resort: try to serve from uploads root, or return original
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Priorizar la búsqueda en la carpeta de subidas general /uploads/
+        # (para chats de usuarios) y si falla, buscar en /uploads/productos/
         try:
-            return url_for('serve_uploaded_file', filename=imagen_url)
+            # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
+            return url_for('serve_uploaded_file', filename=fname)
         except Exception:
-            return imagen_url
+            # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image' de la línea 1221)
+            try:
+                return url_for('serve_product_image', filename=fname)
+            except Exception:
+                # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
+                return imagen_url
+        # --- FIN DE LA CORRECCIÓN ---
+
+    except Exception:
+        # Último recurso si todo el bloque 'try' principal falla
+        return imagen_url
 
 app.add_template_filter(public_image_url, 'public_img')
 
