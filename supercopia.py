@@ -203,7 +203,11 @@ get_docs_dir_for_config,
 get_productos_dir_for_config, 
 determinar_extension
 )
-
+ALLOWED_EXTENSIONS = {
+    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',  # Documentos e imágenes
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',     # Videos
+    'xlsx', 'xls', 'csv', 'docx'                          # Office y documentos
+}
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
@@ -224,23 +228,30 @@ def public_image_url(imagen_url):
         if imagen_url.startswith('/uploads/') or imagen_url.startswith('/static/') or imagen_url.startswith('/'):
             return imagen_url
 
-        # If the value contains a path (e.g. "productos/tenant/filename.jpg" or "uploads/productos/tenant/filename.jpg"),
-        # use the basename because serve_product_image expects filename (it will search tenant dirs and fallbacks).
         from os.path import basename
         fname = basename(imagen_url)
 
-        # If after basename we have nothing, fallback to original value
         if not fname:
             return imagen_url
 
-        # Build URL to the dedicated product-image serving route
-        return url_for('serve_product_image', filename=fname)
-    except Exception:
-        # Last resort: try to serve from uploads root, or return original
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Priorizar la búsqueda en la carpeta de subidas general /uploads/
+        # (para chats de usuarios) y si falla, buscar en /uploads/productos/
         try:
-            return url_for('serve_uploaded_file', filename=imagen_url)
+            # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
+            return url_for('serve_uploaded_file', filename=fname)
         except Exception:
-            return imagen_url
+            # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image' de la línea 1221)
+            try:
+                return url_for('serve_product_image', filename=fname)
+            except Exception:
+                # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
+                return imagen_url
+        # --- FIN DE LA CORRECCIÓN ---
+
+    except Exception:
+        # Último recurso si todo el bloque 'try' principal falla
+        return imagen_url
 
 app.add_template_filter(public_image_url, 'public_img')
 
@@ -818,7 +829,7 @@ def importar_excel_directo():
         if file and allowed_file(file.filename):
             # Guardar archivo temporalmente
             filename = secure_filename(f"excel_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
-            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
             # After file.save(filepath)
             imagenes_embedded = extraer_imagenes_embedded_excel(filepath)
@@ -1424,54 +1435,29 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        if tipo_negocio == 'laporfirianna':
-            prompt = f"""
-            Eres un asistente especializado en analizar documentos para restaurantes.
-            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
+        prompt = f"""
+        Eres un asistente especializado en analizar documentos.
+        Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
             
-            CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
+        CONTENIDO DEL ARCHIVO:
+        {texto_archivo[:80000]}  # Limitar tamaño para evitar tokens excesivos
             
-            Proporciona un análisis en este formato:
+        Proporciona un análisis en este formato:
             
-            📊 **ANÁLISIS DEL DOCUMENTO**
+        📊 **ANÁLISIS DEL DOCUMENTO**
             
-            **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
+        **Tipo de contenido detectado:** [Menú, Inventario, Pedidos, etc.]
             
-            **Información clave encontrada:**
-            - Platillos/productos principales
-            - Precios (si están disponibles)
-            - Cantidades o inventarios
-            - Fechas o periodos relevantes
+        **Información clave encontrada:**
+        - SKU o identificadores de productos
+        - Precios (si están disponibles), Costos, Inscripciones, mensualidades
+        - Modelos o descripciones de productos
+        - imagenes o referencias visuales (si aplica)
             
-            **Resumen ejecutivo:** [2-3 frases con lo más importante]
+        **Resumen ejecutivo:** [2-3 frases con lo más importante]
             
-            **Recomendaciones:** [Cómo podría usar esta información]
-            """
-        else:
-            prompt = f"""
-            Eres un asistente especializado en analizar documentos para servicios digitales.
-            Analiza el siguiente contenido extraído de un archivo y proporciona un resumen útil:
-            
-            CONTENIDO DEL ARCHIVO:
-            {texto_archivo[:80000]}
-            
-            Proporciona un análisis en este formato:
-            
-            📊 **ANÁLISIS DEL DOCUMENTO**
-            
-            **Tipo de contenido detectado:** [Cotización, Requerimientos, Proyecto, etc.]
-            
-            **Información clave encontrada:**
-            - Servicios solicitados
-            - Presupuestos o costos
-            - Especificaciones técnicas
-            - Plazos o fechas importantes
-            
-            **Resumen ejecutivo:** [2-3 frases con lo más importante]
-            
-            **Recomendaciones:** [Siguientes pasos sugeridos]
-            """
+        **Recomendaciones:** [Cómo podría usar esta información]
+        """
         
         headers = {
             "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
@@ -1499,52 +1485,47 @@ def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
         return "❌ No pude analizar el archivo en este momento. Por favor, describe brevemente qué contiene."
 
 def analizar_pdf_servicios(texto_pdf, config=None):
-    """Usa IA para analizar el PDF y extraer servicios y precios - VERSIÓN MEJORADA"""
+    """Usa IA (OpenAI) para analizar el PDF y extraer servicios y precios"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
         # Limitar el texto para evitar tokens excesivos
-        texto_limitado = texto_pdf[:40000]  # Mantenemos un límite razonable
+        # 150,000 caracteres es mucho, gpt-4o tiene un límite de 128k *tokens* (aprox ~400k chars)
+        # pero esto sigue siendo una sola llamada, el límite de *salida* es el problema.
+        texto_limitado = texto_pdf[:150000] 
         
         app.logger.info(f"📊 Texto a analizar: {len(texto_limitado)} caracteres")
         
-        # Determinar el tipo de negocio para el prompt
-        es_porfirianna = 'laporfirianna' in config.get('dominio', '')
-        
-        # PROMPT MÁS ESTRICTO Y OPTIMIZADO - con menos caracteres para evitar errores
-        if es_porfirianna:
-            prompt = f"""Extrae los productos del siguiente texto como JSON:
-{texto_limitado[:15000]}
-Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_PLATILLO","categoria":"COMIDA","descripcion":"DESC","precio":"100.00","precio_mayoreo":"","precio_menudeo":"","costo":"70.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"La Porfirianna"}}]}}
-Solo extrae hasta 20 productos principales."""
-        else:
-            prompt = f"""Extrae los servicios del siguiente texto como JSON:
-{texto_limitado[:15000]}
-Formato: {{"servicios":[{{"sku":"","servicio":"NOMBRE_SERVICIO","categoria":"CATEGORIA","descripcion":"DESC","precio":"5000.00","precio_mayoreo":"","precio_menudeo":"","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
-Solo extrae hasta 20 servicios principales."""
+        # PROMPT MÁS ESTRICTO Y OPTIMIZADO
+
+        prompt = f"""Extrae los servicios del siguiente texto como JSON:
+{texto_limitado[:150000]}
+Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","descripcion":"descripcion de producto o servicio","precio":"100.00","precio_mayoreo":"90.00","precio_menudeo":"100.00","costo":"3500.00","moneda":"MXN","imagen":"","status_ws":"activo","catalogo":"Mektia"}}]}}
+Envia maximo 60 servicios.
+"""
         
         headers = {
-            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Authorization": f"Bearer {OPENAI_API_KEY}",  # <-- CAMBIO
             "Content-Type": "application/json"
         }
         
-        # Payload simplificado para evitar errores
         payload = {
-            "model": "deepseek-chat",
+            "model": "gpt-4o",  # <-- CAMBIO (Recomendado)
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
-            "max_tokens": 4000
+            "max_tokens": 4096,  # <-- CAMBIO (Límite de gpt-4o para salida)
+            "response_format": { "type": "json_object" } # <-- CAMBIO (Modo JSON de OpenAI)
         }
         
-        app.logger.info("🔄 Enviando PDF a IA para análisis...")
+        app.logger.info("🔄 Enviando PDF a OpenAI para análisis...")
         
         # Añadir más logs para diagnóstico
-        app.logger.info(f"🔍 API URL: {DEEPSEEK_API_URL}")
+        app.logger.info(f"🔍 API URL: {OPENAI_API_URL}") # <-- CAMBIO
         app.logger.info(f"🔍 Headers: {json.dumps({k: '***' if k == 'Authorization' else v for k, v in headers.items()})}")
         app.logger.info(f"🔍 Payload: {json.dumps(payload)[:500]}...")
         
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=180)
+        response = requests.post(OPENAI_API_URL, headers=headers, json=payload, timeout=180) # <-- CAMBIO
         
         # Log detallado de la respuesta para diagnóstico
         app.logger.info(f"🔍 Response status: {response.status_code}")
@@ -1563,6 +1544,10 @@ Solo extrae hasta 20 servicios principales."""
         # INTENTAR MÚLTIPLES MÉTODOS DE EXTRACCIÓN JSON
         servicios_extraidos = None
         
+        # Con el "json_mode" de OpenAI, el regex ya no es necesario,
+        # pero lo mantenemos por si acaso o para otros modelos.
+        # El Método 2 (directo) debería funcionar siempre.
+        
         # Método 1: Buscar JSON con regex
         json_match = re.search(r'\{.*\}', respuesta_ia, re.DOTALL)
         if json_match:
@@ -1573,7 +1558,7 @@ Solo extrae hasta 20 servicios principales."""
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON regex falló: {e}")
         
-        # Método 2: Intentar parsear directamente
+        # Método 2: Intentar parsear directamente (El esperado con json_object)
         if not servicios_extraidos:
             try:
                 servicios_extraidos = json.loads(respuesta_ia)
@@ -1581,25 +1566,41 @@ Solo extrae hasta 20 servicios principales."""
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
         
-        # Validar estructura final
-        if servicios_extraidos and 'servicios' in servicios_extraidos:
-            if isinstance(servicios_extraidos['servicios'], list):
-                app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['servicios'])} servicios")
-                
-                # Limpiar y validar servicios
-                servicios_limpios = []
-                for servicio in servicios_extraidos['servicios']:
-                    servicio_limpio = validar_y_limpiar_servicio(servicio)
-                    if servicio_limpio:
-                        servicios_limpios.append(servicio_limpio)
-                
-                servicios_extraidos['servicios'] = servicios_limpios
-                app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
-                
-                return servicios_extraidos
         
-        # Si llegamos aquí, todos los métodos fallaron
-        app.logger.error("❌ Todos los métodos de extracción JSON fallaron")
+        # --- LÓGICA DE VALIDACIÓN CORREGIDA ---
+        key_a_usar = None       # <-- CAMBIO (Inicializar fuera del if)
+        lista_servicios = []  # <-- CAMBIO (Inicializar fuera del if)
+        
+        # 1. Verificación de seguridad contra None
+        if servicios_extraidos and isinstance(servicios_extraidos, dict):
+            
+            # 2. Busca la llave 'servicios'
+            if 'servicios' in servicios_extraidos and isinstance(servicios_extraidos['servicios'], list):
+                key_a_usar = 'servicios'
+                lista_servicios = servicios_extraidos['servicios']
+            # O busca la llave 'productos'
+            elif 'productos' in servicios_extraidos and isinstance(servicios_extraidos['productos'], list):
+                key_a_usar = 'productos'
+                lista_servicios = servicios_extraidos['productos']
+
+        # Si encontró cualquiera de las dos llaves
+        if key_a_usar:
+            app.logger.info(f"✅ JSON válido: {len(lista_servicios)} elementos encontrados bajo la llave '{key_a_usar}'")
+            
+            # Limpiar y validar servicios
+            servicios_limpios = []
+            for servicio in lista_servicios:
+                servicio_limpio = validar_y_limpiar_servicio(servicio)
+                if servicio_limpio:
+                    servicios_limpios.append(servicio_limpio)
+            
+            app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
+            
+            # 3. ESTANDARIZA la salida para que SIEMPRE use la llave 'servicios'
+            return {'servicios': servicios_limpios}
+
+        # Si llegamos aquí, todos los métodos fallaron o la estructura era incorrecta
+        app.logger.error("❌ Todos los métodos de extracción JSON fallaron o la estructura es incorrecta")
         app.logger.error(f"📄 Respuesta IA problemática (primeros 1000 chars): {respuesta_ia[:1000]}...")
         return None
             
@@ -1615,6 +1616,7 @@ Solo extrae hasta 20 servicios principales."""
         app.logger.error(f"🔴 Error inesperado analizando PDF: {e}")
         app.logger.error(traceback.format_exc())
         return None
+
 def validar_y_limpiar_servicio(servicio):
     """Valida y limpia los datos de un servicio individual - VERSIÓN ROBUSTA (fix KeyError 'servicio')."""
     try:
@@ -1632,7 +1634,7 @@ def validar_y_limpiar_servicio(servicio):
             return None
         servicio_limpio['servicio'] = nombre
 
-        # Campos de texto con valores por defecto (no sobrescribir 'servicio')
+        # Campos de texto con valores por defecto
         campos_texto = {
             'sku': '',
             'categoria': 'General',
@@ -1796,7 +1798,7 @@ def subir_pdf_servicios():
         if file and allowed_file(file.filename):
             # Guardar archivo
             filename = secure_filename(f"servicios_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}")
-            filepath = os.path.join(PDF_UPLOAD_FOLDER, filename)
+            filepath = os.path.join(UPLOAD_FOLDER, filename)
             file.save(filepath)
             
             app.logger.info(f"📄 PDF guardado: {filepath}")
@@ -6685,6 +6687,7 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
+            public_url=public_url,
             transcripcion=transcripcion,
             incoming_saved=True
         )
@@ -7353,7 +7356,7 @@ def start_good_morning_scheduler():
     app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
-                               imagen_base64=None, transcripcion=None,
+                               imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante.
@@ -7365,7 +7368,37 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-        #aqui pon el codigo
+        # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
+        if es_imagen and imagen_base64:
+            app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
+            try:
+                # Llamar a la función de análisis de visión que ya existe en tu código
+                respuesta_vision = analizar_imagen_y_responder(
+                    numero=numero,
+                    imagen_base64=imagen_base64,
+                    caption=texto,  # El texto que acompaña la imagen (o "El usuario envió...")
+                    public_url=public_url,
+                    config=config
+                )
+                
+                if respuesta_vision:
+                    # Si OpenAI respondió, enviar esa respuesta y terminar
+                    enviar_mensaje(numero, respuesta_vision, config)
+                    registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
+                    return True  # Termina el procesamiento aquí
+                else:
+                    # Si OpenAI falló, enviar un fallback
+                    app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
+                    fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
+                    enviar_mensaje(numero, fallback_msg, config)
+                    registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
+                    return True # Termina el procesamiento aquí
+
+            except Exception as e:
+                app.logger.error(f"🔴 Error fatal llamando a analizar_imagen_y_responder: {e}")
+                app.logger.error(traceback.format_exc())
+                # No continuar si el análisis de imagen falló
+                return False
         # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""

@@ -6673,8 +6673,22 @@ def webhook():
 
         # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
         try:
-            guardar_mensaje_inmediato(numero, texto, config, imagen_url=public_url, es_imagen=es_imagen)
+            # --- MODIFICADO ---
+            if es_audio:
+                guardar_mensaje_inmediato(
+                    numero, texto, config, 
+                    imagen_url=None, es_imagen=False, 
+                    tipo_mensaje='audio', contenido_extra=audio_url
+                )
+            else:
+                guardar_mensaje_inmediato(
+                    numero, texto, config, 
+                    imagen_url=public_url, es_imagen=es_imagen,
+                    tipo_mensaje='imagen' if es_imagen else 'texto', contenido_extra=None
+                )
+            # --- FIN MODIFICADO ---
         except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
             app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
 
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
@@ -7781,7 +7795,7 @@ def enviar_datos_transferencia(numero, config=None):
         app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False):
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
     """Guarda el mensaje del usuario inmediatamente, sin respuesta.
     Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
     Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
@@ -7802,10 +7816,20 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         # Add detailed logging before saving the message
         app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
 
+        # --- MODIFICADO ---
+        # Determinar el tipo de mensaje correcto
+        if es_imagen:
+            tipo_mensaje = 'imagen'
+        elif tipo_mensaje == 'audio': # Si ya se marcó como audio
+            pass
+        else:
+            tipo_mensaje = 'texto' # Default
+
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen)
-            VALUES (%s, %s, NULL, NOW(), %s, %s)
-        """, (numero, texto_limpio, imagen_url, es_imagen))
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
+            VALUES (%s, %s, NULL, NOW(), %s, %s, %s, %s)
+        """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
+        # --- FIN MODIFICADO ---
 
         # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
@@ -8316,10 +8340,15 @@ def ver_chat(numero):
             LIMIT 1;
         """, (numero,))
         chats = cursor.fetchall()
-
         # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
-            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen
+            SELECT numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+                   tipo_mensaje, contenido_extra,
+                   -- Incluir la transcripción si está en el campo 'mensaje' y es un audio
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp ASC;
