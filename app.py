@@ -239,11 +239,11 @@ def public_image_url(imagen_url):
         # (para chats de usuarios) y si falla, buscar en /uploads/productos/
         try:
             # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
-            return url_for('serve_product_file', filename=fname)
+            return url_for('serve_uploaded_file', filename=fname)
         except Exception:
             # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image' de la línea 1221)
             try:
-                return url_for('serve_uploaded_image', filename=fname)
+                return url_for('serve_product_image', filename=fname)
             except Exception:
                 # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
                 return imagen_url
@@ -7684,20 +7684,27 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
                 
-                # --- CORREGIDO ---
-                # Guardar el nombre de archivo o URL cruda (http)
-                # El filtro en chats.html se encargará de construir la URL correcta
-                bot_media_url_to_save = image_field
+                # La URL de la imagen que envió el bot
+                bot_image_url = image_field
                 
+                # Si no es una URL completa, aplicar el filtro public_img
+                if not (bot_image_url.startswith('http') or bot_image_url.startswith('/')):
+                    try:
+                        bot_image_url = public_image_url(bot_image_url)
+                    except Exception as e:
+                        app.logger.warning(f"Could not build public URL for bot image: {e}")
+                        bot_image_url = f"/uploads/productos/{bot_image_url}" # Fallback
+
                 registrar_respuesta_bot(
                     numero, texto, respuesta_text, config,
                     incoming_saved=incoming_saved,
                     respuesta_tipo='imagen',
-                    respuesta_media_url=bot_media_url_to_save
+                    respuesta_media_url=bot_image_url
                 )
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
+
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
