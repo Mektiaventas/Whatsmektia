@@ -203,7 +203,11 @@ get_docs_dir_for_config,
 get_productos_dir_for_config, 
 determinar_extension
 )
-
+ALLOWED_EXTENSIONS = {
+    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',  # Documentos e imágenes
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',     # Videos
+    'xlsx', 'xls', 'csv', 'docx'                          # Office y documentos
+}
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
