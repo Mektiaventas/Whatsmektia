@@ -139,7 +139,7 @@
         <div class="msgs-wrap-v2" id="msgs">
             {% if mensajes %}
             {% for msg in mensajes %}
-            {% if (msg.respuesta is none or msg.respuesta == '') and msg.mensaje != '[Mensaje manual desde web]' %}
+            {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
@@ -193,44 +193,21 @@
             {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
             <div class="msg-box msg-manual">
                 <div class="message-content">
-                    {% if msg.es_imagen and msg.imagen_url %}
-                    <div class="manual-indicator">📤 Imagen enviada:</div>
-                    <div class="image-message">
-                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
-                        {% if msg.respuesta and msg.respuesta != '[Imagen enviada]' %}
-                        <div class="image-caption">
-                            {{ msg.respuesta }}
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% else %}
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
                     <div class="text-message">
                         {{ msg.respuesta }}
                     </div>
-                    {% endif %}
                 </div>
                 <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
             {% endif %}
 
-            {% if msg.respuesta is not none and msg.respuesta != '' and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai">
                 <div class="message-content">
-                    {% if msg.es_imagen and msg.imagen_url and (not msg.mensaje or msg.mensaje == '') %}
-                    <div class="image-message">
-                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
-                        {% if msg.respuesta and msg.respuesta != '[Imagen enviada]' %}
-                        <div class="image-caption">
-                            {{ msg.respuesta }}
-                        </div>
-                        {% endif %}
-                    </div>
-                    {% else %}
                     <div class="text-message">
                         {{ msg.respuesta }}
                     </div>
-                    {% endif %}
                 </div>
                 <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
