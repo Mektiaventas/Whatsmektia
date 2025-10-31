@@ -1588,7 +1588,7 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
         # Validar estructura final
         if 'productos' in servicios_extraidos and isinstance(servicios_extraidos['productos'], list):
 
-            app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['servicios'])} servicios")
+            app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['productos'])} servicios")
                 
             # Limpiar y validar servicios
             servicios_limpios = []
