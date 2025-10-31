@@ -6680,6 +6680,7 @@ def webhook():
             es_audio=es_audio,
             config=config,
             imagen_base64=imagen_base64,
+            public_url=public_url, # <-- AÑADE ESTA LÍNEA
             transcripcion=transcripcion,
             incoming_saved=True
         )
@@ -7348,7 +7349,7 @@ def start_good_morning_scheduler():
     app.logger.info("✅ Good morning scheduler thread launched")
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
-                               imagen_base64=None, transcripcion=None,
+                               imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
     Flujo unificado para procesar un mensaje entrante.
@@ -7624,7 +7625,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
         if intent == "ANALIZAR_IMAGEN":
-            sent = analizar_imagen_y_responder(msg, numero, texto, config, imagen_base64=imagen_base64, incoming_saved=incoming_saved)
+            sent = analizar_imagen_y_responder(
+                numero=numero,
+                imagen_base64=imagen_base64,
+                caption=texto,
+                public_url=public_url,
+                config=config
+            )
             enviar_mensaje(numero, sent, config)
             registrar_respuesta_bot(numero, texto, sent, config, incoming_saved=incoming_saved)
             return sent     
