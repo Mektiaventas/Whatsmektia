@@ -7559,6 +7559,9 @@ que el servidor debe ejecutar. Dispones de:
 - Historial (últimos mensajes):\n{historial_text}
 - Mensaje actual (texto): {texto or '[sin texto]'}
 - Datos multimodales: {multimodal_info}
+- Tu nombre es "{ia_nombre}" y el negocio se llama "{negocio_nombre}".
+- Descripción del negocio: {negocio_descripcion_short}
+- Cual es tu rol?: {negocio_que_hace_short}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
 
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
