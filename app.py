@@ -1586,21 +1586,21 @@ Formato: {{"servicios":[{{"sku":"TRAVIS OHE-295negro","categoria":"CATEGORIA","d
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
         
         # Validar estructura final
-        if servicios_extraidos and 'servicios' in servicios_extraidos:
-            if isinstance(servicios_extraidos['servicios'], list):
-                app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['servicios'])} servicios")
+        if 'productos' in servicios_extraidos and isinstance(servicios_extraidos['productos'], list):
+
+            app.logger.info(f"✅ JSON válido: {len(servicios_extraidos['servicios'])} servicios")
                 
-                # Limpiar y validar servicios
-                servicios_limpios = []
-                for servicio in servicios_extraidos['servicios']:
-                    servicio_limpio = validar_y_limpiar_servicio(servicio)
-                    if servicio_limpio:
-                        servicios_limpios.append(servicio_limpio)
+            # Limpiar y validar servicios
+            servicios_limpios = []
+            for servicio in servicios_extraidos['productos']:
+                servicio_limpio = validar_y_limpiar_servicio(servicio)
+                if servicio_limpio:
+                    servicios_limpios.append(servicio_limpio)
                 
-                servicios_extraidos['servicios'] = servicios_limpios
-                app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
+            servicios_extraidos['productos'] = servicios_limpios
+            app.logger.info(f"🎯 Servicios después de limpieza: {len(servicios_limpios)}")
                 
-                return servicios_extraidos
+            return servicios_extraidos
         
         # Si llegamos aquí, todos los métodos fallaron
         app.logger.error("❌ Todos los métodos de extracción JSON fallaron")
