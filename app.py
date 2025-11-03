@@ -6985,6 +6985,9 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
 2. Si el PRODUCTO ENCONTRADO tiene un SKU o Modelo definido ({contexto_resumido}), DEBES usar ese SKU o Modelo EXACTO en el campo "sku_o_nombre" del JSON de salida. Nunca cambies el SKU a otro producto si el contexto es claro.
 3. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
 4. NO inventes precios.
+Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
+5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
+6) Si la clave "siguiente_pregunta" NO es null, el campo "respuesta_text" DEBE contener la pregunta formulada en "siguiente_pregunta" o debe ser un texto de introducción que lleve directamente a esa pregunta.
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -7030,6 +7033,7 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
             actualizar_estado_conversacion(numero, "EN_PEDIDO_DINAMICO", "solicitar_info_producto", datos_parciales, config)
 
             # Devolver la pregunta de seguimiento para que sea enviada al usuario
+            # Usamos el texto de respuesta de la IA (que debe contener la pregunta, según la nueva Regla 7)
             return extracted.get('respuesta_text') or siguiente_pregunta
 
         # --- Lógica de Notificación Final (Si ready_to_notify=true o no hay más preguntas) ---
