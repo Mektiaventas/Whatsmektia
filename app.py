@@ -2646,6 +2646,7 @@ def crear_evento_calendar(service, cita_info, config=None):
 🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
 💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
+📝 ESPECIFICACIONES DINÁMICAS: {cita_info.get('notas', 'No se especificaron')} 
         """.strip()
         
         event = {
@@ -3334,19 +3335,20 @@ def guardar_cita(info_cita, config=None):
 
         # 4) Insert into citas (only when validated as complete)
         cursor.execute('''
-            INSERT INTO citas (
-                numero_cliente, servicio_solicitado, fecha_propuesta,
-                hora_propuesta, nombre_cliente, telefono, estado
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            telefono,
-            info_cita.get('servicio_solicitado'),
-            info_cita.get('fecha_sugerida'),
-            info_cita.get('hora_sugerida'),
-            info_cita.get('nombre_cliente'),
-            telefono,
-            'pendiente'
-        ))
+                INSERT INTO citas (
+                    numero_cliente, servicio_solicitado, fecha_propuesta,
+                    hora_propuesta, nombre_cliente, telefono, estado, notas
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                telefono,
+                info_cita.get('servicio_solicitado'),
+                info_cita.get('fecha_sugerida'),
+                info_cita.get('hora_sugerida'),
+                info_cita.get('nombre_cliente'),
+                telefono,
+                'pendiente',
+                info_cita.get('notas', '') # <-- AÑADIDO: Guardar las notas (especificaciones dinámicas)
+            ))
 
         conn.commit()
         cita_id = cursor.lastrowid
@@ -6902,31 +6904,68 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
         # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
+        # Modificación en la función comprar_producto (línea ~3250)
+    # Dentro de comprar_producto, antes del prompt:
+        producto_db = None
+        # Intenta buscar el producto que el usuario está comprando (puedes usar el último mensaje)
+        sku_buscado = buscar_sku_en_texto(ultimo, obtener_todos_los_precios(config))
+        if not sku_buscado:
+            # Fallback a intentar inferir un servicio del último mensaje si no hay SKU
+            servicio_buscado = extraer_servicio_del_mensaje(ultimo, config)
+            if servicio_buscado:
+                 # Necesitas un producto real para obtener la descripción, así que buscamos la fila:
+                 producto_db = obtener_producto_por_sku_o_nombre(servicio_buscado, config)
+        else:
+            producto_db = obtener_producto_por_sku_o_nombre(sku_buscado, config)
+
+        # Si no se encontró un producto, usa un dict vacío para el prompt
+        if not producto_db:
+            producto_db = {'servicio': 'No especificado', 'descripcion': 'El producto no fue identificado en el catálogo.'}
+# ... (código para obtener historial y ultimo) ...
+
+# 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
         prompt = f"""
-Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
-devuelve SOLO un JSON con la siguiente estructura EXACTA:
+Eres un extractor estructurado de pedidos y generador de preguntas de seguimiento. Tu tarea es analizar el historial, el último mensaje del usuario y la descripción del producto para determinar qué información falta.
+
+PRODUCTO ENCONTRADO (si aplica):
+{producto_db.get('servicio') or producto_db.get('modelo') or producto_db.get('sku')}
+Descripción: {producto_db.get('descripcion') or 'No hay descripción detallada.'}
+
+HISTORIAL:
+{historial_text}
+
+ÚLTIMO MENSAJE:
+{ultimo}
+
+Devuelve SOLO un JSON con la siguiente estructura EXACTA. Si falta algún dato, deja el campo con valor `null` y formula la `siguiente_pregunta`.
 
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas), SIEMPRE debe incluir una frase de agradecimiento o confirmación.",
   "productos": [
     {{
       "sku_o_nombre": "CIANI OHE 305",
       "cantidad": 4,
       "precio_unitario": 300.0,
-      "precio_total_item": 1200.0
+      "precio_total_item": 1200.0,
+      "especificaciones_adicionales": "rojo, con logo personalizado" // NUEVO: para color, material, etc.
     }}
   ],
   "metodo_pago": "tarjeta" | "transferencia" | "efectivo" | null,
   "direccion": "Texto de dirección completa" | null,
   "nombre_cliente": "Nombre si se detecta" | null,
   "precio_total": 1200.0 | null,
-  "ready_to_notify": true|false,
-  "confidence": 0.0-1.0
-  "resumen_para_asesor": "Un resumen breve (2-4 líneas) en español del contexto de la conversación para que un asesor humano lo entienda."
+  "ready_to_notify": true|false, // True solo si están TODOS los campos requeridos (productos, pago, dirección) Y la información dinámica del producto está completa.
+  "confidence": 0.0-1.0,
+  "resumen_para_asesor": "Un resumen breve (2-4 líneas) del contexto.",
+  "siguiente_pregunta": "Pregunta de seguimiento que cubra el dato faltante más crucial (ej. ¿Qué color o material deseas?). Si el pedido está listo, debe ser 'null'." // NUEVO: Pregunta dinámica
 }}
 
-Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
+Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
+1. Revisa la 'Descripción' del producto. Si menciona *colores*, *materiales*, *tallas* u *opciones de personalización*, estas opciones deben estar en 'especificaciones_adicionales'. Si no lo están, 'ready_to_notify' es `false` y debes generar una `siguiente_pregunta` para obtener ese dato.
+2. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
+3. NO inventes precios.
 """
+# ... (código para construir headers/payload y hacer request) ...
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": modelo,
@@ -6954,7 +6993,83 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
         except Exception as e:
             app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
             return None
+        siguiente_pregunta = extracted.get('siguiente_pregunta')
 
+        if siguiente_pregunta:
+            # El pedido no está listo, guardar estado provisional y responder la pregunta dinámica
+            # Aquí debe guardar el estado parcial del pedido en 'estados_conversacion'
+            datos_parciales = {
+                 'productos': extracted.get('productos'),
+                 'direccion': extracted.get('direccion'),
+                 'nombre_cliente': extracted.get('nombre_cliente'),
+                 'siguiente_pregunta': siguiente_pregunta
+            }
+            actualizar_estado_conversacion(numero, "EN_PEDIDO_DINAMICO", "solicitar_info_producto", datos_parciales, config)
+
+            # Devolver la pregunta de seguimiento para que sea enviada al usuario
+            return siguiente_pregunta
+        # ... (código existente para manejar siguiente_pregunta) ...
+        if siguiente_pregunta:
+            # El pedido no está listo, guardar estado provisional y responder la pregunta dinámica
+            # Aquí debe guardar el estado parcial del pedido en 'estados_conversacion'
+            datos_parciales = {
+                 'productos': extracted.get('productos'),
+                 'direccion': extracted.get('direccion'),
+                 'nombre_cliente': extracted.get('nombre_cliente'),
+                 'siguiente_pregunta': siguiente_pregunta
+            }
+            actualizar_estado_conversacion(numero, "EN_PEDIDO_DINAMICO", "solicitar_info_producto", datos_parciales, config)
+
+            # Devolver la pregunta de seguimiento para que sea enviada al usuario
+            return siguiente_pregunta
+        
+        # [INICIO MODIFICACIÓN 1: Obtener especificaciones dinámicas]
+        # Consolidar todas las especificaciones de los productos en las notas
+        
+        especificaciones_dinamicas = []
+        for p in productos_norm:
+            # Asumimos que "especificaciones_adicionales" se extrajo en p.catalog_row o directamente en p
+            # La IA en el prompt está instruida a ponerlo en el JSON de salida bajo cada producto
+            # Intentamos leerlo desde el objeto original de la IA (extracted['productos'])
+            original_products = extracted.get('productos') or []
+            # Buscar el objeto original que corresponde a este producto normalizado
+            original_product = next((op for op in original_products if op.get('sku_o_nombre') == p.get('sku_o_nombre')), None)
+            
+            specs = (original_product.get('especificaciones_adicionales') or '').strip()
+            if specs:
+                especificaciones_dinamicas.append(f"[{p.get('sku_o_nombre') or 'Producto'}]: {specs}")
+        
+        notas_dinamicas = "\n".join(especificaciones_dinamicas)
+        
+        # Inyectar las notas dinámicas en los datos de compra
+        datos_compra['notas'] = notas_dinamicas
+        # [FIN MODIFICACIÓN 1]
+        
+        respuesta_text = extracted.get('respuesta_text') or ""
+        # ... (el resto de la función sigue igual, hasta la notificación) ...
+        
+        # [INICIO MODIFICACIÓN 2: Inyectar notas en el mensaje de alerta]
+        if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
+            
+            # ... (código existente de construcción de lineas_items) ...
+
+            # Construir mensaje de alerta con el resumen generado por la IA
+            mensaje_alerta = (
+                f"🔔 *Pedido confirmado por cliente*\n\n"
+                f"👤 *Cliente:* {cliente_mostrado}\n"
+                f"📞 *Número:* {numero}\n\n"
+                f"🧾 *Detalles del pedido:*\n"
+                f"{chr(10).join(lineas_items)}\n\n"
+                f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
+                f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
+                f"• *Dirección:* {datos_compra.get('direccion')}\n"
+                # AÑADIR NOTAS AQUÍ
+                f"• *Especificaciones dinámicas:* {datos_compra.get('notas') or 'No se especificaron'}\n\n"
+                f"💬 *Contexto (IA - resumen):*\n{contexto_resumido_ia or historial_text}\n"
+            )
+            # ... (el resto de la lógica de notificación sigue igual) ...
+        
+        # [FIN MODIFICACIÓN 2]
         respuesta_text = extracted.get('respuesta_text') or ""
         productos = extracted.get('productos') or []
         metodo_pago = extracted.get('metodo_pago')
