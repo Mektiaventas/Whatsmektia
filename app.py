@@ -122,39 +122,39 @@ NUMEROS_CONFIG = {
         'dominio': 'laporfirianna.mektia.com'
     },
     '524495486324': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("FITO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
+        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("FITO_DB_HOST"),                  
+        'db_user': os.getenv("FITO_DB_USER"),                  
+        'db_password': os.getenv("FITO_DB_PASSWORD"),          
+        'db_name': os.getenv("FITO_DB_NAME"),                  
         'dominio': 'ofitodo.mektia.com'
     },
-    '1011': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
+    '1011': {  # Número de Maindsteel - CORREGIDO
+        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  
+        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  
+        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          
+        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  
         'dominio': 'maindsteel.mektia.com'
     },
-    '1012': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("DRASGO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
+    '1012': {  # Número de Drasgo - CORREGIDO
+        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"), 
+        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("DRASCO_DB_HOST"),                 
+        'db_user': os.getenv("DRASGO_DB_USER"),                
+        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          
+        'db_name': os.getenv("DRASGO_DB_NAME"),                  
         'dominio': 'drasgo.mektia.com'
     },
-    '1013': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
+    '1013': {  # Número de Lacse - CORREGIDO
+        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("LACSE_DB_HOST"),                  
+        'db_user': os.getenv("LACSE_DB_USER"),                  
+        'db_password': os.getenv("LACSE_DB_PASSWORD"),          
+        'db_name': os.getenv("LACSE_DB_NAME"),                  
         'dominio': 'lacse.mektia.com'
     }
 }
@@ -7669,7 +7669,43 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         notify_asesor = bool(decision.get('notify_asesor'))
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
-
+        # --- INICIO DE LA CORRECCIÓN DE LÓGICA DE PAGO ---
+        # Si la IA eligió 'DATOS_TRANSFERENCIA' pero el usuario
+        # solo está confirmando 'proceder con el pago'
+        # (y aún no tenemos dirección/datos completos),
+        # debemos forzar la intención 'COMPRAR_PRODUCTO'.
+        try:
+            ultimo_mensaje_ia = ""
+            if historial:
+                # Buscar la última respuesta del asistente en el historial
+                for h in reversed(historial):
+                    if h.get('respuesta'):
+                        ultimo_mensaje_ia = h['respuesta'].lower()
+                        break
+            # Si el último mensaje de la IA fue la oferta de "proceder con el pago"
+            # Y el usuario actual responde afirmativamente
+            # Y la IA seleccionó la intención equivocada (DATOS_TRANSFERENCIA)
+            
+            es_confirmacion_pago = "procedemos con el pago" in ultimo_mensaje_ia or \
+                                   "proceder con el pago" in ultimo_mensaje_ia
+            
+            es_respuesta_afirmativa = texto_norm.startswith(('si', 'sí', 'procedamos', 'ok', 'claro', 'acepto'))
+            
+            if intent == "DATOS_TRANSFERENCIA" and es_confirmacion_pago and es_respuesta_afirmativa:
+                app.logger.warning(f"⚠️ CORRECCIÓN DE LÓGICA: La IA eligió '{intent}' prematuramente.")
+                app.logger.warning(f"Forzando 'COMPRAR_PRODUCTO' para recolectar datos (dirección/nombre).")
+                
+                # Sobrescribir la intención
+                intent = "COMPRAR_PRODUCTO"
+                
+                # Opcional: limpiar la 'respuesta_text' que venía con
+                # la intención DATOS_TRANSFERENCIA, para que 
+                # 'comprar_producto' genere la suya.
+                respuesta_text = ""
+                
+        except Exception as e_override:
+            app.logger.error(f"🔴 Error en la lógica de corrección de intención de pago: {e_override}")
+        # --- FIN DE LA CORRECCIÓN DE LÓGICA DE PAGO ---
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""

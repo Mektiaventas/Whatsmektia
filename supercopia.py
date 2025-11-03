@@ -122,39 +122,39 @@ NUMEROS_CONFIG = {
         'dominio': 'laporfirianna.mektia.com'
     },
     '524495486324': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("FITO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("FITO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("FITO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("FITO_DB_NAME"),                  # ← Cambiado
+        'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("FITO_DB_HOST"),                  
+        'db_user': os.getenv("FITO_DB_USER"),                  
+        'db_password': os.getenv("FITO_DB_PASSWORD"),          
+        'db_name': os.getenv("FITO_DB_NAME"),                  
         'dominio': 'ofitodo.mektia.com'
     },
-    '1011': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  # ← Cambiado
+    '1011': {  # Número de Maindsteel - CORREGIDO
+        'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  
+        'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  
+        'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          
+        'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  
         'dominio': 'maindsteel.mektia.com'
     },
-    '1012': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("DRASCO_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("DRASGO_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("DRASGO_DB_NAME"),                  # ← Cambiado
+    '1012': {  # Número de Drasgo - CORREGIDO
+        'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"), 
+        'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("DRASCO_DB_HOST"),                 
+        'db_user': os.getenv("DRASGO_DB_USER"),                
+        'db_password': os.getenv("DRASGO_DB_PASSWORD"),          
+        'db_name': os.getenv("DRASGO_DB_NAME"),                  
         'dominio': 'drasgo.mektia.com'
     },
-    '1013': {  # Número de Ofitodo - CORREGIDO
-        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  # ← Cambiado
-        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    # ← Cambiado
-        'db_host': os.getenv("LACSE_DB_HOST"),                  # ← Cambiado
-        'db_user': os.getenv("LACSE_DB_USER"),                  # ← Cambiado
-        'db_password': os.getenv("LACSE_DB_PASSWORD"),          # ← Cambiado
-        'db_name': os.getenv("LACSE_DB_NAME"),                  # ← Cambiado
+    '1013': {  # Número de Lacse - CORREGIDO
+        'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("LACSE_DB_HOST"),                  
+        'db_user': os.getenv("LACSE_DB_USER"),                  
+        'db_password': os.getenv("LACSE_DB_PASSWORD"),          
+        'db_name': os.getenv("LACSE_DB_NAME"),                  
         'dominio': 'lacse.mektia.com'
     }
 }
@@ -2443,36 +2443,65 @@ def negocio_contact_block(negocio):
     return block
 
 @app.route('/chat/<telefono>/messages')
+@login_required
 def get_chat_messages(telefono):
-    """Obtener mensajes de un chat específico después de cierto ID"""
-    after_id = request.args.get('after', 0, type=int)
+    """
+    Endpoint para el 'polling' de JavaScript. 
+    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
+    """
     config = obtener_configuracion_por_host()
+    
+    # --- CORREGIDO: Buscar por after_ts (timestamp en milisegundos) ---
+    after_ts_ms = request.args.get('after_ts', 0, type=float)
+    after_ts_sec = after_ts_ms / 1000.0
+    
+    # Convertir a un objeto datetime (asumiendo UTC)
+    try:
+        # Usar el timestamp (zona UTC) para la consulta
+        after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
+    except Exception:
+        # Fallback: últimos 60 segundos si el timestamp es inválido
+        after_dt = datetime.now(pytz.utc) - timedelta(minutes=1)
 
-    # Guardar y validar el parámetro recibido para evitar consultas inválidas
-    if not telefono or str(telefono).lower() in ('none', 'null', ''):
-        app.logger.warning(f"⚠️ get_chat_messages llamado con telefono inválido: {telefono}")
-        return jsonify({'messages': [], 'timestamp': int(time.time() * 1000)})
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # --- CORREGIDO: Consultar por timestamp > after_dt ---
+        cursor.execute("""
+            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
+                   tipo_mensaje, contenido_extra,
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio,
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
+            FROM conversaciones 
+            WHERE numero = %s AND timestamp > %s
+            ORDER BY timestamp ASC;
+        """, (telefono, after_dt))
+        
+        new_messages = cursor.fetchall()
+        cursor.close()
+        conn.close()
 
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-
-    # Consultar solo mensajes más recientes que el ID proporcionado
-    # Usar la columna correcta 'numero' y ordenar por 'timestamp'
-    cursor.execute("""
-        SELECT id, mensaje AS content, timestamp, respuesta
-        FROM conversaciones 
-        WHERE numero = %s AND id > %s
-        ORDER BY timestamp ASC
-    """, (telefono, after_id))
-
-    messages = cursor.fetchall()
-    cursor.close()
-    conn.close()
-
-    return jsonify({
-        'messages': messages,
-        'timestamp': int(time.time() * 1000)
-    })
+        # Convertir timestamps a ISO (con zona horaria) para JSON
+        for msg in new_messages:
+            if msg.get('timestamp'):
+                if msg['timestamp'].tzinfo is None:
+                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
+                else:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                
+                # Convertir a string ISO para JSON (esto es lo que Date.parse() en JS espera)
+                msg['timestamp'] = msg['timestamp'].isoformat()
+        
+        return jsonify({'messages': new_messages})
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en get_new_messages (antes get_chat_messages): {e}")
+        return jsonify({'messages': []}), 500
 
 @app.route('/autorizar-porfirianna')
 def autorizar_porfirianna():
@@ -5679,7 +5708,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             SET respuesta = %s,
                 respuesta_tipo_mensaje = %s,
                 respuesta_contenido_extra = %s,
-                timestamp = NOW() 
+                timestamp = UTC_TIMESTAMP() 
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
@@ -5694,7 +5723,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
-                VALUES (%s, %s, %s, %s, %s, NOW())
+                VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP())
             """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url)) # <-- Usar también la variable sanitizada aquí
         
         conn.commit()
@@ -6026,7 +6055,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         # Usar los nombres de columna existentes en tu BD
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen)
-            VALUES (%s, %s, %s, %s, %s, NOW(), %s, %s)
+            VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s)
         """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen))
 
         conn.commit()
@@ -7640,7 +7669,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         notify_asesor = bool(decision.get('notify_asesor'))
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
-
+        
+        # --- FIN DE LA CORRECCIÓN DE LÓGICA DE PAGO ---
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
@@ -7887,7 +7917,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
-            VALUES (%s, %s, NULL, NOW(), %s, %s, %s, %s)
+            VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
         # --- FIN MODIFICADO ---
 
@@ -8472,63 +8502,6 @@ def ver_chat(numero):
         """
         return render_template_string(html, err_id=err_id), 500
        
-@app.route('/chat/<numero>/messages')
-@login_required
-def get_new_messages(numero):
-    """
-    Endpoint para el 'polling' de JavaScript. 
-    Devuelve mensajes nuevos O ACTUALIZADOS después de un timestamp dado.
-    """
-    config = obtener_configuracion_por_host()
-    
-    # Recibir el timestamp en milisegundos y convertir a segundos
-    after_ts_ms = request.args.get('after_ts', 0, type=float)
-    after_ts_sec = after_ts_ms / 1000.0
-    
-    # Convertir a un objeto datetime (asumiendo que el timestamp es UTC)
-    after_dt = datetime.fromtimestamp(after_ts_sec, pytz.utc)
-
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Consultar mensajes donde el timestamp (que ahora SÍ se actualiza)
-        # es más reciente que el último timestamp que vio el cliente.
-        cursor.execute("""
-            SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
-                   tipo_mensaje, contenido_extra,
-                   CASE 
-                       WHEN tipo_mensaje = 'audio' THEN mensaje 
-                       ELSE NULL 
-                   END AS transcripcion_audio,
-                   respuesta_tipo_mensaje,
-                   respuesta_contenido_extra
-            FROM conversaciones 
-            WHERE numero = %s AND timestamp > %s
-            ORDER BY timestamp ASC;
-        """, (numero, after_dt))
-        
-        new_messages = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        # Convertir timestamps a ISO (con zona horaria) para JSON
-        for msg in new_messages:
-            if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is None:
-                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
-                else:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-                
-                # Convertir a string ISO para JSON
-                msg['timestamp'] = msg['timestamp'].isoformat()
-        
-        return jsonify({'messages': new_messages})
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en get_new_messages: {e}")
-        return jsonify({'messages': []}), 500
-
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
     """Endpoint para verificar si el correo de Calendar está guardado"""
