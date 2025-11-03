@@ -6911,8 +6911,10 @@ DETALLES DEL PRODUCTO EN EL CATÁLOGO:
 
 INSTRUCCIÓN CLAVE: Analiza la descripción o medidas del producto. Si estas sugieren una elección faltante (ej. 'disponible en 5 colores', 'tallas S, M, L'), genera una lista de preguntas específicas que el asesor debe hacer para completar el pedido (ej. '¿Qué color desea?').
 
+REGLA CRÍTICA DE FLUJO: El campo "ready_to_notify" solo debe ser 'true' si tienes la dirección, el método de pago Y el nombre completo del cliente. En caso contrario, debe ser 'false' y las preguntas faltantes deben incluir el nombre.
+
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas) que confirma la intención de compra.",
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas) que confirma la intención de compra o pide el dato faltante.",
   "productos": [
     {{
       "sku_o_nombre": "CIANI OHE 305",
@@ -6927,11 +6929,11 @@ INSTRUCCIÓN CLAVE: Analiza la descripción o medidas del producto. Si estas sug
   "precio_total": 1200.0 | null,
   "ready_to_notify": true|false,
   "confidence": 0.0-1.0,
-  "preguntas_faltantes": ["lista de preguntas específicas para el producto (ej. '¿Qué talla desea?', '¿Con qué guisado?'). Incluye también preguntas sobre método de pago o dirección si faltan."]
+  "preguntas_faltantes": ["lista de preguntas específicas. DEBE incluir nombre, método de pago o dirección si faltan. Si no falta nada, la lista debe ser VACÍA."]
 }}
 
-Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago) inclúyelos en 'preguntas_faltantes'.
-""" # ← MODIFICADO: Se incluyó 'preguntas_faltantes' en la estructura JSON del prompt.
+Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago/nombre) inclúyelos en 'preguntas_faltantes'.
+""" # ← MODIFICADO: Se incluyó REGLA CRÍTICA para 'ready_to_notify' y 'nombre_cliente'
 
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -6958,7 +6960,7 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         try:
             extracted = json.loads(match.group(1))
         except Exception as e:
-            app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
+            app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:500]}")
             return None
 
         respuesta_text = extracted.get('respuesta_text') or ""
@@ -6970,7 +6972,7 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
         
-        preguntas_ia = extracted.get('preguntas_faltantes') or [] # ← MODIFICADO: Extrae la lista de preguntas
+        preguntas_ia = extracted.get('preguntas_faltantes') or []
 
         # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
@@ -7041,29 +7043,36 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
         
         # --- LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES (3.1) ---
-        # NOTE: should_notify logic is simplified to use ready_to_notify from IA or payment heuristics (computed later)
-        # We must compute 'should_notify' before this block, or use a placeholder/proxy from IA:
         _ready_from_ia = bool(extracted.get('ready_to_notify') if extracted.get('ready_to_notify') is not None else False)
         
-        if preguntas_ia and not _ready_from_ia:
-            # Si hay preguntas faltantes y NO está listo para notificar, genera la respuesta compuesta.
+        # Determinar si el pedido está *realmente* listo para ser notificado (todos los campos esenciales)
+        # Requerimos: ready_to_notify=true DE LA IA Y precio, pago, dirección, nombre
+        is_fully_ready = _ready_from_ia and \
+                         datos_compra.get('precio_total') is not None and \
+                         datos_compra.get('metodo_pago') and \
+                         datos_compra.get('direccion') and \
+                         datos_compra.get('nombre_cliente') and \
+                         len(productos_norm) > 0
+
+        if preguntas_ia and not is_fully_ready: # ← CORREGIDO: Usar is_fully_ready
+            # Si hay preguntas faltantes y NO está listo, genera la respuesta compuesta.
             respuesta_al_cliente = (
                 f"{respuesta_text}\n\n"
                 "Para poder procesar tu compra, por favor responde a lo siguiente:\n\n"
                 + "\n".join(f"- {p}" for p in preguntas_ia)
             )
         else:
-            # Si no hay preguntas faltantes O ya está listo, usa el texto de la IA (respuesta_text).
+            # Si está listo o si la IA no devolvió preguntas (debería estar listo), usa el texto de la IA.
             respuesta_al_cliente = respuesta_text
         # --- FIN LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
 
         # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
+            # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
             resumen_prompt = f"""
-Tu rol es generar un resumen con tus palabras del chat para un asesor. 
-Analiza el historial y el pedido, y resume en 1-3 frases en español el CONTEXTO del cliente. 
-El resumen debe ser breve y enfocado en la intención de compra del cliente, NO en las características del producto.
-Por ejemplo: "El cliente ha confirmado el color y la dirección, solo falta procesar el pago en efectivo."
+Tu rol es generar un resumen EJECUTIVO del chat para un asesor. 
+Analiza el historial y el pedido, y **parafrasea en 1-3 frases en español** el CONTEXTO del cliente. 
+El resumen debe ser **breve, conciso** y enfocado en el estado final de la compra (ej. "El cliente confirmó color gris y regatones, pago por transferencia, falta su nombre completo."). **NUNCA** copies y pegues bloques de catálogo o historial en el resumen.
 
 HISTORIAL DE CONVERSACIÓN:
 {historial_text}
@@ -7072,7 +7081,8 @@ PEDIDO ACTUAL (para contexto):
 {json.dumps(datos_compra, ensure_ascii=False)[:1500]}
 
 Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados ni viñetas.
-"""
+""" # ← CORREGIDO: Prompt para forzar la parafrasis y evitar pegar historial.
+            
             payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
             rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
             rsum.raise_for_status()
@@ -7080,12 +7090,15 @@ Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados
             contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
             if isinstance(contexto_resumido, list):
                 contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
-            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
+            # Limpieza adicional para asegurar que no haya saltos de línea y artefactos
+            contexto_resumido = re.sub(r'\s*\n\s*', ' ', contexto_resumido).strip()
+            contexto_resumido = re.sub(r' {2,}', ' ', contexto_resumido).strip()
+            
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
-            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
+            contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles."
 
-        # 5) Evitar re-notificaciones
+        # 5) Evitar re-notificaciones (sin cambios)
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
         try:
@@ -7095,20 +7108,10 @@ Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados
         except Exception:
             already_notified = False
 
-        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
-        should_notify = False
-        try:
-            if datos_compra.get('ready_to_notify'):
-                should_notify = True
-            else:
-                # If payment method is transfer and essential fields are present, notify anyway
-                mp = datos_compra.get('metodo_pago') or ''
-                if mp and 'transfer' in str(mp).lower():
-                    if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
-                        should_notify = True
-                        app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
-        except Exception:
-            should_notify = False
+        # 6) Notificar solo si is_fully_ready (CORREGIDO en esta línea)
+        should_notify = is_fully_ready or (
+            datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower() and is_fully_ready
+        )
 
         if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
@@ -7131,7 +7134,7 @@ Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                # Construir mensaje de alerta con el resumen generado por la IA
+                # Construir mensaje de alerta con el resumen generado por la IA (contexto_resumido)
                 mensaje_alerta = (
                     f"🔔 *Pedido confirmado por cliente*\n\n"
                     f"👤 *Cliente:* {cliente_mostrado}\n"
@@ -7140,11 +7143,13 @@ Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados
                     f"{chr(10).join(lineas_items)}\n\n"
                     f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
-                    f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
-                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
+                    f"• *Dirección:* {datos_compra.get('direccion')}\n"
+                    f"• *Nombre Cliente:* {datos_compra.get('nombre_cliente') or 'FALTA POR CONFIRMAR'}\n\n"
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n" # ← CORREGIDO: Usar parafrasis
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
+                # ... (resto de la lógica de notificación y kanban sin cambios)
                 if asesor_email:
                     try:
                         service = autenticar_google_calendar(config)
@@ -7215,8 +7220,9 @@ Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados
         else:
             if already_notified:
                 app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
-            elif not datos_compra['ready_to_notify'] and not (datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower()):
-                app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
+            # ← CORREGIDO: Mensaje de log para cuando no está listo
+            elif not is_fully_ready:
+                app.logger.info("ℹ️ comprar_producto: NO está completamente listo (is_fully_ready=False) -> esperando más confirmación.")
             else:
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
