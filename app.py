@@ -6881,9 +6881,9 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
 
 def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
     """
-    Igual que antes pero:
+    Detección inteligente de compra/pedido.
      - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
-     - NOTA: ya no hace acciones adicionales cuando el método de pago es 'transferencia'.
+     - Pide a la IA preguntas específicas (ej. color, talla) basadas en la descripción del producto.
     Devuelve: respuesta_text (string) o None.
     """
     if config is None:
@@ -6901,13 +6901,18 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
+        # 2) Llamada IA: extraer pedido estructurado (prompt estricto)
         prompt = f"""
-Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
-devuelve SOLO un JSON con la siguiente estructura EXACTA:
+Eres un extractor estructurado de pedidos. A partir del historial, del último mensaje del usuario, y de los detalles de los productos,
+devuelve SOLO un JSON con la siguiente estructura EXACTA.
+
+DETALLES DEL PRODUCTO EN EL CATÁLOGO:
+-- Para cada producto detectado, se incluye su descripción y medidas si están en el catálogo.
+
+INSTRUCCIÓN CLAVE: Analiza la descripción o medidas del producto. Si estas sugieren una elección faltante (ej. 'disponible en 5 colores', 'tallas S, M, L'), genera una lista de preguntas específicas que el asesor debe hacer para completar el pedido (ej. '¿Qué color desea?').
 
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas) que confirma la intención de compra.",
   "productos": [
     {{
       "sku_o_nombre": "CIANI OHE 305",
@@ -6921,11 +6926,13 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
   "nombre_cliente": "Nombre si se detecta" | null,
   "precio_total": 1200.0 | null,
   "ready_to_notify": true|false,
-  "confidence": 0.0-1.0
+  "confidence": 0.0-1.0,
+  "preguntas_faltantes": ["lista de preguntas específicas para el producto (ej. '¿Qué talla desea?', '¿Con qué guisado?'). Incluye también preguntas sobre método de pago o dirección si faltan."]
 }}
 
-Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
-"""
+Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago) inclúyelos en 'preguntas_faltantes'.
+""" # ← MODIFICADO: Se incluyó 'preguntas_faltantes' en la estructura JSON del prompt.
+
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": modelo,
@@ -6962,6 +6969,8 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
         precio_total_ia = extracted.get('precio_total')
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
+        
+        preguntas_ia = extracted.get('preguntas_faltantes') or [] # ← MODIFICADO: Extrae la lista de preguntas
 
         # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
@@ -7030,6 +7039,23 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
         }
 
         app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
+        
+        # --- LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES (3.1) ---
+        # NOTE: should_notify logic is simplified to use ready_to_notify from IA or payment heuristics (computed later)
+        # We must compute 'should_notify' before this block, or use a placeholder/proxy from IA:
+        _ready_from_ia = bool(extracted.get('ready_to_notify') if extracted.get('ready_to_notify') is not None else False)
+        
+        if preguntas_ia and not _ready_from_ia:
+            # Si hay preguntas faltantes y NO está listo para notificar, genera la respuesta compuesta.
+            respuesta_al_cliente = (
+                f"{respuesta_text}\n\n"
+                "Para poder procesar tu compra, por favor responde a lo siguiente:\n\n"
+                + "\n".join(f"- {p}" for p in preguntas_ia)
+            )
+        else:
+            # Si no hay preguntas faltantes O ya está listo, usa el texto de la IA (respuesta_text).
+            respuesta_al_cliente = respuesta_text
+        # --- FIN LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
 
         # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
@@ -7069,8 +7095,6 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
             already_notified = False
 
         # 6) Notificar solo si IA indicó ready_to_notify y datos completos
-        # NOTE: treat transferencias as an intent to buy — allow notification even if ready_to_notify==False,
-        # so advisors get alerted when user confirmed transfer and required fields exist.
         should_notify = False
         try:
             if datos_compra.get('ready_to_notify'):
@@ -7196,9 +7220,9 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                 app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
         # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
-        if respuesta_text:
-            respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-        return respuesta_text or None
+        if respuesta_al_cliente:
+            respuesta_al_cliente = aplicar_restricciones(respuesta_al_cliente, numero, config)
+        return respuesta_al_cliente or None
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 comprar_producto - request error: {e}")
