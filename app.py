@@ -6922,6 +6922,7 @@ devuelve SOLO un JSON con la siguiente estructura EXACTA:
   "precio_total": 1200.0 | null,
   "ready_to_notify": true|false,
   "confidence": 0.0-1.0
+  "resumen_para_asesor": "Un resumen breve (2-4 líneas) en español del contexto de la conversación para que un asesor humano lo entienda."
 }}
 
 Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
@@ -6962,7 +6963,7 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
         precio_total_ia = extracted.get('precio_total')
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
-
+        contexto_resumido_ia = extracted.get('resumen_para_asesor') or None
         # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
         suma_total = 0.0
@@ -7031,33 +7032,6 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
 
         app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
 
-        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
-        try:
-            resumen_prompt = f"""
-Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
-para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
-No incluyas números de teléfono ni direcciones completas en el resumen.
-
-HISTORIAL:
-{historial_text}
-
-PRODUCTOS DETECTADOS:
-{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
-
-Devuelve únicamente el resumen de 2-4 líneas en español.
-"""
-            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
-            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
-            rsum.raise_for_status()
-            sum_data = rsum.json()
-            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
-            if isinstance(contexto_resumido, list):
-                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
-            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
-            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
-
         # 5) Evitar re-notificaciones
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
@@ -7116,7 +7090,7 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
-                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido_ia or historial_text}\n"
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
