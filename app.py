@@ -7060,17 +7060,18 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
             resumen_prompt = f"""
-Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
-para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
-No incluyas números de teléfono ni direcciones completas en el resumen.
+Tu rol es generar un resumen EJECUTIVO del chat para un asesor. 
+Analiza el historial y el pedido, y resume en 1-3 frases en español el CONTEXTO del cliente. 
+El resumen debe ser breve y enfocado en la intención de compra del cliente, NO en las características del producto.
+Por ejemplo: "El cliente ha confirmado el color y la dirección, solo falta procesar el pago en efectivo."
 
-HISTORIAL:
+HISTORIAL DE CONVERSACIÓN:
 {historial_text}
 
-PRODUCTOS DETECTADOS:
-{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
+PEDIDO ACTUAL (para contexto):
+{json.dumps(datos_compra, ensure_ascii=False)[:1500]}
 
-Devuelve únicamente el resumen de 2-4 líneas en español.
+Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados ni viñetas.
 """
             payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
             rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
