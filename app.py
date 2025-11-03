@@ -7961,9 +7961,28 @@ Reglas: Prioriza la extracción de Medidas, Tipo de Superficie y Color/Acabado.
                 "Por favor, genera la cotización y contacta al cliente."
             )
             
-            # Enviar alerta (reutilizando lógica de envío a administradores)
-            enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-            enviar_mensaje('5214493432744', mensaje_alerta, config)
+            # 1. Obtener el siguiente asesor por Round Robin
+            asesor = obtener_siguiente_asesor(config)
+            targets = []
+            if asesor and asesor.get('telefono'):
+                targets.append(asesor['telefono'])
+                app.logger.info(f"✅ Alerta de cotización dirigida al asesor en turno: {asesor['nombre']} ({asesor['telefono']})")
+            
+            # 2. Añadir números de alerta configurados
+            if ALERT_NUMBER and ALERT_NUMBER not in targets:
+                targets.append(ALERT_NUMBER)
+            if '5214493432744' not in targets:
+                targets.append('5214493432744')
+            if '5214491182201' not in targets:
+                targets.append('5214491182201')
+            
+            # 3. Enviar mensaje a todos los destinos
+            for t in targets:
+                try:
+                    enviar_mensaje(t, mensaje_alerta, config)
+                    app.logger.info(f"✅ Alerta de cotización enviada a {t}")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo enviar alerta de cotización a {t}: {e}")
             
             # Marcar estado para evitar re-notificaciones (usar contexto de cotización)
             nuevo_estado = {
