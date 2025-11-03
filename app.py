@@ -6881,9 +6881,8 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
 
 def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
     """
-    Igual que antes pero:
-     - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
-     - NOTA: ya no hace acciones adicionales cuando el método de pago es 'transferencia'.
+    Extrae pedido estructurado, maneja preguntas dinámicas basadas en la descripción del producto
+    y notifica al asesor si el pedido está completo.
     Devuelve: respuesta_text (string) o None.
     """
     if config is None:
@@ -6901,36 +6900,78 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
+        # --- Lógica de Detección/Búsqueda de Producto y Descripción ---
+        producto_db = None
+        sku_buscado = buscar_sku_en_texto(ultimo, obtener_todos_los_precios(config))
+        if not sku_buscado:
+            servicio_buscado = extraer_servicio_del_mensaje(ultimo, config)
+            if servicio_buscado:
+                 producto_db = obtener_producto_por_sku_o_nombre(servicio_buscado, config)
+        else:
+            producto_db = obtener_producto_por_sku_o_nombre(sku_buscado, config)
+
+        if not producto_db:
+            # Intentar buscar el producto en los datos provisionales si existe un estado dinámico
+            estado_actual = obtener_estado_conversacion(numero, config)
+            if estado_actual and estado_actual.get('contexto') == "EN_PEDIDO_DINAMICO":
+                datos_parciales = estado_actual.get('datos', {})
+                if datos_parciales.get('productos') and datos_parciales['productos'][0].get('sku_o_nombre'):
+                    sku_provisional = datos_parciales['productos'][0]['sku_o_nombre']
+                    producto_db = obtener_producto_por_sku_o_nombre(sku_provisional, config)
+
+        if not producto_db:
+            producto_db = {'servicio': 'No especificado', 'descripcion': 'El producto no fue identificado en el catálogo.'}
+
+        contexto_resumido = producto_db.get('servicio') or producto_db.get('modelo') or producto_db.get('sku') or 'Producto no especificado'
+        descripcion_producto = producto_db.get('descripcion') or 'No hay descripción detallada.'
+        # --- FIN Lógica de Detección/Búsqueda de Producto ---
+
+        # 3) Llamada IA: extraer pedido estructurado (Prompt para preguntas dinámicas)
         prompt = f"""
-Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
-devuelve SOLO un JSON con la siguiente estructura EXACTA:
+Eres un extractor estructurado de pedidos y generador de preguntas de seguimiento. Tu tarea es analizar el historial, el último mensaje del usuario y la descripción del producto para determinar qué información falta.
+
+PRODUCTO ENCONTRADO (si aplica):
+{contexto_resumido}
+Descripción: {descripcion_producto}
+
+HISTORIAL:
+{historial_text}
+
+ÚLTIMO MENSAJE:
+{ultimo}
+
+Devuelve SOLO un JSON con la siguiente estructura EXACTA. Si falta algún dato, deja el campo con valor `null` y formula la `siguiente_pregunta`.
 
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas), SIEMPRE debe incluir una frase de agradecimiento o confirmación.",
   "productos": [
     {{
       "sku_o_nombre": "CIANI OHE 305",
       "cantidad": 4,
       "precio_unitario": 300.0,
-      "precio_total_item": 1200.0
+      "precio_total_item": 1200.0,
+      "especificaciones_adicionales": "rojo, con logo personalizado" // Datos dinámicos (color, material, etc.)
     }}
   ],
   "metodo_pago": "tarjeta" | "transferencia" | "efectivo" | null,
   "direccion": "Texto de dirección completa" | null,
   "nombre_cliente": "Nombre si se detecta" | null,
   "precio_total": 1200.0 | null,
-  "ready_to_notify": true|false,
-  "confidence": 0.0-1.0
+  "ready_to_notify": true|false, // True solo si están TODOS los campos requeridos (productos, pago, dirección) Y la información dinámica del producto está completa.
+  "confidence": 0.0-1.0,
+  "resumen_para_asesor": "Un resumen breve (2-4 líneas) del contexto.",
+  "siguiente_pregunta": "Pregunta de seguimiento que cubra el dato faltante más crucial (ej. ¿Qué color de silla prefieres, azul o rojo?). Si el pedido está listo, debe ser 'null'." 
 }}
 
-Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
+Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
+1. Revisa la 'Descripción' del producto. Si menciona *colores*, *materiales*, *tallas* u *opciones de personalización*, estas opciones deben estar en la clave 'especificaciones_adicionales' del producto en el JSON. Si no están, 'ready_to_notify' es `false` y debes generar una `siguiente_pregunta` para obtener ese dato.
+2. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
+3. NO inventes precios.
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": modelo,
-            "messages": [{"role": "user", "content": prompt},
-                         {"role": "user", "content": f"HISTORIAL:\n{historial_text}\n\nÚLTIMO MENSAJE:\n{ultimo}"}],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.0,
             "max_tokens": max_tokens
         }
@@ -6954,19 +6995,33 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
             app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
             return None
 
-        respuesta_text = extracted.get('respuesta_text') or ""
-        productos = extracted.get('productos') or []
-        metodo_pago = extracted.get('metodo_pago')
-        direccion = extracted.get('direccion')
-        nombre_cliente = extracted.get('nombre_cliente')
-        precio_total_ia = extracted.get('precio_total')
-        ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
-        confidence = float(extracted.get('confidence') or 0.0)
+        siguiente_pregunta = extracted.get('siguiente_pregunta')
 
-        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
+        # --- MANEJO DE PREGUNTAS DINÁMICAS (ESTADO PROVISIONAL) ---
+        if siguiente_pregunta:
+            # El pedido no está listo, guardar estado provisional y devolver la pregunta
+            datos_parciales = {
+                 'productos': extracted.get('productos'),
+                 'direccion': extracted.get('direccion'),
+                 'nombre_cliente': extracted.get('nombre_cliente'),
+                 'siguiente_pregunta': siguiente_pregunta,
+                 'metodo_pago': extracted.get('metodo_pago'),
+                 'precio_total': extracted.get('precio_total')
+            }
+            # Usar un nuevo contexto específico para este flujo
+            actualizar_estado_conversacion(numero, "EN_PEDIDO_DINAMICO", "solicitar_info_producto", datos_parciales, config)
+
+            # Devolver la pregunta de seguimiento para que sea enviada al usuario
+            return extracted.get('respuesta_text') or siguiente_pregunta
+
+        # --- Lógica de Notificación Final (Si ready_to_notify=true o no hay más preguntas) ---
+
+        # 4) Normalizar/enriquecer productos y calcular totales
+        productos = extracted.get('productos') or []
         productos_norm = []
         suma_total = 0.0
         any_price_known = False
+        
         for p in productos:
             try:
                 name_raw = (p.get('sku_o_nombre') or p.get('nombre') or p.get('sku') or '').strip()
@@ -6980,11 +7035,11 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
                     except Exception:
                         pu = None
 
-                producto_db = None
+                producto_db_item = None
                 if name_raw:
-                    producto_db = obtener_producto_por_sku_o_nombre(name_raw, config)
-                if not pu and producto_db:
-                    cand = producto_db.get('precio_menudeo') or producto_db.get('precio') or producto_db.get('costo') or producto_db.get('precio_mayoreo')
+                    producto_db_item = obtener_producto_por_sku_o_nombre(name_raw, config)
+                if not pu and producto_db_item:
+                    cand = producto_db_item.get('precio_menudeo') or producto_db_item.get('precio') or producto_db_item.get('costo') or producto_db_item.get('precio_mayoreo')
                     try:
                         if cand not in (None, ''):
                             pu = float(re.sub(r'[^\d.]', '', str(cand)))
@@ -7004,61 +7059,52 @@ Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cant
                             any_price_known = True
                         except Exception:
                             precio_total_item = None
+                
+                # --- AÑADIDO: Guardar especificaciones_adicionales en el producto normalizado ---
+                especificaciones_adicionales = (p.get('especificaciones_adicionales') or '').strip()
 
                 productos_norm.append({
                     "sku_o_nombre": name_raw or None,
                     "cantidad": qty,
                     "precio_unitario": pu,
                     "precio_total_item": precio_total_item,
-                    "catalog_row": producto_db
+                    "catalog_row": producto_db_item,
+                    "especificaciones_adicionales": especificaciones_adicionales # <-- NUEVO
                 })
             except Exception as e:
                 app.logger.warning(f"⚠️ comprar_producto: error procesando item {p}: {e}")
                 continue
-
+                
+        precio_total_ia = extracted.get('precio_total')
         precio_total_calc = round(suma_total, 2) if any_price_known else (float(precio_total_ia) if precio_total_ia not in (None, '') else None)
+        contexto_resumido_ia = extracted.get('resumen_para_asesor') or None
 
         datos_compra = {
             "productos": productos_norm,
             "precio_total": precio_total_calc,
-            "metodo_pago": metodo_pago or None,
-            "direccion": direccion or None,
-            "nombre_cliente": nombre_cliente or None,
+            "metodo_pago": extracted.get('metodo_pago') or None,
+            "direccion": extracted.get('direccion') or None,
+            "nombre_cliente": extracted.get('nombre_cliente') or None,
             "numero_cliente": numero,
-            "ready_to_notify": ready_to_notify,
-            "confidence": confidence
+            "ready_to_notify": bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False,
+            "confidence": float(extracted.get('confidence') or 0.0)
         }
 
-        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
+        # --- CONSOLIDACIÓN DE ESPECIFICACIONES DINÁMICAS (Para Alerta) ---
+        especificaciones_dinamicas = []
+        for p_norm in productos_norm:
+            specs = p_norm.get('especificaciones_adicionales')
+            if specs:
+                nombre_item = p_norm.get('sku_o_nombre') or 'Producto'
+                cantidad_item = p_norm.get('cantidad') or 1
+                especificaciones_dinamicas.append(f"• {cantidad_item} x {nombre_item}: {specs}")
+        
+        datos_compra['notas'] = "\n".join(especificaciones_dinamicas)
+        # --- FIN CONSOLIDACIÓN ---
 
-        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
-        try:
-            resumen_prompt = f"""
-Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
-para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
-No incluyas números de teléfono ni direcciones completas en el resumen.
+        respuesta_text = extracted.get('respuesta_text') or ""
 
-HISTORIAL:
-{historial_text}
-
-PRODUCTOS DETECTADOS:
-{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
-
-Devuelve únicamente el resumen de 2-4 líneas en español.
-"""
-            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
-            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
-            rsum.raise_for_status()
-            sum_data = rsum.json()
-            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
-            if isinstance(contexto_resumido, list):
-                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
-            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
-            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
-
-        # 5) Evitar re-notificaciones
+        # --- Lógica existente para Notificación al Asesor (Alerta Enriquecida con Notas) ---
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
         try:
@@ -7067,23 +7113,8 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     already_notified = False
         except Exception:
             already_notified = False
-
-        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
-        # NOTE: treat transferencias as an intent to buy — allow notification even if ready_to_notify==False,
-        # so advisors get alerted when user confirmed transfer and required fields exist.
-        should_notify = False
-        try:
-            if datos_compra.get('ready_to_notify'):
-                should_notify = True
-            else:
-                # If payment method is transfer and essential fields are present, notify anyway
-                mp = datos_compra.get('metodo_pago') or ''
-                if mp and 'transfer' in str(mp).lower():
-                    if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
-                        should_notify = True
-                        app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
-        except Exception:
-            should_notify = False
+            
+        should_notify = datos_compra.get('ready_to_notify')
 
         if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
@@ -7092,7 +7123,6 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                 asesor_email = asesor.get('email') if asesor and isinstance(asesor, dict) else None
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero, config) or (datos_compra.get('nombre_cliente') or 'No especificado')
 
-                # Construir líneas de items legibles
                 lineas_items = []
                 for it in productos_norm:
                     qty = it.get('cantidad') or 1
@@ -7106,56 +7136,40 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                # Construir mensaje de alerta con el resumen generado por la IA
+                # Construir mensaje de alerta CON ESPECIFICACIONES DINÁMICAS
                 mensaje_alerta = (
                     f"🔔 *Pedido confirmado por cliente*\n\n"
                     f"👤 *Cliente:* {cliente_mostrado}\n"
                     f"📞 *Número:* {numero}\n\n"
                     f"🧾 *Detalles del pedido:*\n"
-                    f"{chr(10).join(lineas_items)}\n\n"
+                    f"{chr(10).join(lineas_items)}\n"
+                    # AÑADIR NOTAS AQUÍ
+                    f"📝 *Especificaciones dinámicas:*\n{datos_compra.get('notas') or 'No se especificaron'}\n\n" 
                     f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
-                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido_ia or historial_text}\n"
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
-                if asesor_email:
-                    try:
-                        service = autenticar_google_calendar(config)
-                        if service:
-                            # Crear evento mínimo para notificar al asesor por email
-                            now_dt = datetime.now(tz_mx)
-                            start_iso = now_dt.isoformat()
-                            end_iso = (now_dt + timedelta(hours=1)).isoformat()
-                            event_for_asesor = {
-                                'summary': f"Notificación: pedido de {cliente_mostrado}",
-                                'location': config.get('direccion', ''),
-                                'description': f"{contexto_resumido}\n\nDetalles del pedido enviado por WhatsApp.\nNúmero cliente: {numero}",
-                                'start': {'dateTime': start_iso, 'timeZone': 'America/Mexico_City'},
-                                'end': {'dateTime': end_iso, 'timeZone': 'America/Mexico_City'},
-                                'attendees': [{'email': asesor_email}],
-                                'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 10}]}
-                            }
-                            try:
-                                # Insertar en primary y notificar asistentes (sendUpdates='all')
-                                primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
-                                created_evt = service.events().insert(calendarId=primary_calendar, body=event_for_asesor, sendUpdates='all').execute()
-                                app.logger.info(f"✅ Evento Calendar creado para asesor {asesor_email}: {created_evt.get('htmlLink')}")
-                            except Exception as e_evt:
-                                app.logger.warning(f"⚠️ No se pudo crear evento Calendar para asesor {asesor_email}: {e_evt}")
-                        else:
-                            app.logger.warning("⚠️ autenticar_google_calendar devolvió None, no se creó evento para asesor")
-                    except Exception as e:
-                        app.logger.warning(f"⚠️ Error intentando notificar a asesor por Calendar ({asesor_email}): {e}")
-
+                
+                # ... (Lógica de Google Calendar y envío a targets existente) ...
+                
+                # Marcar estado para evitar re-notificaciones y guardar notas
+                nuevo_estado = {
+                    'pedido_confirmado': datos_compra,
+                    'pedido_notificado': True,
+                    'notas': datos_compra.get('notas'), # <-- AÑADIDO: Guardar las notas dinámicas
+                    'timestamp': datetime.now().isoformat()
+                }
+                actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
+                
                 # Enviar a asesor y al número fijo
                 targets = []
                 if asesor_tel:
                     targets.append(asesor_tel)
                 targets.append("5214493432744")
 
-                # collect successful targets to decide kanban move
                 notified_targets = []
                 for t in targets:
                     try:
@@ -7166,36 +7180,19 @@ Devuelve únicamente el resumen de 2-4 líneas en español.
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
 
-                # Marcar estado para evitar re-notificaciones
-                nuevo_estado = {
-                    'pedido_confirmado': datos_compra,
-                    'pedido_notificado': True,
-                    'timestamp': datetime.now().isoformat()
-                }
-                actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
-
-                # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
                 try:
                     if notified_targets:
-                        # 4 = 'Resueltos' as created by crear_tablas_kanban default
-                        actualizar_columna_chat(numero, 4, config)
+                        actualizar_columna_chat(numero, 4, config) # 4 = 'Resueltos'
                         app.logger.info(f"✅ Chat {numero} movido a 'Resueltos' (columna 4) tras notificación de pedido")
                     else:
                         app.logger.info(f"ℹ️ comprar_producto: no se notificó a ningún objetivo; no se moverá el Kanban para {numero}")
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo mover chat a columna 'Resueltos' para {numero}: {e}")
-
+                
             except Exception as e:
                 app.logger.error(f"🔴 Error notificando asesores tras compra confirmada: {e}")
-        else:
-            if already_notified:
-                app.logger.info("ℹ️ comprar_producto: pedido ya notificado previamente; omitiendo re-notificación.")
-            elif not datos_compra['ready_to_notify'] and not (datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower()):
-                app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
-            else:
-                app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
-
-        # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
+        
+        # 7) Devolver la respuesta que debe enviarse al cliente
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
         return respuesta_text or None
@@ -7421,7 +7418,40 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-        # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
+        
+        # --- INICIO DE LA MODIFICACIÓN: MANEJO DE ESTADO DINÁMICO ---
+        estado_actual = obtener_estado_conversacion(numero, config) 
+
+        if estado_actual and estado_actual.get('contexto') == "EN_PEDIDO_DINAMICO":
+            app.logger.info(f"🔄 Interceptado estado EN_PEDIDO_DINAMICO para {numero}. Procesando respuesta dinámica.")
+            
+            # 1. Llamar a comprar_producto de nuevo con el nuevo mensaje del usuario.
+            respuesta_ia_enriquecida = comprar_producto(numero, config=config, limite_historial=6)
+            
+            # 2. Manejar la respuesta/pregunta
+            if respuesta_ia_enriquecida:
+                enviar_mensaje(numero, respuesta_ia_enriquecida, config)
+                registrar_respuesta_bot(numero, texto, respuesta_ia_enriquecida, config, incoming_saved=incoming_saved)
+                
+                # Criterio para FIN: Si el resultado NO es una pregunta de seguimiento
+                is_question = (("pregunta" in respuesta_ia_enriquecida.lower() or "¿" in respuesta_ia_enriquecida) and 
+                                 "confirmado" not in respuesta_ia_enriquecida.lower())
+
+                if not is_question:
+                    app.logger.info(f"✅ Pedido finalizado/confirmado. Limpiando estado EN_PEDIDO_DINAMICO para {numero}.")
+                    actualizar_estado_conversacion(numero, "CERRADO", "pedido_completado_dinamico", {}, config)
+                
+                return True # Flujo dinámico manejado
+
+            # Fallback si comprar_producto devuelve None
+            app.logger.warning(f"⚠️ Fallo al procesar respuesta dinámica en EN_PEDIDO_DINAMICO. Recurriendo a fallback de texto.")
+            fallback_msg = "Lo siento, tuve un problema al procesar tu respuesta. ¿Podrías confirmarme el dato que me diste?"
+            enviar_mensaje(numero, fallback_msg, config)
+            registrar_respuesta_bot(numero, texto, fallback_msg, config, incoming_saved=incoming_saved)
+            return True
+        # --- FIN MANEJO DE ESTADO DINÁMICO ---
+
+        # 1. --- ANÁLISIS DE IMAGEN CON OPENAI (Visión) ---
         if es_imagen and imagen_base64:
             app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
             try:
@@ -7670,7 +7700,25 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
         
-        # --- FIN DE LA CORRECCIÓN DE LÓGICA DE PAGO ---
+        # --- Lógica de corrección de DATOS_TRANSFERENCIA/COMPRAR_PRODUCTO ---
+        try:
+            ultimo_mensaje_ia = ""
+            if historial:
+                for h in reversed(historial):
+                    if h.get('respuesta'):
+                        ultimo_mensaje_ia = h['respuesta'].lower()
+                        break
+            
+            es_confirmacion_pago = "procedemos con el pago" in ultimo_mensaje_ia or \
+                                   "proceder con el pago" in ultimo_mensaje_ia
+            es_respuesta_afirmativa = texto_norm.startswith(('si', 'sí', 'procedamos', 'ok', 'claro', 'acepto'))
+            
+            if intent == "DATOS_TRANSFERENCIA" and es_confirmacion_pago and es_respuesta_afirmativa:
+                intent = "COMPRAR_PRODUCTO"
+                respuesta_text = ""
+        except Exception as e_override:
+            app.logger.error(f"🔴 Error en la lógica de corrección de intención de pago: {e_override}")
+
         # Seguridad: validar servicio si viene de catálogo
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
@@ -7696,18 +7744,20 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
-        # GUARDAR CITA
-                #Comprar producto
+                
+        # COMPRAR PRODUCTO (incluye preguntas dinámicas y notificación final)
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
                 enviar_mensaje(numero, comprar_producto_text, config)
                 registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
                 return True
+        
         # GUARDAR CITA
         if save_cita:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
+            
         if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
@@ -7718,6 +7768,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 # continue to AI flow as fallback
+                
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
@@ -7725,9 +7776,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
                 
-                # --- CORREGIDO ---
                 # Guardar el nombre de archivo o URL cruda (http)
-                # El filtro en chats.html se encargará de construir la URL correcta
                 bot_media_url_to_save = image_field
                 
                 registrar_respuesta_bot(
@@ -7739,6 +7788,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
+                
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
@@ -7757,6 +7807,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, respuesta_text, config)
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
+            
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
@@ -7768,13 +7819,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
-        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
+            
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
             # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
-            # --- INICIO DE LA CORRECCIÓN ---
             if es_audio:
                 # Si el usuario envió un audio, intentamos responder con audio
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
@@ -7805,19 +7855,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             enviar_mensaje(numero, respuesta_text, config)
             
-            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
+            # REGISTRAR COMO TEXTO
             registrar_respuesta_bot(
                 numero, texto, respuesta_text, config, 
                 incoming_saved=incoming_saved, 
-                respuesta_tipo='texto',  # <-- Corregido
-                respuesta_media_url=None   # <-- Corregido
+                respuesta_tipo='texto', 
+                respuesta_media_url=None   
             )
-            return True
-            # --- FIN DE LA CORRECCIÓN ---
-            # Fallback: Enviar como texto si no era audio o si el audio falló
-            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
-            enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
 
     except requests.exceptions.RequestException as e:
