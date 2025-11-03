@@ -6900,18 +6900,34 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # --- Lógica de Detección/Búsqueda de Producto y Descripción ---
+        # --- Lógica de Detección/Búsqueda de Producto y Descripción (MEJORADA) ---
         producto_db = None
-        sku_buscado = buscar_sku_en_texto(ultimo, obtener_todos_los_precios(config))
+        precios_catalogo = obtener_todos_los_precios(config)
+        sku_buscado = None
+
+        # 1. Intentar encontrar SKU en el último mensaje
+        sku_buscado = buscar_sku_en_texto(ultimo, precios_catalogo)
+
+        # 2. Si no se encuentra en el último mensaje, buscar el SKU más reciente en el historial
         if not sku_buscado:
+            for h in reversed(historial):
+                # Buscar en el mensaje del usuario y en la respuesta del asistente (donde la IA lo confirmó)
+                sku_en_historial = buscar_sku_en_texto(h.get('mensaje') or h.get('respuesta') or '', precios_catalogo)
+                if sku_en_historial:
+                    sku_buscado = sku_en_historial
+                    app.logger.info(f"🔎 SKU recuperado del historial: {sku_buscado}")
+                    break
+
+        if sku_buscado:
+            producto_db = obtener_producto_por_sku_o_nombre(sku_buscado, config)
+        else:
+            # 3. Fallback a buscar por nombre de servicio si no hay SKU
             servicio_buscado = extraer_servicio_del_mensaje(ultimo, config)
             if servicio_buscado:
                  producto_db = obtener_producto_por_sku_o_nombre(servicio_buscado, config)
-        else:
-            producto_db = obtener_producto_por_sku_o_nombre(sku_buscado, config)
 
+        # 4. Fallback: Intentar buscar el producto en los datos provisionales si existe un estado dinámico
         if not producto_db:
-            # Intentar buscar el producto en los datos provisionales si existe un estado dinámico
             estado_actual = obtener_estado_conversacion(numero, config)
             if estado_actual and estado_actual.get('contexto') == "EN_PEDIDO_DINAMICO":
                 datos_parciales = estado_actual.get('datos', {})
@@ -6919,12 +6935,13 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                     sku_provisional = datos_parciales['productos'][0]['sku_o_nombre']
                     producto_db = obtener_producto_por_sku_o_nombre(sku_provisional, config)
 
+        # Si aún no hay producto, usar un placeholder
         if not producto_db:
             producto_db = {'servicio': 'No especificado', 'descripcion': 'El producto no fue identificado en el catálogo.'}
 
         contexto_resumido = producto_db.get('servicio') or producto_db.get('modelo') or producto_db.get('sku') or 'Producto no especificado'
         descripcion_producto = producto_db.get('descripcion') or 'No hay descripción detallada.'
-        # --- FIN Lógica de Detección/Búsqueda de Producto ---
+        # --- FIN Lógica de Detección/Búsqueda de Producto y Descripción (MEJORADA) ---
 
         # 3) Llamada IA: extraer pedido estructurado (Prompt para preguntas dinámicas)
         prompt = f"""
@@ -6965,8 +6982,9 @@ Devuelve SOLO un JSON con la siguiente estructura EXACTA. Si falta algún dato, 
 
 Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
 1. Revisa la 'Descripción' del producto. Si menciona *colores*, *materiales*, *tallas* u *opciones de personalización*, estas opciones deben estar en la clave 'especificaciones_adicionales' del producto en el JSON. Si no están, 'ready_to_notify' es `false` y debes generar una `siguiente_pregunta` para obtener ese dato.
-2. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
-3. NO inventes precios.
+2. Si el PRODUCTO ENCONTRADO tiene un SKU o Modelo definido ({contexto_resumido}), DEBES usar ese SKU o Modelo EXACTO en el campo "sku_o_nombre" del JSON de salida. Nunca cambies el SKU a otro producto si el contexto es claro.
+3. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
+4. NO inventes precios.
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -7153,7 +7171,51 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
                 
-                # ... (Lógica de Google Calendar y envío a targets existente) ...
+                if asesor_email:
+                    try:
+                        service = autenticar_google_calendar(config)
+                        if service:
+                            # Crear evento mínimo para notificar al asesor por email
+                            now_dt = datetime.now(tz_mx)
+                            start_iso = now_dt.isoformat()
+                            end_iso = (now_dt + timedelta(hours=1)).isoformat()
+                            event_for_asesor = {
+                                'summary': f"Notificación: pedido de {cliente_mostrado}",
+                                'location': config.get('direccion', ''),
+                                'description': f"{contexto_resumido}\n\nDetalles del pedido enviado por WhatsApp.\nNúmero cliente: {numero}",
+                                'start': {'dateTime': start_iso, 'timeZone': 'America/Mexico_City'},
+                                'end': {'dateTime': end_iso, 'timeZone': 'America/Mexico_City'},
+                                'attendees': [{'email': asesor_email}],
+                                'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 10}]}
+                            }
+                            try:
+                                # Insertar en primary y notificar asistentes (sendUpdates='all')
+                                primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
+                                created_evt = service.events().insert(calendarId=primary_calendar, body=event_for_asesor, sendUpdates='all').execute()
+                                app.logger.info(f"✅ Evento Calendar creado para asesor {asesor_email}: {created_evt.get('htmlLink')}")
+                            except Exception as e_evt:
+                                app.logger.warning(f"⚠️ No se pudo crear evento Calendar para asesor {asesor_email}: {e_evt}")
+                        else:
+                            app.logger.warning("⚠️ autenticar_google_calendar devolvió None, no se creó evento para asesor")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ Error intentando notificar a asesor por Calendar ({asesor_email}): {e}")
+
+                # Enviar a asesor y al número fijo
+                targets = []
+                if asesor_tel:
+                    targets.append(asesor_tel)
+                targets.append("5214493432744")
+
+                # collect successful targets to decide kanban move
+                notified_targets = []
+                for t in targets:
+                    try:
+                        sent = enviar_mensaje(t, mensaje_alerta, config)
+                        if sent:
+                            notified_targets.append(t)
+                        app.logger.info(f"✅ Alerta de pedido enviada a {t}")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
                 
                 # Marcar estado para evitar re-notificaciones y guardar notas
                 nuevo_estado = {
