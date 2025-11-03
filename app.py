@@ -7694,7 +7694,46 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
+        try:
+            # Primero, verificamos si la IA ya planeaba enviar una imagen. Si es así, no hacemos nada.
+            if intent != "ENVIAR_IMAGEN" and respuesta_text:
+                texto_respuesta_lower = respuesta_text.lower()
+                imagen_auto_enviar = None
+                producto_detectado = None
 
+                # Recorremos el catálogo para ver si algún producto fue mencionado
+                for producto in catalog_list:
+                    sku = (producto.get('sku') or '').strip().lower()
+                    servicio = (producto.get('servicio') or '').strip().lower()
+
+                    # Comprobamos si el SKU o el nombre del servicio están en la respuesta de la IA
+                    if (sku and sku in texto_respuesta_lower) or (servicio and servicio in texto_respuesta_lower):
+                        # Si encontramos un producto y tiene una imagen asociada, la seleccionamos
+                        if producto.get('imagen'):
+                            imagen_auto_enviar = producto.get('imagen')
+                            producto_detectado = sku or servicio
+                            app.logger.info(f"🖼️ Producto '{producto_detectado}' detectado en la respuesta. Se enviará la imagen: {imagen_auto_enviar}")
+                            break # Dejamos de buscar una vez que encontramos el primer producto
+
+                # Si encontramos una imagen para enviar, lo hacemos ahora
+                if imagen_auto_enviar:
+                    # El caption de la imagen será la respuesta de texto que generó la IA
+                    enviar_imagen(numero, imagen_auto_enviar, config, caption=respuesta_text)
+                    
+                    # Guardamos en la base de datos que el bot envió una imagen con su texto
+                    registrar_respuesta_bot(
+                        numero, texto, respuesta_text, config,
+                        incoming_saved=incoming_saved,
+                        respuesta_tipo='imagen',
+                        respuesta_media_url=imagen_auto_enviar
+                    )
+                    
+                    # Como ya enviamos la imagen Y el texto como caption, terminamos el flujo aquí.
+                    return True
+
+        except Exception as e:
+            app.logger.error(f"🔴 Error en la lógica de envío automático de imagen: {e}")
+        # --- FIN DEL CÓDIGO A INSERTAR ---
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
