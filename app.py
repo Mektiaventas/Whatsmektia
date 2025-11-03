@@ -8824,12 +8824,10 @@ def enviar_manual():
             conn = get_db_connection(config)
             cursor = conn.cursor()
         
-            # Usar timestamp con zona horaria de México
-            timestamp_local = datetime.now(tz_mx)  # Cambiar de utcnow() a now(tz_mx)
-        
+            # CORREGIDO: Usar UTC_TIMESTAMP() en MySQL para asegurar orden cronológico correcto.
             cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, %s);",
-                (numero, '[Mensaje manual desde web]', texto, timestamp_local)
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
+                (numero, '[Mensaje manual desde web]', texto) # Ya no pasamos timestamp_local
             )
         
             conn.commit()
