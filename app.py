@@ -6933,7 +6933,7 @@ REGLA CRÍTICA DE FLUJO: El campo "ready_to_notify" solo debe ser 'true' si tien
   "resumen_conversacion": "Resumen breve en español del contexto de la conversación para el asesor."
 }}
 
-Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago/nombre) inclúyelos en 'preguntas_faltantes'.
+Reglas: NO inventes precios; Si te piden un producto y no tienes di que no tienes ese producto; Incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago/nombre) inclúyelos en 'preguntas_faltantes'.
 """ # ← MODIFICADO: Se incluyó REGLA CRÍTICA para 'ready_to_notify' y 'nombre_cliente'
 
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
