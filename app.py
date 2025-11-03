@@ -2646,7 +2646,6 @@ def crear_evento_calendar(service, cita_info, config=None):
 🕒 Creado: {datetime.now().strftime('%d/%m/%Y %H:%M')}
 
 💬 Notas: {'Pedido' if es_porfirianna else 'Cita'} agendado automáticamente desde WhatsApp
-📝 ESPECIFICACIONES DINÁMICAS: {cita_info.get('notas', 'No se especificaron')}  <-- AÑADIDO
         """.strip()
         
         event = {
@@ -3337,8 +3336,8 @@ def guardar_cita(info_cita, config=None):
         cursor.execute('''
             INSERT INTO citas (
                 numero_cliente, servicio_solicitado, fecha_propuesta,
-                hora_propuesta, nombre_cliente, telefono, estado, notas, evento_calendar_id <-- AÑADIDO: 'notas' y 'evento_calendar_id'
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                hora_propuesta, nombre_cliente, telefono, estado
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', (
             telefono,
             info_cita.get('servicio_solicitado'),
@@ -3346,9 +3345,7 @@ def guardar_cita(info_cita, config=None):
             info_cita.get('hora_sugerida'),
             info_cita.get('nombre_cliente'),
             telefono,
-            'pendiente',
-            info_cita.get('notas', ''), # <-- AÑADIDO: Guardar las notas (especificaciones dinámicas)
-            None # Inicialmente None para evento_calendar_id
+            'pendiente'
         ))
 
         conn.commit()
@@ -6884,8 +6881,9 @@ def manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial,
 
 def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
     """
-    Función que extrae el pedido estructurado, maneja la secuencia de preguntas dinámicas,
-    consolida las especificaciones adicionales y notifica al asesor si el pedido está completo.
+    Igual que antes pero:
+     - Pide a la IA un resumen (contexto) en sus propias palabras y lo usa en la alerta.
+     - NOTA: ya no hace acciones adicionales cuando el método de pago es 'transferencia'.
     Devuelve: respuesta_text (string) o None.
     """
     if config is None:
@@ -6903,68 +6901,36 @@ def comprar_producto(numero, config=None, limite_historial=8, modelo="deepseek-c
                 partes.append(f"Asistente: {h.get('respuesta')}")
         historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
 
-        # Buscar el producto que el usuario está comprando (para obtener descripción)
-        producto_db = None
-        sku_buscado = buscar_sku_en_texto(ultimo, obtener_todos_los_precios(config))
-        if not sku_buscado:
-            servicio_buscado = extraer_servicio_del_mensaje(ultimo, config)
-            if servicio_buscado:
-                 producto_db = obtener_producto_por_sku_o_nombre(servicio_buscado, config)
-        else:
-            producto_db = obtener_producto_por_sku_o_nombre(sku_buscado, config)
-
-        if not producto_db:
-            producto_db = {'servicio': 'No especificado', 'descripcion': 'El producto no fue identificado en el catálogo.'}
-
-        # 2) Llamada IA: extraer pedido estructurado (Prompt para preguntas dinámicas)
-        contexto_resumido = producto_db.get('servicio') or producto_db.get('modelo') or producto_db.get('sku') or 'Producto no especificado'
-        descripcion_producto = producto_db.get('descripcion') or 'No hay descripción detallada.'
-
+        # 2) Llamada IA: extraer pedido estructurado (mismo prompt estricto de antes)
         prompt = f"""
-Eres un extractor estructurado de pedidos y generador de preguntas de seguimiento. Tu tarea es analizar el historial, el último mensaje del usuario y la descripción del producto para determinar qué información falta.
-
-PRODUCTO ENCONTRADO (si aplica):
-{contexto_resumido}
-Descripción: {descripcion_producto}
-
-HISTORIAL:
-{historial_text}
-
-ÚLTIMO MENSAJE:
-{ultimo}
-
-Devuelve SOLO un JSON con la siguiente estructura EXACTA. Si falta algún dato, deja el campo con valor `null` y formula la `siguiente_pregunta`.
+Eres un extractor estructurado. A partir del historial y del último mensaje del usuario,
+devuelve SOLO un JSON con la siguiente estructura EXACTA:
 
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas), SIEMPRE debe incluir una frase de agradecimiento o confirmación.",
+  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas).",
   "productos": [
     {{
       "sku_o_nombre": "CIANI OHE 305",
       "cantidad": 4,
       "precio_unitario": 300.0,
-      "precio_total_item": 1200.0,
-      "especificaciones_adicionales": "rojo, con logo personalizado" 
+      "precio_total_item": 1200.0
     }}
   ],
   "metodo_pago": "tarjeta" | "transferencia" | "efectivo" | null,
   "direccion": "Texto de dirección completa" | null,
   "nombre_cliente": "Nombre si se detecta" | null,
   "precio_total": 1200.0 | null,
-  "ready_to_notify": true|false, // True solo si están TODOS los campos requeridos (productos, pago, dirección) Y la información dinámica del producto está completa.
-  "confidence": 0.0-1.0,
-  "resumen_para_asesor": "Un resumen breve (2-4 líneas) del contexto.",
-  "siguiente_pregunta": "Pregunta de seguimiento que cubra el dato faltante más crucial (ej. ¿Qué color o material deseas?). Si el pedido está listo, debe ser 'null'." 
+  "ready_to_notify": true|false,
+  "confidence": 0.0-1.0
 }}
 
-Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
-1. Revisa la 'Descripción' del producto. Si menciona *colores*, *materiales*, *tallas* u *opciones de personalización*, estas opciones deben estar en 'especificaciones_adicionales'. Si no lo están, 'ready_to_notify' es `false` y debes generar una `siguiente_pregunta` para obtener ese dato.
-2. Si la descripción no requiere opciones, o el usuario ya las proporcionó en el mensaje/historial, enfócate en la 'dirección' y el 'metodo_pago'.
-3. NO inventes precios.
+Reglas: NO inventes precios si hay catálogo; incluye todos los productos y cantidades detectadas.
 """
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
             "model": modelo,
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": prompt},
+                         {"role": "user", "content": f"HISTORIAL:\n{historial_text}\n\nÚLTIMO MENSAJE:\n{ultimo}"}],
             "temperature": 0.0,
             "max_tokens": max_tokens
         }
@@ -6987,29 +6953,20 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
         except Exception as e:
             app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:1000]}")
             return None
-            
-        siguiente_pregunta = extracted.get('siguiente_pregunta')
 
-        # --- Lógica de Manejo de Preguntas Dinámicas (Estado EN_PEDIDO_DINAMICO) ---
-        if siguiente_pregunta:
-            # El pedido no está listo, guardar estado provisional y responder la pregunta dinámica
-            datos_parciales = {
-                 'productos': extracted.get('productos'),
-                 'direccion': extracted.get('direccion'),
-                 'nombre_cliente': extracted.get('nombre_cliente'),
-                 'siguiente_pregunta': siguiente_pregunta
-            }
-            actualizar_estado_conversacion(numero, "EN_PEDIDO_DINAMICO", "solicitar_info_producto", datos_parciales, config)
-
-            # Devolver la pregunta de seguimiento para que sea enviada al usuario
-            return siguiente_pregunta
-        
-        # --- 3) Normalizar/enriquecer productos y calcular totales ---
+        respuesta_text = extracted.get('respuesta_text') or ""
         productos = extracted.get('productos') or []
+        metodo_pago = extracted.get('metodo_pago')
+        direccion = extracted.get('direccion')
+        nombre_cliente = extracted.get('nombre_cliente')
+        precio_total_ia = extracted.get('precio_total')
+        ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
+        confidence = float(extracted.get('confidence') or 0.0)
+
+        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
         productos_norm = []
         suma_total = 0.0
         any_price_known = False
-        
         for p in productos:
             try:
                 name_raw = (p.get('sku_o_nombre') or p.get('nombre') or p.get('sku') or '').strip()
@@ -7023,11 +6980,11 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                     except Exception:
                         pu = None
 
-                producto_db_item = None
+                producto_db = None
                 if name_raw:
-                    producto_db_item = obtener_producto_por_sku_o_nombre(name_raw, config)
-                if not pu and producto_db_item:
-                    cand = producto_db_item.get('precio_menudeo') or producto_db_item.get('precio') or producto_db_item.get('costo') or producto_db_item.get('precio_mayoreo')
+                    producto_db = obtener_producto_por_sku_o_nombre(name_raw, config)
+                if not pu and producto_db:
+                    cand = producto_db.get('precio_menudeo') or producto_db.get('precio') or producto_db.get('costo') or producto_db.get('precio_mayoreo')
                     try:
                         if cand not in (None, ''):
                             pu = float(re.sub(r'[^\d.]', '', str(cand)))
@@ -7053,67 +7010,81 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                     "cantidad": qty,
                     "precio_unitario": pu,
                     "precio_total_item": precio_total_item,
-                    "catalog_row": producto_db_item
+                    "catalog_row": producto_db
                 })
             except Exception as e:
                 app.logger.warning(f"⚠️ comprar_producto: error procesando item {p}: {e}")
                 continue
-                
-        # Calcular precio total y otros datos
-        precio_total_ia = extracted.get('precio_total')
+
         precio_total_calc = round(suma_total, 2) if any_price_known else (float(precio_total_ia) if precio_total_ia not in (None, '') else None)
 
         datos_compra = {
             "productos": productos_norm,
             "precio_total": precio_total_calc,
-            "metodo_pago": extracted.get('metodo_pago') or None,
-            "direccion": extracted.get('direccion') or None,
-            "nombre_cliente": extracted.get('nombre_cliente') or None,
+            "metodo_pago": metodo_pago or None,
+            "direccion": direccion or None,
+            "nombre_cliente": nombre_cliente or None,
             "numero_cliente": numero,
-            "ready_to_notify": bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False,
-            "confidence": float(extracted.get('confidence') or 0.0)
+            "ready_to_notify": ready_to_notify,
+            "confidence": confidence
         }
 
-        # --- CONSOLIDACIÓN DE ESPECIFICACIONES DINÁMICAS (Para Alerta y Calendar) ---
-        especificaciones_dinamicas = []
-        for p_norm in productos_norm:
-            # Buscar el objeto original de la IA que corresponde a este producto normalizado
-            original_product = next((op for op in productos if op.get('sku_o_nombre') == p_norm.get('sku_o_nombre')), None)
-            
-            # Extraer especificaciones del objeto original de la IA
-            specs = (original_product.get('especificaciones_adicionales') or '').strip() if original_product else ''
-            
-            if specs:
-                nombre_item = p_norm.get('sku_o_nombre') or 'Producto'
-                cantidad_item = p_norm.get('cantidad') or 1
-                especificaciones_dinamicas.append(f"• {cantidad_item} x {nombre_item}: {specs}")
-        
-        notas_dinamicas = "\n".join(especificaciones_dinamicas)
-        datos_compra['notas'] = notas_dinamicas
-        # --- FIN CONSOLIDACIÓN ---
+        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
 
-        contexto_resumido_ia = extracted.get('resumen_para_asesor') or None
-        respuesta_text = extracted.get('respuesta_text') or ""
+        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
+        try:
+            resumen_prompt = f"""
+Resume en 2-4 líneas en español, con lenguaje natural, el contexto de la conversación
+para que un asesor humano entienda rápidamente. Usa SOLO el historial y la lista de productos a continuación.
+No incluyas números de teléfono ni direcciones completas en el resumen.
 
-        # ... (Lógica existente para evitar re-notificaciones: should_notify, already_notified) ...
+HISTORIAL:
+{historial_text}
+
+PRODUCTOS DETECTADOS:
+{json.dumps(productos_norm, ensure_ascii=False)[:3000]}
+
+Devuelve únicamente el resumen de 2-4 líneas en español.
+"""
+            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
+            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
+            rsum.raise_for_status()
+            sum_data = rsum.json()
+            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
+            if isinstance(contexto_resumido, list):
+                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
+            contexto_resumido = re.sub(r'\n\s+\n', '\n\n', contexto_resumido).strip()
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
+            contexto_resumido = historial_text if len(historial_text) <= 1200 else historial_text[-1200:]
+
+        # 5) Evitar re-notificaciones
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
         try:
             if estado_actual and estado_actual.get('datos') and isinstance(estado_actual.get('datos'), dict):
                 if estado_actual['datos'].get('pedido_notificado'):
-                    already_notified = True
+                    already_notified = False
         except Exception:
             already_notified = False
-            
-        should_notify = datos_compra.get('ready_to_notify')
-        # ... (Lógica para forzar notificación si pago es transferencia y campos completos) ...
-        mp = datos_compra.get('metodo_pago') or ''
-        if mp and 'transfer' in str(mp).lower():
-            if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
-                should_notify = True
-                app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
 
-        # --- Notificación al Asesor (Alerta Enriquecida) ---
+        # 6) Notificar solo si IA indicó ready_to_notify y datos completos
+        # NOTE: treat transferencias as an intent to buy — allow notification even if ready_to_notify==False,
+        # so advisors get alerted when user confirmed transfer and required fields exist.
+        should_notify = False
+        try:
+            if datos_compra.get('ready_to_notify'):
+                should_notify = True
+            else:
+                # If payment method is transfer and essential fields are present, notify anyway
+                mp = datos_compra.get('metodo_pago') or ''
+                if mp and 'transfer' in str(mp).lower():
+                    if datos_compra.get('direccion') and datos_compra.get('precio_total') is not None and len(productos_norm) > 0:
+                        should_notify = True
+                        app.logger.info(f"ℹ️ comprar_producto: metodo_pago='transferencia' detectado -> forzando notificación si campos completos.")
+        except Exception:
+            should_notify = False
+
         if should_notify and not already_notified and datos_compra.get('metodo_pago') and datos_compra.get('direccion') and datos_compra['precio_total'] is not None and len(productos_norm) > 0:
             try:
                 asesor = obtener_siguiente_asesor(config)
@@ -7135,41 +7106,39 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                     else:
                         lineas_items.append(f"• {qty} x {nombre} (precio por confirmar)")
 
-                # Construir mensaje de alerta CON ESPECIFICACIONES DINÁMICAS
+                # Construir mensaje de alerta con el resumen generado por la IA
                 mensaje_alerta = (
                     f"🔔 *Pedido confirmado por cliente*\n\n"
                     f"👤 *Cliente:* {cliente_mostrado}\n"
                     f"📞 *Número:* {numero}\n\n"
                     f"🧾 *Detalles del pedido:*\n"
                     f"{chr(10).join(lineas_items)}\n\n"
-                    f"• *Especificaciones dinámicas:* {datos_compra.get('notas') or 'No se especificaron'}\n\n" # <-- AÑADIDO
                     f"• *Precio total:* ${datos_compra['precio_total']:,.2f}\n"
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
                     f"• *Dirección:* {datos_compra.get('direccion')}\n\n"
-                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido_ia or historial_text}\n"
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
-                
-                # ... (Lógica existente para crear evento Calendar si hay email de asesor) ...
                 if asesor_email:
                     try:
                         service = autenticar_google_calendar(config)
                         if service:
-                            # Crear evento para notificar al asesor por email
-                            now_dt = datetime.now(pytz.timezone('America/Mexico_City'))
+                            # Crear evento mínimo para notificar al asesor por email
+                            now_dt = datetime.now(tz_mx)
                             start_iso = now_dt.isoformat()
                             end_iso = (now_dt + timedelta(hours=1)).isoformat()
                             event_for_asesor = {
                                 'summary': f"Notificación: pedido de {cliente_mostrado}",
-                                'location': datos_compra.get('direccion') or config.get('direccion', ''),
-                                'description': f"{contexto_resumido_ia}\n\nDetalles del pedido: {chr(10).join(lineas_items)}\n\nEspecificaciones: {datos_compra.get('notas') or 'N/A'}\nNúmero cliente: {numero}",
+                                'location': config.get('direccion', ''),
+                                'description': f"{contexto_resumido}\n\nDetalles del pedido enviado por WhatsApp.\nNúmero cliente: {numero}",
                                 'start': {'dateTime': start_iso, 'timeZone': 'America/Mexico_City'},
                                 'end': {'dateTime': end_iso, 'timeZone': 'America/Mexico_City'},
                                 'attendees': [{'email': asesor_email}],
                                 'reminders': {'useDefault': False, 'overrides': [{'method': 'email', 'minutes': 10}]}
                             }
                             try:
+                                # Insertar en primary y notificar asistentes (sendUpdates='all')
                                 primary_calendar = os.getenv('GOOGLE_CALENDAR_ID', 'primary')
                                 created_evt = service.events().insert(calendarId=primary_calendar, body=event_for_asesor, sendUpdates='all').execute()
                                 app.logger.info(f"✅ Evento Calendar creado para asesor {asesor_email}: {created_evt.get('htmlLink')}")
@@ -7180,12 +7149,13 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                     except Exception as e:
                         app.logger.warning(f"⚠️ Error intentando notificar a asesor por Calendar ({asesor_email}): {e}")
 
-                # ... (Lógica existente para enviar a targets y mover a Resueltos) ...
+                # Enviar a asesor y al número fijo
                 targets = []
                 if asesor_tel:
                     targets.append(asesor_tel)
                 targets.append("5214493432744")
 
+                # collect successful targets to decide kanban move
                 notified_targets = []
                 for t in targets:
                     try:
@@ -7196,6 +7166,7 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                     except Exception as e:
                         app.logger.warning(f"⚠️ No se pudo notificar a {t}: {e}")
 
+                # Marcar estado para evitar re-notificaciones
                 nuevo_estado = {
                     'pedido_confirmado': datos_compra,
                     'pedido_notificado': True,
@@ -7203,9 +7174,11 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
                 }
                 actualizar_estado_conversacion(numero, "PEDIDO_CONFIRMADO", "pedido_notificado", nuevo_estado, config)
 
+                # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
                 try:
                     if notified_targets:
-                        actualizar_columna_chat(numero, 4, config) # 4 = 'Resueltos'
+                        # 4 = 'Resueltos' as created by crear_tablas_kanban default
+                        actualizar_columna_chat(numero, 4, config)
                         app.logger.info(f"✅ Chat {numero} movido a 'Resueltos' (columna 4) tras notificación de pedido")
                     else:
                         app.logger.info(f"ℹ️ comprar_producto: no se notificó a ningún objetivo; no se moverá el Kanban para {numero}")
@@ -7220,10 +7193,9 @@ Reglas clave para la 'ready_to_notify' y 'siguiente_pregunta':
             elif not datos_compra['ready_to_notify'] and not (datos_compra.get('metodo_pago') and 'transfer' in str(datos_compra.get('metodo_pago')).lower()):
                 app.logger.info("ℹ️ comprar_producto: IA no marcó ready_to_notify -> esperando más confirmación.")
             else:
-                app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion/o producto dinámico).")
+                app.logger.info("ℹ️ comprar_producto: datos incompletos para notificar (p.ej. falta precio_total/metodo/direccion).")
 
-
-        # 7) Devolver la respuesta que debe enviarse al cliente
+        # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
         return respuesta_text or None
@@ -7449,67 +7421,38 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             config = obtener_configuracion_por_host()
 
         texto_norm = (texto or "").strip().lower()
-
-        # 1. --- MANEJO DE ESTADO DINÁMICO (PREGUNTAS DE PRODUCTO) ---
-        estado_actual = obtener_estado_conversacion(numero, config) 
-
-        if estado_actual and estado_actual.get('contexto') == "EN_PEDIDO_DINAMICO":
-            app.logger.info(f"🔄 Interceptado estado EN_PEDIDO_DINAMICO para {numero}. Procesando respuesta dinámica.")
-            
-            # Llamar a comprar_producto de nuevo con el nuevo mensaje del usuario.
-            respuesta_ia_enriquecida = comprar_producto(numero, config=config, limite_historial=6)
-            
-            if respuesta_ia_enriquecida:
-                enviar_mensaje(numero, respuesta_ia_enriquecida, config)
-                registrar_respuesta_bot(numero, texto, respuesta_ia_enriquecida, config, incoming_saved=incoming_saved)
-                
-                # Criterio para FIN: Si no contiene signos de pregunta ni palabras clave (ej. qué, cuál) y no es 'confirmado'.
-                is_question = (("pregunta" in respuesta_ia_enriquecida.lower() or "¿" in respuesta_ia_enriquecida) and 
-                                 "confirmado" not in respuesta_ia_enriquecida.lower())
-
-                if not is_question:
-                    app.logger.info(f"✅ Pedido finalizado/confirmado. Limpiando estado EN_PEDIDO_DINAMICO para {numero}.")
-                    actualizar_estado_conversacion(numero, "CERRADO", "pedido_completado_dinamico", {}, config)
-                
-                return True # Flujo dinámico manejado
-
-            # Fallback si comprar_producto devuelve None
-            app.logger.warning(f"⚠️ Fallo al procesar respuesta dinámica en EN_PEDIDO_DINAMICO. Recurriendo a fallback de texto.")
-            fallback_msg = "Lo siento, tuve un problema al procesar tu respuesta. ¿Podrías confirmarme el dato que me diste?"
-            enviar_mensaje(numero, fallback_msg, config)
-            registrar_respuesta_bot(numero, texto, fallback_msg, config, incoming_saved=incoming_saved)
-            return True
-        # --- FIN MANEJO DE ESTADO DINÁMICO ---
-
-
-        # 2. --- ANÁLISIS DE IMAGEN CON OPENAI (Visión) ---
+        # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
         if es_imagen and imagen_base64:
             app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
             try:
+                # Llamar a la función de análisis de visión que ya existe en tu código
                 respuesta_vision = analizar_imagen_y_responder(
                     numero=numero,
                     imagen_base64=imagen_base64,
-                    caption=texto,
+                    caption=texto,  # El texto que acompaña la imagen (o "El usuario envió...")
                     public_url=public_url,
                     config=config
                 )
                 
                 if respuesta_vision:
+                    # Si OpenAI respondió, enviar esa respuesta y terminar
                     enviar_mensaje(numero, respuesta_vision, config)
                     registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
-                    return True
+                    return True  # Termina el procesamiento aquí
                 else:
+                    # Si OpenAI falló, enviar un fallback
+                    app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
                     fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
                     enviar_mensaje(numero, fallback_msg, config)
                     registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
-                    return True
+                    return True # Termina el procesamiento aquí
 
             except Exception as e:
                 app.logger.error(f"🔴 Error fatal llamando a analizar_imagen_y_responder: {e}")
+                app.logger.error(traceback.format_exc())
+                # No continuar si el análisis de imagen falló
                 return False
-        
-        
-        # 3. --- Preparar contexto y catálogo para DeepSeek ---
+        # --- Preparar contexto y catálogo ---
         historial = obtener_historial(numero, limite=6, config=config) or []
         historial_text = ""
         for h in historial:
@@ -7517,6 +7460,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
+                # --- DeepSeek prompt: detectar si el mensaje solicita información de producto ---
         producto_aplica = "NO_APLICA"
         try:
             # Build a minimal, strict prompt that forces the model to answer ONLY with SI_APLICA or NO_APLICA
@@ -7573,13 +7517,13 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 producto_aplica = "NO_APLICA"
                 app.logger.info("🔎 Fallback product-detector -> NO_APLICA")
             app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
+        # --- end DeepSeek product detection ---
         precios = obtener_todos_los_precios(config) or []
         texto_catalogo = build_texto_catalogo(precios, limit=40)
 
         catalog_list = []
         for p in precios:
             try:
-                # Normalizar la estructura del catálogo (omito detalles por brevedad)
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
                     "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
@@ -7592,41 +7536,52 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
-                
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
             try:
                 transfer_list.append({
-                    "cuenta_bancaria": (t.get('transferencia_numero') or '').strip(),
+                    "cuenta_bancaria": (p.get('transferencia_numero') or '').strip(),
                     "nombre_transferencia": (p.get('transferencia_nombre') or '').strip(),
                     "banco_transferencia": str(p.get('transferencia_banco') or "")
                 })
             except Exception:
                 continue
-                
         cfg_full = load_config(config)
         asesores_block = format_asesores_block(cfg_full)
-        
-        # Cargar configuración de negocio
-        negocio_cfg = (cfg_full.get('negocio') or {})
-        negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
-        negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
-        MAX_CFG_CHARS = 5000
-        negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
-        negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
-        ia_nombre = (negocio_cfg.get('ia_nombre') or negocio_cfg.get('app_nombre') or "Asistente")
-        negocio_nombre = (negocio_cfg.get('negocio_nombre') or "")
-        
-        # Información Multimodal
+                 # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
+        try:
+            negocio_cfg = (cfg_full.get('negocio') or {})  # may be {}
+            negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
+            negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
+            # Truncate to keep prompt/token usage reasonable
+            MAX_CFG_CHARS = 5000
+            negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
+            negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
+        except Exception:
+            negocio_descripcion_short = ""
+            negocio_que_hace_short = ""
+        # --- NEW: expose the assistant/business display name from configuration to the system prompt ---
+        try:
+            ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
+            negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
+            
+        except Exception:
+            ia_nombre = "Asistente"
+            negocio_nombre = ""
         multimodal_info = ""
+        if es_imagen:
+            multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
+            if imagen_base64:
+                multimodal_info += "Se proporciona la imagen codificada en base64 para análisis.\n"
+            if isinstance(msg, dict) and msg.get('image', {}).get('caption'):
+                multimodal_info += f"Caption: {msg['image'].get('caption')}\n"
         if es_audio:
             multimodal_info += "El mensaje incluye audio y se ha provisto transcripción.\n"
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-
-        # 4. --- System prompt (DeepSeek) ---
+        # --- System prompt (strict rules to avoid hallucinations) ---
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
@@ -7670,13 +7625,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         }
         if producto_aplica == "SI_APLICA":
             user_content["catalogo"] = catalog_list
-        
+            app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
+        else:
+            app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
+
         payload_messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ]
 
-        # 5. --- Llamada a la IA (DeepSeek) ---
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
 
@@ -7684,14 +7641,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         resp.raise_for_status()
         data = resp.json()
         raw = data['choices'][0]['message']['content']
-        # ... (lógica de extracción y parseo JSON) ...
         if isinstance(raw, list):
             raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
         raw = str(raw).strip()
 
         match = re.search(r'(\{.*\}|\[.*\])', raw, re.DOTALL)
         if not match:
-            # Fallback a texto si no hay JSON
+            app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
                 enviar_mensaje(numero, fallback_text, config)
@@ -7711,66 +7667,69 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         document_field = decision.get('document')
         save_cita = decision.get('save_cita')
         notify_asesor = bool(decision.get('notify_asesor'))
+        followups = decision.get('followups') or []
         source = decision.get('source') or "none"
-
-        # --- Lógica de corrección de DATOS_TRANSFERENCIA/COMPRAR_PRODUCTO ---
-        try:
-            ultimo_mensaje_ia = ""
-            if historial:
-                for h in reversed(historial):
-                    if h.get('respuesta'):
-                        ultimo_mensaje_ia = h['respuesta'].lower()
-                        break
-            
-            es_confirmacion_pago = "procedemos con el pago" in ultimo_mensaje_ia or \
-                                   "proceder con el pago" in ultimo_mensaje_ia
-            es_respuesta_afirmativa = texto_norm.startswith(('si', 'sí', 'procedamos', 'ok', 'claro', 'acepto'))
-            
-            if intent == "DATOS_TRANSFERENCIA" and es_confirmacion_pago and es_respuesta_afirmativa:
-                intent = "COMPRAR_PRODUCTO"
-                respuesta_text = ""
-        except Exception as e_override:
-            app.logger.error(f"🔴 Error en la lógica de corrección de intención de pago: {e_override}")
-
-        # 6. --- Ejecutar la Intención ---
         
-        # COMPRAR PRODUCTO (incluye preguntas dinámicas y notificación final)
+        # --- FIN DE LA CORRECCIÓN DE LÓGICA DE PAGO ---
+        # Seguridad: validar servicio si viene de catálogo
+        if source == "catalog" and decision.get('save_cita'):
+            svc = decision['save_cita'].get('servicio_solicitado') or ""
+            svc_lower = svc.strip().lower()
+            found = False
+            for item in catalog_list:
+                if item.get('sku', '').strip().lower() == svc_lower or item.get('subcategoria', '').strip().lower() == svc_lower:
+                    found = True
+                    break
+            if not found:
+                app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
+                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
+                registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
+                return True
+
+        # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
+        if intent == "ENVIAR_DOCUMENTO" and not document_field:
+            app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
+            try:
+                sent = enviar_catalogo(numero, original_text=texto, config=config)
+                msg_resp = "Te envié el catálogo solicitado." if sent else "No encontré catálogo publicado."
+                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
+        # GUARDAR CITA
+                #Comprar producto
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
                 enviar_mensaje(numero, comprar_producto_text, config)
                 registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
                 return True
-        
-        # GUARDAR CITA (Flujo Unificado)
+        # GUARDAR CITA
         if save_cita:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
-            
-        # ENVIAR CATÁLOGO (atajo)
-        if intent in ["ENVIAR_CATALOGO", "ENVIAR_TEMARIO", "ENVIAR_FLYER", "ENVIAR_PDF", "ENVIAR_DOCUMENTO"]:
-            if intent == "ENVIAR_DOCUMENTO" and document_field:
-                # Si es un documento específico, lo enviamos directamente
-                enviar_documento(numero, document_field, os.path.basename(document_field), config)
-                if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
-                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
-                return True
-            else:
-                # Si es catálogo/temario/flyer, usamos la función genérica
+        if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
+            try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                msg_resp = respuesta_text or ("Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar.")
+                # registrar respuesta evitando duplicados
+                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
                 registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
                 return True
-                
+            except Exception as e:
+                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                # continue to AI flow as fallback
         # ENVIAR IMAGEN
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
-                enviar_imagen(numero, image_field, config)
+                sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
                 
+                # --- CORREGIDO ---
+                # Guardar el nombre de archivo o URL cruda (http)
+                # El filtro en chats.html se encargará de construir la URL correcta
                 bot_media_url_to_save = image_field
+                
                 registrar_respuesta_bot(
                     numero, texto, respuesta_text, config,
                     incoming_saved=incoming_saved,
@@ -7780,29 +7739,45 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
-                
+        # ENVIAR DOCUMENTO (explicit)
+        if intent == "ENVIAR_DOCUMENTO" and document_field:
+            try:
+                enviar_documento(numero, document_field, os.path.basename(document_field), config)
+                if respuesta_text:
+                    enviar_mensaje(numero, respuesta_text, config)
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
+                return True
+            except Exception as e:
+                app.logger.error(f"🔴 Error enviando documento: {e}")
+
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
-            pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
                 enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
-            
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
             if not sent:
+                # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
                 if respuesta_text:
                     enviar_mensaje(numero, respuesta_text, config)
-                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+            else:
+                app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
-
+        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
+            # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
+            # --- INICIO DE LA CORRECCIÓN ---
             if es_audio:
+                # Si el usuario envió un audio, intentamos responder con audio
+                app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
                     audio_url = texto_a_voz(respuesta_text, filename, config)
@@ -7811,24 +7786,44 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         sent_audio = enviar_mensaje_voz(numero, audio_url, config)
                         
                         if sent_audio:
+                            # ÉXITO AUDIO: Enviar y registrar como audio
+                            app.logger.info(f"✅ Respuesta de audio enviada a {numero}")
                             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
                             return True
-                    app.logger.warning("⚠️ Falló la generación/envío de audio. Enviando como texto.")
+                        else:
+                            app.logger.warning("⚠️ Falló el envío del mensaje de voz. Enviando como texto.")
+                    else:
+                        app.logger.warning("⚠️ Falló la generación de audio (texto_a_voz). Enviando como texto.")
+                
                 except Exception as e:
                     app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
+                    app.logger.error(traceback.format_exc())
+                    # Fallback a enviar texto si algo falla
             
             # FALLBACK A TEXTO:
+            # (Ocurre si 'es_audio' era False, o si la generación/envío de audio falló)
+            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
-            return True
             
-        # NO ACTION o fallback final
-        if intent == "NO_ACTION" or not respuesta_text:
-             app.logger.info("ℹ️ IA respondió NO_ACTION o no devolvió texto útil.")
-             return True # Se procesó la intención (aunque sea "no hacer nada")
+            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
+            registrar_respuesta_bot(
+                numero, texto, respuesta_text, config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  # <-- Corregido
+                respuesta_media_url=None   # <-- Corregido
+            )
+            return True
+            # --- FIN DE LA CORRECCIÓN ---
+            # Fallback: Enviar como texto si no era audio o si el audio falló
+            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
+            enviar_mensaje(numero, respuesta_text, config)
+            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+            return True
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            app.logger.error(f"🔴 API body: {e.response.text[:1000]}")
         return False
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
