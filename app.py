@@ -7060,7 +7060,7 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
         try:
             resumen_prompt = f"""
-Tu rol es generar un resumen EJECUTIVO del chat para un asesor. 
+Tu rol es generar un resumen con tus palabras del chat para un asesor. 
 Analiza el historial y el pedido, y resume en 1-3 frases en español el CONTEXTO del cliente. 
 El resumen debe ser breve y enfocado en la intención de compra del cliente, NO en las características del producto.
 Por ejemplo: "El cliente ha confirmado el color y la dirección, solo falta procesar el pago en efectivo."
@@ -7626,7 +7626,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
-6) El JSON debe tener estas claves mínimas:
+6) Devuelve intent == DATOS_TRANSFERENCIA si el usuario pregunta por "datos de transferencia", "cuenta bancaria", "cómo hacer la transferencia" o similares y el usuario no esta en proceso de compra.
+7) El JSON debe tener estas claves mínimas:
    - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF"]
    - respuesta_text: string
    - image: filename_or_url_or_null
