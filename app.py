@@ -6930,6 +6930,7 @@ REGLA CRÍTICA DE FLUJO: El campo "ready_to_notify" solo debe ser 'true' si tien
   "ready_to_notify": true|false,
   "confidence": 0.0-1.0,
   "preguntas_faltantes": ["lista de preguntas específicas. DEBE incluir nombre, método de pago o dirección si faltan. Si no falta nada, la lista debe ser VACÍA."]
+  "resumen_conversacion": "Resumen breve en español del contexto de la conversación para el asesor."
 }}
 
 Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago/nombre) inclúyelos en 'preguntas_faltantes'.
@@ -6971,7 +6972,7 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         precio_total_ia = extracted.get('precio_total')
         ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
         confidence = float(extracted.get('confidence') or 0.0)
-        
+        resumen = extracted.get('resumen_conversacion') or ""
         preguntas_ia = extracted.get('preguntas_faltantes') or []
 
         # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
@@ -7067,48 +7068,7 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
         # --- FIN LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
             # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
         contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles." # <-- Valor de fallback inicial
-        try:
-            # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
-            resumen_prompt = f"""
-Tu rol es generar un resumen EJECUTIVO del chat para un asesor. 
-Analiza el historial y el pedido, y **parafrasea en 1-3 frases en español** el CONTEXTO del cliente. 
-El resumen debe ser **breve, conciso** y enfocado en el estado final de la compra (ej. "El cliente confirmó color gris y regatones, pago por transferencia, falta su nombre completo."). **NUNCA** copies y pegues bloques de catálogo o historial en el resumen.
-
-HISTORIAL DE CONVERSACIÓN:
-{historial_text}
-
-PEDIDO ACTUAL (para contexto):
-{json.dumps(datos_compra, ensure_ascii=False)[:1500]}
-
-Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados ni viñetas.
-""" # ← PROMPT REFORZADO
-
-            payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
-            rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
-            rsum.raise_for_status()
-            sum_data = rsum.json()
-            
-            # Capturar la respuesta de la IA antes de cualquier limpieza
-            raw_response = sum_data['choices'][0]['message']['content']
-            
-            if isinstance(raw_response, list):
-                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in raw_response])
-            else:
-                contexto_resumido = str(raw_response)
-                
-            # Limpieza para asegurar un texto limpio
-            contexto_resumido = re.sub(r'\s*\n\s*', ' ', contexto_resumido).strip()
-            contexto_resumido = re.sub(r' {2,}', ' ', contexto_resumido).strip()
-            
-            # Si el resultado es muy corto o sigue conteniendo artefactos de catálogo,
-            # forzamos el fallback simple (aunque el prompt debería evitarlo)
-            if len(contexto_resumido) < 10 or any(kw in contexto_resumido.lower() for kw in ['usuario:', 'asistente:']):
-                 contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles."
-            
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto, usando fallback: {e}")
-            # Si hay un error, `contexto_resumido` mantiene su valor de fallback inicial.
-
+        contexto_resumido = resumen 
         # 5) Evitar re-notificaciones (sin cambios)
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
