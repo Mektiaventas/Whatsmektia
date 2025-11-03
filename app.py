@@ -7065,8 +7065,8 @@ Reglas: NO inventes precios; incluye todos los productos y cantidades. Si faltan
             # Si está listo o si la IA no devolvió preguntas (debería estar listo), usa el texto de la IA.
             respuesta_al_cliente = respuesta_text
         # --- FIN LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
-
-        # 4) Pedir a la IA que resuma el contexto en sus propias palabras (2-4 líneas)
+            # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
+        contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles." # <-- Valor de fallback inicial
         try:
             # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
             resumen_prompt = f"""
@@ -7081,22 +7081,33 @@ PEDIDO ACTUAL (para contexto):
 {json.dumps(datos_compra, ensure_ascii=False)[:1500]}
 
 Devuelve **únicamente** el resumen de 1 a 3 frases en español, sin encabezados ni viñetas.
-""" # ← CORREGIDO: Prompt para forzar la parafrasis y evitar pegar historial.
-            
+""" # ← PROMPT REFORZADO
+
             payload_sum = {"model": "deepseek-chat", "messages": [{"role": "user", "content": resumen_prompt}], "temperature": 0.2, "max_tokens": 200}
             rsum = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload_sum, timeout=15)
             rsum.raise_for_status()
             sum_data = rsum.json()
-            contexto_resumido = sum_data['choices'][0]['message']['content'].strip()
-            if isinstance(contexto_resumido, list):
-                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in contexto_resumido])
-            # Limpieza adicional para asegurar que no haya saltos de línea y artefactos
+            
+            # Capturar la respuesta de la IA antes de cualquier limpieza
+            raw_response = sum_data['choices'][0]['message']['content']
+            
+            if isinstance(raw_response, list):
+                contexto_resumido = " ".join([c.get('text') if isinstance(c, dict) else str(c) for c in raw_response])
+            else:
+                contexto_resumido = str(raw_response)
+                
+            # Limpieza para asegurar un texto limpio
             contexto_resumido = re.sub(r'\s*\n\s*', ' ', contexto_resumido).strip()
             contexto_resumido = re.sub(r' {2,}', ' ', contexto_resumido).strip()
             
+            # Si el resultado es muy corto o sigue conteniendo artefactos de catálogo,
+            # forzamos el fallback simple (aunque el prompt debería evitarlo)
+            if len(contexto_resumido) < 10 or any(kw in contexto_resumido.lower() for kw in ['usuario:', 'asistente:']):
+                 contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles."
+            
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto: {e}")
-            contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles."
+            app.logger.warning(f"⚠️ No se pudo generar resumen IA de contexto, usando fallback: {e}")
+            # Si hay un error, `contexto_resumido` mantiene su valor de fallback inicial.
 
         # 5) Evitar re-notificaciones (sin cambios)
         estado_actual = obtener_estado_conversacion(numero, config)
