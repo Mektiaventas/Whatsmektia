@@ -376,6 +376,36 @@
                                value="{{ precio_edit.proveedor if precio_edit else '' }}"
                                placeholder="Ej: Proveedor S.A.">
                     </div>
+                    <div class="form-group">
+                        <label for="moneda">Moneda</label>
+                        <input type="text" id="moneda" name="moneda" class="input"
+                               value="{{ precio_edit.moneda if precio_edit else '' }}"
+                               placeholder="Ej: MXN.">
+                    </div>
+                    <div class="form-group">
+                        <label for="tipo_descuento">Tipo de descuento</label>
+                        <input type="text" id="tipo_descuento" name="tipo_descuento" class="input"
+                               value="{{ precio_edit.tipo_descuento if precio_edit else '' }}"
+                               placeholder="Ej: Descuento tipo A">
+                    </div>
+                    <div class="form-group">
+                        <label for="descuento">Descuento</label>
+                        <input type="text" id="descuento" name="descuento" class="input"
+                               value="{{ precio_edit.descuento if precio_edit else '' }}"
+                               placeholder="Ej: 15.00">
+                    </div>
+                    <div class="form-group">
+                        <label for="unidad">Unidad</label>
+                        <input type="text" id="unidad" name="unidad" class="input"
+                               value="{{ precio_edit.unidad if precio_edit else '' }}"
+                               placeholder="Ej: Pieza, Servicio, etc...">
+                    </div>
+                    <div class="form-group">
+                        <label for="cantidad_minima">Cantidad minima</label>
+                        <input type="text" id="cantidad_minima" name="cantidad_minima" class="input"
+                               value="{{ precio_edit.cantidad_minima if precio_edit else '' }}"
+                               placeholder="Ej: 1">
+                    </div>
                 </div>
                 <div class="form-actions flex justify-end gap-2">
                     <button type="submit" class="btn primary">
