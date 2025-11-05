@@ -315,7 +315,12 @@
                 <div class="card-content">
                     <div class="card-title-row">
                         <div class="card-avatar-section">
-                            <img src="{{ '/static/icons/whatsapp-icon.png' }}"
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% set avatar_src = '/static/icons/telegram-icon.png' %}
+                            {% endif %}
+
+                            <img src="{{ avatar_src }}"
                                  class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                         </div>
