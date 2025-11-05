@@ -161,7 +161,7 @@ NUMEROS_CONFIG = {
 }
 
 soli = "cita"
-servicios_clave = [
+servicios_clave = [ 
             'página web', 'sitio web', 'ecommerce', 'tienda online',
             'aplicación', 'app', 'software', 'sistema',
             'marketing', 'seo', 'redes sociales', 'publicidad',
@@ -256,7 +256,8 @@ def public_image_url(imagen_url):
         return imagen_url
 
 app.add_template_filter(public_image_url, 'public_img')
-#holi que tal  
+#holi que tal
+#muy bien   
 def get_clientes_conn():
     return mysql.connector.connect(
         host=os.getenv("CLIENTES_DB_HOST"),
