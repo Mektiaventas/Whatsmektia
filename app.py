@@ -1,4 +1,4 @@
-#from tkinter import SE
+#from tkinter import SE 
 import traceback
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -13,7 +13,7 @@ from flask import render_template_string
 import pytz
 import os
 import logging
-import json 
+import json  
 import base64 
 import argparse
 import math
@@ -256,7 +256,7 @@ def public_image_url(imagen_url):
         return imagen_url
 
 app.add_template_filter(public_image_url, 'public_img')
-
+#holi que tal  
 def get_clientes_conn():
     return mysql.connector.connect(
         host=os.getenv("CLIENTES_DB_HOST"),
