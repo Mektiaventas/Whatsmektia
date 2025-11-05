@@ -902,7 +902,12 @@ def importar_productos_desde_excel(filepath, config=None):
             'catalogo 3': 'catalogo3',
             'proveedor': 'proveedor',
             'inscripcion': 'inscripcion',
-            'mensualidad': 'mensualidad'
+            'mensualidad': 'mensualidad',
+            'moneda': 'moneda',
+            'unidad': 'unidad',
+            'cantidad_minima': 'cantidad_minima',
+            'tipo_descuento': 'tipo_descuento',
+            'descuento': 'descuento'
         }
 
         for excel_col, db_col in column_mapping.items():
@@ -1013,7 +1018,8 @@ def importar_productos_desde_excel(filepath, config=None):
         campos_esperados = [
             'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
-            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor','inscripcion', 'mensualidad'
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor','inscripcion', 'mensualidad',
+            'moneda','unidad','cantidad_minima','tipo_descuento','descuento'
         ]
 
         productos_importados = 0
@@ -1061,7 +1067,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = " "
 
-                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad']:
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad','descuento']:
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
@@ -1098,15 +1104,21 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('catalogo3', ''),
                     producto.get('proveedor', ''),
                     producto.get('inscripcion', '0.00'),
-                    producto.get('mensualidad', '0.00')
+                    producto.get('mensualidad', '0.00'),
+                    producto.get('moneda', 'MXN'),
+                    producto.get('unidad', 'pieza'),
+                    producto.get('cantidad_minima', '1'),
+                    producto.get('tipo_descuento', 'porcentaje'),
+                    producto.get('descuento', '0.00')
                 ]
 
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
                         descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
-                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad, 
+                        moneda, unidad, cantidad_minima, tipo_descuento, descuento
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
@@ -1117,7 +1129,12 @@ def importar_productos_desde_excel(filepath, config=None):
                         status_ws=VALUES(status_ws),
                         imagen=VALUES(imagen),
                         inscripcion=VALUES(inscripcion),
-                        mensualidad=VALUES(mensualidad)
+                        mensualidad=VALUES(mensualidad),
+                        moneda=VALUES(moneda),
+                        unidad=VALUES(unidad),
+                        cantidad_minima=VALUES(cantidad_minima),
+                        tipo_descuento=VALUES(tipo_descuento),
+                        descuento=VALUES(descuento)
                 """, values)
 
                 # Si asignamos una imagen, actualizar también la fila de imagenes_productos.sku con el sku recién insertado
