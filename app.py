@@ -3110,38 +3110,18 @@ def debug_dominio():
     </ul>
     """
 
-# --- Modificación en la definición de la función ---
 def get_country_flag(numero):
-    """
-    Determina la URL de la bandera o ícono de la plataforma basado en el número.
-    Prioridad: 1. Telegram Icono, 2. Bandera de País, 3. Icono de WhatsApp por defecto.
-    """
     if not numero:
         return None
     numero = str(numero)
-    
-    # --- 1. LÓGICA: ÍCONO DE TELEGRAM (MÁXIMA PRIORIDAD) ---
-    if numero.startswith('tg_'):
-        # Devuelve la URL estática del ícono de Telegram
-        return url_for('static', filename='icons/telegram-icon.png')
-    
-    # --- 2. LÓGICA: BANDERA DE PAÍS (WHATSAPP) ---
-    # Limpia el número quitando el '+' si existe (ej. +52449...)
-    numero_limpio = numero.lstrip('+')
-    
-    # Busca el prefijo de país más largo posible (3, 2 o 1 dígito)
+    if numero.startswith('+'):
+        numero = numero[1:]
     for i in range(3, 0, -1):
-        prefijo = numero_limpio[:i]
-        
-        # Asume que PREFIJOS_PAIS es un diccionario global que mapea '52' -> 'mx'
+        prefijo = numero[:i]
         if prefijo in PREFIJOS_PAIS:
             codigo = PREFIJOS_PAIS[prefijo]
-            # Devuelve la bandera del país
             return f"https://flagcdn.com/24x18/{codigo}.png"
-            
-    # --- 3. LÓGICA: IMAGEN LOCAL POR DEFECTO PARA WHATSAPP (FALLBACK) ---
-    # Si no se detectó prefijo de país conocido ni era Telegram
-    return url_for('static', filename='icons/whatsapp-icon.png')
+    return None
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
 app.add_template_filter(get_country_flag, 'bandera')
