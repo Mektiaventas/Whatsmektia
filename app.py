@@ -10552,14 +10552,13 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         except:
             pass
 
-# --- Función actualizar_info_contacto ---
-def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
+def actualizar_info_contacto(numero, config=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Primero verificar si ya tenemos información reciente
+        # Primero verificar si ya tenemos información reciente del webhook
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
@@ -10572,8 +10571,7 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
         contacto = cursor.fetchone()
         
         # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
-        # PERO si recibimos un nombre de Telegram explícito, forzamos la actualización
-        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion') and not nombre_telegram:
+        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion'):
             fecha_actualizacion = contacto['fecha_actualizacion']
             if isinstance(fecha_actualizacion, str):
                 fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
@@ -10587,57 +10585,29 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
         cursor.close()
         conn.close()
         
-        # --- 🛠️ INICIO: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
-        if nombre_telegram or plataforma:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            nombre_a_usar = nombre_telegram
-            plataforma_a_usar = plataforma or 'WhatsApp'
-
-            # Insertar o actualizar el contacto (COALESCE mantiene el nombre existente si el nuevo es NULL)
-            cursor.execute("""
-                INSERT INTO contactos 
-                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
-                VALUES (%s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE 
-                    nombre = COALESCE(VALUES(nombre), nombre), 
-                    plataforma = VALUES(plataforma),
-                    fecha_actualizacion = NOW()
-            """, (numero, nombre_a_usar, plataforma_a_usar))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            app.logger.info(f"✅ Información de contacto actualizada para {numero} (Plataforma: {plataforma_a_usar})")
-            return
-        # --- FIN: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
-
         # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
         try:
-            # ⚠️ Código antiguo que hace un intento de actualización de nombre/imagen via WhatsApp Web (si es que existe la librería 'client')
+            client = get_whatsapp_client()
             if client and client.is_logged_in:
                 nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
                 if nombre_whatsapp or imagen_whatsapp:
-                            app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
-            
-                            conn = get_db_connection(config)
-                            cursor = conn.cursor()
-            
-                            # --- CORRECCIÓN: SOLO ACTUALIZAR COLUMNAS EXISTENTES ---
-                            cursor.execute("""
-                                UPDATE contactos 
-                                SET nombre = COALESCE(%s, nombre),
-                                    imagen_url = COALESCE(%s, imagen_url),
-                                    fecha_actualizacion = NOW() 
-                                    -- ^^^ Esta columna ya existe en tu esquema
-                                WHERE numero_telefono = %s
-                            """, (nombre_whatsapp, imagen_whatsapp, numero))
-            
-                            conn.commit()
-                            cursor.close()
-                            conn.close()
-                            return
+                    app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
+                    
+                    conn = get_db_connection(config)
+                    cursor = conn.cursor()
+                    
+                    cursor.execute("""
+                        UPDATE contactos 
+                        SET nombre = COALESCE(%s, nombre),
+                            imagen_url = COALESCE(%s, imagen_url),
+                            fecha_actualizacion = NOW()
+                        WHERE numero_telefono = %s
+                    """, (nombre_whatsapp, imagen_whatsapp, numero))
+                    
+                    conn.commit()
+                    cursor.close()
+                    conn.close()
+                    return
         except Exception as e:
             app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
         
