@@ -3110,17 +3110,26 @@ def debug_dominio():
     </ul>
     """
 
+# --- Modificación en la definición de la función ---
 def get_country_flag(numero):
     if not numero:
         return None
     numero = str(numero)
+    
+    # --- 🛠️ NUEVA LÓGICA: ÍCONO DE TELEGRAM 🛠️ ---
+    if numero.startswith('tg_'):
+        # Devuelve un ícono de Telegram (asegúrate de subir este archivo a /static/icons/)
+        return url_for('static', filename='icons/telegram-icon.png')
+    # --- FIN DE LA NUEVA LÓGICA ---
+
     if numero.startswith('+'):
         numero = numero[1:]
     for i in range(3, 0, -1):
         prefijo = numero[:i]
         if prefijo in PREFIJOS_PAIS:
             codigo = PREFIJOS_PAIS[prefijo]
-            return f"https://flagcdn.com/24x18/{codigo}.png"
+            # --- CORREGIDO: Usar flagcdn.com o el origen que prefieras ---
+            return f"https://flagcdn.com/24x18/{codigo}.png" 
     return None
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
@@ -9790,15 +9799,24 @@ def telegram_webhook_multitenant(token_bot):
         chat_id = msg['chat']['id']
         texto = msg.get('text') or "[Mensaje no textual]"
         
+        # --- EXTRACCIÓN DEL NOMBRE DE TELEGRAM ---
+        from_user = msg.get('from', {})
+        first_name = from_user.get('first_name', '')
+        last_name = from_user.get('last_name', '')
+        
+        # Combinar los nombres si ambos existen
+        nombre_telegram = f"{first_name} {last_name}".strip() if first_name or last_name else None
+        
         # Simula la estructura de WhatsApp
         numero_telegram = f"tg_{chat_id}"
         
-        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}'")
+        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}' (Nombre: {nombre_telegram})")
 
         # 2. Inicializar meta y contacto (usando la config detectada)
         try:
             inicializar_chat_meta(numero_telegram, config)
-            actualizar_info_contacto(numero_telegram, config)
+            # 🛠️ PASAMOS EL NOMBRE Y LA PLATAFORMA
+            actualizar_info_contacto(numero_telegram, config, nombre_telegram=nombre_telegram, plataforma='Telegram') 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
 
@@ -10543,13 +10561,14 @@ def actualizar_columna_chat(numero, columna_id, config=None):
         except:
             pass
 
-def actualizar_info_contacto(numero, config=None):
+# --- Función actualizar_info_contacto ---
+def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Primero verificar si ya tenemos información reciente del webhook
+        # Primero verificar si ya tenemos información reciente
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
@@ -10562,7 +10581,8 @@ def actualizar_info_contacto(numero, config=None):
         contacto = cursor.fetchone()
         
         # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
-        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion'):
+        # PERO si recibimos un nombre de Telegram explícito, forzamos la actualización
+        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion') and not nombre_telegram:
             fecha_actualizacion = contacto['fecha_actualizacion']
             if isinstance(fecha_actualizacion, str):
                 fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
@@ -10576,8 +10596,35 @@ def actualizar_info_contacto(numero, config=None):
         cursor.close()
         conn.close()
         
+        # --- 🛠️ INICIO: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
+        if nombre_telegram or plataforma:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            nombre_a_usar = nombre_telegram
+            plataforma_a_usar = plataforma or 'WhatsApp'
+
+            # Insertar o actualizar el contacto (COALESCE mantiene el nombre existente si el nuevo es NULL)
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+                VALUES (%s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(VALUES(nombre), nombre), 
+                    plataforma = VALUES(plataforma),
+                    fecha_actualizacion = NOW()
+            """, (numero, nombre_a_usar, plataforma_a_usar))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            app.logger.info(f"✅ Información de contacto actualizada para {numero} (Plataforma: {plataforma_a_usar})")
+            return
+        # --- FIN: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
+
         # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
         try:
+            # ⚠️ Código antiguo que hace un intento de actualización de nombre/imagen via WhatsApp Web (si es que existe la librería 'client')
             if client and client.is_logged_in:
                 nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
                 if nombre_whatsapp or imagen_whatsapp:
