@@ -265,7 +265,55 @@ def get_clientes_conn():
         password=os.getenv("CLIENTES_DB_PASSWORD"),
         database=os.getenv("CLIENTES_DB_NAME")
     )
+def descargar_template_excel(columnas):
+    """Genera un archivo Excel con los encabezados de columna dados y sin datos."""
+    try:
+        # Crea un DataFrame vacío con las columnas especificadas
+        df = pd.DataFrame(columns=columnas)
+        
+        # Usa BytesIO para guardar el archivo Excel en memoria
+        output = io.BytesIO()
+        
+        # Exporta el DataFrame a Excel
+        # Usamos engine='xlsxwriter' para compatibilidad en el buffer
+        df.to_excel(output, index=False, sheet_name='Plantilla_Productos', engine='xlsxwriter')
+        
+        output.seek(0) # Mover el puntero al inicio del archivo
+        return output
 
+    except Exception as e:
+        app.logger.error(f"🔴 Error generando template Excel: {e}")
+        return None
+
+# --- Nuevo endpoint para descargar el template ---
+@app.route('/configuracion/precios/descargar-template', methods=['GET'])
+def descargar_template():
+    """Descarga el template de Excel con las columnas requeridas."""
+    
+    # Columnas esperadas en importar_productos_desde_excel()
+    # Estas son las claves mapeadas en importar_productos_desde_excel: columna_mapping
+    columnas_template = [
+        'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+        'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
+        'imagen', 'status ws', 'catalogo', 'catalogo 2', 'catalogo 3', 'proveedor',
+        'inscripcion', 'mensualidad', 'moneda', 'unidad', 'cantidad_minima',
+        'tipo_descuento', 'descuento'
+    ]
+    
+    output = descargar_template_excel(columnas_template)
+    
+    if output:
+        fecha_str = datetime.now().strftime('%Y%m%d')
+        filename = f"Plantilla_Productos_{fecha_str}.xlsx"
+        
+        # Devolver el archivo como respuesta de descarga
+        return Response(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+    
+    return "Error generando el archivo", 500
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
     try:

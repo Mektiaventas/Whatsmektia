@@ -63,6 +63,12 @@
             </div>
         </button>
         <br /><br />
+        <button class="btn btn-primary mt-3" id="btn-column-template" onclick="showSection('column-template')">
+            <div class="tab-icon">📝</div>
+            <div>
+                <span class="tab-title">Template Columnas</span>
+            </div>
+        </button>
         <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
             🔁 Restablecer columnas
         </button>
@@ -597,7 +603,60 @@
     </div>
 </div>
 
+<div class="section" id="column-template" style="display:none;">
+    <div class="section-header">
+        <h3 class="flex justify-between items-center">
+            <span>📝 Generar Plantilla de Columnas</span>
+        </h3>
+    </div>
 
+    <div class="card mb-6">
+        <div class="card-header bg-warning text-white">
+            <h3>📥 Descargar Plantilla de Columnas</h3>
+        </div>
+        <div class="card-body">
+            <div class="grid grid-cols-2 gap-6">
+                <div>
+                    <h4 class="font-semibold mb-2">Columnas Requeridas para Importación</h4>
+                    <p class="text-sm mb-4">Esta plantilla contiene el conjunto **completo** de columnas que el sistema espera para la carga masiva. Úsala como base para tu archivo de Excel.</p>
+
+                    <a href="{{ url_for('descargar_template') }}" class="btn btn-success mt-3" target="_blank">
+                        ⬇️ Descargar Plantilla Excel
+                    </a>
+                </div>
+
+                <div>
+                    <h4 class="font-semibold mb-2">📋 Lista de Columnas (Encabezados)</h4>
+                    <ul class="text-sm list-disc pl-5 space-y-1 bg-gray-50 p-3 rounded-lg">
+                        <li>sku (clave primaria)</li>
+                        <li>categoria</li>
+                        <li>subcategoria</li>
+                        <li>linea</li>
+                        <li>modelo</li>
+                        <li>descripcion</li>
+                        <li>medidas</li>
+                        <li>costo</li>
+                        <li>precio mayoreo</li>
+                        <li>precio menudeo</li>
+                        <li>imagen (opcional)</li>
+                        <li>status ws</li>
+                        <li>catalogo</li>
+                        <li>catalogo 2</li>
+                        <li>catalogo 3</li>
+                        <li>proveedor</li>
+                        <li>inscripcion (suscripción)</li>
+                        <li>mensualidad (suscripción)</li>
+                        <li>moneda</li>
+                        <li>unidad</li>
+                        <li>cantidad_minima</li>
+                        <li>tipo_descuento</li>
+                        <li>descuento</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
 <!-- Mensajes Flash -->
 <div class="mt-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
