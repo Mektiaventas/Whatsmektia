@@ -1,3 +1,4 @@
+from tkinter import SE
 import traceback
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -1666,7 +1667,14 @@ def validar_y_limpiar_servicio(servicio):
             'catalogo': '',
             'catalogo2': '',
             'catalogo3': '',
-            'proveedor': ''
+            'proveedor': '',
+            'inscripcion': '0.00',
+            'mensualidad': '0.00',
+            'moneda': 'MXN',
+            'unidad': 'pieza',
+            'cantidad_minima': '1.00',
+            'tipo_descuento': 'porcentaje',
+            'descuento': '0.00'
         }
 
         for campo, valor_default in campos_texto.items():
@@ -1751,7 +1759,14 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
                     servicio.get('catalogo3', '').strip(),
-                    servicio.get('proveedor', '').strip()
+                    servicio.get('proveedor', '').strip(),
+                    servicio.get('inscripcion', '0.00'),
+                    servicio.get('mensualidad', '0.00'),
+                    servicio.get('moneda', 'MXN').strip(),
+                    servicio.get('unidad', 'pieza').strip(),
+                    servicio.get('cantidad_minima', '1.00'),
+                    servicio.get('tipo_descuento', 'porcentaje').strip(),
+                    servicio.get('descuento', '0.00')
                 ]
             
                 # Validar precios
@@ -1766,10 +1781,10 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
                         descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
-                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad,
+                         moneda, unidad, cantidad_minima, tipo_descuento, descuento
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
-       
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
                         descripcion=VALUES(descripcion),
@@ -1777,7 +1792,14 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         imagen=VALUES(imagen),
-                        status_ws=VALUES(status_ws)
+                        status_ws=VALUES(status_ws),
+                        inscripcion=VALUES(inscripcion),
+                        mensualidad=VALUES(mensualidad),
+                        moneda=VALUES(moneda),
+                        unidad=VALUES(unidad),
+                        cantidad_minima=VALUES(cantidad_minima),
+                        tipo_descuento=VALUES(tipo_descuento),
+                        descuento=VALUES(descuento)
                 """, campos)
                 
                 servicios_guardados += 1
@@ -2078,7 +2100,6 @@ def eliminar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'columna_destino': columna_destino})
 
-
 @app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
 def actualizar_icono_columna(columna_id):
     config = obtener_configuracion_por_host()
@@ -2121,6 +2142,7 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
