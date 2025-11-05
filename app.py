@@ -1,5 +1,6 @@
 #from tkinter import SE 
 import traceback
+import telegram
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -86,6 +87,7 @@ def format_time_24h(dt):
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
 # ——— Env vars ———
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -6388,6 +6390,57 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
     
     return False
          
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    try:
+        if not TELEGRAM_BOT_TOKEN:
+            app.logger.error("🔴 TELEGRAM_BOT_TOKEN no configurado.")
+            return jsonify({'status': 'error', 'message': 'Token not configured'}), 500
+        
+        payload = request.get_json()
+        
+        # Telegram solo envía "message" en el payload
+        if not payload or 'message' not in payload:
+            app.logger.info("⚠️ Telegram: Payload recibido sin mensaje")
+            return 'OK', 200 # Siempre responde 'OK' para evitar reintentos
+
+        msg = payload['message']
+        chat_id = msg['chat']['id']
+        texto = msg.get('text') or "[Mensaje no textual]"
+        
+        # Creamos un "número" único para Telegram (ej: tg_123456789)
+        numero_telegram = f"tg_{chat_id}"
+        
+        app.logger.info(f"📥 Telegram Incoming {numero_telegram}: '{texto[:200]}'")
+
+        # ASIGNACIÓN DE CONFIGURACIÓN (Mektia por defecto)
+        # Asume que el bot de Telegram usa la misma config de Mektia (el primer elemento de NUMEROS_CONFIG)
+        # *Ajusta esto si manejas múltiples tenants por chat_id*
+        first_key = list(NUMEROS_CONFIG.keys())[0]
+        config_mektia = NUMEROS_CONFIG[first_key]
+        
+        # 1. Guarda el mensaje de Telegram (usando la lógica existente)
+        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
+                                  tipo_mensaje='texto', contenido_extra=None)
+
+        # 2. Procesa el mensaje con la lógica unificada
+        procesar_mensaje_unificado(
+            msg={'text': texto, 'chat_id': chat_id}, # Adaptamos el mensaje para tu función
+            numero=numero_telegram,
+            texto=texto,
+            es_imagen=False,
+            es_audio=False,
+            config=config_mektia,
+            incoming_saved=True
+        )
+
+        return 'OK', 200
+
+    except Exception as e:
+        app.logger.error(f"🔴 CRITICAL error in telegram_webhook: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Internal server error', 500
+
 def es_mensaje_repetido(numero, mensaje_actual, config=None):
     """Verifica si el mensaje actual es muy similar al anterior"""
     if config is None:
@@ -7755,7 +7808,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
-                enviar_mensaje(numero, fallback_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    # Enviar por Telegram
+                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                else:
+                    # Enviar por WhatsApp (o lógica de audio existente)
+                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 registrar_respuesta_bot(numero, texto, fallback_text, config, incoming_saved=incoming_saved)
                 return True
             return False
@@ -7787,13 +7846,25 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     break
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
-                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    # Enviar por Telegram
+                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                else:
+                    # Enviar por WhatsApp (o lógica de audio existente)
+                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
         if intent == "COTIZAR":
             cotizar_text = cotizar_proyecto(numero, config=config)
             if cotizar_text:
-                enviar_mensaje(numero, cotizar_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    # Enviar por Telegram
+                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                else:
+                    # Enviar por WhatsApp (o lógica de audio existente)
+                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 registrar_respuesta_bot(numero, texto, cotizar_text, config, incoming_saved=incoming_saved)
                 return True
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
@@ -7811,7 +7882,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
-                enviar_mensaje(numero, comprar_producto_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    # Enviar por Telegram
+                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                else:
+                    # Enviar por WhatsApp (o lógica de audio existente)
+                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
                 return True
         # GUARDAR CITA
@@ -7833,7 +7910,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             try:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        # Enviar por Telegram
+                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    else:
+                        # Enviar por WhatsApp (o lógica de audio existente)
+                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 
                 # --- CORREGIDO ---
                 # Guardar el nombre de archivo o URL cruda (http)
@@ -7854,7 +7937,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             try:
                 enviar_documento(numero, document_field, os.path.basename(document_field), config)
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        # Enviar por Telegram
+                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    else:
+                        # Enviar por WhatsApp (o lógica de audio existente)
+                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
@@ -7864,7 +7953,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         if intent == "PASAR_ASESOR" or notify_asesor:
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    # Enviar por Telegram
+                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                else:
+                    # Enviar por WhatsApp (o lógica de audio existente)
+                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
         # PASAR DATOS TRANSFERENCIA
@@ -7873,7 +7968,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not sent:
                 # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        # Enviar por Telegram
+                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    else:
+                        # Enviar por WhatsApp (o lógica de audio existente)
+                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
                     registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
@@ -7913,7 +8014,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             # FALLBACK A TEXTO:
             # (Ocurre si 'es_audio' era False, o si la generación/envío de audio falló)
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
-            enviar_mensaje(numero, respuesta_text, config)
+            # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+            if numero.startswith('tg_'):
+                # Enviar por Telegram
+                send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+            else:
+                # Enviar por WhatsApp (o lógica de audio existente)
+                enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
             
             # REGISTRAR COMO TEXTO (Esta es la corrección clave)
             registrar_respuesta_bot(
@@ -7926,7 +8033,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             # --- FIN DE LA CORRECCIÓN ---
             # Fallback: Enviar como texto si no era audio o si el audio falló
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
-            enviar_mensaje(numero, respuesta_text, config)
+            # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+            if numero.startswith('tg_'):
+                # Enviar por Telegram
+                send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+            else:
+                # Enviar por WhatsApp (o lógica de audio existente)
+                enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
             return True
 
@@ -9650,6 +9763,74 @@ def debug_image(filename):
         'exists': exists,
         'url': url_for('serve_uploaded_file', filename=filename, _external=True)
     })
+
+@app.route('/telegram_webhook', methods=['POST'])
+def telegram_webhook():
+    try:
+        if not TELEGRAM_BOT_TOKEN:
+            app.logger.error("🔴 TELEGRAM_BOT_TOKEN no configurado.")
+            return jsonify({'status': 'error', 'message': 'Token not configured'}), 500
+        
+        payload = request.get_json()
+        if not payload or 'message' not in payload:
+            app.logger.info("⚠️ Telegram: no message in payload")
+            return 'OK', 200
+
+        msg = payload['message']
+        chat_id = msg['chat']['id']
+        texto = msg.get('text') or "[Mensaje no textual]"
+        
+        # Simula la estructura de WhatsApp para compatibilidad (usando chat_id como "numero")
+        numero_telegram = f"tg_{chat_id}"
+        
+        app.logger.info(f"📥 Telegram Incoming {numero_telegram}: '{texto[:200]}'")
+
+        # 1. Guarda el mensaje de Telegram (usando la lógica existente de WhatsApp)
+        # Asumiendo config por defecto (Mektia) ya que no hay un esquema de multi-tenant por chat_id.
+        config_mektia = NUMEROS_CONFIG['524495486142']
+        
+        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
+                                  tipo_mensaje='texto', contenido_extra=None)
+
+        # 2. Procesa el mensaje con la lógica unificada
+        # Pasa `config_mektia` para que la DB se use correctamente.
+        processed_ok = procesar_mensaje_unificado(
+            msg=msg,
+            numero=numero_telegram,
+            texto=texto,
+            es_imagen=False, # Simplificación
+            es_audio=False,  # Simplificación
+            config=config_mektia,
+            incoming_saved=True
+        )
+
+        if not processed_ok:
+            # Fallback en caso de error en el procesamiento unificado
+            send_telegram_message(chat_id, "Lo siento, hubo un error interno al procesar tu mensaje.", TELEGRAM_BOT_TOKEN)
+            
+        return 'OK', 200
+
+    except Exception as e:
+        app.logger.error(f"🔴 CRITICAL error in telegram_webhook: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Internal server error', 500
+
+# --- Función de Envío de Mensajes a Telegram ---
+def send_telegram_message(chat_id, text, token):
+    """Envía un mensaje de texto a un chat de Telegram."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'Markdown' # Para que Markdown funcione
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error enviando mensaje a Telegram chat_id={chat_id}: {e}")
+        return False
 
 @app.route('/debug-image-full/<path:image_path>')
 def debug_image_full(image_path):
