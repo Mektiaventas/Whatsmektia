@@ -119,7 +119,7 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("UNILOVA_DB_USER"),
         'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
         'db_name': os.getenv("UNILOVA_DB_NAME"),
-        'dominio': 'unilova.mektia.com'
+        'dominio': 'unilova.mektia.com',
         'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_UNILOVA")
     },
     '524812372326': {  # Número de La Porfirianna
