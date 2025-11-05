@@ -29,7 +29,7 @@ from decimal import Decimal
 import re
 import io
 from werkzeug.utils import secure_filename
-from PIL import Image
+from PIL import Image 
 from openai import OpenAI
 import PyPDF2
 import fitz 
