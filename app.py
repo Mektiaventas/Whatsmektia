@@ -9564,7 +9564,7 @@ def configuracion_precio_guardar():
             'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'inscripcion', 'mensualidad',
             'precio', 'precio_mayoreo', 'precio_menudeo',
-            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor',
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor',
             'moneda', 'unidad', 'cantidad_minima', 'tipo_descuento', 'descuento'
         ]
 
