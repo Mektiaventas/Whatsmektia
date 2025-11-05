@@ -9503,7 +9503,7 @@ def configuracion_precios():
         precios=precios,
         precio_edit=None,
         is_admin=is_admin,
-        master_columns=MASTER_COLUMN
+        master_columns=MASTER_COLUMNS
     )
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
