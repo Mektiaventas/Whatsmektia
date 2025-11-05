@@ -9540,7 +9540,7 @@ def configuracion_precio_guardar():
             app.logger.warning("⚠️ _ensure_precios_subscription_columns falló (continuando)")
 
         # Process numeric price fields coming from form (empty -> None)
-        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad']:
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad','descuento']:
             if f in data and data.get(f, '').strip() == '':
                 data[f] = None
 
@@ -9564,7 +9564,8 @@ def configuracion_precio_guardar():
             'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'inscripcion', 'mensualidad',
             'precio', 'precio_mayoreo', 'precio_menudeo',
-            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor',
+            'moneda', 'unidad', 'cantidad_minima', 'tipo_descuento', 'descuento'
         ]
 
         # Get actual columns from DB and keep intersection (respect DB schema)
