@@ -9737,7 +9737,19 @@ def telegram_webhook():
         # 1. Guarda el mensaje de Telegram (usando la lógica existente de WhatsApp)
         # Asumiendo config por defecto (Mektia) ya que no hay un esquema de multi-tenant por chat_id.
         config_mektia = NUMEROS_CONFIG['524495486142']
-        
+        # --- 🛠️ AÑADE ESTO AQUÍ 🛠️ ---
+        try:
+            inicializar_chat_meta(numero_telegram, config_mektia)
+            # Nota: actualizar_info_contacto se llama dentro de guardar_mensaje_inmediato, 
+            # pero también podemos llamarlo aquí para más seguridad si lo deseas.
+            actualizar_info_contacto(numero_telegram, config_mektia) 
+        except Exception as e:
+            app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
+        # --- FIN DE LA ADICIÓN ---
+
+        # 2. Guarda el mensaje de Telegram
+        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
+                                  tipo_mensaje='texto', contenido_extra=None)
         guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
                                   tipo_mensaje='texto', contenido_extra=None)
 
