@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
   <meta charset="UTF-8">
-  <title>{% block title %}{% endblock %} - SmartWhats</title>
+  <title>{{ app_nombre or 'Tu Dominio' }} - {% block title %}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 </head>
 <body>
