@@ -1067,7 +1067,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = " "
 
-                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad','descuento']:
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad','descuento','cantidad_minima']:
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
@@ -1107,7 +1107,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('mensualidad', '0.00'),
                     producto.get('moneda', 'MXN'),
                     producto.get('unidad', 'pieza'),
-                    producto.get('cantidad_minima', '1'),
+                    producto.get('cantidad_minima', '1.00'),
                     producto.get('tipo_descuento', 'porcentaje'),
                     producto.get('descuento', '0.00')
                 ]
