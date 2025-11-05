@@ -87,7 +87,6 @@ def format_time_24h(dt):
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
 # ——— Env vars ———
-
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -121,6 +120,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
         'db_name': os.getenv("UNILOVA_DB_NAME"),
         'dominio': 'unilova.mektia.com'
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_UNILOVA")
     },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
@@ -7761,7 +7761,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     # Enviar por Telegram
-                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
                     # Enviar por WhatsApp (o lógica de audio existente)
                     enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7799,7 +7804,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     # Enviar por Telegram
-                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
                     # Enviar por WhatsApp (o lógica de audio existente)
                     enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7811,7 +7821,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     # Enviar por Telegram
-                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
                     # Enviar por WhatsApp (o lógica de audio existente)
                     enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7835,7 +7850,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     # Enviar por Telegram
-                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
                     # Enviar por WhatsApp (o lógica de audio existente)
                     enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7863,7 +7883,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
                         # Enviar por Telegram
-                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
                         # Enviar por WhatsApp (o lógica de audio existente)
                         enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7890,7 +7915,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
                         # Enviar por Telegram
-                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
                         # Enviar por WhatsApp (o lógica de audio existente)
                         enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7906,7 +7936,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     # Enviar por Telegram
-                    send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
                     # Enviar por WhatsApp (o lógica de audio existente)
                     enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7921,7 +7956,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
                         # Enviar por Telegram
-                        send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                     else:
                         # Enviar por WhatsApp (o lógica de audio existente)
                         enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7967,7 +8007,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
             if numero.startswith('tg_'):
                 # Enviar por Telegram
-                send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                telegram_token = config.get('telegram_token')
+                if telegram_token:
+                    chat_id = numero.replace('tg_', '')
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                else:
+                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
             else:
                 # Enviar por WhatsApp (o lógica de audio existente)
                 enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -7986,7 +8031,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
             if numero.startswith('tg_'):
                 # Enviar por Telegram
-                send_telegram_message(numero.replace('tg_', ''), respuesta_text, TELEGRAM_BOT_TOKEN)
+                telegram_token = config.get('telegram_token')
+                if telegram_token:
+                    chat_id = numero.replace('tg_', '')
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                else:
+                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
             else:
                 # Enviar por WhatsApp (o lógica de audio existente)
                 enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
@@ -9714,12 +9764,22 @@ def debug_image(filename):
         'url': url_for('serve_uploaded_file', filename=filename, _external=True)
     })
 
-@app.route('/telegram_webhook', methods=['POST'])
-def telegram_webhook():
+# --- Endpoint Multi-Tenant para Webhook de Telegram ---
+@app.route('/telegram_webhook/<token_bot>', methods=['POST'])
+def telegram_webhook_multitenant(token_bot):
     try:
-        if not TELEGRAM_BOT_TOKEN:
-            app.logger.error("🔴 TELEGRAM_BOT_TOKEN no configurado.")
-            return jsonify({'status': 'error', 'message': 'Token not configured'}), 500
+        # 1. Detectar Configuración por Token
+        config = None
+        for key, cfg in NUMEROS_CONFIG.items():
+            if cfg.get('telegram_token') == token_bot:
+                config = cfg
+                break
+        
+        if not config:
+            app.logger.error(f"🔴 TELEGRAM: Token no reconocido: {token_bot[:10]}...")
+            return jsonify({'status': 'error', 'message': 'Token no reconocido'}), 401
+
+        # El resto del código usa la variable 'config' para el tenant correcto
         
         payload = request.get_json()
         if not payload or 'message' not in payload:
@@ -9730,45 +9790,36 @@ def telegram_webhook():
         chat_id = msg['chat']['id']
         texto = msg.get('text') or "[Mensaje no textual]"
         
-        # Simula la estructura de WhatsApp para compatibilidad (usando chat_id como "numero")
+        # Simula la estructura de WhatsApp
         numero_telegram = f"tg_{chat_id}"
         
-        app.logger.info(f"📥 Telegram Incoming {numero_telegram}: '{texto[:200]}'")
+        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}'")
 
-        # 1. Guarda el mensaje de Telegram (usando la lógica existente de WhatsApp)
-        # Asumiendo config por defecto (Mektia) ya que no hay un esquema de multi-tenant por chat_id.
-        config_mektia = NUMEROS_CONFIG['524495486142']
-        # --- 🛠️ AÑADE ESTO AQUÍ 🛠️ ---
+        # 2. Inicializar meta y contacto (usando la config detectada)
         try:
-            inicializar_chat_meta(numero_telegram, config_mektia)
-            # Nota: actualizar_info_contacto se llama dentro de guardar_mensaje_inmediato, 
-            # pero también podemos llamarlo aquí para más seguridad si lo deseas.
-            actualizar_info_contacto(numero_telegram, config_mektia) 
+            inicializar_chat_meta(numero_telegram, config)
+            actualizar_info_contacto(numero_telegram, config)
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
-        # --- FIN DE LA ADICIÓN ---
 
-        # 2. Guarda el mensaje de Telegram
-        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
-                                  tipo_mensaje='texto', contenido_extra=None)
-        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
+        # 3. Guarda el mensaje de Telegram
+        guardar_mensaje_inmediato(numero_telegram, texto, config=config, 
                                   tipo_mensaje='texto', contenido_extra=None)
 
-        # 2. Procesa el mensaje con la lógica unificada
-        # Pasa `config_mektia` para que la DB se use correctamente.
+        # 4. Procesa el mensaje con la lógica unificada
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero_telegram,
             texto=texto,
-            es_imagen=False, # Simplificación
-            es_audio=False,  # Simplificación
-            config=config_mektia,
+            es_imagen=False,
+            es_audio=False,
+            config=config, # 👈 USA LA CONFIGURACIÓN CORRECTA
             incoming_saved=True
         )
 
         if not processed_ok:
             # Fallback en caso de error en el procesamiento unificado
-            send_telegram_message(chat_id, "Lo siento, hubo un error interno al procesar tu mensaje.", TELEGRAM_BOT_TOKEN)
+            send_telegram_message(chat_id, "Lo siento, hubo un error interno al procesar tu mensaje.", token_bot)
             
         return 'OK', 200
 
