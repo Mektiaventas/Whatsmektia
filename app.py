@@ -41,6 +41,13 @@ from flask import url_for
 from urllib.parse import urlparse
 import threading
 
+MASTER_COLUMNS = [
+    'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+    'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
+    'imagen', 'status ws', 'catalogo', 'catalogo 2', 'catalogo 3', 'proveedor',
+    'inscripcion', 'mensualidad', 'moneda', 'unidad', 'cantidad_minima',
+    'tipo_descuento', 'descuento'
+]
 
 try:
     # preferred location
@@ -288,19 +295,25 @@ def descargar_template_excel(columnas):
 # --- Nuevo endpoint para descargar el template ---
 @app.route('/configuracion/precios/descargar-template', methods=['GET'])
 def descargar_template():
-    """Descarga el template de Excel con las columnas requeridas."""
+    """Descarga el template de Excel con las columnas requeridas (seleccionables)."""
     
-    # Columnas esperadas en importar_productos_desde_excel()
-    # Estas son las claves mapeadas en importar_productos_desde_excel: columna_mapping
-    columnas_template = [
-        'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
-        'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
-        'imagen', 'status ws', 'catalogo', 'catalogo 2', 'catalogo 3', 'proveedor',
-        'inscripcion', 'mensualidad', 'moneda', 'unidad', 'cantidad_minima',
-        'tipo_descuento', 'descuento'
-    ]
+    cols_param = request.args.get('cols')
     
-    output = descargar_template_excel(columnas_template)
+    if cols_param:
+        # Convertir la cadena separada por comas en una lista de columnas
+        requested_columns = [col.strip() for col in cols_param.split(',') if col.strip()]
+        
+        # Filtrar para asegurar que solo se usan columnas válidas
+        columnas_template = [col for col in requested_columns if col in MASTER_COLUMNS]
+    else:
+        # Fallback: si no se especifica ninguna columna, usar todas
+        columnas_template = MASTER_COLUMNS
+        
+    # Validar que al menos se seleccionó una columna
+    if not columnas_template:
+        return "Debe seleccionar al menos una columna para descargar el template.", 400
+
+    output = descargar_template_excel(columnas_template) # Esta función ya fue definida
     
     if output:
         fecha_str = datetime.now().strftime('%Y%m%d')
@@ -314,6 +327,7 @@ def descargar_template():
         )
     
     return "Error generando el archivo", 500
+
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
     try:
@@ -9488,9 +9502,9 @@ def configuracion_precios():
         guardado=False,
         precios=precios,
         precio_edit=None,
-        is_admin=is_admin
+        is_admin=is_admin,
+        master_columns=MASTER_COLUMN
     )
-
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()

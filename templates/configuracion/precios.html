@@ -602,7 +602,6 @@
         </div>
     </div>
 </div>
-
 <div class="section" id="column-template" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
@@ -612,46 +611,26 @@
 
     <div class="card mb-6">
         <div class="card-header bg-warning text-white">
-            <h3>📥 Descargar Plantilla de Columnas</h3>
+            <h3>📥 Template de Columnas Personalizado</h3>
         </div>
         <div class="card-body">
-            <div class="grid grid-cols-2 gap-6">
+            <div class="grid grid-cols-1 gap-6">
                 <div>
-                    <h4 class="font-semibold mb-2">Columnas Requeridas para Importación</h4>
-                    <p class="text-sm mb-4">Esta plantilla contiene el conjunto **completo** de columnas que el sistema espera para la carga masiva. Úsala como base para tu archivo de Excel.</p>
+                    <h4 class="font-semibold mb-2">📋 Selecciona las Columnas (Encabezados)</h4>
+                    <p class="text-sm mb-4">Marca las columnas que deseas incluir en tu plantilla de Excel. El archivo descargado solo tendrá los encabezados seleccionados.</p>
 
-                    <a href="{{ url_for('descargar_template') }}" class="btn btn-success mt-3" target="_blank">
-                        ⬇️ Descargar Plantilla Excel
-                    </a>
-                </div>
+                    <div id="column-checklist-container" class="grid grid-cols-2 gap-x-4 gap-y-1 text-sm bg-gray-50 p-3 rounded-lg">
+                        {% for col in master_columns %}
+                        <div class="flex items-center">
+                            <input type="checkbox" id="col-{{ col|replace(' ', '_') }}" name="selected_columns" value="{{ col }}" class="form-checkbox h-4 w-4 text-indigo-600 border-gray-300 rounded" checked>
+                            <label for="col-{{ col|replace(' ', '_') }}" class="ml-2 text-gray-700">{{ col }}</label>
+                        </div>
+                        {% endfor %}
+                    </div>
 
-                <div>
-                    <h4 class="font-semibold mb-2">📋 Lista de Columnas (Encabezados)</h4>
-                    <ul class="text-sm list-disc pl-5 space-y-1 bg-gray-50 p-3 rounded-lg">
-                        <li>sku (clave primaria)</li>
-                        <li>categoria</li>
-                        <li>subcategoria</li>
-                        <li>linea</li>
-                        <li>modelo</li>
-                        <li>descripcion</li>
-                        <li>medidas</li>
-                        <li>costo</li>
-                        <li>precio mayoreo</li>
-                        <li>precio menudeo</li>
-                        <li>imagen (opcional)</li>
-                        <li>status ws</li>
-                        <li>catalogo</li>
-                        <li>catalogo 2</li>
-                        <li>catalogo 3</li>
-                        <li>proveedor</li>
-                        <li>inscripcion (suscripción)</li>
-                        <li>mensualidad (suscripción)</li>
-                        <li>moneda</li>
-                        <li>unidad</li>
-                        <li>cantidad_minima</li>
-                        <li>tipo_descuento</li>
-                        <li>descuento</li>
-                    </ul>
+                    <button onclick="downloadTemplateWithSelection()" class="btn btn-success mt-4">
+                        ⬇️ Descargar Plantilla Excel con columnas seleccionadas
+                    </button>
                 </div>
             </div>
         </div>
@@ -1010,6 +989,28 @@
     }
 </style>
 <script>
+    function downloadTemplateWithSelection() {
+        // Obtener todos los checkboxes seleccionados con el nombre 'selected_columns'
+        const checkboxes = document.querySelectorAll('input[name="selected_columns"]:checked');
+
+        // Extraer el 'value' (nombre de la columna) de cada checkbox
+        const selectedColumns = Array.from(checkboxes).map(cb => cb.value);
+
+        if (selectedColumns.length === 0) {
+            alert("🚨 Por favor, selecciona al menos una columna para descargar.");
+            return;
+        }
+
+        // Codificar la lista como una cadena separada por comas para el parámetro 'cols'
+        const colsParam = selectedColumns.join(',');
+
+        // Construir la URL de descarga con el parámetro
+        // NOTA: 'descargar_template' debe ser el nombre de la función en app.py que tiene el @app.route
+        const downloadUrl = `{{ url_for('descargar_template') }}?cols=${encodeURIComponent(colsParam)}`;
+
+        // Disparar la descarga abriendo la URL en una nueva pestaña
+        window.open(downloadUrl, '_blank');
+    }
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
         const sections = document.querySelectorAll('.section');
