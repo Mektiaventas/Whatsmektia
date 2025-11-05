@@ -391,7 +391,7 @@ def login_required(f):
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
     'static', 'debug_headers', 'debug_dominio', 'diagnostico',
-    'telegram_webhook'
+    'telegram_webhook_multitenant'
 }
 @app.before_request
 def proteger_rutas():
