@@ -6389,57 +6389,6 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
             return True
     
     return False
-         
-@app.route('/telegram_webhook', methods=['POST'])
-def telegram_webhook():
-    try:
-        if not TELEGRAM_BOT_TOKEN:
-            app.logger.error("🔴 TELEGRAM_BOT_TOKEN no configurado.")
-            return jsonify({'status': 'error', 'message': 'Token not configured'}), 500
-        
-        payload = request.get_json()
-        
-        # Telegram solo envía "message" en el payload
-        if not payload or 'message' not in payload:
-            app.logger.info("⚠️ Telegram: Payload recibido sin mensaje")
-            return 'OK', 200 # Siempre responde 'OK' para evitar reintentos
-
-        msg = payload['message']
-        chat_id = msg['chat']['id']
-        texto = msg.get('text') or "[Mensaje no textual]"
-        
-        # Creamos un "número" único para Telegram (ej: tg_123456789)
-        numero_telegram = f"tg_{chat_id}"
-        
-        app.logger.info(f"📥 Telegram Incoming {numero_telegram}: '{texto[:200]}'")
-
-        # ASIGNACIÓN DE CONFIGURACIÓN (Mektia por defecto)
-        # Asume que el bot de Telegram usa la misma config de Mektia (el primer elemento de NUMEROS_CONFIG)
-        # *Ajusta esto si manejas múltiples tenants por chat_id*
-        first_key = list(NUMEROS_CONFIG.keys())[0]
-        config_mektia = NUMEROS_CONFIG[first_key]
-        
-        # 1. Guarda el mensaje de Telegram (usando la lógica existente)
-        guardar_mensaje_inmediato(numero_telegram, texto, config=config_mektia, 
-                                  tipo_mensaje='texto', contenido_extra=None)
-
-        # 2. Procesa el mensaje con la lógica unificada
-        procesar_mensaje_unificado(
-            msg={'text': texto, 'chat_id': chat_id}, # Adaptamos el mensaje para tu función
-            numero=numero_telegram,
-            texto=texto,
-            es_imagen=False,
-            es_audio=False,
-            config=config_mektia,
-            incoming_saved=True
-        )
-
-        return 'OK', 200
-
-    except Exception as e:
-        app.logger.error(f"🔴 CRITICAL error in telegram_webhook: {e}")
-        app.logger.error(traceback.format_exc())
-        return 'Internal server error', 500
 
 def es_mensaje_repetido(numero, mensaje_actual, config=None):
     """Verifica si el mensaje actual es muy similar al anterior"""
