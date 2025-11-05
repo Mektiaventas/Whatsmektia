@@ -87,7 +87,7 @@ def format_time_24h(dt):
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
 # ——— Env vars ———
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
@@ -10245,13 +10245,14 @@ def inicializar_chat_meta(numero, config=None):
         contacto_existente = cursor.fetchone()
         
         # 2. Si no existe, crear el contacto básico
-        if not contacto_existente:
-            cursor.execute("""
+        cursor.execute("""
                 INSERT INTO contactos 
-                    (numero_telefono, plataforma, fecha_creacion) 
-                VALUES (%s, 'WhatsApp', NOW())
+                    (numero_telefono, plataforma, created_at) 
+                VALUES (%s, 'Telegram', UTC_TIMESTAMP()) 
+                -- ^^^ USAR created_at en lugar de fecha_creacion
+                -- y usar UTC_TIMESTAMP para forzar la creación inmediata del registro
             """, (numero,))
-            app.logger.info(f"✅ Contacto básico creado: {numero}")
+        app.logger.info(f"✅ Contacto básico creado: {numero}")
         
         # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
@@ -10526,27 +10527,28 @@ def actualizar_info_contacto(numero, config=None):
         
         # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
         try:
-            client = get_whatsapp_client()
             if client and client.is_logged_in:
                 nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
                 if nombre_whatsapp or imagen_whatsapp:
-                    app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
-                    
-                    conn = get_db_connection(config)
-                    cursor = conn.cursor()
-                    
-                    cursor.execute("""
-                        UPDATE contactos 
-                        SET nombre = COALESCE(%s, nombre),
-                            imagen_url = COALESCE(%s, imagen_url),
-                            fecha_actualizacion = NOW()
-                        WHERE numero_telefono = %s
-                    """, (nombre_whatsapp, imagen_whatsapp, numero))
-                    
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    return
+                            app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
+            
+                            conn = get_db_connection(config)
+                            cursor = conn.cursor()
+            
+                            # --- CORRECCIÓN: SOLO ACTUALIZAR COLUMNAS EXISTENTES ---
+                            cursor.execute("""
+                                UPDATE contactos 
+                                SET nombre = COALESCE(%s, nombre),
+                                    imagen_url = COALESCE(%s, imagen_url),
+                                    fecha_actualizacion = NOW() 
+                                    -- ^^^ Esta columna ya existe en tu esquema
+                                WHERE numero_telefono = %s
+                            """, (nombre_whatsapp, imagen_whatsapp, numero))
+            
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+                            return
         except Exception as e:
             app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
         
