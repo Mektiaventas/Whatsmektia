@@ -289,80 +289,84 @@ let platformConversationsChart = null;
 let platformContactsChart = null;
   // expose current period to JS (server value on load)
   const CURRENT_PERIOD = '{{ period }}';
-async function loadPlatformData() {
-    try {
-        const res = await fetch(`/dashboard/platform-data`);
-        const json = await res.json();
-        if (json.error) {
-            console.error('Error fetching platform data', json.error);
-            return;
+    async function loadPlatformData() {
+        try {
+            // Asegúrate de que el endpoint /dashboard/platform-data esté en app.py
+            const res = await fetch(`/dashboard/platform-data`);
+            const json = await res.json();
+            if (json.error) {
+                console.error('Error fetching platform data', json.error);
+                return;
+            }
+
+            const convData = json.conversations;
+            const contactData = json.contacts;
+
+            // Actualizar tarjetas rápidas
+            // Si no existe la plataforma, el valor es 0
+            const whatsappConv = convData.values[convData.labels.indexOf('WhatsApp')] || 0;
+            const telegramConv = convData.values[convData.labels.indexOf('Telegram')] || 0;
+            document.getElementById('whatsappConversations').innerText = whatsappConv;
+            document.getElementById('telegramConversations').innerText = telegramConv;
+
+            // Renderizar Conversaciones (Chart 1: Doughnut)
+            const convCtx = document.getElementById('platformConversationsChart').getContext('2d');
+            if (platformConversationsChart) platformConversationsChart.destroy();
+            platformConversationsChart = new Chart(convCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: convData.labels,
+                    datasets: [{
+                        data: convData.values,
+                        backgroundColor: ['#25D366', '#0088CC', '#34B7F1', '#ccc'], // Colores para WhatsApp, Telegram, etc.
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#333' } },
+                        datalabels: { color: 'white', formatter: (v) => v, font: { weight: 'bold' } }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+            // Renderizar Contactos (Chart 2: Bar)
+            const contactCtx = document.getElementById('platformContactsChart').getContext('2d');
+            if (platformContactsChart) platformContactsChart.destroy();
+            platformContactsChart = new Chart(contactCtx, {
+                type: 'bar',
+                data: {
+                    labels: contactData.labels,
+                    datasets: [{
+                        label: 'Contactos',
+                        data: contactData.values,
+                        backgroundColor: contactData.labels.map(l => {
+                            if (l === 'WhatsApp') return '#25D366';
+                            if (l === 'Telegram') return '#0088CC';
+                            return '#1f4e79';
+                        }),
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { anchor: 'end', align: 'end', color: '#000', font: { weight: 'bold', size: 14 } }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+        } catch (err) {
+            console.error('Failed to load platform data', err);
         }
-
-        const convData = json.conversations;
-        const contactData = json.contacts;
-
-        // Actualizar tarjetas rápidas
-        // Si no existe la plataforma, el valor es 0
-        const whatsappConv = convData.values[convData.labels.indexOf('WhatsApp')] || 0;
-        const telegramConv = convData.values[convData.labels.indexOf('Telegram')] || 0;
-        document.getElementById('whatsappConversations').innerText = whatsappConv;
-        document.getElementById('telegramConversations').innerText = telegramConv;
-
-        // Renderizar Conversaciones (Chart 1: Doughnut)
-        const convCtx = document.getElementById('platformConversationsChart').getContext('2d');
-        if (platformConversationsChart) platformConversationsChart.destroy();
-        platformConversationsChart = new Chart(convCtx, {
-            type: 'doughnut',
-            data: {
-                labels: convData.labels,
-                datasets: [{
-                    data: convData.values,
-                    backgroundColor: ['#25D366', '#0088CC', '#34B7F1', '#ccc'], // Colores para WhatsApp, Telegram, etc.
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { position: 'bottom', labels: { color: '#333' } },
-                    datalabels: { color: 'white', formatter: (v) => v }
-                }
-            },
-            plugins: [ChartDataLabels]
-        });
-
-        // Renderizar Contactos (Chart 2: Bar)
-        const contactCtx = document.getElementById('platformContactsChart').getContext('2d');
-        if (platformContactsChart) platformContactsChart.destroy();
-        platformContactsChart = new Chart(contactCtx, {
-            type: 'bar',
-            data: {
-                labels: contactData.labels,
-                datasets: [{
-                    label: 'Contactos',
-                    data: contactData.values,
-                    backgroundColor: contactData.labels.map(l => {
-                        if (l === 'WhatsApp') return '#25D366';
-                        if (l === 'Telegram') return '#0088CC';
-                        return '#1f4e79';
-                    }),
-                }]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: { display: false },
-                    datalabels: { anchor: 'end', align: 'end', color: '#000', font: { weight: 'bold', size: 14 } }
-                }
-            },
-            plugins: [ChartDataLabels]
-        });
-
-    } catch (err) {
-        console.error('Failed to load platform data', err);
     }
-}
   // --- Overview bar chart (existente) ---
   (function renderOverview(){
       const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
