@@ -5820,20 +5820,6 @@ Devuelve únicamente el resumen breve (1-3 líneas).
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
         return False
 
-def obtener_telefonos_asesores(config=None):
-    """Retorna una lista de strings de los números de teléfono de todos los asesores configurados."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        cfg = load_config(config)
-        asesores = cfg.get('asesores_list') or []
-        telefonos = [(a.get('telefono') or '').strip() for a in asesores if a.get('telefono')]
-        return telefonos
-    except Exception as e:
-        app.logger.error(f"🔴 Error obteniendo teléfonos de asesores: {e}")
-        return []
-
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
@@ -10451,11 +10437,7 @@ def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
-    # Obtener la lista de números de teléfono de los asesores
-    telefonos_asesores = obtener_telefonos_asesores(config)
-    
-    # Crea un set de los números de asesores para el filtro
-    asesores_set = set(telefonos_asesores)
+
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
