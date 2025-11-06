@@ -7853,7 +7853,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             user_content["catalogo"] = catalog_list
             app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
         else:
-            app_content["catalogo"] = catalog_list
             app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
 
         payload_messages = [
