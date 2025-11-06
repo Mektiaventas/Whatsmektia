@@ -8045,27 +8045,34 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
         # PASAR A ASESOR
+        # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
             
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             
-            # 🚨 CORRECCIÓN CRÍTICA: Definir un mensaje claro para el log web
-            mensaje_log = respuesta_text # Usar la respuesta de la IA como mensaje de envío (ej: "Un asesor te contactará...")
+            # 🚨 CORRECCIÓN: Definir el mensaje a guardar para el historial web
+            mensaje_a_guardar = respuesta_text or "El asistente pasó la conversación a un asesor humano."
             
-            # Si se pasó al asesor, registrar el evento en el historial del bot
             if sent:
                 app.logger.info(f"👤 Contacto {numero} pasado a asesor exitosamente.")
                 
-                # Opcional: Agregar una nota explícita al mensaje log si la respuesta_text era corta
-                if not mensaje_log or len(mensaje_log) < 10:
-                    mensaje_log = "El contacto fue marcado como pasado a un asesor."
-                
-            else:
-                app.logger.warning(f"⚠️ Falló la acción de pasar a asesor para {numero}.")
-                
+                # Si la respuesta_text estaba vacía, el mensaje por defecto será el que se envía.
+                if not respuesta_text:
+                    # Enviar el mensaje por defecto si la IA no proporcionó uno
+                    mensaje_por_defecto_envio = "De acuerdo, un asesor revisará tu solicitud y te contactará pronto."
+                    # --- LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, mensaje_por_defecto_envio, telegram_token) 
+                    else:
+                        enviar_mensaje(numero, mensaje_por_defecto_envio, config)
+            
             
             if respuesta_text:
-                # --- INICIO LÓGICA DE ENVÍO MULTICANAL (texto de confirmación) ---
+                # Si la IA proporcionó una respuesta de texto, enviarla al cliente
+                # --- LÓGICA DE ENVÍO MULTICANAL (texto de confirmación) ---
                 if numero.startswith('tg_'):
                     telegram_token = config.get('telegram_token')
                     if telegram_token:
@@ -8077,12 +8084,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     enviar_mensaje(numero, respuesta_text, config) 
                 # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
             
-            # 💾 REGISTRAR EL EVENTO EN CONVERSACIONES (Usando mensaje_log)
-            # Esto guarda la nota en la columna 'respuesta'
+            # 💾 REGISTRAR EL EVENTO EN CONVERSACIONES (Usando mensaje_a_guardar)
+            # Esto guarda la nota en la columna 'respuesta', y se muestra en la web.
             registrar_respuesta_bot(
                 numero, 
                 texto, # Mensaje original del usuario
-                mensaje_log, # Mensaje claro para el historial web
+                mensaje_a_guardar, # Mensaje enviado al cliente o nota de pase
                 config, 
                 incoming_saved=incoming_saved
             )
