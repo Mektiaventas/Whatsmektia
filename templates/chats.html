@@ -38,14 +38,19 @@
             <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
-                        <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                        {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                        {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                        {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                        {% endif %}
+
+                        <img src="{{ avatar_src }}"
                              class="card-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"> 
+                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         {% endif %}
-                         
+
                         <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
 
                         {% if is_admin %}
@@ -91,8 +96,17 @@
         <div class="chat-panel-header" data-num="{{ selected }}">
             <div class="chat-header-info">
                 <div class="chat-title">
+                    {% set selected_chat = (chats | selectattr("numero", "equalto", selected) | first) %}
+                    {% set avatar_src_header = '/static/icons/whatsapp-icon.png' %}
+                    {% if selected and (selected.startswith('tg_') or (selected_chat and selected_chat.canal == 'Telegram')) %}
+                    {% set avatar_src_header = '/static/icons/telegram-icon-dos.png' %}
+                    {% endif %}
+
+                    <img src="{{ avatar_src_header }}" class="card-avatar" alt="Avatar"
+                         style="width: 24px; height: 24px; border-radius: 4px; margin-right: 6px;">
+
                     <span class="alias-view" data-num="{{ selected }}">
-                        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
+                        {{ selected_chat.nombre_mostrado if selected_chat else selected }}
                     </span>
 
                     {% if is_admin %}
@@ -776,9 +790,15 @@ function actualizarListaChats() {
 const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
 function crearNuevoChatHTML(chat) {
-    const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
-    const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
-    const imagen = escapeHtml(coalesce(chat.imagen_url, chat.avatar, '/static/icons/default-avatar.png'));
+        const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+        const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+
+        // === ICONOS CORRECTOS (WhatsApp/Telegram) ===
+        let imagen = '/static/icons/whatsapp-icon.png';
+        if (num.startsWith('tg_') || chat.canal === 'Telegram') {
+            imagen = '/static/icons/telegram-icon-dos.png';
+        }
+        // === FIN ICONOS ===
     const banderaUrl = escapeHtml(coalesce(chat.bandera, chat.flag, chat.flag_url, ''));
     const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
     const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
@@ -872,24 +892,23 @@ function actualizarChatExistente(elemento, chat) {
     const aliasView = elemento.querySelector('.alias-view');
     if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
 
+    // === MANTENER LOS ICONOS CORRECTOS ===
     const avatarImg = elemento.querySelector('.card-avatar');
-    const imagenUrl = coalesce(chat.imagen_url, chat.avatar, '');
-    if (imagenUrl) {
-        if (avatarImg) {
-            if (avatarImg.getAttribute('src') !== imagenUrl) avatarImg.setAttribute('src', imagenUrl);
-        } else {
-            const avatarSection = document.createElement('div');
-            avatarSection.className = 'card-avatar-section';
-            const img = document.createElement('img');
-            img.className = 'card-avatar';
-            img.alt = 'Avatar';
-            img.src = imagenUrl;
-            img.onerror = function () { this.onerror = null; this.src = '/static/icons/default-avatar.png'; };
-            avatarSection.appendChild(img);
-            const titleRow = elemento.querySelector('.card-title-row');
-            if (titleRow) titleRow.insertBefore(avatarSection, titleRow.firstChild);
+    if (avatarImg) {
+        // Determinar el icono correcto basado en el número/canal
+        let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
+        }
+
+        // Solo actualizar si es diferente
+        if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
+            avatarImg.setAttribute('src', nuevoAvatarSrc);
         }
     }
+    // === FIN MANTENER ICONOS ===
+
+
 
     const timeEl = elemento.querySelector('.card-time');
     if (timeEl) {
