@@ -8165,6 +8165,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         )
                         return True
                     else:
+                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
                 
                 # 2. Fallback a texto si no era audio, o si el envío de audio falló
                 if telegram_token:
