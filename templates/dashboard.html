@@ -250,6 +250,9 @@
         <div class="chart-container" style="height:400px;">
             <canvas id="dailyChart"></canvas>
         </div>
+        <div class="chart-container" style="height:400px;">
+            <canvas id="platformChart"></canvas>
+        </div>
     </div>
 </div>
 
@@ -262,6 +265,7 @@
   let overviewChart = null;
   let remainingChart = null;
   let dailyChart = null;
+  let platformChart = null; // 🆕 NUEVA VARIABLE GLOBAL
 
   // expose current period to JS (server value on load)
   const CURRENT_PERIOD = '{{ period }}';
@@ -331,6 +335,7 @@
           if (overviewChart) overviewChart.resize();
           if (remainingChart) remainingChart.resize();
           if (dailyChart) dailyChart.resize();
+          if (platformChart) platformChart.resize(); // 🆕 Nuevo resize
       }, 200);
   }
 
@@ -369,11 +374,16 @@
   // --- Load data and render conversations charts ---
     async function loadConversacionesData() {
         try {
-            // For the dailyChart we now want the last 3 months aggregated by month:
+            // Para el dailyChart ahora queremos los últimos 3 meses agregados por mes:
             const period = '3months';
+
+            // 🎯 Llama a la API de Plataformas (el endpoint ya existe en app.py)
+            const platformRes = await fetch(`/dashboard/platform-data`);
+            const platformJson = await platformRes.json();
 
             const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
             const json = await res.json();
+
             if (json.error) {
                 console.error('Error fetching conversaciones data', json.error);
                 return;
@@ -449,6 +459,48 @@
                         }
                         });
 
+            // 🆕 Chart: Platform Distribution (Doughnut)
+            const platformCtx = document.getElementById('platformChart').getContext('2d');
+            const platformData = platformJson.conversations; // Usar el campo 'conversations' del JSON
+
+            if (platformChart) platformChart.destroy();
+            platformChart = new Chart(platformCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: platformData.labels,
+                    datasets: [{
+                        label: 'Conversaciones por Plataforma',
+                        data: platformData.values,
+                        // Colores de ejemplo
+                        backgroundColor: ['#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa'],
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        datalabels: {
+                            color: 'white',
+                            formatter: (value, context) => {
+                                // Muestra porcentaje junto con el valor
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100) + '%';
+                                return percentage;
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Conversaciones por Plataforma (Clientes Distintos)',
+                            color: 'white',
+                            font: { size: 16 }
+                        }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+
         } catch (err) {
             console.error('Failed to load conversaciones data', err);
         }
@@ -471,6 +523,7 @@
       if (overviewChart) overviewChart.resize();
       if (remainingChart) remainingChart.resize();
       if (dailyChart) dailyChart.resize();
+      if (platformChart) platformChart.resize(); // 🆕 Nuevo resize
   });
 </script>
 {% endblock %}
