@@ -80,9 +80,11 @@
         background: #ffffff22;
         padding: 2px;
     }
-    .card-time { 
+
+    .card-time {
         font-size: small;
     }
+
     .icon-picker {
         position: absolute;
         background: #1f2630;
@@ -147,15 +149,15 @@
         flex: 1 1 auto;
     }
 
-    .card-title-row .alias-view {
-        font-size: 0.82rem;
-        font-weight: 600;
-        line-height: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: calc(100% - 90px);
-    }
+        .card-title-row .alias-view {
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: calc(100% - 90px);
+        }
 
     .card-meta-row {
         display: flex;
@@ -189,6 +191,7 @@
         max-width: 100%;
         line-height: 1;
     }
+
     .card-msg {
         color: #e2e5ed;
         font-size: 0.6rem;
@@ -232,6 +235,7 @@
         line-height: 1;
         padding: 0 6px;
     }
+
     .card-unread {
         position: absolute;
         top: 19px;
@@ -292,6 +296,93 @@
             margin-bottom: 4px;
         }
     }
+    /* 🆕 CSS para el botón flotante de alertas */
+    .floating-alerts-container {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
+        width: 350px; /* Ancho del pop-up */
+        max-height: 80vh;
+    }
+
+    .alerts-button {
+        background-color: #f7931e; /* Color llamativo */
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 60px;
+        height: 60px;
+        font-size: 24px;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        transition: background-color 0.3s;
+        position: absolute;
+        bottom: 0;
+        right: 0;
+    }
+
+        .alerts-button:hover {
+            background-color: #e08418;
+        }
+
+    .alerts-badge {
+        position: absolute;
+        top: 0;
+        right: 0;
+        background-color: #ff3333;
+        color: white;
+        border-radius: 50%;
+        padding: 5px 8px;
+        font-size: 12px;
+        font-weight: bold;
+        transform: translate(25%, -25%);
+    }
+
+    .alerts-dropdown {
+        background: #1f2630;
+        border: 1px solid #2e3a46;
+        border-radius: 8px;
+        padding: 10px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        max-height: 100%;
+        overflow-y: auto;
+        position: absolute;
+        bottom: 70px; /* Posicionar encima del botón */
+        right: 0;
+        display: none; /* Oculto por defecto */
+        width: 100%;
+        font-size: 0.9rem;
+    }
+
+        .alerts-dropdown.visible {
+            display: block;
+        }
+
+    .alert-item {
+        padding: 8px;
+        border-bottom: 1px solid #2e3a46;
+        cursor: pointer;
+        transition: background-color 0.2s;
+    }
+
+        .alert-item:hover {
+            background-color: #2b3440;
+        }
+
+        .alert-item:last-child {
+            border-bottom: none;
+        }
+
+        .alert-item a {
+            text-decoration: none;
+            color: inherit;
+            display: block;
+        }
+
+        .alert-item strong {
+            color: #f7931e;
+        }
 </style>
 
 <div id="kanban-board" class="kanban-board">
@@ -340,7 +431,7 @@
                     </div>
                     <div class="card-meta-row">
                         {% endif %}
-                        
+
                         {% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
@@ -354,6 +445,16 @@
     {% endfor %}
 </div>
 
+<div class="floating-alerts-container">
+    <div id="alerts-dropdown" class="alerts-dropdown">
+        <p style="text-align: center; margin: 5px 0;">Cargando alertas...</p>
+    </div>
+    <button id="alerts-button" class="alerts-button">
+        <span id="alerts-icon">🛎️</span>
+        <span id="alerts-badge" class="alerts-badge" style="display:none;">0</span>
+    </button>
+</div>
+
 <div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
@@ -363,6 +464,11 @@
     let kanbanAutoRefresh = true;
     let refreshInterval = 500;
     const renameTimers = new Map(); // debounce timers por columna
+
+    // 🆕 JS para manejar el botón flotante y las alertas
+    let alertsData = [];
+    let alertsDropdownVisible = false;
+    let lastAlertCount = 0; // Para rastrear el cambio en el número de alertas
 
     document.addEventListener('DOMContentLoaded', () => {
         bindColumnHeaderEvents();
@@ -374,7 +480,106 @@
         startAutoRefresh();
         inicializarSortable();
         document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
+
+        // 🆕 BINDINGS Y REFRESH PARA ALERTAS
+        bindAlertsButton();
+        fetchAlertsData();
+        setInterval(fetchAlertsData, 10000);
     });
+
+    function bindAlertsButton() {
+        const button = document.getElementById('alerts-button');
+        const dropdown = document.getElementById('alerts-dropdown');
+
+        button.addEventListener('click', (e) => {
+            e.stopPropagation();
+            alertsDropdownVisible = !alertsDropdownVisible;
+            dropdown.classList.toggle('visible', alertsDropdownVisible);
+
+            // Si se abre y hay alertas, poner el badge a cero, pero mantener el ícono de campana
+            if (alertsDropdownVisible && alertsData.length > 0) {
+                updateAlertsBadge(0); // Poner badge a 0 para 'simular visto'
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (alertsDropdownVisible && !dropdown.contains(e.target) && e.target !== button) {
+                dropdown.classList.remove('visible');
+                alertsDropdownVisible = false;
+            }
+        });
+    }
+
+    function fetchAlertsData() {
+        fetch('/asesor/alerts')
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    const newAlertsData = data.alerts;
+
+                    // Contar nuevas alertas (siempre usamos la longitud total para el badge)
+                    const currentAlertCount = newAlertsData.length;
+
+                    // Si el dropdown no está visible, actualizar el badge con la cuenta total
+                    if (!alertsDropdownVisible) {
+                        // Solo actualiza el badge si la cuenta total cambió desde la última vez.
+                        if (currentAlertCount !== lastAlertCount) {
+                            updateAlertsBadge(currentAlertCount);
+                        }
+                    }
+
+                    // Renderizar siempre la lista de alertas
+                    renderAlertsDropdown(newAlertsData);
+                    alertsData = newAlertsData;
+                    lastAlertCount = currentAlertCount;
+                } else {
+                    document.getElementById('alerts-dropdown').innerHTML = `<p style="color: #ff6666; text-align: center;">Error al cargar: ${data.error}</p>`;
+                    updateAlertsBadge(0);
+                }
+            })
+            .catch(err => {
+                console.error('Error fetching alerts:', err);
+                document.getElementById('alerts-dropdown').innerHTML = `<p style="color: #ff6666; text-align: center;">Error de red.</p>`;
+                updateAlertsBadge(0);
+            });
+    }
+
+    function updateAlertsBadge(count) {
+        const badge = document.getElementById('alerts-badge');
+        badge.textContent = count > 9 ? '9+' : count;
+        // Mostrar/Ocultar y cambiar ícono
+        badge.style.display = count > 0 ? 'block' : 'none';
+        document.getElementById('alerts-icon').textContent = count > 0 ? '🔔' : '🛎️';
+    }
+
+    function renderAlertsDropdown(alerts) {
+        const dropdown = document.getElementById('alerts-dropdown');
+        if (alerts.length === 0) {
+            dropdown.innerHTML = '<p style="text-align: center;">No hay alertas pendientes del asesor.</p>';
+            return;
+        }
+
+        let html = '';
+        alerts.forEach(alert => {
+            // Formato de hora simple
+            const date = new Date(alert.timestamp_iso);
+            const timeStr = date.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+            // Usar el link directo a la conversación del cliente
+            // Usamos alert.alerta_resumen que contiene el resumen de la IA
+            html += `
+            <div class="alert-item" data-chat-num="${alert.numero_cliente}" onclick="window.location.href='${alert.chat_link}'">
+                <strong>${alert.nombre_cliente}</strong> <span style="float: right; color: #aaa; font-size: 0.8em;">${timeStr}</span>
+                <p style="margin-top: 5px; color: #ccc;">${(alert.alerta_resumen || '').substring(0, 100)}...</p>
+                <a href="${alert.chat_link}" style="color: #f7931e; font-size: 0.8em;">Ver Chat Cliente (${alert.numero_cliente}) →</a>
+            </div>
+            `;
+        });
+
+        dropdown.innerHTML = html;
+    }
+
+    // ... (código JS existente: bindMarkReadOnClick, bindAddColumnButtons, etc.) ...
 
     function bindMarkReadOnClick() {
         document.addEventListener('click', (e) => {
@@ -648,11 +853,13 @@
         const timeElement = elemento.querySelector('.card-time');
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
+            // Formatear la fecha para que coincida con el backend y evitar parpadeo
             const dia = fechaObj.getDate();
-            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
+            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).replace('.', '');
             const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-            const fechaFormateada = `${dia}-${mes} ${hora}`;
-            if (timeElement.textContent !== fechaFormateada) timeElement.textContent = fechaFormateada;
+            const fechaFormateada = `${dia}-${mes}   ${hora}`; // espacio doble por el formato del backend
+
+            if (timeElement.textContent.trim() !== fechaFormateada.trim()) timeElement.textContent = fechaFormateada;
         }
 
         const msgElement = elemento.querySelector('.card-msg');
@@ -692,7 +899,7 @@
                 </div>
                 ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
                 <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
-                {% if es_admin %}
+                {% if is_admin %}
                 <span class="alias-edit" style="display:none;">
                     <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
                 </span>
