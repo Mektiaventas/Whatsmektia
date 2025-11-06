@@ -8177,18 +8177,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     # 💥 WHATSAPP: USAR URL PÚBLICA DIRECTAMENTE
                     sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
                     
-                    # 💥 CORRECCIÓN CRÍTICA: NO LIMPIAR AQUÍ PARA EVITAR EL 404 DE LA CONDICIÓN DE CARRERA
-                    # Se mantiene la limpieza de archivos en una tarea externa/scheduler
+                    # La limpieza del archivo se realiza en una tarea externa/scheduler
                     
                     if sent_audio:
                          app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
-                         # Registrar con la URL pública
+                         
+                         # 🚨 CORRECCIÓN CRÍTICA: ENVIAR RESPUESTA TEXTUAL POR SEPARADO
+                         if respuesta_text:
+                             # 1. Enviar el mensaje de texto
+                             enviar_mensaje(numero, respuesta_text, config)
+                             app.logger.info(f"✅ WhatsApp: Texto de respuesta adjunto enviado.")
+                         
+                         # 2. Registrar el flujo de conversación (como audio)
                          registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
                          return True
                     else:
                          app.logger.warning("⚠️ WhatsApp: Falló el envío de audio. Enviando como texto.")
                         
-                # Fallback a texto (WhatsApp)
+                # Fallback a texto (WhatsApp) - Se ejecuta si audio_url_publica era None o el envío falló
                 enviar_mensaje(numero, respuesta_text, config) 
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
                 return True
