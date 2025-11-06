@@ -38,14 +38,19 @@
             <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
-                        <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                        {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                        {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                        {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                        {% endif %}
+
+                        <img src="{{ avatar_src }}"
                              class="card-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"> 
+                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         {% endif %}
-                         
+
                         <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
 
                         {% if is_admin %}
@@ -91,8 +96,17 @@
         <div class="chat-panel-header" data-num="{{ selected }}">
             <div class="chat-header-info">
                 <div class="chat-title">
+                    {% set selected_chat = (chats | selectattr("numero", "equalto", selected) | first) %}
+                    {% set avatar_src_header = '/static/icons/whatsapp-icon.png' %}
+                    {% if selected and (selected.startswith('tg_') or (selected_chat and selected_chat.canal == 'Telegram')) %}
+                    {% set avatar_src_header = '/static/icons/telegram-icon-dos.png' %}
+                    {% endif %}
+
+                    <img src="{{ avatar_src_header }}" class="card-avatar" alt="Avatar"
+                         style="width: 24px; height: 24px; border-radius: 4px; margin-right: 6px;">
+
                     <span class="alias-view" data-num="{{ selected }}">
-                        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
+                        {{ selected_chat.nombre_mostrado if selected_chat else selected }}
                     </span>
 
                     {% if is_admin %}
