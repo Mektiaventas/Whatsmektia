@@ -8153,19 +8153,50 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             
             else:
                 # Es WhatsApp (lógica existente)
-                if audio_url:
-                    # Intento de enviar audio por WhatsApp (requiere url pública)
-                    if urlparse(audio_url).scheme in ('http', 'https'):
-                        # Asumo que tu texto_a_voz devuelve URL pública
-                        sent_audio = enviar_mensaje_voz(numero, audio_url, config)
-                        if sent_audio:
-                             app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
-                             registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
-                             return True
-                        else:
-                             app.logger.warning("⚠️ WhatsApp: Falló el envío de audio. Enviando como texto.")
+                if audio_url: # audio_url es la RUTA LOCAL (ej: /app/uploads/respuesta_...ogg)
+                    
+                    # 💥 CORRECCIÓN CRÍTICA PARA WHATSAPP: Convertir la ruta local a una URL pública proxy
+                    # Se ejecuta si audio_url NO es ya una URL (es decir, es una ruta de archivo local)
+                    if not urlparse(audio_url).scheme in ('http', 'https'):
+                        from os.path import basename
+                        # Necesario para extraer solo el nombre del archivo del path local
+                        filename_audio = basename(audio_url) 
+                        
+                        # Construir la URL pública que WhatsApp puede descargar
+                        dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
+                        
+                        # Forzar HTTPS para compatibilidad y seguridad (crítico para Telegram/WhatsApp)
+                        base_url = dominio if dominio.startswith('http') else f"https://{dominio}"
+                        if base_url.startswith('http://'):
+                             base_url = base_url.replace('http://', 'https://')
+                             
+                        # Se asume que /proxy-audio/ sirve archivos desde UPLOAD_FOLDER
+                        audio_url_publica = f"{base_url}/proxy-audio/{filename_audio}"
+                        
+                        app.logger.info(f"🔊 WHATSAPP: Convirtiendo ruta local a URL pública proxy: {audio_url_publica}")
+                        
                     else:
-                        app.logger.warning("⚠️ WhatsApp: texto_a_voz no devolvió URL pública. Enviando como texto.")
+                        # Si por alguna razón texto_a_voz devolvió una URL, la usamos
+                        audio_url_publica = audio_url 
+
+                    # Intento de enviar audio por WhatsApp (usando la URL pública/proxy)
+                    sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
+                    
+                    if sent_audio:
+                         app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
+                         
+                         # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DE ENVÍO POR WHATSAPP
+                         try:
+                             os.remove(audio_url)
+                             app.logger.info(f"🗑️ Archivo de audio temporal eliminado después de envío por WhatsApp: {audio_url}")
+                         except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo eliminar archivo local después de envío por WhatsApp: {e}")
+                         
+                         # Registrar con la URL pública
+                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
+                         return True
+                    else:
+                         app.logger.warning("⚠️ WhatsApp: Falló el envío de audio. Enviando como texto.")
                         
                 # Fallback a texto (WhatsApp)
                 enviar_mensaje(numero, respuesta_text, config) 
