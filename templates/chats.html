@@ -754,7 +754,18 @@ function formatClientTime(serverTs) {
     const month = d.toLocaleString('es-MX', { month: 'short' });
     const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
     return `${day}-${month} ${time}`;
-}
+    }
+    // Función para obtener bandera (igual que en kanban)
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    } 
 
 /* State */
 let chatAutoRefresh = true;
@@ -799,7 +810,7 @@ function crearNuevoChatHTML(chat) {
             imagen = '/static/icons/telegram-icon-dos.png';
         }
         // === FIN ICONOS ===
-    const banderaUrl = escapeHtml(coalesce(chat.bandera, chat.flag, chat.flag_url, ''));
+    const banderaUrl = getCountryFlag(num) || '';
     const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
     const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
     const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
@@ -923,7 +934,7 @@ function actualizarChatExistente(elemento, chat) {
         }
     }
 
-    const bandera = coalesce(chat.bandera, chat.flag, chat.flag_url, '');
+    const bandera = getCountryFlag(chat.numero) || ''; 
     let flagImg = elemento.querySelector('.card-flag');
     if (bandera) {
         if (flagImg) {
