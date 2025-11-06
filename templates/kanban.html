@@ -80,11 +80,9 @@
         background: #ffffff22;
         padding: 2px;
     }
-
-    .card-time {
+    .card-time { 
         font-size: small;
     }
-
     .icon-picker {
         position: absolute;
         background: #1f2630;
@@ -149,15 +147,15 @@
         flex: 1 1 auto;
     }
 
-        .card-title-row .alias-view {
-            font-size: 0.82rem;
-            font-weight: 600;
-            line-height: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: calc(100% - 90px);
-        }
+    .card-title-row .alias-view {
+        font-size: 0.82rem;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: calc(100% - 90px);
+    }
 
     .card-meta-row {
         display: flex;
@@ -191,7 +189,6 @@
         max-width: 100%;
         line-height: 1;
     }
-
     .card-msg {
         color: #e2e5ed;
         font-size: 0.6rem;
@@ -235,7 +232,6 @@
         line-height: 1;
         padding: 0 6px;
     }
-
     .card-unread {
         position: absolute;
         top: 19px;
@@ -344,7 +340,7 @@
                     </div>
                     <div class="card-meta-row">
                         {% endif %}
-
+                        
                         {% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
@@ -359,85 +355,7 @@
 </div>
 
 <div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
-<button id="asesores-toggle-btn" class="flotante-btn">
-    Asesores (<span id="asesores-count">0</span>) 🗣️
-</button>
 
-<div id="asesores-sidebar" class="asesores-sidebar">
-    <div class="sidebar-header">
-        <h3>Chats de Asesores</h3>
-        <button id="asesores-close-btn">×</button>
-    </div>
-    <div class="sidebar-list" id="asesores-list-container">
-    </div>
-</div>
-
-<style>
-    /* Estilos para el botón flotante y el sidebar */
-    .flotante-btn {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
-        background-color: #007bff;
-        color: white;
-        border: none;
-        border-radius: 8px;
-        padding: 12px 18px;
-        font-size: 16px;
-        font-weight: 600;
-        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-        cursor: pointer;
-        transition: background-color 0.3s, transform 0.2s;
-    }
-
-        .flotante-btn:hover {
-            background-color: #0056b3;
-            transform: translateY(-2px);
-        }
-
-    .asesores-sidebar {
-        position: fixed;
-        top: 0;
-        right: 0;
-        width: 300px;
-        height: 100%;
-        background-color: #1f2937; /* Usar el color de fondo de chat-list-v2 */
-        box-shadow: -4px 0 12px rgba(0, 0, 0, 0.4);
-        z-index: 1001;
-        transform: translateX(100%);
-        transition: transform 0.3s ease-out;
-        display: flex;
-        flex-direction: column;
-    }
-
-        .asesores-sidebar.visible {
-            transform: translateX(0);
-        }
-
-    .sidebar-header {
-        padding: 15px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom: 1px solid #374151;
-        color: white;
-    }
-
-    #asesores-close-btn {
-        background: none;
-        border: none;
-        color: white;
-        font-size: 24px;
-        cursor: pointer;
-    }
-
-    .sidebar-list {
-        flex: 1;
-        overflow-y: auto;
-        padding: 8px;
-    }
-</style>
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
 <script>
     let editingColId = null;
@@ -667,26 +585,19 @@
         setInterval(actualizarKanban, refreshInterval);
         setTimeout(actualizarKanban, 1000);
     }
-    // ... (en kanban.html, en la función actualizarKanban())
     function actualizarKanban() {
         if (!kanbanAutoRefresh) return;
         const scrollPosition = window.scrollY;
-        fetch('/kanban/data') // <-- Asumimos que esta API devuelve TODOS los chats
+        fetch('/kanban/data')
             .then(r => r.json())
             .then(data => {
-                const telefonosAsesores = CHATS_ASESORES_RAW.map(c => c.numero); // Lista de números de asesores para filtrar
-
-                const chatsClientes = data.chats.filter(chat => !telefonosAsesores.includes(chat.numero));
-                const chatsAsesores = data.chats.filter(chat => telefonosAsesores.includes(chat.numero));
-
-                // 1. Actualizar el Kanban de clientes
-                actualizarIncremental(data, chatsClientes); // Necesitarías refactorizar actualizarIncremental
-
-                // 2. Actualizar el Sidebar de asesores
-                renderAsesoresList(chatsAsesores);
-
+                actualizarIncremental(data);
                 if (editingColId) {
-                    // ... (lógica de edición de columna) ...
+                    const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
+                    if (colHeader && editingColText) {
+                        colHeader.focus();
+                        colHeader.textContent = editingColText;
+                    }
                 }
                 setTimeout(() => window.scrollTo(0, scrollPosition), 10);
             })
