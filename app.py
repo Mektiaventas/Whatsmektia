@@ -5723,7 +5723,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
 
         if enviado:
-            # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
+            # Registrar el evento en la CONVERSACIÓN DEL CLIENTE (El cliente habló, el bot respondió)
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
             app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
         else:
@@ -5735,7 +5735,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
                 # Obtener nombre mostrado del cliente
                 cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config) or numero_cliente
 
-                # Preparar historial para resumen
+                # Preparar historial para resumen (Lógica de resumen con IA, sin cambios)
                 historial = obtener_historial(numero_cliente, limite=8, config=config) or []
                 partes = []
                 for h in historial:
@@ -5748,7 +5748,6 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
                 # Preguntar a la IA por un resumen breve (1-3 líneas)
                 resumen = None
                 try:
-                    # Usando DeepSeek para el resumen (como en tu código original)
                     prompt = f"""
 Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
 del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
@@ -5790,27 +5789,29 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     "Por favor, estate atento para contactarlo si corresponde."
                 )
 
-                # Envío de la alerta por WhatsApp (si el asesor está en WhatsApp)
+                # Envío de la alerta por WhatsApp
                 if not telefono.startswith('tg_'):
                     enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
                 
-                # <--- REGISTRO DE LA ALERTA PARA EL ASESOR (Para visibilidad en Kanban/Chats) --->
-                # Asegura que el chat del asesor aparezca en el CRM si el número del asesor es uno de los números configurados.
+                # <--- REGISTRO CRÍTICO PARA LA VISIBILIDAD DEL ASESOR EN EL CHAT --->
+                # Registra la alerta como una conversación en la que el número del asesor es el cliente
+                # y el contenido es el mensaje de alerta.
                 guardar_conversacion(
-                    telefono, 
-                    f"[ALERTA: CLIENTE {cliente_mostrado} ({numero_cliente})]", 
-                    texto_asesor, 
+                    telefono,                                # El número del asesor es el 'cliente' en esta vista
+                    texto_asesor,                            # El mensaje de alerta va en el campo 'mensaje'
+                    "",                                      # Dejamos la respuesta vacía
                     config,
-                    respuesta_tipo='alerta', # Tipo para identificar que es una alerta automática
-                    respuesta_media_url=f"https://wa.me/{numero_cliente.lstrip('+')}" # Link directo al cliente para la UI
+                    imagen_url=None, 
+                    es_imagen=False, 
+                    tipo_mensaje='alerta',                   # Usamos 'alerta' para identificarlo como sistema
+                    contenido_extra=f"Cliente: {numero_cliente}"
                 )
+                app.logger.info(f"✅ Alerta registrada en la vista del asesor {telefono}")
                 
                 # Mueve el chat del cliente (numero_cliente) a columna 'Esperando Respuesta' (3)
                 actualizar_columna_chat(numero_cliente, 3, config)
                 app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
-                
-                # <--- FIN REGISTRO DE ALERTA PARA EL ASESOR --->
                 
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}")
