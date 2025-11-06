@@ -377,12 +377,12 @@
             const period = '3months';
 
             // 🎯 Llama a la API de Plataformas (el endpoint ya existe en app.py)
-            const platformRes = await fetch(`/dashboard/platform-data`);
+            const platformRes = await fetch(`/dashboard/platform-data`); 
             const platformJson = await platformRes.json();
-
+            
             const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
             const json = await res.json();
-
+            
             if (json.error) {
                 console.error('Error fetching conversaciones data', json.error);
                 return;
@@ -457,13 +457,13 @@
                             }
                         }
                         });
-
+                        
             // 🆕 Chart: Platform Distribution (Doughnut)
             const platformCtx = document.getElementById('platformChart').getContext('2d');
-            const platformData = platformJson.conversations;
+            const platformData = platformJson.conversations; 
 
             // Definir los colores y mapeo de iconos
-            const platformColors = ['#25D366', '#0088CC', '#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa'];
+            const platformColors = ['#25D366', '#0088CC', '#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa']; 
             const iconMap = {
                 'WhatsApp': '/static/icons/whatsapp-icon.png',
                 'Telegram': '/static/icons/telegram-icon.png',
@@ -478,16 +478,16 @@
                     datasets: [{
                         label: 'Conversaciones por Plataforma',
                         data: platformData.values,
-                        backgroundColor: platformColors,
+                        backgroundColor: platformColors, 
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: {
+                        legend: { 
+                            position: 'bottom', 
+                            labels: { 
                                 color: 'white',
                                 // 💥 Implementación de la función customizadora para usar iconos
                                 generateLabels: (chart) => {
@@ -495,7 +495,7 @@
                                     return data.data.map((value, i) => {
                                         const label = chart.data.labels[i];
                                         const iconUrl = iconMap[label]; // Obtener URL del icono
-
+                                        
                                         // Crear una etiqueta HTML personalizada si hay URL de icono
                                         if (iconUrl) {
                                             return {
@@ -521,10 +521,10 @@
                                         };
                                     });
                                 }
-                            }
+                            } 
                         },
-                        datalabels: {
-                            color: 'white',
+                        datalabels: { 
+                            color: 'white', 
                             formatter: (value, context) => {
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
                                 const percentage = Math.round((value / total) * 100) + '%';
