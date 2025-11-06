@@ -5692,7 +5692,8 @@ def obtener_siguiente_asesor(config=None):
 def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
     """
     Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
-    También notifica al asesor seleccionado (opcional).
+    También notifica al asesor seleccionado (opcional) y registra la alerta 
+    en el historial del asesor para visibilidad en Kanban/Chats.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5705,14 +5706,30 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
+        # 1. ENVIAR MENSAJE AL CLIENTE (Confirma que se pasará a un asesor)
         texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}"
-        enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        
+        # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
+        if numero_cliente.startswith('tg_'):
+            telegram_token = config.get('telegram_token')
+            if telegram_token:
+                chat_id = numero_cliente.replace('tg_', '')
+                enviado = send_telegram_message(chat_id, texto_cliente, telegram_token) 
+            else:
+                app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                enviado = False
+        else:
+            enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
         if enviado:
+            # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
             app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
         else:
             app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
 
+        # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR
         if notificar_asesor and telefono:
             try:
                 # Obtener nombre mostrado del cliente
@@ -5731,6 +5748,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
                 # Preguntar a la IA por un resumen breve (1-3 líneas)
                 resumen = None
                 try:
+                    # Usando DeepSeek para el resumen (como en tu código original)
                     prompt = f"""
 Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
 del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
@@ -5755,11 +5773,9 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     if isinstance(raw, list):
                         raw = " ".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
                     resumen = str(raw).strip()
-                    # Keep it compact
                     resumen = re.sub(r'\s*\n\s*', ' ', resumen)[:400]
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo generar resumen IA para asesor: {e}")
-                    # Fallback: usar primer/último mensaje corto
                     if historial:
                         ultimo = historial[-1].get('mensaje') or ''
                         resumen = (ultimo[:200] + '...') if len(ultimo) > 200 else ultimo
@@ -5767,15 +5783,37 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                         resumen = "Sin historial disponible."
 
                 texto_asesor = (
+                    f"🚨 *ALERTA: Cliente requiere atención humana*\n\n"
                     f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
-                    f"🔎 Resumen rápido del chat para que lo atiendas:\n{resumen}\n\n"
+                    f"🔎 *Resumen rápido del chat para que lo atiendas:*\n{resumen}\n\n"
+                    f"🔗 *Link Directo (si aplica):* https://wa.me/{numero_cliente.lstrip('+')}\n\n"
                     "Por favor, estate atento para contactarlo si corresponde."
                 )
 
-                enviar_mensaje(telefono, texto_asesor, config)
+                # Envío de la alerta por WhatsApp (si el asesor está en WhatsApp)
+                if not telefono.startswith('tg_'):
+                    enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
+                
+                # <--- REGISTRO DE LA ALERTA PARA EL ASESOR (Para visibilidad en Kanban/Chats) --->
+                # Asegura que el chat del asesor aparezca en el CRM si el número del asesor es uno de los números configurados.
+                guardar_conversacion(
+                    telefono, 
+                    f"[ALERTA: CLIENTE {cliente_mostrado} ({numero_cliente})]", 
+                    texto_asesor, 
+                    config,
+                    respuesta_tipo='alerta', # Tipo para identificar que es una alerta automática
+                    respuesta_media_url=f"https://wa.me/{numero_cliente.lstrip('+')}" # Link directo al cliente para la UI
+                )
+                
+                # Mueve el chat del cliente (numero_cliente) a columna 'Esperando Respuesta' (3)
+                actualizar_columna_chat(numero_cliente, 3, config)
+                app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
+                
+                # <--- FIN REGISTRO DE ALERTA PARA EL ASESOR --->
+                
             except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo notificar al asesor {telefono}: {e}")
+                app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}")
 
         return enviado
     except Exception as e:
