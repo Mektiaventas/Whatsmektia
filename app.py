@@ -8552,7 +8552,7 @@ def dashboard_platform_data():
         cursor = conn.cursor(dictionary=True)
 
         # 1. Conteo de Conversaciones por Plataforma (contactos distintos)
-        # Usa COALESCE para Telegram (tg_%) y WhatsApp si la columna plataforma es NULL
+        # COALESCE prioritizes the platform from the contacts table. If null, uses the prefix tg_ for Telegram, and WhatsApp otherwise.
         cursor.execute("""
             SELECT 
                 COALESCE(c.plataforma, 
@@ -8601,7 +8601,7 @@ def dashboard_platform_data():
 
     except Exception as e:
         app.logger.error(f"🔴 Error en /dashboard/platform-data: {e}")
-        return jsonify({'error': str(e)}), 500    
+        return jsonify({'error': str(e)}), 500  
 
 def extraer_nombre_desde_webhook(payload):
     """
