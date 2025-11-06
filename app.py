@@ -7822,36 +7822,94 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
-                if numero.startswith('tg_'):
-                    # Enviar por Telegram
-                    telegram_token = config.get('telegram_token')
-                    if telegram_token:
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+# app.py (Nuevo bloque para la sección de envío de la respuesta final)
+
+            # --- LÓGICA DE ENVÍO MULTICANAL (Telegram y WhatsApp) ---
+
+            if numero.startswith('tg_'):
+                # Es Telegram
+                telegram_token = config.get('telegram_token')
+                chat_id = numero.replace('tg_', '')
+                
+                if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                    # 1. Intento de enviar como audio si la generación fue exitosa
+                    sent_audio = send_telegram_voice(
+                        chat_id=chat_id, 
+                        audio_file_path=audio_url, 
+                        token_bot=telegram_token, 
+                        caption=respuesta_text
+                    )
+                    if sent_audio:
+                        app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                        return True
                     else:
-                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                # 2. Fallback a texto si no era audio, o si el envío de audio falló
+                if telegram_token:
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) 
                 else:
-                    # Enviar por WhatsApp (o lógica de audio existente)
-                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
-                return True
+                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
+            else:
+                enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+            registrar_respuesta_bot(
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
+            )
+            return True
         if intent == "COTIZAR":
             cotizar_text = cotizar_proyecto(numero, config=config)
             if cotizar_text:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
-                    # Enviar por Telegram
+                    # Es Telegram
                     telegram_token = config.get('telegram_token')
+                    chat_id = numero.replace('tg_', '')
+                
+                    if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                        # 1. Intento de enviar como audio si la generación fue exitosa
+                        sent_audio = send_telegram_voice(
+                            chat_id=chat_id, 
+                            audio_file_path=audio_url, 
+                            token_bot=telegram_token, 
+                            caption=respuesta_text
+                        )
+                        if sent_audio:
+                            app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                            return True
+                        else:
+                            app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                    # 2. Fallback a texto si no era audio, o si el envío de audio falló
                     if telegram_token:
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) 
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                 else:
-                    # Enviar por WhatsApp (o lógica de audio existente)
-                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                registrar_respuesta_bot(numero, texto, cotizar_text, config, incoming_saved=incoming_saved)
-                return True
+                    enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+            registrar_respuesta_bot(
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
+            )
+            return True
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
         if intent == "ENVIAR_DOCUMENTO" and not document_field:
             app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
@@ -7869,18 +7927,45 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if comprar_producto_text:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
-                    # Enviar por Telegram
+                    # Es Telegram
                     telegram_token = config.get('telegram_token')
+                    chat_id = numero.replace('tg_', '')
+                
+                    if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                        # 1. Intento de enviar como audio si la generación fue exitosa
+                        sent_audio = send_telegram_voice(
+                            chat_id=chat_id, 
+                            audio_file_path=audio_url, 
+                            token_bot=telegram_token, 
+                            caption=respuesta_text
+                        )
+                        if sent_audio:
+                            app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                            return True
+                        else:
+                            app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                    # 2. Fallback a texto si no era audio, o si el envío de audio falló
                     if telegram_token:
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) 
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                 else:
-                    # Enviar por WhatsApp (o lógica de audio existente)
-                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
-                return True
+                    enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+            registrar_respuesta_bot(
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
+            )
+            return True
         # GUARDAR CITA
         if save_cita:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
@@ -7902,27 +7987,43 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if respuesta_text:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
-                        # Enviar por Telegram
+                        # Es Telegram
                         telegram_token = config.get('telegram_token')
+                        chat_id = numero.replace('tg_', '')
+                
+                        if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                            # 1. Intento de enviar como audio si la generación fue exitosa
+                            sent_audio = send_telegram_voice(
+                                chat_id=chat_id, 
+                                audio_file_path=audio_url, 
+                                token_bot=telegram_token, 
+                                caption=respuesta_text
+                            )
+                            if sent_audio:
+                                app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                                return True
+                            else:
+                                app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                        # 2. Fallback a texto si no era audio, o si el envío de audio falló
                         if telegram_token:
-                            chat_id = numero.replace('tg_', '')
-                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
                         else:
                             app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                     else:
-                        # Enviar por WhatsApp (o lógica de audio existente)
-                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                
-                # --- CORREGIDO ---
-                # Guardar el nombre de archivo o URL cruda (http)
-                # El filtro en chats.html se encargará de construir la URL correcta
-                bot_media_url_to_save = image_field
-                
+                        enviar_mensaje(numero, respuesta_text, config)
+
+                    # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
                 registrar_respuesta_bot(
-                    numero, texto, respuesta_text, config,
-                    incoming_saved=incoming_saved,
-                    respuesta_tipo='imagen',
-                    respuesta_media_url=bot_media_url_to_save
+                    numero, 
+                    texto, 
+                    respuesta_text, 
+                    config, 
+                    incoming_saved=incoming_saved, 
+                    respuesta_tipo='texto',  
+                    respuesta_media_url=None   
                 )
                 return True
             except Exception as e:
@@ -7934,17 +8035,44 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if respuesta_text:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
-                        # Enviar por Telegram
+                        # Es Telegram
                         telegram_token = config.get('telegram_token')
+                        chat_id = numero.replace('tg_', '')
+                
+                        if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                            # 1. Intento de enviar como audio si la generación fue exitosa
+                            sent_audio = send_telegram_voice(
+                                chat_id=chat_id, 
+                                audio_file_path=audio_url, 
+                                token_bot=telegram_token, 
+                                caption=respuesta_text
+                            )
+                            if sent_audio:
+                                app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                                return True
+                            else:
+                                app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                        # 2. Fallback a texto si no era audio, o si el envío de audio falló
                         if telegram_token:
-                            chat_id = numero.replace('tg_', '')
-                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
                         else:
                             app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                     else:
-                        # Enviar por WhatsApp (o lógica de audio existente)
-                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
+                        enviar_mensaje(numero, respuesta_text, config)
+
+                # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+                registrar_respuesta_bot(
+                    numero, 
+                    texto, 
+                    respuesta_text, 
+                    config, 
+                    incoming_saved=incoming_saved, 
+                    respuesta_tipo='texto',  
+                    respuesta_media_url=None   
+                )
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
@@ -7955,17 +8083,44 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if respuesta_text:
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
-                    # Enviar por Telegram
+                    # Es Telegram
                     telegram_token = config.get('telegram_token')
+                    chat_id = numero.replace('tg_', '')
+                
+                    if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                        # 1. Intento de enviar como audio si la generación fue exitosa
+                        sent_audio = send_telegram_voice(
+                            chat_id=chat_id, 
+                            audio_file_path=audio_url, 
+                            token_bot=telegram_token, 
+                            caption=respuesta_text
+                        )
+                        if sent_audio:
+                            app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                            return True
+                        else:
+                            app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                    # 2. Fallback a texto si no era audio, o si el envío de audio falló
                     if telegram_token:
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                        send_telegram_message(chat_id, respuesta_text, telegram_token) 
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                 else:
-                    # Enviar por WhatsApp (o lógica de audio existente)
-                    enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                    enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+            registrar_respuesta_bot(
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
+            )
             return True
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
@@ -7975,17 +8130,45 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 if respuesta_text:
                     # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                     if numero.startswith('tg_'):
-                        # Enviar por Telegram
+                        # Es Telegram
                         telegram_token = config.get('telegram_token')
+                        chat_id = numero.replace('tg_', '')
+                
+                        if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                            # 1. Intento de enviar como audio si la generación fue exitosa
+                            sent_audio = send_telegram_voice(
+                                chat_id=chat_id, 
+                                audio_file_path=audio_url, 
+                                token_bot=telegram_token, 
+                                caption=respuesta_text
+                            )
+                            if sent_audio:
+                                app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                                return True
+                            else:
+                                app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                        # 2. Fallback a texto si no era audio, o si el envío de audio falló
                         if telegram_token:
-                            chat_id = numero.replace('tg_', '')
-                            send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
                         else:
                             app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
                     else:
-                        # Enviar por WhatsApp (o lógica de audio existente)
-                        enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                        enviar_mensaje(numero, respuesta_text, config)
+
+                # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+                registrar_respuesta_bot(
+                    numero, 
+                    texto, 
+                    respuesta_text, 
+                    config, 
+                    incoming_saved=incoming_saved, 
+                    respuesta_tipo='texto',  
+                    respuesta_media_url=None   
+                )
+                return True
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
@@ -8026,23 +8209,43 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
             if numero.startswith('tg_'):
-                # Enviar por Telegram
+                # Es Telegram
                 telegram_token = config.get('telegram_token')
+                chat_id = numero.replace('tg_', '')
+                
+                if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                    # 1. Intento de enviar como audio si la generación fue exitosa
+                    sent_audio = send_telegram_voice(
+                        chat_id=chat_id, 
+                        audio_file_path=audio_url, 
+                        token_bot=telegram_token, 
+                        caption=respuesta_text
+                    )
+                    if sent_audio:
+                        app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                        return True
+                    else:
+                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                # 2. Fallback a texto si no era audio, o si el envío de audio falló
                 if telegram_token:
-                    chat_id = numero.replace('tg_', '')
-                    send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) 
                 else:
                     app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-            else:
-                # Enviar por WhatsApp (o lógica de audio existente)
-                enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
             
-            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
+            else:
+                enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
             registrar_respuesta_bot(
-                numero, texto, respuesta_text, config, 
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
                 incoming_saved=incoming_saved, 
-                respuesta_tipo='texto',  # <-- Corregido
-                respuesta_media_url=None   # <-- Corregido
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
             )
             return True
             # --- FIN DE LA CORRECCIÓN ---
@@ -8050,17 +8253,44 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
             # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
             if numero.startswith('tg_'):
-                # Enviar por Telegram
+                # Es Telegram
                 telegram_token = config.get('telegram_token')
+                chat_id = numero.replace('tg_', '')
+                
+                if telegram_token and es_audio and audio_url and os.path.exists(audio_url):
+                    # 1. Intento de enviar como audio si la generación fue exitosa
+                    sent_audio = send_telegram_voice(
+                        chat_id=chat_id, 
+                        audio_file_path=audio_url, 
+                        token_bot=telegram_token, 
+                        caption=respuesta_text
+                    )
+                    if sent_audio:
+                        app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                        return True
+                    else:
+                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+
+                # 2. Fallback a texto si no era audio, o si el envío de audio falló
                 if telegram_token:
-                    chat_id = numero.replace('tg_', '')
-                    send_telegram_message(chat_id, respuesta_text, telegram_token) # 👈 USAR TOKEN DEL TENANT
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) 
                 else:
                     app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            
             else:
-                # Enviar por WhatsApp (o lógica de audio existente)
-                enviar_mensaje(numero, respuesta_text, config) # Esto asume que tienes 'enviar_mensaje'
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                enviar_mensaje(numero, respuesta_text, config)
+
+            # REGISTRAR LA RESPUESTA FINAL (usando el tipo de respuesta que realmente se envió)
+            registrar_respuesta_bot(
+                numero, 
+                texto, 
+                respuesta_text, 
+                config, 
+                incoming_saved=incoming_saved, 
+                respuesta_tipo='texto',  
+                respuesta_media_url=None   
+            )
             return True
 
     except requests.exceptions.RequestException as e:
@@ -9809,6 +10039,40 @@ def obtener_url_archivo_telegram(file_id, token):
     # 2. Construir la URL final de descarga
     download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
     return download_url
+
+def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
+    """
+    Envía un archivo de audio (nota de voz, usualmente OGG) a Telegram usando el método sendVoice.
+    chat_id: ID del chat de Telegram (solo el número, no el prefijo 'tg_').
+    audio_file_path: Ruta del archivo .ogg en tu servidor local.
+    """
+    send_voice_url = f"https://api.telegram.org/bot{token_bot}/sendVoice"
+    
+    # ⚠️ Telegram espera el archivo como un archivo de subida, no una URL
+    try:
+        # Abrir el archivo de audio en modo binario
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {'voice': audio_file}
+            data = {'chat_id': chat_id}
+            if caption:
+                data['caption'] = caption
+            
+            # Realizar la solicitud POST multipart/form-data
+            response = requests.post(send_voice_url, files=files, data=data, timeout=30)
+            response.raise_for_status() # Lanza un error si la solicitud falló
+            
+            app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {chat_id}")
+            return True
+            
+    except FileNotFoundError:
+        app.logger.error(f"❌ TELEGRAM: Archivo de audio no encontrado: {audio_file_path}")
+        return False
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"❌ TELEGRAM: Error al enviar audio: {e}")
+        return False
+    except Exception as e:
+        app.logger.error(f"❌ TELEGRAM: Error inesperado al enviar audio: {e}")
+        return False
 
 # --- Endpoint Multi-Tenant para Webhook de Telegram ---
 @app.route('/telegram_webhook/<token_bot>', methods=['POST'])
