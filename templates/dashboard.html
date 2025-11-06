@@ -250,30 +250,31 @@
         <div class="chart-container" style="height:400px;">
             <canvas id="dailyChart"></canvas>
         </div>
-    </div>
-    <div id="pane-plataformas" class="tab-pane {% if request.args.get('tab') == 'plataformas' %}active{% endif %}">
-        <div class="stats" style="margin-top:0;">
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones por WhatsApp:</strong>
-                <div id="whatsappConversations">—</div>
+        <div id="pane-plataformas" class="tab-pane {% if request.args.get('tab') == 'plataformas' %}active{% endif %}">
+            <div class="stats" style="margin-top:0;">
+                <div class="stat-card" style="min-height:64px;height:64px;">
+                    <strong>Conversaciones por WhatsApp:</strong>
+                    <div id="whatsappConversations">—</div>
+                </div>
+                <div class="stat-card" style="min-height:64px;height:64px;">
+                    <strong>Conversaciones por Telegram:</strong>
+                    <div id="telegramConversations">—</div>
+                </div>
             </div>
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones por Telegram:</strong>
-                <div id="telegramConversations">—</div>
-            </div>
-        </div>
 
-        <div style="display:flex; gap:16px; margin-top: 1rem;">
-            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
-                <h4 style="text-align: center; color: #333;">Conversaciones por Plataforma</h4>
-                <canvas id="platformConversationsChart"></canvas>
-            </div>
-            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
-                <h4 style="text-align: center; color: #333;">Contactos por Plataforma</h4>
-                <canvas id="platformContactsChart"></canvas>
+            <div style="display:flex; gap:16px; margin-top: 1rem;">
+                <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+                    <h4 style="text-align: center; color: #333;">Conversaciones por Plataforma</h4>
+                    <canvas id="platformConversationsChart"></canvas>
+                </div>
+                <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+                    <h4 style="text-align: center; color: #333;">Contactos por Plataforma</h4>
+                    <canvas id="platformContactsChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
+   
 </div>
 
 <!-- Chart.js y plugin datalabels -->
