@@ -7535,6 +7535,72 @@ def start_good_morning_scheduler():
     GOOD_MORNING_THREAD_STARTED = True
     app.logger.info("✅ Good morning scheduler thread launched")
 
+# --- Función de Envío de Documento/PDF a Telegram (FALTANTE) ---
+def enviar_telegram_documento(chat_id, document_field, token_bot, caption='Documento adjunto'):
+    """
+    Envía un documento a Telegram.
+    document_field puede ser una URL HTTP o una ruta de archivo local.
+    """
+    send_document_url = f"https://api.telegram.org/bot{token_bot}/sendDocument"
+    
+    # Prepara la carga de datos
+    data = {'chat_id': chat_id, 'caption': caption}
+    
+    try:
+        # Si es una URL pública (HTTP/HTTPS), Telegram puede descargarla directamente
+        if urlparse(document_field).scheme in ('http', 'https'):
+            data['document'] = document_field
+            response = requests.post(send_document_url, data=data, timeout=30)
+        
+        # Si es una ruta de archivo local, debe enviarse como multipart/form-data
+        elif os.path.exists(document_field):
+            with open(document_field, 'rb') as doc_file:
+                files = {'document': doc_file}
+                response = requests.post(send_document_url, files=files, data=data, timeout=30)
+        
+        # Si no es URL ni ruta local, falla
+        else:
+            app.logger.error(f"❌ TELEGRAM DOC: Documento no es URL ni ruta local existente: {document_field}")
+            return False
+        
+        response.raise_for_status()
+        app.logger.info(f"✅ TELEGRAM: Documento enviado a {chat_id}")
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"❌ TELEGRAM DOC: Error al enviar documento: {e}")
+        return False
+    except Exception as e:
+        app.logger.error(f"❌ TELEGRAM DOC: Error inesperado: {e}")
+        return False
+
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
+# --- Función de Envío de Mensajes de Texto a Telegram (NECESARIA para Fallback) ---
+# (Si ya tienes esta función definida, puedes omitirla)
+def send_telegram_message(chat_id, text, token):
+    """Envía un mensaje de texto a un chat de Telegram."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'Markdown' # Para que Markdown funcione
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error enviando mensaje a Telegram chat_id={chat_id}: {e}")
+        return False
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -8013,10 +8079,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 chat_id = numero.replace('tg_', '')
                 
                 # 1. Intento de enviar como audio si la generación fue exitosa
-                if telegram_token and audio_url and os.path.exists(audio_url):
+                # audio_url debe ser la RUTA LOCAL del archivo .ogg
+                if telegram_token and audio_url and os.path.exists(audio_url) and not urlparse(audio_url).scheme in ('http', 'https'): # <-- VERIFICACIÓN RUTA LOCAL
+                    
+                    app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_url}") 
+                    
                     sent_audio = send_telegram_voice(
                         chat_id=chat_id, 
-                        audio_file_path=audio_url, # 👈 Ruta local al archivo .ogg
+                        audio_file_path=audio_url, # 👈 RUTA LOCAL
                         token_bot=telegram_token, 
                         caption=respuesta_text
                     )
