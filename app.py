@@ -2933,11 +2933,42 @@ def dashboard_platform_data():
     config = obtener_configuracion_por_host()
     
     try:
+        # --- 1. Obtener números a excluir (Asesores y ALERT_NUMBER) ---
+        cfg_full = load_config(config) 
+        asesores_list = cfg_full.get('asesores_list', [])
+        
+        # Recopilar todos los números de teléfono de los asesores configurados
+        numeros_a_excluir = {
+            (a.get('telefono') or '').strip() 
+            for a in asesores_list 
+            if a.get('telefono')
+        }
+        
+        # Añadir números de alerta
+        if ALERT_NUMBER:
+            numeros_a_excluir.add(ALERT_NUMBER)
+        # Añadir tu número personal
+        numeros_a_excluir.add('5214493432744')
+        numeros_a_excluir.add('5214491182201')
+        
+        # Limpiar números vacíos
+        numeros_a_excluir.discard('')
+
+        # Convertir a una lista/tupla para usar en la cláusula SQL IN
+        exclusion_list = tuple(numeros_a_excluir)
+        
+        if exclusion_list:
+            app.logger.info(f"📊 Excluyendo números internos del dashboard: {exclusion_list}")
+        
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # 1. Conteo de Conversaciones por Plataforma
-        cursor.execute("""
+        # 2. Conteo de Conversaciones por Plataforma (Clientes)
+        # Filtramos `conv.numero` para excluir los números internos
+        exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
+        
+        # Consulta de Conversaciones
+        cursor.execute(f"""
             SELECT 
                 COALESCE(c.plataforma, 
                          CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
@@ -2945,26 +2976,30 @@ def dashboard_platform_data():
                 COUNT(DISTINCT conv.numero) AS conversation_count
             FROM conversaciones conv
             LEFT JOIN contactos c ON conv.numero = c.numero_telefono
+            WHERE 1=1 {exclusion_clause}
             GROUP BY platform
             ORDER BY conversation_count DESC
-        """)
+        """, exclusion_list)
         conversations_raw = cursor.fetchall()
 
-        # 2. Conteo de Contactos Totales por Plataforma
-        cursor.execute("""
+        # 3. Conteo de Contactos Totales por Plataforma (Clientes)
+        # Filtramos `numero_telefono` para excluir los números internos
+        # Usamos la misma lista de exclusión
+        cursor.execute(f"""
             SELECT 
                 COALESCE(plataforma, 'WhatsApp') AS platform, 
                 COUNT(*) AS contact_count
             FROM contactos
+            WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
             GROUP BY platform
             ORDER BY contact_count DESC
-        """)
+        """, exclusion_list)
         contacts_raw = cursor.fetchall()
         
         cursor.close()
         conn.close()
 
-        # Formatear para Chart.js
+        # Formatear para Chart.js (sin cambios)
         conv_labels = [row['platform'] for row in conversations_raw]
         conv_values = [row['conversation_count'] for row in conversations_raw]
         
@@ -2985,7 +3020,7 @@ def dashboard_platform_data():
 
     except Exception as e:
         app.logger.error(f"🔴 Error en /dashboard/platform-data: {e}")
-        return jsonify({'error': str(e)}), 500    
+        return jsonify({'error': str(e)}), 500
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
