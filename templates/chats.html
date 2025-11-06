@@ -38,16 +38,14 @@
             <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
-                        <div class="card-avatar-section">
-                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
-                                 class="card-avatar" alt="Avatar"
-                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-                        </div>
+                        <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                             class="card-avatar" alt="Avatar"
+                             onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';"> 
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         {% endif %}
-
+                         
                         <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
 
                         {% if is_admin %}
@@ -603,84 +601,85 @@
         z-index: 1400 !important;
     }
 
+    
     /* ===== ESTILOS COMPACTOS PARA CHATS (IGUAL QUE KANBAN) ===== */
-    .card-avatar {
+    .chat-list-v2 .card-avatar {
         width: 24px !important;
         height: 24px !important;
         border-radius: 4px !important;
-        margin-right: 0px;
-        flex: 0 0 auto;
+        margin-right: 0px !important;
+        flex: 0 0 auto !important;
         object-fit: cover !important;
     }
 
-    .card-title-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        min-width: 0;
-        flex: 1 1 auto;
+    .chat-list-v2 .card-title-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
     }
 
-        .card-title-row .alias-view {
-            font-size: 0.82rem;
-            font-weight: 600;
-            line-height: 1;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: calc(100% - 90px);
+        .chat-list-v2 .card-title-row .alias-view {
+            font-size: 0.82rem !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            max-width: calc(100% - 90px) !important;
         }
 
-    .card-meta-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex: 0 0 auto;
-        margin-left: 6px;
+    .chat-list-v2 .card-meta-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        flex: 0 0 auto !important;
+        margin-left: 6px !important;
     }
 
-        .card-meta-row span {
-            font-size: 0.62rem;
-            color: rgba(255,255,255,0.9);
-            line-height: 1;
+        .chat-list-v2 .card-meta-row span {
+            font-size: 0.62rem !important;
+            color: rgba(255,255,255,0.9) !important;
+            line-height: 1 !important;
         }
 
-    .edit-alias-btn {
-        font-size: 11px;
-        padding: 1px 3px;
-        margin-left: 6px;
+    .chat-list-v2 .edit-alias-btn {
+        font-size: 11px !important;
+        padding: 1px 3px !important;
+        margin-left: 6px !important;
     }
 
-    .card-msg {
-        font-size: 0.75rem;
-        color: #e2e5ed;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: normal;
-        min-height: 1rem;
-        font-weight: 400;
-        max-width: 70%;
-        letter-spacing: 0.01rem;
-        margin-top: 2px;
+    .chat-list-v2 .card-msg {
+        font-size: 0.75rem !important;
+        color: #e2e5ed !important;
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: normal !important;
+        min-height: 1rem !important;
+        font-weight: 400 !important;
+        max-width: 70% !important;
+        letter-spacing: 0.01rem !important;
+        margin-top: 2px !important;
     }
 
-    .card-unread {
-        position: absolute;
-        top: 8px;
-        right: 8px;
-        background: #00E091;
-        color: #fff;
-        border-radius: 10px;
-        padding: 0.5px 8px;
-        font-size: 0.89em;
-        font-weight: 600;
-        min-width: 14px;
-        text-align: center;
-        box-shadow: 0 0 5px #00e09144;
-        z-index: 2;
+    .chat-list-v2 .card-unread {
+        position: absolute !important;
+        top: 8px !important;
+        right: 8px !important;
+        background: #00E091 !important;
+        color: #fff !important;
+        border-radius: 10px !important;
+        padding: 0.5px 8px !important;
+        font-size: 0.89em !important;
+        font-weight: 600 !important;
+        min-width: 14px !important;
+        text-align: center !important;
+        box-shadow: 0 0 5px #00e09144 !important;
+        z-index: 2 !important;
     }
 
     /* Estilos para el header del chat seleccionado */
@@ -703,8 +702,7 @@
             font-size: 12px;
             padding: 2px 4px;
         }
-</style>
-
+</style> 
 <script>
 /* Small helpers */
 function coalesce(...args) {
