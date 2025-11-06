@@ -10380,31 +10380,14 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
-def proxy_audio(filename):
-    """
-    Sirve archivos de audio (OGG/MP3) desde UPLOAD_FOLDER localmente.
-    Esto permite que WhatsApp/Telegram descarguen el archivo generado.
-    """
-    from werkzeug.exceptions import abort
-    
+@app.route('/proxy-audio/<path:audio_url>')
+def proxy_audio(audio_url):
+    """Proxy para evitar problemas de CORS con archivos de audio"""
     try:
-        # Asegúrate de que UPLOAD_FOLDER sea accesible (ya está importado globalmente)
-        from app import UPLOAD_FOLDER
-        
-        # Servir el archivo directamente desde la carpeta de subidas
-        # El nombre del archivo ya está 'secured' por texto_a_voz
-        return send_from_directory(
-            directory=UPLOAD_FOLDER, 
-            path=filename, # Usamos path=filename para ser explícitos
-            mimetype='audio/ogg', # Forzamos el MIME type correcto para notas de voz
-            as_attachment=False
-        )
-
+        response = requests.get(audio_url, timeout=10)
+        return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
     except Exception as e:
-        app.logger.error(f"🔴 ERROR 500 en proxy_audio para {filename}: {e}")
-        # Retornar un error 404 o 500 si el archivo no se encuentra o hay un fallo
-        abort(404)
+        return str(e), 500
 
 @app.route('/privacy-policy')
 def privacy_policy():
