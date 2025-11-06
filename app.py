@@ -9784,6 +9784,32 @@ def debug_image(filename):
         'url': url_for('serve_uploaded_file', filename=filename, _external=True)
     })
 
+# app.py, en cualquier lugar fuera de las rutas:
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    # 1. Obtener la ruta del archivo
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    
+    # 2. Construir la URL final de descarga
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
+# --- Función de Soporte para obtener URL de archivos de Telegram ---
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    # 1. Obtener la ruta del archivo (file_path)
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    
+    # 2. Construir la URL final de descarga
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
 # --- Endpoint Multi-Tenant para Webhook de Telegram ---
 @app.route('/telegram_webhook/<token_bot>', methods=['POST'])
 def telegram_webhook_multitenant(token_bot):
@@ -9799,8 +9825,6 @@ def telegram_webhook_multitenant(token_bot):
             app.logger.error(f"🔴 TELEGRAM: Token no reconocido: {token_bot[:10]}...")
             return jsonify({'status': 'error', 'message': 'Token no reconocido'}), 401
 
-        # El resto del código usa la variable 'config' para el tenant correcto
-        
         payload = request.get_json()
         if not payload or 'message' not in payload:
             app.logger.info("⚠️ Telegram: no message in payload")
@@ -9808,46 +9832,128 @@ def telegram_webhook_multitenant(token_bot):
 
         msg = payload['message']
         chat_id = msg['chat']['id']
-        texto = msg.get('text') or "[Mensaje no textual]"
         
-        # --- EXTRACCIÓN DEL NOMBRE DE TELEGRAM ---
+        # Simula la estructura de WhatsApp para el número (tg_chatid)
+        numero_telegram = f"tg_{chat_id}"
+        
+        # --- 2. Inicializar Variables y Detectar Media/Texto ---
+        texto = ''
+        es_imagen = 'photo' in msg
+        es_audio = 'voice' in msg or 'audio' in msg
+        es_archivo = 'document' in msg
+        file_id = None
+        public_url = None
+        transcripcion = None
+        
+        if es_imagen:
+            # Telegram envía una lista de fotos; tomamos la última (la más grande)
+            file_id = msg['photo'][-1]['file_id']
+            texto = msg.get('caption') or "El usuario envió una imagen"
+            tipo_mensaje = 'imagen'
+        elif es_audio:
+            # voice es para notas de voz, audio es para archivos de música
+            audio_obj = msg.get('voice') or msg.get('audio')
+            file_id = audio_obj['file_id']
+            # El texto inicial es la transcripción si la obtenemos, sino la nota
+            texto = msg.get('caption') or "El usuario envió un audio"
+            tipo_mensaje = 'audio'
+        elif es_archivo:
+            file_id = msg['document']['file_id']
+            texto = msg.get('caption') or f"Archivo: {msg['document'].get('file_name','sin nombre')}"
+            tipo_mensaje = 'documento'
+        elif 'text' in msg:
+            texto = (msg['text'] or '').strip()
+            tipo_mensaje = 'texto'
+        else:
+            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
+            tipo_mensaje = 'texto'
+
+        # --- 3. Obtener Nombre de Contacto (para DB) ---
         from_user = msg.get('from', {})
         first_name = from_user.get('first_name', '')
         last_name = from_user.get('last_name', '')
-        
-        # Combinar los nombres si ambos existen
         nombre_telegram = f"{first_name} {last_name}".strip() if first_name or last_name else None
         
-        # Simula la estructura de WhatsApp
-        numero_telegram = f"tg_{chat_id}"
-        
-        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}' (Nombre: {nombre_telegram})")
+        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}' (Media: {es_imagen or es_audio or es_archivo})")
 
-        # 2. Inicializar meta y contacto (usando la config detectada)
+        # --- 4. Procesar Archivo (si aplica) ---
+        if file_id:
+            try:
+                # Obtener la URL de descarga (temporal y directa de Telegram)
+                public_url = obtener_url_archivo_telegram(file_id, token_bot)
+                
+                if es_audio and public_url:
+                    # Necesitas una función para descargar y transcribir el audio de Telegram
+                    # Aquí la simulamos ya que requiere código adicional fuera de este extracto
+                    # Tu implementación de whatsapp.py debe ser extendida para descargar la URL de Telegram
+                    # y llamar a transcribir_audio_con_openai()
+                    try:
+                        # Simulando la descarga/transcripción
+                        # Si no hay forma de descargar el archivo a disco, la transcripción con OpenAI no funcionará
+                        # (OpenAI requiere el archivo para la transcripción)
+                        # Por ahora, solo usamos la transcripción del texto
+                        
+                        # PASO CRÍTICO: Descargar la URL (public_url) a un archivo temporal para luego transcribir
+                        audio_content = requests.get(public_url, timeout=15).content
+                        temp_ogg_path = os.path.join(UPLOAD_FOLDER, f"tg_audio_{chat_id}_{int(time.time())}.ogg")
+                        with open(temp_ogg_path, 'wb') as f:
+                            f.write(audio_content)
+                        
+                        # Llamar a la función de transcripción (asumiendo que convierte el ogg de Telegram a un formato compatible)
+                        transcripcion_resultado = transcribir_audio_con_openai(temp_ogg_path) 
+                        if transcripcion_resultado:
+                            transcripcion = transcripcion_resultado
+                            texto = transcripcion
+                            app.logger.info(f"🎤 Telegram Audio Transcrito: {transcripcion[:100]}...")
+                        
+                        # Limpiar archivo temporal después de transcribir
+                        try: os.remove(temp_ogg_path)
+                        except: pass
+                        
+                    except Exception as e_transcribe:
+                        app.logger.warning(f"⚠️ Telegram transcripción/descarga falló: {e_transcribe}")
+                        transcripcion = None
+                        
+                # Para imágenes y documentos, la URL pública es la URL directa de Telegram (expira rápido, pero sirve para la IA)
+            except Exception as e:
+                app.logger.error(f"❌ TELEGRAM: Error obteniendo URL de archivo: {e}")
+                public_url = None
+
+        # --- 5. Inicializar Contacto/Meta y Guardar Mensaje Entrante ---
         try:
             inicializar_chat_meta(numero_telegram, config)
-            # 🛠️ PASAMOS EL NOMBRE Y LA PLATAFORMA
             actualizar_info_contacto(numero_telegram, config, nombre_telegram=nombre_telegram, plataforma='Telegram') 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
 
-        # 3. Guarda el mensaje de Telegram
-        guardar_mensaje_inmediato(numero_telegram, texto, config=config, 
-                                  tipo_mensaje='texto', contenido_extra=None)
+        # Guardar el mensaje (incoming_saved=True para el procesador unificado)
+        # Usamos public_url en imagen_url/contenido_extra según el tipo
+        guardar_mensaje_inmediato(
+            numero_telegram, 
+            texto, 
+            config=config, 
+            imagen_url=public_url if es_imagen else None,
+            es_imagen=es_imagen,
+            tipo_mensaje=tipo_mensaje,
+            contenido_extra=public_url if public_url and not es_imagen else None
+        )
 
-        # 4. Procesa el mensaje con la lógica unificada
+        # --- 6. Procesa el mensaje con la lógica unificada ---
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero_telegram,
             texto=texto,
-            es_imagen=False,
-            es_audio=False,
-            config=config, # 👈 USA LA CONFIGURACIÓN CORRECTA
+            es_imagen=es_imagen,
+            es_audio=es_audio,
+            es_archivo=es_archivo, # Pasar el flag de archivo
+            config=config, 
+            public_url=public_url,
+            imagen_base64=None, # No se puede obtener base64 sin descargar, no lo pasamos
+            transcripcion=transcripcion,
             incoming_saved=True
         )
 
         if not processed_ok:
-            # Fallback en caso de error en el procesamiento unificado
             send_telegram_message(chat_id, "Lo siento, hubo un error interno al procesar tu mensaje.", token_bot)
             
         return 'OK', 200
