@@ -766,7 +766,6 @@ function formatClientTime(serverTs) {
         }
         return null;
     } 
-
 /* State */
 let chatAutoRefresh = true;
 let refreshIntervalMs = 500;
@@ -1162,48 +1161,181 @@ function onEditAliasClick(e) {
     activarEdicionAlias(parent);
 }
 
-function activarEdicionAlias(parent) {
-    if (!parent) return;
-    const view = parent.querySelector('.alias-view');
-    const edit = parent.querySelector('.alias-edit');
-    if (!view || !edit) return;
-    const input = edit.querySelector('input[type=text]');
-    if (!input) return;
-    view.style.display = 'none';
-    edit.style.display = 'flex';
-    input.focus();
-    input.select();
-    isEditingAlias = true;
+    function activarEdicionAlias(parent) {
+        if (!parent) return;
+        const view = parent.querySelector('.alias-view');
+        const edit = parent.querySelector('.alias-edit');
+        if (!view || !edit) return;
+        const input = edit.querySelector('input[type=text]');
+        if (!input) return;
 
-    const finish = () => {
-        const nuevo = (input.value || '').trim();
-        edit.style.display = 'none';
-        view.style.display = '';
-        if (!nuevo) return;
-        view.textContent = nuevo;
-        fetch(`/contactos/${input.dataset.num}/alias`, {
-            method: 'POST',
-            body: new URLSearchParams({ alias: nuevo }),
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-        .catch(err => console.warn('Error guardando alias:', err))
-        .finally(() => { isEditingAlias = false; });
-    };
+        // Guardar el valor actual antes de editar
+        const valorOriginal = view.textContent;
 
-    input.onblur = () => setTimeout(finish, 0);
-    input.onkeydown = (ev) => {
-        if (ev.key === 'Enter') {
-            ev.preventDefault();
-            finish();
-        }
-        if (ev.key === 'Escape') {
+        view.style.display = 'none';
+        edit.style.display = 'flex';
+        input.focus();
+        input.select();
+        isEditingAlias = true;
+
+        const finish = () => {
+            const nuevo = (input.value || '').trim();
             edit.style.display = 'none';
             view.style.display = '';
-            isEditingAlias = false;
-        }
-    };
-}
 
+            if (!nuevo || nuevo === valorOriginal) {
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+                return;
+            }
+
+            view.textContent = nuevo;
+            fetch(`/contactos/${input.dataset.num}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({ alias: nuevo }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Error en la respuesta');
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Alias guardado exitosamente');
+                })
+                .catch(err => console.warn('Error guardando alias:', err))
+                .finally(() => {
+                    isEditingAlias = false;
+                });
+        };
+
+        input.onblur = () => setTimeout(finish, 200);
+        input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                finish();
+            }
+            if (ev.key === 'Escape') {
+                edit.style.display = 'none';
+                view.style.display = '';
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+            }
+        };
+    }
+
+    /* ===================== EMOJI PICKER ===================== */
+
+    function setupEmojiPicker() {
+        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        function buildPicker(container) {
+            if (container.dataset.built === '1') return container;
+            container.innerHTML = EMOJIS.map(e =>
+                `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
+            ).join('');
+            container.dataset.built = '1';
+            return container;
+        }
+
+        function ensurePicker(trigger) {
+            const form = trigger.closest('form') || document.body;
+            let picker = form.querySelector('.emoji-picker-list');
+            if (!picker) {
+                picker = document.createElement('div');
+                picker.className = 'emoji-picker-list';
+                picker.style.position = 'absolute';
+                picker.style.display = 'none';
+                picker.style.zIndex = 10000;
+                picker.style.background = 'white';
+                picker.style.border = '1px solid #ccc';
+                picker.style.borderRadius = '8px';
+                picker.style.padding = '6px';
+                picker.style.maxWidth = '320px';
+                picker.style.maxHeight = '180px';
+                picker.style.overflowY = 'auto';
+                const attachTo = form.querySelector('.input-group') || form;
+                attachTo.appendChild(picker);
+            }
+            buildPicker(picker);
+            return picker;
+        }
+
+        // Event delegation for emoji picker
+        document.addEventListener('click', function (ev) {
+            try {
+                const tgt = ev.target;
+                const trigger = tgt.closest ? tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
+                if (trigger) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const picker = ensurePicker(trigger);
+                    const isVisible = picker.style.display === 'block';
+                    if (isVisible) {
+                        picker.style.display = 'none';
+                        return;
+                    }
+
+                    const rect = trigger.getBoundingClientRect();
+                    const parent = picker.offsetParent || document.body;
+                    const parentRect = parent.getBoundingClientRect();
+                    const topVal = rect.top - parentRect.top - picker.offsetHeight - 8;
+
+                    if (topVal > 0) {
+                        picker.style.top = topVal + 'px';
+                    } else {
+                        picker.style.top = (rect.bottom - parentRect.top + 8) + 'px';
+                    }
+
+                    let left = rect.left - parentRect.left;
+                    const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
+                    if (left > maxLeft) left = Math.max(8, maxLeft);
+                    picker.style.left = left + 'px';
+                    picker.style.display = 'block';
+                    picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
+                    return;
+                }
+
+                const emojiBtn = tgt.closest ? tgt.closest('.emoji-option') : null;
+                if (emojiBtn) {
+                    ev.preventDefault();
+                    ev.stopPropagation();
+                    const picker = emojiBtn.closest('.emoji-picker-list');
+                    const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
+                    const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+
+                    if (input) {
+                        const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+                        const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
+                        input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+                        const pos = start + emoji.length;
+                        input.selectionStart = input.selectionEnd = pos;
+                        input.focus();
+                    }
+                    if (picker) picker.style.display = 'none';
+                    return;
+                }
+
+                // Close picker when clicking outside
+                const insidePicker = tgt.closest && !!tgt.closest('.emoji-picker-list');
+                const isTrigger = tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
+                if (!insidePicker && !isTrigger) {
+                    document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+                }
+            } catch (err) {
+                console.error('emoji handler error', err);
+            }
+        }, false);
+
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Escape') {
+                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
+            }
+        });
+
+        console.debug('Emoji picker inicializado');
+    }
+
+   
 /* ===================== AUDIO & UI HELPERS ===================== */
 
 function toggleChatList() {
@@ -1246,9 +1378,12 @@ function seekAudio(id, progressBar, evt) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado - inicializando componentes');
-    enhanceAliasButtons();
+    document.addEventListener('DOMContentLoaded', () => {
+        console.log('DOM cargado - inicializando componentes');
+        enhanceAliasButtons();
+
+        // INICIALIZAR EMOJI PICKER - AGREGA ESTA LÍNEA
+        setupEmojiPicker();
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
@@ -1301,7 +1436,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (selectedChatId && !messagesIntervalHandle) {
                 initMessagesStateFromDOM();
                 messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages();
+                    if (!document.hidden) pollSelectedMessages(); 
                 }, messagePollIntervalMs);
             }
         }

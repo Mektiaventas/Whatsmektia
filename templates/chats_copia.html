@@ -35,38 +35,44 @@
 
         <div class="chat-items">
             {% for chat in chats %}
-            <a href="/chats/{{ chat.numero }}" class="chat-item {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}">
+            <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
-                        <div class="card-avatar-section">
-                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
-                                 class="card-avatar" alt="Avatar"
-                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-                        </div>
+                        {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                        {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                        {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                        {% endif %}
+
+                        <img src="{{ avatar_src }}"
+                             class="card-avatar" alt="Avatar"
+                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                         {% endif %}
-                        <span class="alias-view" data-num="{{ chat.numero }}">
-                            {{ chat.nombre_mostrado }}
-                        </span>
+
+                        <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+
+                        {% if is_admin %}
                         <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or '' }}" data-num="{{ chat.numero }}" maxlength="100" style="width: 110px;">
+                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
                         </span>
-                        {% if is_admin%}
-                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">
-                            ✏️
-                        </button>
+                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                         {% endif %}
-                    </div>
-                    <div class="card-meta-row">
-                        <span class="card-num">{{ chat.numero }}</span>
+
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha|format_time_24h }}
                             {% endif %}
                         </span>
                     </div>
+
+                    <div class="card-meta-row">
+                        {% if chat.sin_leer and chat.sin_leer > 0 %}
+                        <span class="card-unread">{{ chat.sin_leer }}</span>
+                        {% endif %}
+                    </div>
+
                     <div class="card-msg">
                         {% if chat.ultimo_mensaje %}
                         {% if chat.tipo_mensaje == 'imagen' %}
@@ -75,7 +81,7 @@
                         {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
                         {% endif %}
                         {% else %}
-                        Sin mensajes
+                        &nbsp;
                         {% endif %}
                     </div>
                 </div>
@@ -90,18 +96,29 @@
         <div class="chat-panel-header" data-num="{{ selected }}">
             <div class="chat-header-info">
                 <div class="chat-title">
-                    <span class="alias-view">
-                        {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
+                    {% set selected_chat = (chats | selectattr("numero", "equalto", selected) | first) %}
+                    {% set avatar_src_header = '/static/icons/whatsapp-icon.png' %}
+                    {% if selected and (selected.startswith('tg_') or (selected_chat and selected_chat.canal == 'Telegram')) %}
+                    {% set avatar_src_header = '/static/icons/telegram-icon-dos.png' %}
+                    {% endif %}
+
+                    <img src="{{ avatar_src_header }}" class="card-avatar" alt="Avatar"
+                         style="width: 24px; height: 24px; border-radius: 4px; margin-right: 6px;">
+
+                    <span class="alias-view" data-num="{{ selected }}">
+                        {{ selected_chat.nombre_mostrado if selected_chat else selected }}
                     </span>
-                    <span class="alias-edit" style="display:none;">
-                        {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
-                        <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}"
-                               data-num="{{ selected }}" maxlength="100">
-                    </span>
+
                     {% if is_admin %}
-                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">
-                        ✏️
-                    </button>
+                    <span class="alias-edit" style="display:none;">
+                        {% set chat_info = (chats | selectattr('numero', 'equalto', selected) | first) %}
+                        <input type="text"
+                               value="{{ chat_info.alias if chat_info and chat_info.alias else (chat_info.nombre if chat_info and chat_info.nombre else selected) }}"
+                               data-num="{{ selected }}"
+                               maxlength="100"
+                               style="width:110px;">
+                    </span>
+                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">✏️</button>
                     {% endif %}
                 </div>
                 <span class="chat-number">{{ selected }}</span>
@@ -135,7 +152,7 @@
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
                     <div class="image-message">
-                        <img src="{{ msg.imagen_url }}" alt="Imagen" class="whatsapp-image">
+                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                         <div class="image-caption">
                             {{ msg.mensaje }}
@@ -194,11 +211,49 @@
             {% endif %}
 
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
-            <div class="msg-box msg-ai">
+            <div class="msg-box msg-ai" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
+
+                    {% if msg.respuesta_tipo_mensaje == 'imagen' and msg.respuesta_contenido_extra %}
+                    <div class="image-message">
+                        <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
+                        {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
+                        <div class="image-caption">
+                            {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-bot-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/mpeg">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/ogg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-bot-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-bot-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-bot-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.respuesta_contenido_extra }}" download="audio-respuesta.mp3" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+                        {% if msg.respuesta %}
+                        <div class="audio-transcription">
+                            <strong>Respuesta:</strong> {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
                     <div class="text-message">
                         {{ msg.respuesta }}
                     </div>
+                    {% endif %}
+
                 </div>
                 <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
             </div>
@@ -246,7 +301,7 @@
         {% endif %}
     </section>
 
-    <aside class="sidebar-right">
+    <aside class="sidebar-right" style="color: white;text-align: center;padding: inherit;border-top: blue;border-start-start-radius: revert-layer;">
         {% if selected %}
         <div class="sidebar-section">
             <h3>Acciones</h3>
@@ -284,60 +339,384 @@
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 <style>
+    :root {
+        --left-width: 340px;
+        --right-width: 320px;
+        --gap: 16px;
+        --bg-card: #1f2937;
+        --text-light: #ffffff;
+    }
 
-    .card-avatar {
-        width: 8%;
-        height: 8%;
+    /* Layout base */
+    .chat-layout-v2 {
+        display: flex;
+        gap: var(--gap);
+        align-items: stretch;
+        height: calc(100vh - 120px); /* leave room for header/footer */
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .chat-list-v2 {
+        width: var(--left-width);
+        min-width: 220px;
+        max-width: 420px;
+        border-radius: 8px;
+        background: var(--bg-card);
+        padding: 8px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        transition: transform 240ms ease, box-shadow 200ms ease;
+        position: relative;
+        z-index: 30;
+    }
+
+    .chat-panel-v2 {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: transparent;
+        overflow: hidden;
+    }
+
+    .sidebar-right {
+        width: var(--right-width);
+        min-width: 220px;
+        max-width: 420px;
+        border-radius: 8px;
+        background: var(--bg-card);
+        padding: 8px;
+        box-sizing: border-box;
+        overflow-y: auto;
+    }
+
+    /* Chat items & messages */
+    .chat-items {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .chat-item {
+        display: block;
+        color: inherit;
+        text-decoration: none;
     }
 
     .card-content {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        color: var(--text-light);
+    }
+
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .card-avatar-section {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 44px;
+    }
+
+    .card-avatar {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 8px;
+    }
+
+    .card-flag {
+        width: 20px;
+        height: 14px;
+        object-fit: cover;
+        border-radius: 2px;
+    }
+
+    .alias-view {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--text-light);
+        display: inline-block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 160px;
+    }
+
+    .card-time {
+        margin-left: auto;
+        font-size: 12px;
+        opacity: 0.85;
+        color: #d1d5db;
+    }
+
+    .card-msg {
+        font-size: 13px;
+        color: #d1d5db;
+        opacity: 0.95;
+    }
+
+    /* Messages panel */
+    .msgs-wrap-v2 {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+        border-radius: 8px;
+    }
+
+    .msg-box {
+        max-width: 85%;
+        padding: 8px;
+        border-radius: 8px;
+        box-sizing: border-box;
+    }
+
+    .msg-user {
+        align-self: flex-end;
+        background: #0b78d1;
         color: white;
     }
 
-    .emoji-picker-list {
-        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-        min-width: 220px;
-        max-width: 320px;
-        max-height: 180px;
-        overflow-y: auto;
-        padding: 8px;
-        display: none;
-        background: white;
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        position: absolute !important;
-        z-index: 1000 !important;
-        bottom: 50px;
-        left: 10px;
-    }
-
-    .emoji-pick-btn {
-        font-size: 22px;
-        margin: 2px;
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 5px;
-        border-radius: 4px;
-        transition: background-color 0.2s;
-    }
-
-
-        .emoji-pick-btn:hover {
-            background-color: #f0f0f0;
-        }
-
-    .input-group {
-        position: relative;
-        display: flex;
-        align-items: center;
+    .msg-ai {
+        align-self: flex-start;
+        background: #111827;
+        color: #e5e7eb;
     }
 
     .msg-manual {
-        left: 20%
+        align-self: end;
+        background: #0ea5a4;
+        color: white;
     }
-</style>
 
+    .msg-meta {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-top: 6px;
+    }
+
+    /* Mobile toggle button */
+    .mobile-chat-toggle {
+        display: none;
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 1200;
+        background: #0b78d1;
+        color: white;
+        border: none;
+        padding: 10px 14px;
+        border-radius: 999px;
+        box-shadow: 0 6px 18px rgba(2,6,23,0.35);
+        cursor: pointer;
+        font-size: 18px;
+    }
+
+    /* New: mobile overlay behaviour for left panel */
+    @media (max-width: 900px) {
+        :root {
+            --left-width: 320px;
+            --right-width: 0px;
+        }
+
+        .chat-layout-v2 {
+            gap: 8px;
+            height: calc(100vh - 100px);
+        }
+
+        /* hide right sidebar on medium screens */
+        .sidebar-right {
+            display: none;
+        }
+
+        /* make list a fixed overlay off-canvas by default */
+        .chat-list-v2 {
+            position: fixed;
+            left: 0;
+            top: 64px;
+            bottom: 0;
+            width: min(86vw, 380px);
+            transform: translateX(-110%);
+            box-shadow: 0 10px 30px rgba(2,6,23,0.6);
+            transition: transform 240ms ease;
+            border-radius: 0 8px 8px 0;
+            overflow-y: auto;
+        }
+
+            .chat-list-v2.mobile-visible {
+                transform: translateX(0);
+            }
+
+        .chat-panel-v2 {
+            margin-left: 0;
+            padding-right: 8px;
+        }
+
+        .mobile-chat-toggle {
+            display: block;
+        }
+    }
+
+    /* Small phones: full screen single panel */
+    @media (max-width: 480px) {
+        .chat-layout-v2 {
+            padding: 8px;
+        }
+
+        .chat-list-v2 {
+            width: 92vw;
+        }
+
+        .alias-view {
+            max-width: 120px;
+            font-size: 13px;
+        }
+
+        .card-avatar-section {
+            width: 40px;
+            height: 40px;
+        }
+
+        .card-time {
+            font-size: 11px;
+        }
+
+        .chat-panel-v2 {
+            padding-left: 6px;
+            padding-right: 6px;
+        }
+
+        .msgs-wrap-v2 {
+            padding: 8px;
+        }
+    }
+
+    /* Accessibility / minor aesthetics */
+    .chat-item.selected {
+        outline: 2px solid rgba(59,130,246,0.2);
+    }
+
+    .new-message {
+        box-shadow: 0 6px 18px rgba(2,6,23,0.25);
+        transform: translateY(-2px);
+    }
+
+    .emoji-picker-list {
+        z-index: 1400 !important;
+    }
+
+
+    /* ===== ESTILOS COMPACTOS PARA CHATS (IGUAL QUE KANBAN) ===== */
+    .chat-list-v2 .card-avatar {
+        width: 24px !important;
+        height: 24px !important;
+        border-radius: 4px !important;
+        margin-right: 0px !important;
+        flex: 0 0 auto !important;
+        object-fit: cover !important;
+    }
+
+    .chat-list-v2 .card-title-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        min-width: 0 !important;
+        flex: 1 1 auto !important;
+    }
+
+        .chat-list-v2 .card-title-row .alias-view {
+            font-size: 0.82rem !important;
+            font-weight: 600 !important;
+            line-height: 1 !important;
+            white-space: nowrap !important;
+            overflow: hidden !important;
+            text-overflow: ellipsis !important;
+            max-width: calc(100% - 90px) !important;
+        }
+
+    .chat-list-v2 .card-meta-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        flex: 0 0 auto !important;
+        margin-left: 6px !important;
+    }
+
+        .chat-list-v2 .card-meta-row span {
+            font-size: 0.62rem !important;
+            color: rgba(255,255,255,0.9) !important;
+            line-height: 1 !important;
+        }
+
+    .chat-list-v2 .edit-alias-btn {
+        font-size: 11px !important;
+        padding: 1px 3px !important;
+        margin-left: 6px !important;
+    }
+
+    .chat-list-v2 .card-msg {
+        font-size: 0.75rem !important;
+        color: #e2e5ed !important;
+        display: -webkit-box !important;
+        -webkit-line-clamp: 2 !important;
+        -webkit-box-orient: vertical !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        white-space: normal !important;
+        min-height: 1rem !important;
+        font-weight: 400 !important;
+        max-width: 70% !important;
+        letter-spacing: 0.01rem !important;
+        margin-top: 2px !important;
+    }
+
+    .chat-list-v2 .card-unread {
+        position: absolute !important;
+        top: 8px !important;
+        right: 8px !important;
+        background: #00E091 !important;
+        color: #fff !important;
+        border-radius: 10px !important;
+        padding: 0.5px 8px !important;
+        font-size: 0.89em !important;
+        font-weight: 600 !important;
+        min-width: 14px !important;
+        text-align: center !important;
+        box-shadow: 0 0 5px #00e09144 !important;
+        z-index: 2 !important;
+    }
+
+    /* Estilos para el header del chat seleccionado */
+    .chat-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+        .chat-title .alias-view {
+            font-size: 1rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+
+        .chat-title .edit-alias-btn {
+            font-size: 12px;
+            padding: 2px 4px;
+        }
+</style>
 <script>
 /* Small helpers */
 function coalesce(...args) {
@@ -375,15 +754,26 @@ function formatClientTime(serverTs) {
     const month = d.toLocaleString('es-MX', { month: 'short' });
     const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
     return `${day}-${month} ${time}`;
-}
+    }
+    // Función para obtener bandera (igual que en kanban)
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    }
 
 /* State */
 let chatAutoRefresh = true;
-let refreshIntervalMs = 2000;
+let refreshIntervalMs = 500;
 let messagePollIntervalMs = 1200;
-let selectedChatId = {{ selected|tojson }}; // injected by server; may be null
+let selectedChatId = {{ selected|tojson }};
 let lastChatsTimestamp = 0;
-let lastMessageIdForSelected = 0;
+let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
 let isEditingAlias = false;
 let aliasTimers = new Map();
 let chatsIntervalHandle = null;
@@ -408,13 +798,57 @@ function actualizarListaChats() {
         .catch(err => console.error('Error actualizando lista de chats:', err));
 }
 
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+function crearNuevoChatHTML(chat) {
+        const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+        const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+
+        // === ICONOS CORRECTOS (WhatsApp/Telegram) ===
+        let imagen = '/static/icons/whatsapp-icon.png';
+        if (num.startsWith('tg_') || chat.canal === 'Telegram') {
+            imagen = '/static/icons/telegram-icon-dos.png';
+        }
+        // === FIN ICONOS ===
+    const banderaUrl = getCountryFlag(num) || '';
+    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
+    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+    const preview = tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+    const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+
+    return `
+    <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+            <div class="card-title-row">
+                <div class="card-avatar-section">
+                    <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
+                ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
+                <span class="alias-view" data-num="${num}">${nombre}</span>
+                <span class="card-time">${ultima ? formatClientTime(ultima) : ''}</span>
+                <span class="alias-edit" style="display:none;">
+                    <input type="text" value="${escapeHtml(coalesce(chat.alias, chat.nombre, num))}" data-num="${num}" maxlength="100" style="width:110px;">
+                </span>
+                ${IS_ADMIN ? `<button type="button" class="edit-alias-btn" data-num="${num}" title="Editar nombre">✏️</button>` : ''}
+            </div>
+            <div class="card-meta-row">
+                ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+            </div>
+            <div class="card-msg">${preview}</div>
+        </div>
+    </a>`.trim();
+}
+
 function actualizarIncrementalChats(chats) {
     const container = document.querySelector('.chat-items');
     if (!container) return;
     const existing = new Map();
     container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-    chats.forEach(chat => {
+    for (let i = chats.length - 1; i >= 0; i--) {
+        const chat = chats[i];
         const num = chat.numero;
         const node = existing.get(num);
         if (node) {
@@ -425,46 +859,139 @@ function actualizarIncrementalChats(chats) {
             }
         } else {
             const tmp = document.createElement('div');
-
-            // safe optional builder
             const hasBuilder = typeof crearNuevoChatHTML === 'function';
             tmp.innerHTML = hasBuilder
                 ? crearNuevoChatHTML(chat)
                 : `
-                <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
-                    <div class="card-content">
-                        <div class="card-title-row">
-                            <div class="card-avatar-section">
-                                <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
-                            </div>
-                            <span class="alias-view">${chat.nombre_mostrado}</span>
+            <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
                         </div>
-                        <div class="card-meta-row">
-                            <span class="card-num">${chat.numero}</span>
-                            <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
-                        </div>
-                        <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
+                        <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
                     </div>
-                </a>`;
-
+                    <div class="card-meta-row">
+                        <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
+                    </div>
+                    <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
+                </div>
+            </a>`;
             const el = tmp.firstElementChild;
-            if (!el) return;
+            if (!el) continue;
             container.insertBefore(el, container.firstElementChild);
             const editBtn = el.querySelector('.edit-alias-btn');
             if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
             el.classList.add('new-message');
             setTimeout(() => el.classList.remove('new-message'), 1400);
         }
-    });
+    }
 
     existing.forEach((node) => node.remove());
 }
 
+try {
+    const msgsEl = document.getElementById('msgs');
+    if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+} catch (e) {
+    console.warn('Initial scroll to bottom failed:', e);
+}
+
 function actualizarChatExistente(elemento, chat) {
+    if (!elemento) return;
+    const nombre = coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, chat.numero);
     const aliasView = elemento.querySelector('.alias-view');
-    if (aliasView && aliasView.textContent.trim() !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+    if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
+
+    // === MANTENER LOS ICONOS CORRECTOS ===
+    const avatarImg = elemento.querySelector('.card-avatar');
+    if (avatarImg) {
+        // Determinar el icono correcto basado en el número/canal
+        let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
+        }
+
+        // Solo actualizar si es diferente
+        if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
+            avatarImg.setAttribute('src', nuevoAvatarSrc);
+        }
+    }
+    // === FIN MANTENER ICONOS ===
+
+
+
     const timeEl = elemento.querySelector('.card-time');
-    if (timeEl && chat.ultima_fecha) timeEl.textContent = formatClientTime(chat.ultima_fecha);
+    if (timeEl) {
+        timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+    } else {
+        const titleRow = elemento.querySelector('.card-title-row');
+        if (titleRow) {
+            const span = document.createElement('span');
+            span.className = 'card-time';
+            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+            titleRow.appendChild(span);
+        }
+    }
+
+    const bandera = getCountryFlag(chat.numero) || '';
+    let flagImg = elemento.querySelector('.card-flag');
+    if (bandera) {
+        if (flagImg) {
+            if (flagImg.getAttribute('src') !== bandera) flagImg.setAttribute('src', bandera);
+        } else {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const img = document.createElement('img');
+                img.className = 'card-flag';
+                img.alt = 'País';
+                img.title = 'País';
+                img.src = bandera;
+                titleRow.insertBefore(img, titleRow.querySelector('.alias-view'));
+            }
+        }
+    } else if (flagImg) {
+        flagImg.remove();
+    }
+
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const unreadEl = elemento.querySelector('.card-unread');
+    if (sin_leer > 0) {
+        if (unreadEl) unreadEl.textContent = sin_leer;
+        else {
+            const metaRow = elemento.querySelector('.card-meta-row');
+            if (metaRow) {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = sin_leer;
+                metaRow.appendChild(span);
+            }
+        }
+    } else if (unreadEl) {
+        unreadEl.remove();
+    }
+
+    const editBtn = elemento.querySelector('.edit-alias-btn');
+    if (IS_ADMIN) {
+        if (!editBtn) {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'edit-alias-btn';
+                btn.dataset.num = chat.numero;
+                btn.title = 'Editar nombre';
+                btn.textContent = '✏️';
+                titleRow.appendChild(btn);
+                btn.addEventListener('click', onEditAliasClick);
+            }
+        } else {
+            editBtn.dataset.num = chat.numero;
+        }
+    } else if (editBtn) {
+        editBtn.remove();
+    }
+
     const msgEl = elemento.querySelector('.card-msg');
     const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
     if (msgEl && msgEl.textContent.trim() !== previewText) {
@@ -472,13 +999,13 @@ function actualizarChatExistente(elemento, chat) {
         elemento.classList.add('new-message');
         setTimeout(() => elemento.classList.remove('new-message'), 1200);
     }
+
+    if (selectedChatId && String(selectedChatId) === String(chat.numero)) elemento.classList.add('selected');
+    else elemento.classList.remove('selected');
 }
 
 /* ===================== MESSAGES POLLING & DEDUPE ===================== */
 
-/**
- * Build stable key for a message
- */
 function buildMessageKeyFor(m) {
     const id = coalesce(m.id, m[0], m['id']);
     if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
@@ -495,39 +1022,81 @@ function buildMessageKeyFor(m) {
     return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
 }
 
-/**
-
-    if (!messagesIntervalHandle) {
-        messagesIntervalHandle = setInterval(() => {
-            if (!selectedChatId || document.hidden) return;
-            pollSelectedMessages();
-        }, messagePollIntervalMs);
-    }
-}
-
-/**
- * Poll selected chat messages and append only new ones
- */
 function pollSelectedMessages() {
-    const after = Number(lastMessageIdForSelected) || 0;
-    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after=${after}`, { cache: 'no-store' })
+    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
+
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
             if (!data || !Array.isArray(data.messages)) return;
             if (data.messages.length === 0) return;
-            const maxId = data.messages.reduce((m, mm) => {
-                const id = Number(coalesce(mm.id, mm[0], mm['id'], 0)) || 0;
-                return id > m ? id : m;
-            }, lastMessageIdForSelected);
-            if (maxId > lastMessageIdForSelected) lastMessageIdForSelected = maxId;
+
+            let maxTs = lastMessageTimestamp;
+
+            data.messages.forEach(m => {
+                let ts = 0;
+                if (m.timestamp) {
+                    ts = Date.parse(m.timestamp);
+                    if (!isNaN(ts)) {
+                        maxTs = Math.max(maxTs, ts);
+                    }
+                }
+            });
+
+            if (maxTs > lastMessageTimestamp) {
+                lastMessageTimestamp = maxTs + 1;
+            }
+
             appendUserMessagesToPanel(data.messages);
+            appendAIResponsesToPanel(data.messages);
         })
         .catch(err => console.error('Error polling messages:', err));
 }
 
-/**
- * Append only new user messages using seenMessageKeys
- */
+function appendAIResponsesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    let appended = false;
+
+    for (const m of messages) {
+        const aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
+        if (!aiText) continue;
+
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        let key;
+        if (id) {
+            key = 'ai:id:' + id;
+            if (seenMessageKeys.has(key)) continue;
+        } else {
+            let ts = Number(coalesce(m.ts_ms, 0));
+            if (!ts && m.timestamp) {
+                const parsed = Date.parse(m.timestamp);
+                ts = isNaN(parsed) ? Date.now() : parsed;
+            }
+            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+            if (seenMessageKeys.has(key)) continue;
+        }
+
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-ai';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta">${formatClientTime(tsVal)}</div>`;
+
+        container.appendChild(div);
+        appended = true;
+
+        seenMessageKeys.add(key);
+        if (id) seenMessageKeys.add('id:' + id);
+    }
+
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
+}
+
 function appendUserMessagesToPanel(messages) {
     const container = document.getElementById('msgs');
     if (!container) return;
@@ -576,8 +1145,6 @@ function appendUserMessagesToPanel(messages) {
     }
 }
 
-
-
 /* ===================== ALIAS EDITING & EMOJI ===================== */
 
 function enhanceAliasButtons() {
@@ -586,7 +1153,15 @@ function enhanceAliasButtons() {
         btn.addEventListener('click', onEditAliasClick);
     });
 }
-function onEditAliasClick(e) { e.preventDefault(); e.stopPropagation(); const btn = e.currentTarget; const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content'); activarEdicionAlias(parent); }
+
+function onEditAliasClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content');
+    activarEdicionAlias(parent);
+}
+
 function activarEdicionAlias(parent) {
     if (!parent) return;
     const view = parent.querySelector('.alias-view');
@@ -594,171 +1169,46 @@ function activarEdicionAlias(parent) {
     if (!view || !edit) return;
     const input = edit.querySelector('input[type=text]');
     if (!input) return;
-    view.style.display = 'none'; edit.style.display = 'flex'; input.focus(); input.select(); isEditingAlias = true;
+    view.style.display = 'none';
+    edit.style.display = 'flex';
+    input.focus();
+    input.select();
+    isEditingAlias = true;
+
     const finish = () => {
         const nuevo = (input.value || '').trim();
-        edit.style.display = 'none'; view.style.display = '';
+        edit.style.display = 'none';
+        view.style.display = '';
         if (!nuevo) return;
         view.textContent = nuevo;
-        fetch(`/contactos/${input.dataset.num}/alias`, { method: 'POST', body: new URLSearchParams({ alias: nuevo }), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } })
-            .catch(err => console.warn('Error guardando alias:', err)).finally(() => { isEditingAlias = false; });
+        fetch(`/contactos/${input.dataset.num}/alias`, {
+            method: 'POST',
+            body: new URLSearchParams({ alias: nuevo }),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+        .catch(err => console.warn('Error guardando alias:', err))
+        .finally(() => { isEditingAlias = false; });
     };
+
     input.onblur = () => setTimeout(finish, 0);
-    input.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); finish(); } if (ev.key === 'Escape') { edit.style.display = 'none'; view.style.display = ''; isEditingAlias = false; } };
-}
-
-    (function addEmojiButtonFallback() {
-        const EMOJIS_FALLBACK = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-
-        function buildPickerInto(container) {
-            try {
-                if (!container) return container;
-                if (container.dataset.built === '1') return container;
-                container.innerHTML = EMOJIS_FALLBACK.map(e =>
-                    `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
-                ).join('');
-                container.dataset.built = '1';
-            } catch (err) {
-                console.error('buildPickerInto error', err);
-            }
-            return container;
+    input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            finish();
         }
-
-        function togglePickerForButton(btn) {
-            try {
-                const form = btn.closest && btn.closest('form');
-                let picker = form && form.querySelector('.emoji-picker-list');
-                if (!picker) picker = document.getElementById('emoji-picker-list') || document.querySelector('.emoji-picker-list');
-
-                // If the picker exists but is empty, build it immediately so it's not a blank box.
-                if (picker && (!picker.dataset || picker.dataset.built !== '1')) {
-                    buildPickerInto(picker);
-                }
-
-                // if ensurePicker is available (from setupEmojiPicker) prefer it to build/attach picker
-                if (!picker && typeof ensurePicker === 'function') picker = ensurePicker(btn);
-
-                if (!picker) return;
-                const isVisible = picker.style.display === 'block';
-                picker.style.display = isVisible ? 'none' : 'block';
-                picker._targetInput = (form && form.querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
-            } catch (err) {
-                console.error('emoji fallback error', err);
-            }
+        if (ev.key === 'Escape') {
+            edit.style.display = 'none';
+            view.style.display = '';
+            isEditingAlias = false;
         }
-
-        document.addEventListener('DOMContentLoaded', () => {
-            const btn = document.getElementById('emoji-pick-btn');
-            if (btn) {
-                // remove any previous bound handler to avoid duplicates
-                btn.removeEventListener('__emoji_fallback_click__', null);
-                btn.addEventListener('click', function handler(ev) {
-                    ev.preventDefault();
-                    ev.stopPropagation();
-                    togglePickerForButton(this);
-                }, false);
-            }
-        });
-    })();
-
-function setupEmojiPicker() {
-    const EMOJIS = ['😊','😂','😍','👍','🙏','😎','🥳','😢','😡','🎉','💬','❤️','🔥','🤔','🙌','😅','😉','😇','😜','🤖'];
-
-    function buildPicker(container) {
-        if (container.dataset.built === '1') return container;
-        container.innerHTML = EMOJIS.map(e =>
-            `<button type="button" class="emoji-option" data-emoji="${e}" aria-label="emoji" style="font-size:20px;background:none;border:0;cursor:pointer;padding:5px;margin:2px;border-radius:4px;">${e}</button>`
-        ).join('');
-        container.dataset.built = '1';
-        return container;
-    }
-
-    function ensurePicker(trigger) {
-        const form = trigger.closest('form') || document.body;
-        let picker = form.querySelector('.emoji-picker-list');
-        if (!picker) {
-            picker = document.createElement('div');
-            picker.className = 'emoji-picker-list';
-            picker.style.position = 'absolute';
-            picker.style.display = 'none';
-            picker.style.zIndex = 10000;
-            picker.style.background = 'white';
-            picker.style.border = '1px solid #ccc';
-            picker.style.borderRadius = '8px';
-            picker.style.padding = '6px';
-            picker.style.maxWidth = '320px';
-            picker.style.maxHeight = '180px';
-            picker.style.overflowY = 'auto';
-            const attachTo = form.querySelector('.input-group') || form;
-            attachTo.appendChild(picker);
-        }
-        buildPicker(picker);
-        return picker;
-    }
-
-    // delegated
-    document.addEventListener('click', function (ev) {
-        try {
-            const tgt = ev.target;
-            const trigger = tgt.closest ? tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn') : null;
-            if (trigger) {
-                ev.preventDefault(); ev.stopPropagation();
-                const picker = ensurePicker(trigger);
-                const isVisible = picker.style.display === 'block';
-                if (isVisible) { picker.style.display = 'none'; return; }
-                const rect = trigger.getBoundingClientRect();
-                const parent = picker.offsetParent || document.body;
-                const parentRect = parent.getBoundingClientRect();
-                const topVal = rect.top - parentRect.top - picker.offsetHeight - 8;
-                if (topVal > 0) picker.style.top = topVal + 'px';
-                else picker.style.top = (rect.bottom - parentRect.top + 8) + 'px';
-                let left = rect.left - parentRect.left;
-                const maxLeft = (parentRect.width || window.innerWidth) - (picker.offsetWidth || 320) - 8;
-                if (left > maxLeft) left = Math.max(8, maxLeft);
-                picker.style.left = left + 'px';
-                picker.style.display = 'block';
-                picker._targetInput = (trigger.closest('form') && trigger.closest('form').querySelector('#mensaje-texto')) || document.getElementById('mensaje-texto');
-                return;
-            }
-
-            const emojiBtn = tgt.closest ? tgt.closest('.emoji-option') : null;
-            if (emojiBtn) {
-                ev.preventDefault(); ev.stopPropagation();
-                const picker = emojiBtn.closest('.emoji-picker-list');
-                const input = (picker && picker._targetInput) || document.getElementById('mensaje-texto');
-                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
-                if (input) {
-                    const start = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
-                    const end = typeof input.selectionEnd === 'number' ? input.selectionEnd : input.value.length;
-                    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-                    const pos = start + emoji.length;
-                    input.selectionStart = input.selectionEnd = pos;
-                    input.focus();
-                }
-                if (picker) picker.style.display = 'none';
-                return;
-            }
-
-            const insidePicker = tgt.closest && !!tgt.closest('.emoji-picker-list');
-            const isTrigger = tgt.closest && !!tgt.closest('#emoji-pick-btn, .emoji-btn, .emoji-pick-btn');
-            if (!insidePicker && !isTrigger) {
-                document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
-            }
-        } catch (err) {
-            console.error('emoji handler error', err);
-        }
-    }, false);
-
-    document.addEventListener('keydown', function (ev) {
-        if (ev.key === 'Escape') document.querySelectorAll('.emoji-picker-list').forEach(p => p.style.display = 'none');
-    });
-
-    console.debug('setupEmojiPicker initialized');
+    };
 }
 
 /* ===================== AUDIO & UI HELPERS ===================== */
 
-function toggleChatList() { document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible'); }
+function toggleChatList() {
+    document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
+}
 
 function toggleAudio(id, btn) {
     const audio = document.getElementById(id);
@@ -784,6 +1234,7 @@ function toggleAudio(id, btn) {
         btn.textContent = '▶️';
     }
 }
+
 function seekAudio(id, progressBar, evt) {
     const audio = document.getElementById(id);
     const inner = progressBar.querySelector('.audio-progress-bar');
@@ -794,47 +1245,67 @@ function seekAudio(id, progressBar, evt) {
         if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
     }
 }
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM cargado - inicializando componentes');
-        enhanceAliasButtons();
 
-        // Guarded init for setupEmojiPicker (llama inmediatamente si ya existe,
-        // si no, espera brevemente hasta 3s a que se defina).
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM cargado - inicializando componentes');
+    enhanceAliasButtons();
+
+    // Start automatic chat-list refresh
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats();
+        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+            if (!document.hidden) actualizarListaChats();
+        }, refreshIntervalMs);
+    }
+
+    // Initialize message polling if chat is selected
+    function initMessagesStateFromDOM() {
         try {
-            if (typeof setupEmojiPicker === 'function') {
-                setupEmojiPicker();
-            } else {
-                const __emojiInitInterval = setInterval(() => {
-                    if (typeof setupEmojiPicker === 'function') {
-                        clearInterval(__emojiInitInterval);
-                        setupEmojiPicker();
-                    }
-                }, 50);
-                setTimeout(() => clearInterval(__emojiInitInterval), 3000);
-            }
-        } catch (err) {
-            console.error('Error initializing emoji picker:', err);
-        }
-
-        // Start automatic chat-list refresh (opcional: comentar si no quieres auto-refresh)
-        if (document.querySelector('.chat-items')) {
-            actualizarListaChats(); // initial load
-            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
-        }
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                chatAutoRefresh = false;
-            } else {
-                chatAutoRefresh = true;
-                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                    chatsIntervalHandle = setInterval(() => { if (!document.hidden) actualizarListaChats(); }, refreshIntervalMs);
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
+            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            let maxTs = Number(lastMessageTimestamp) || 0;
+            nodes.forEach(n => {
+                const idAttr = n.getAttribute('data-msg-id');
+                const id = Number(idAttr) || 0;
+                if (id) {
+                    seenMessageKeys.add('id:' + String(id));
                 }
-                if (selectedChatId && !messagesIntervalHandle) {
-                    messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
-                }
+            });
+            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+        } catch (e) {
+            console.warn('initMessagesStateFromDOM failed', e);
+        }
+    }
+
+    if (selectedChatId) {
+        initMessagesStateFromDOM();
+        if (!messagesIntervalHandle) {
+            pollSelectedMessages();
+            messagesIntervalHandle = setInterval(() => {
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
+        } else {
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => {
+                    if (!document.hidden) actualizarListaChats();
+                }, refreshIntervalMs);
             }
-        });
+            if (selectedChatId && !messagesIntervalHandle) {
+                initMessagesStateFromDOM();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
+        }
     });
+});
 </script>
-{% endblock %}
+{% endblock %}    
