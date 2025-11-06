@@ -7629,14 +7629,37 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 
                 if respuesta_vision:
                     # Si OpenAI respondió, enviar esa respuesta y terminar
-                    enviar_mensaje(numero, respuesta_vision, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_vision, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, respuesta_vision, config) 
+                    # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
                     registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
                     return True  # Termina el procesamiento aquí
                 else:
                     # Si OpenAI falló, enviar un fallback
                     app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
                     fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
-                    enviar_mensaje(numero, fallback_msg, config)
+                    
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, fallback_msg, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, fallback_msg, config) 
+                    # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
                     registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
                     return True # Termina el procesamiento aquí
 
@@ -7792,7 +7815,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
 2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
-4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que "no hay PDF publicado".
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) Devuelve intent == DATOS_TRANSFERENCIA si el usuario pregunta por "datos de transferencia", "cuenta bancaria", "cómo hacer la transferencia" o similares y el usuario no esta en proceso de compra.
 7) El JSON debe tener estas claves mínimas:
@@ -7997,7 +8020,9 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         # Telegram tiene método sendDocument, pero la implementación aquí
                         # depende de si document_field es ruta local o URL
                         # Usaremos el send_message de texto con URL como fallback simple si no hay sendDocument
+                        # 💥 CORRECCIÓN: Intenta enviar documento por sendDocument
                         if not enviar_telegram_documento(chat_id, document_field, token_bot=telegram_token):
+                             # Fallback si sendDocument falla (ej: por la URL HTTP/HTTPS)
                              send_telegram_message(chat_id, f"{respuesta_text}\n\nDescarga el documento aquí: {document_field}", telegram_token)
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
@@ -8059,7 +8084,11 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             is_telegram_client = numero.startswith('tg_')
 
             # --- Generación de Audio si es necesario ---
-            if es_audio: # Si el usuario envió un audio, intentamos responder con audio
+            # 💥 CORRECCIÓN DE LÓGICA DE AUDIO: 
+            # El audio se genera si el usuario envió un audio (es_audio=True)
+            should_respond_with_voice = es_audio 
+            
+            if should_respond_with_voice and respuesta_text: 
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
