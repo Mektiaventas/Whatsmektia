@@ -8093,11 +8093,17 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     
                     if sent_audio:
                         app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                        # 💥 CORRECCIÓN: Eliminar el archivo de audio local
+                        try:
+                            os.remove(audio_url) 
+                            app.logger.info(f"🗑️ Archivo de audio temporal eliminado: {audio_url}")
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo eliminar archivo de audio {audio_url}: {e}")
+        
                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
                         return True
                     else:
                         app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
-                        # Continuar a Fallback (envío de texto)
                 
                 # 2. Fallback a texto si no era audio, o si el envío de audio falló
                 if telegram_token:
