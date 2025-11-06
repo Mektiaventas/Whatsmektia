@@ -80,9 +80,11 @@
         background: #ffffff22;
         padding: 2px;
     }
-    .card-time { 
+
+    .card-time {
         font-size: small;
     }
+
     .icon-picker {
         position: absolute;
         background: #1f2630;
@@ -147,15 +149,15 @@
         flex: 1 1 auto;
     }
 
-    .card-title-row .alias-view {
-        font-size: 0.82rem;
-        font-weight: 600;
-        line-height: 1;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: calc(100% - 90px);
-    }
+        .card-title-row .alias-view {
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: calc(100% - 90px);
+        }
 
     .card-meta-row {
         display: flex;
@@ -189,6 +191,7 @@
         max-width: 100%;
         line-height: 1;
     }
+
     .card-msg {
         color: #e2e5ed;
         font-size: 0.6rem;
@@ -232,6 +235,7 @@
         line-height: 1;
         padding: 0 6px;
     }
+
     .card-unread {
         position: absolute;
         top: 19px;
@@ -340,7 +344,7 @@
                     </div>
                     <div class="card-meta-row">
                         {% endif %}
-                        
+
                         {% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
@@ -356,525 +360,339 @@
 
 <div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+
 <script>
-    let editingColId = null;
-    let editingColText = null;
-    let kanbanAutoRefresh = true;
-    let refreshInterval = 500;
-    const renameTimers = new Map(); // debounce timers por columna
+  // Variables globales para charts
+  let overviewChart = null;
+  let remainingChart = null;
+  let dailyChart = null;
+  let platformChart = null; // 🆕 NUEVA VARIABLE GLOBAL
 
-    document.addEventListener('DOMContentLoaded', () => {
-        bindColumnHeaderEvents();
-        bindAddColumnButtons();
-        bindDeleteButtons();
-        initRenameHandlers();
-        bindIconPicker();
-        bindMarkReadOnClick();
-        startAutoRefresh();
-        inicializarSortable();
-        document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
-    });
+  // expose current period to JS (server value on load)
+  const CURRENT_PERIOD = '{{ period }}';
 
-    function bindMarkReadOnClick() {
-        document.addEventListener('click', (e) => {
-            try {
-                const a = e.target.closest && e.target.closest('.kanban-chat-link');
-                if (!a) return;
-                // permitir abrir en nueva pestaña / modificar con teclas modificadoras
-                if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
-                e.preventDefault();
-                const numero = a.dataset.chatNum;
-                if (!numero) {
-                    window.location = a.href;
-                    return;
-                }
-                // Fire-and-forget: marcar mensajes como leídos antes de navegar.
-                fetch(`/chats/${encodeURIComponent(numero)}/marcar-leido`, { method: 'POST' })
-                    .catch(err => console.warn('Error marcando como leído:', err))
-                    .finally(() => {
-                        // navegar al href aunque la petición falle o tarde
-                        window.location = a.href;
-                    });
-            } catch (err) {
-                // en caso de error, fallback a navegación normal
-                const anchor = e.target.closest && e.target.closest('a');
-                if (anchor && anchor.href) window.location = anchor.href;
-            }
-        }, { passive: true });
-    }
+  // --- Overview bar chart (existente) ---
+  (function renderOverview(){
+      const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
+      if (!ctx) return;
+      const rawValues = {{ values| tojson }};
+      const maxValor = rawValues.length ? Math.max(...rawValues) : 0;
+      const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5;
+      const data = {
+            labels: {{ labels| tojson }},
+        datasets: [{
+            label: 'Mensajes por número',
+            data: rawValues,
+            backgroundColor: '#1f4e79'
+        }]
+      };
+      if (overviewChart) overviewChart.destroy();
+      overviewChart = new Chart(ctx, {
+        type: 'bar',
+        data: data,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: { duration: 0 },
+          plugins: {
+            legend: { display: false },
+            datalabels: { anchor: 'end', align: 'end', color: '#fff', font: { weight: 'bold', size: 14 } }
+          },
+          scales: {
+            y: { beginAtZero: true, suggestedMax: maxAuto, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+            x: { ticks: { maxRotation: 45, minRotation: 45, color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } }
+          }
+        },
+        plugins: [ChartDataLabels]
+      });
+  })();
 
-    function bindAddColumnButtons() {
-        document.querySelectorAll('.add-chat-btn').forEach(btn => {
-            btn.removeEventListener('click', addColumnClickHandler);
-            btn.addEventListener('click', addColumnClickHandler);
-        });
-    }
-    function addColumnClickHandler(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const baseCol = this.closest('.kanban-column');
-        if (!baseCol) return;
-        const afterId = parseInt(this.dataset.after, 10);
+  // --- Tab handling ---
+  function showTab(tab) {
+      // remove active from all tab anchors
+      document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
 
-        fetch('/kanban/columna/agregar', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ after_id: afterId })
-        })
-            .then(r => r.json())
-            .then(data => {
-                if (!data.success) { alert(data.error || 'Error al crear columna'); return; }
-                const nuevaCol = crearColumnaDOM(data);
-                insertarColumnaDespues(baseCol, nuevaCol);
-                bindAddColumnButtons(); bindDeleteButtons(); initRenameHandlers(); bindIconPicker(); inicializarSortable();
-            })
-            .catch(err => console.error('Error creando columna:', err));
-    }
-    function crearColumnaDOM(data) {
-        const div = document.createElement('div');
-        div.className = 'kanban-column';
-        div.dataset.colId = data.id;
-        div.dataset.orden = data.orden;
-        const iconSrc = data.icono || '/static/icons/default-avatar.png';
-        div.innerHTML = `
-        <div class="column-header" style="--col-color:${data.color || '#37474f'}">
-            <img src="${iconSrc}" class="col-icon" alt="icono" title="Cambiar icono"
-                 data-col-id="${data.id}"
-                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-            <h3 contenteditable="true" data-col-id="${data.id}" class="col-name">${data.nombre}</h3>
-            <button class="add-chat-btn" data-after="${data.id}" title="Agregar columna a la derecha">+</button>
-            <button class="delete-col-btn" data-col-id="${data.id}" title="Eliminar columna"
-                style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">×</button>
-        </div>
-        <div class="column-list" data-col-id="${data.id}"></div>`;
-        return div;
-    }
-    function insertarColumnaDespues(baseCol, nuevaCol) {
-        if (baseCol.nextElementSibling) baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
-        else baseCol.parentNode.appendChild(nuevaCol);
-    }
+      if (tab === 'overview') {
+          // For overview, activate only the period button matching CURRENT_PERIOD
+          let el = document.querySelector(`.tabs a[data-period="${CURRENT_PERIOD}"]`);
+          if (!el) {
+              // fallback: first overview anchor
+              el = document.querySelector('.tabs a[data-tab="overview"]');
+          }
+          if (el) el.classList.add('active');
+      } else {
+          // mark anchors that match the tab (normally only the conversation tab)
+          document.querySelectorAll(`.tabs a[data-tab="${tab}"]`).forEach(a => a.classList.add('active'));
+      }
 
-    /* Icon picker */
-    function bindIconPicker() {
-        const picker = document.getElementById('iconPicker');
-        const emojis = ['🆕', '💬', '⏳', '✅', '📞', '🛠️', '📦', '🚀', '📝', '📅', '⭐', '📍', '🏷️', '🎯'];
-        picker.innerHTML = emojis.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
+      // show/hide panes
+      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+      const pane = document.getElementById('pane-' + tab);
+      if (pane) pane.classList.add('active');
 
-        document.querySelectorAll('.col-icon').forEach(img => {
-            img.addEventListener('click', (e) => {
-                e.stopPropagation();
-                showIconPickerAt(img, picker);
-                picker.dataset.targetColId = img.dataset.colId;
-                picker.dataset.targetImgSelector = `.col-icon[data-col-id="${img.dataset.colId}"]`;
-            });
-        });
+      if (tab === 'conversaciones') loadConversacionesData();
+      // resize charts
+      setTimeout(() => {
+          if (overviewChart) overviewChart.resize();
+          if (remainingChart) remainingChart.resize();
+          if (dailyChart) dailyChart.resize();
+          if (platformChart) platformChart.resize(); // 🆕 Nuevo resize
+      }, 200);
+  }
 
-        picker.querySelectorAll('button').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const emoji = btn.dataset.emoji;
-                const dataUrl = emojiToSvgDataUrl(emoji);
-                const colId = picker.dataset.targetColId;
-                const img = document.querySelector(picker.dataset.targetImgSelector);
-                if (img) img.src = dataUrl;
 
-                fetch(`/kanban/columna/${colId}/icono`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ icono: dataUrl })
-                }).catch(console.error);
+  document.querySelectorAll('.tabs a').forEach(a => {
+      a.addEventListener('click', function(e){
+          const tab = this.getAttribute('data-tab') || 'overview';
+          const dp = this.getAttribute('data-period'); // period attribute, if any
+          const url = new URL(window.location);
 
-                hideIconPicker(picker);
-            });
-        });
+          // Always prevent default: we control navigation explicitly to avoid races
+          e.preventDefault();
 
-        document.addEventListener('click', (e) => {
-            if (!picker.contains(e.target)) hideIconPicker(picker);
-        });
-    }
-    function showIconPickerAt(anchorEl, picker) {
-        const r = anchorEl.getBoundingClientRect();
-        picker.style.left = `${r.left + window.scrollX}px`;
-        picker.style.top = `${r.bottom + window.scrollY + 6}px`;
-        picker.style.display = 'block';
-        picker.setAttribute('aria-hidden', 'false');
-    }
-    function hideIconPicker(picker) {
-        picker.style.display = 'none';
-        picker.setAttribute('aria-hidden', 'true');
-    }
-    function emojiToSvgDataUrl(emoji) {
-        const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36'>
-  <rect width='100%' height='100%' rx='6' ry='6' fill='#ffffff' fill-opacity='0.08'/>
-  <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='20'>${emoji}</text>
-</svg>`;
-        return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
-    }
+          // update tab param in url
+          if (tab === 'conversaciones') {
+              url.searchParams.set('tab', 'conversaciones');
+          } else {
+              url.searchParams.set('tab', 'overview');
+          }
 
-    /* Eliminar columna */
-    function bindDeleteButtons() {
-        document.querySelectorAll('.delete-col-btn').forEach(btn => {
-            if (btn.dataset.bound === '1') return; btn.dataset.bound = '1';
-            btn.addEventListener('click', e => {
-                e.preventDefault();
-                const colId = btn.dataset.colId;
-                const totalCols = document.querySelectorAll('.kanban-column').length;
-                if (totalCols <= 1) { alert('No se puede eliminar la última columna'); return; }
-                if (!confirm('¿Seguro que deseas eliminar esta columna? Los chats se moverán a otra.')) return;
-                fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
-                    .then(res => res.json())
-                    .then(data => {
-                        if (data.success) {
-                            const colEl = document.querySelector(`.kanban-column[data-col-id="${colId}"]`);
-                            if (colEl) colEl.remove();
-                        } else { alert(data.error || 'No se pudo eliminar'); }
-                    });
-            });
-        });
-    }
+          // If this is a period button, do a full navigation so server re-renders page with new data
+          if (dp) {
+              url.searchParams.set('period', dp);
+              // Use full href navigation (reliable)
+              window.location.href = url.toString();
+              return;
+          }
 
-    /* Renombrar columna: pausa refresh + guardado con debounce */
-    function initRenameHandlers() {
-        document.querySelectorAll('.col-name[contenteditable="true"]').forEach(header => {
-            if (header.dataset.bound === '1') return; header.dataset.bound = '1';
+          // For tabs handled client-side, update history and show tab
+          window.history.replaceState({}, '', url);
+          showTab(tab);
+      });
+  });
 
-            header.addEventListener('focus', () => {
-                editingColId = header.dataset.colId;
-                editingColText = header.textContent;
-                kanbanAutoRefresh = false; // pausa mientras editas
-            });
 
-            header.addEventListener('input', () => {
-                editingColText = header.textContent;
-                const id = header.dataset.colId;
-                if (renameTimers.has(id)) clearTimeout(renameTimers.get(id));
-                // guarda 600ms después de dejar de teclear
-                const t = setTimeout(() => saveColumnName(id, header.textContent.trim()), 600);
-                renameTimers.set(id, t);
-            });
+  // --- Load data and render conversations charts ---
+    async function loadConversacionesData() {
+        try {
+            // Para el dailyChart ahora queremos los últimos 3 meses agregados por mes:
+            const period = '3months';
 
-            header.addEventListener('blur', () => {
-                const id = header.dataset.colId;
-                const nombre = header.textContent.trim();
-                if (renameTimers.has(id)) {
-                    clearTimeout(renameTimers.get(id));
-                    renameTimers.delete(id);
-                }
-                saveColumnName(id, nombre).finally(() => {
-                    // reanuda refresh con un pequeño delay para evitar parpadeo
-                    setTimeout(() => { kanbanAutoRefresh = true; }, 300);
-                    editingColId = null;
-                    editingColText = null;
-                });
-            });
+            // 🎯 Llama a la API de Plataformas (el endpoint ya existe en app.py)
+            const platformRes = await fetch(`/dashboard/platform-data`);
+            const platformJson = await platformRes.json();
 
-            header.addEventListener('keydown', e => {
-                if (e.key === 'Enter') { e.preventDefault(); header.blur(); }
-            });
-        });
-    }
-    function saveColumnName(columnaId, nombre) {
-        return fetch(`/kanban/columna/${columnaId}/renombrar`, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ nombre })
-        }).then(r => r.json()).then(data => {
-            if (!data.success) console.warn('No se pudo guardar el nombre');
-        }).catch(err => console.error('Error guardando nombre:', err));
-    }
+            const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
+            const json = await res.json();
 
-    /* Auto-refresh incremental (no toca título si está en edición) */
-    function startAutoRefresh() {
-        setInterval(actualizarKanban, refreshInterval);
-        setTimeout(actualizarKanban, 1000);
-    }
-    function actualizarKanban() {
-        if (!kanbanAutoRefresh) return;
-        const scrollPosition = window.scrollY;
-        fetch('/kanban/data')
-            .then(r => r.json())
-            .then(data => {
-                actualizarIncremental(data);
-                if (editingColId) {
-                    const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
-                    if (colHeader && editingColText) {
-                        colHeader.focus();
-                        colHeader.textContent = editingColText;
-                    }
-                }
-                setTimeout(() => window.scrollTo(0, scrollPosition), 10);
-            })
-            .catch(err => console.error('❌ Error actualizando Kanban:', err));
-    }
-    function actualizarIncremental(data) {
-        data.columnas.forEach(col => {
-            const nameEl = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
-            // no sobreescribir si es el elemento activo o está en edición
-            if (nameEl && document.activeElement !== nameEl &&
-                editingColId !== col.id.toString() && nameEl.textContent !== col.nombre) {
-                nameEl.textContent = col.nombre;
-            }
-            const iconEl = document.querySelector(`.col-icon[data-col-id="${col.id}"]`);
-            if (iconEl && col.icono && iconEl.src !== col.icono) {
-                iconEl.src = col.icono;
-            }
-        });
-
-        const chatsActuales = new Map();
-        document.querySelectorAll('.kanban-card').forEach(card => {
-            chatsActuales.set(card.dataset.chatNum, {
-                element: card,
-                columnaId: card.closest('.kanban-column').dataset.colId
-            });
-        });
-
-        data.chats.forEach(chat => {
-            const existente = chatsActuales.get(chat.numero);
-            if (existente) {
-                actualizarChatExistente(existente.element, chat);
-                if (existente.columnaId !== chat.columna_id.toString()) {
-                    moverChatAColumna(chat.numero, chat.columna_id);
-                }
-                chatsActuales.delete(chat.numero);
-            } else {
-                agregarNuevoChat(chat);
-            }
-        });
-
-        chatsActuales.forEach((info, numero) => eliminarChat(numero));
-    }
-
-    function actualizarChatExistente(elemento, chat) {
-        const aliasView = elemento.querySelector('.alias-view');
-        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
-
-        const timeElement = elemento.querySelector('.card-time');
-        if (timeElement && chat.ultima_fecha) {
-            const fechaObj = new Date(chat.ultima_fecha);
-            const dia = fechaObj.getDate();
-            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
-            const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-            const fechaFormateada = `${dia}-${mes} ${hora}`;
-            if (timeElement.textContent !== fechaFormateada) timeElement.textContent = fechaFormateada;
-        }
-
-        const msgElement = elemento.querySelector('.card-msg');
-        const nuevoMensaje = chat.ultimo_mensaje || '';
-        if (msgElement && msgElement.textContent !== nuevoMensaje) {
-            msgElement.textContent = nuevoMensaje;
-            if (nuevoMensaje) {
-                elemento.classList.add('new-message');
-                setTimeout(() => elemento.classList.remove('new-message'), 2500);
-            }
-        }
-
-        const unread = elemento.querySelector('.card-unread');
-        if (chat.sin_leer > 0) {
-            if (unread) unread.textContent = chat.sin_leer;
-            else {
-                const span = document.createElement('span');
-                span.className = 'card-unread';
-                span.textContent = chat.sin_leer;
-                elemento.querySelector('.card-meta-row').appendChild(span);
-            }
-        } else if (unread) unread.remove();
-    }
-
-    function agregarNuevoChat(chat) {
-        const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
-        if (!columna) return;
-        const bandera = getCountryFlag(chat.numero);
-        const html = `
-    <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
-        <div class="card-content">
-            <div class="card-title-row">
-                <div class="card-avatar-section">
-                    <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
-                         class="card-avatar" alt="Avatar"
-                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                </div>
-                ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
-                {% if es_admin %}
-                <span class="alias-edit" style="display:none;">
-                    <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
-                </span>
-                {% endif %}
-                <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
-            </div>
-            <div class="card-meta-row">
-                <span class="card-num">${chat.numero}</span>
-                <span class="card-time">
-                    ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}
-                </span>
-                ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
-            </div>
-            <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
-        </div>
-    </a>`;
-        columna.insertAdjacentHTML('beforeend', html);
-        setTimeout(() => {
-            const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
-            if (el) el.classList.remove('new-message');
-        }, 2500);
-    }
-
-    function moverChatAColumna(numero, nuevaColumnaId) {
-        const chatEl = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
-        const destino = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
-        if (chatEl && destino) destino.appendChild(chatEl);
-    }
-    function eliminarChat(numero) {
-        const el = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
-        if (el) el.remove();
-    }
-    function getCountryFlag(numero) {
-        if (!numero) return null;
-        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
-        const numStr = numero.toString().replace('+', '');
-        for (let i = 3; i > 0; i--) {
-            const pref = numStr.substring(0, i);
-            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
-        }
-        return null;
-    }
-
-    function inicializarSortable() {
-        document.querySelectorAll('.column-list').forEach(list => {
-            if (list.dataset.sortableInit === '1') return;
-            list.dataset.sortableInit = '1';
-            new Sortable(list, {
-                group: 'kanban',
-                animation: 150,
-                ghostClass: 'sortable-ghost',
-                onEnd: evt => {
-                    const numero = evt.item.dataset.chatNum;
-                    const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
-                    fetch('/kanban/mover', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ numero, columna_id: nuevaCol })
-                    });
-                }
-            });
-        });
-    }
-
-    function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
-    // === Edit alias helper (improved) ===
-    function activarEdicionAlias(parent) {
-        if (!parent) return;
-        const card = parent.closest('.kanban-card, .kanban-chat-link, .card-content') || parent;
-        const viewElement = card.querySelector('.alias-view');
-        const editElement = card.querySelector('.alias-edit');
-        if (!viewElement || !editElement) return;
-
-        // prefer structured data if available
-        const displayed = (viewElement.textContent || '').trim();
-        const fullname = (viewElement.dataset && viewElement.dataset.nombre) ? (viewElement.dataset.nombre || '').trim() : '';
-        const original = fullname || displayed;
-
-        const input = editElement.querySelector('input[type=text]');
-        if (!input) return;
-
-        if (!input.dataset.num || input.dataset.num.trim() === '') {
-            const numFromView = viewElement.dataset.num || card.dataset.chatNum || input.getAttribute('data-num') || '';
-            if (numFromView) input.dataset.num = numFromView;
-        }
-
-        // choose initial input value: alias -> nombre -> numero
-        const aliasFromDataset = (input.dataset && input.dataset.alias) ? (input.dataset.alias || '').trim() : '';
-        const candidate = aliasFromDataset || (input.value || '').trim() || fullname || input.dataset.num || '';
-        input.value = candidate;
-
-        // mark editing so auto-refresh won't overwrite
-        card.classList.add('alias-editing');
-
-        viewElement.style.display = 'none';
-        editElement.style.display = 'flex';
-        input.focus();
-        input.select();
-
-        let submitted = false;
-
-        function finishAndRestore(valueToShow) {
-            try { card.classList.remove('alias-editing'); } catch (e) { }
-            editElement.style.display = 'none';
-
-            // If valueToShow is empty or equals phone, but we have a fullname, prefer fullname
-            let show = valueToShow;
-            if ((!show || String(show).trim() === '') && fullname) show = fullname;
-            // final fallback: the displayed original
-            if (!show) show = original;
-
-            viewElement.textContent = show;
-            // update dataset.alias to keep consistency (if value equals fullname, clear alias dataset)
-            try {
-                if (input && input.dataset) {
-                    if (String(show).trim() === (fullname || '').trim()) input.dataset.alias = '';
-                    else input.dataset.alias = String(show).trim();
-                }
-            } catch (e) { }
-            viewElement.style.display = '';
-        }
-
-        function terminar() {
-            const nuevo = (input.value || '').trim();
-
-            // If nothing changed or empty, restore original (prefer fullname)
-            if (nuevo === '' || nuevo === original) {
-                finishAndRestore(original);
+            if (json.error) {
+                console.error('Error fetching conversaciones data', json.error);
                 return;
             }
 
-            submitted = true;
-            fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
-                method: 'POST',
-                body: new URLSearchParams({ alias: nuevo }),
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-            })
-                .then(res => {
-                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                    return res;
-                })
-                .then(() => {
-                    finishAndRestore(nuevo);
-                })
-                .catch(err => {
-                    console.warn('Error guardando alias:', err);
-                    finishAndRestore(original);
-                });
+            // compute plan-related metrics
+            const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
+            const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
+            const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+
+            // actualizar métricas superiores (only disponibles y consumidos)
+            const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+            const elDisponibles = document.getElementById('planDisponibles');
+            const elConsumidos = document.getElementById('planConsumidos');
+            if (elDisponibles) elDisponibles.innerText = disponibles;
+            if (elConsumidos) elConsumidos.innerText = consumed;
+
+            // Chart: Remaining / Consumed (pie-like)
+            const remCtx = document.getElementById('remainingChart').getContext('2d');
+            const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
+            const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
+
+            if (remainingChart) remainingChart.destroy();
+            remainingChart = new Chart(remCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: pieLabels,
+                    datasets: [{
+                        data: pieData,
+                        backgroundColor: ['#e74c3c', '#2ecc71']
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        datalabels: { color: 'white', formatter: (v) => v }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+            // Chart: Monthly conversations (last 3 months)
+            const dailyCtx = document.getElementById('dailyChart').getContext('2d');
+            const dailyLabels = json.labels || [];
+            const dailyValues = json.values || [];
+
+            if (dailyChart) dailyChart.destroy();
+            dailyChart = new Chart(dailyCtx, {
+                type: 'line',
+                data: {
+                    labels: dailyLabels,
+                    datasets: [{
+
+                                    label: 'Conversaciones nuevas (últimos 90 días)',
+                                    data: dailyValues,
+                                    borderColor: '#1f4e79',
+                                    backgroundColor: 'rgba(31,78,121,0.15)',
+                                    fill: true,
+                                    tension: 0.2,
+                                    pointRadius: 4
+                                }]
+                        },
+                            options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false }, datalabels: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+                                x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                            }
+                        }
+                        });
+
+            // 🆕 Chart: Platform Distribution (Doughnut)
+            const platformCtx = document.getElementById('platformChart').getContext('2d');
+            const platformData = platformJson.conversations;
+
+            // Definir los colores y mapeo de iconos
+            const platformColors = ['#25D366', '#0088CC', '#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa'];
+            const iconMap = {
+                'WhatsApp': '/static/icons/whatsapp-icon.png',
+                'Telegram': '/static/icons/telegram-icon.png',
+                // Añade más plataformas si es necesario
+            };
+
+            if (platformChart) platformChart.destroy();
+            platformChart = new Chart(platformCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: platformData.labels,
+                    datasets: [{
+                        label: 'Conversaciones por Plataforma',
+                        data: platformData.values,
+                        backgroundColor: platformColors,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: 'white',
+                                // 💥 Implementación de la función customizadora para usar iconos
+                                generateLabels: (chart) => {
+                                    const data = chart.data.datasets[0];
+                                    return data.data.map((value, i) => {
+                                        const label = chart.data.labels[i];
+                                        const iconUrl = iconMap[label]; // Obtener URL del icono
+
+                                        // Crear una etiqueta HTML personalizada si hay URL de icono
+                                        if (iconUrl) {
+                                            return {
+                                                // Usamos un pequeño hack HTML para inyectar la imagen en el texto de la leyenda
+                                                text: `<img src="${iconUrl}" style="height:16px; margin-right:6px; vertical-align:middle;"> ${label}`,
+                                                fillStyle: data.backgroundColor[i],
+                                                strokeStyle: data.borderColor,
+                                                lineWidth: data.borderWidth,
+                                                // Se usa index y hidden para que Chart.js pueda controlar la visibilidad al hacer clic
+                                                hidden: chart.getDatasetMeta(0).data[i].hidden,
+                                                index: i
+                                            };
+                                        }
+
+                                        // Retornar etiqueta estándar si no hay icono mapeado
+                                        return {
+                                            text: label,
+                                            fillStyle: data.backgroundColor[i],
+                                            strokeStyle: data.borderColor,
+                                            lineWidth: data.borderWidth,
+                                            hidden: chart.getDatasetMeta(0).data[i].hidden,
+                                            index: i
+                                        };
+                                    });
+                                }
+                            }
+                        },
+                        datalabels: {
+                            color: 'white',
+                            formatter: (value, context) => {
+                                const total = context.dataset.data.reduce((a, b) => a + b, 0);
+                                const percentage = Math.round((value / total) * 100) + '%';
+                                return percentage;
+                            }
+                        },
+                        title: {
+                            display: true,
+                            text: 'Conversaciones por Plataforma (Clientes Distintos)',
+                            color: 'white',
+                            font: { size: 16 }
+                        }
+                    }
+                },
+                plugins: [
+                    ChartDataLabels,
+                    // Plugin para habilitar HTML en la leyenda
+                    {
+                        id: 'htmlLegend',
+                        afterUpdate: (chart) => {
+                            // Buscar el contenedor <ul> generado por Chart.js
+                            const ul = chart.legend.legendItems[0]?.element.closest('ul');
+                            if (ul) {
+                                ul.style.listStyle = 'none'; // Asegurar que no haya viñetas
+                                ul.querySelectorAll('li').forEach((li, i) => {
+                                    // Obtener la etiqueta generada por generateLabels
+                                    const item = chart.options.plugins.legend.labels.generateLabels(chart)[i];
+                                    // Si la etiqueta contiene la imagen, inyectarla
+                                    if (item && item.text.includes('<img')) {
+                                        li.style.cursor = 'pointer';
+                                        const text = li.querySelector('span'); // El texto visible está dentro de un span
+                                        if (text) text.innerHTML = item.text;
+                                    }
+                                });
+                            }
+                        }
+                    }
+                ]
+            });
+
+
+        } catch (err) {
+            console.error('Failed to load conversaciones data', err);
         }
-
-        input.onblur = () => {
-            setTimeout(() => {
-                if (!submitted) terminar();
-            }, 0);
-        };
-
-        input.onkeydown = e => {
-            if (e.key === 'Enter') { e.preventDefault(); terminar(); }
-            if (e.key === 'Escape') {
-                try { card.classList.remove('alias-editing'); } catch (ee) { }
-                editElement.style.display = 'none';
-                viewElement.style.display = '';
-            }
-        };
     }
 
-    // Attach handlers to edit buttons that are already in DOM on load
-    document.addEventListener('DOMContentLoaded', () => {
-        try {
-            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
-                if (btn.dataset.boundAlias === '1') return;
-                btn.dataset.boundAlias = '1';
-                btn.addEventListener('click', function (e) {
-                    e.preventDefault(); e.stopPropagation();
-                    // Encontrar contenedor correcto dentro de la tarjeta
-                    const parent = this.closest('.card-title-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
-                    if (!parent) return;
-                    activarEdicionAlias(parent);
-                });
-            });
-        } catch (err) {
-            console.error('Error binding edit-alias-btn handlers:', err);
-        }
-    });
+  // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
+  // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
+  (function initTabFromUrl(){
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab') === 'overview') {
+          showTab('overview');
+      } else {
+          // default to conversaciones
+          showTab('conversaciones');
+      }
+  })();
+
+  // Resize handlers
+  window.addEventListener('resize', () => {
+      if (overviewChart) overviewChart.resize();
+      if (remainingChart) remainingChart.resize();
+      if (dailyChart) dailyChart.resize();
+      if (platformChart) platformChart.resize(); // 🆕 Asegurar que el nuevo gráfico también se redimensiona
+  });
 </script>
 {% endblock %}
