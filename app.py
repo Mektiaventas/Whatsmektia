@@ -8095,7 +8095,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
                     # texto_a_voz guarda el archivo localmente y devuelve la ruta/URL (asumo que es la ruta local)
-                    audio_url = texto_a_voz(respuesta_text, filename, config) 
+                    audio_url = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
