@@ -78,25 +78,25 @@
             border-bottom: 3px solid transparent;
         }
 
-            .tabs a.active {
-                opacity: 1;
-                font-weight: 600;
-                border-bottom: 3px solid #007bff; /* Color de acento */
-            }
+        .tabs a.active {
+            opacity: 1;
+            font-weight: 600;
+            border-bottom: 3px solid #007bff; /* Color de acento */
+        }
 
-            .tabs a:hover {
-                opacity: 0.9;
-                background-color: rgba(255,255,255,0.05);
-            }
-
+        .tabs a:hover {
+            opacity: 0.9;
+            background-color: rgba(255,255,255,0.05);
+        }
+    
     .tab-pane {
         display: none;
         padding-top: 1rem;
     }
 
-        .tab-pane.active {
-            display: block;
-        }
+    .tab-pane.active {
+        display: block;
+    }
 
     /* Cards */
     .stats {
@@ -196,7 +196,7 @@
             <strong>Conversaciones por Telegram:</strong>
             <div id="telegramConversations">—</div>
         </div>
-    </div>
+        </div>
 
     <div style="display:flex; gap:16px; margin-top: 1rem; margin-bottom: 2rem;">
         <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
@@ -208,7 +208,7 @@
             <canvas id="platformContactsChart"></canvas>
         </div>
     </div>
-</div>
+    </div>
 
 <div id="pane-overview" class="tab-pane {{ 'active' if request.args.get('tab') == 'overview' else '' }}">
     <div class="stats">
@@ -239,7 +239,7 @@
     // NUEVAS VARIABLES GLOBALES PARA GRÁFICAS DE PLATAFORMA
     let platformConversationsChart = null;
     let platformContactsChart = null;
-
+    
     // Función para cambiar de pestaña
     function showTab(tab) {
         document.querySelectorAll('.tabs a').forEach(a => {
@@ -279,7 +279,7 @@
 
     // Manejar el clic en las pestañas
     document.querySelectorAll('.tabs a').forEach(a => {
-        a.addEventListener('click', function (e) {
+        a.addEventListener('click', function(e) {
             const tab = this.getAttribute('data-tab');
             if (tab !== 'overview') {
                 e.preventDefault();
@@ -301,7 +301,7 @@
         try {
             const res = await fetch(`/dashboard/overview-data?period=${period}`);
             const json = await res.json();
-
+            
             document.getElementById('totalMensajesPeriodo').innerText = json.total_mensajes;
             document.getElementById('totalConversacionesPeriodo').innerText = json.total_conversaciones;
 
@@ -358,7 +358,7 @@
 
             const convData = json.conversations;
             const contactData = json.contacts;
-
+            
             // Actualizar tarjetas rápidas
             // Nota: Si no existe la plataforma, el valor es 0
             const whatsappConv = convData.values[convData.labels.indexOf('WhatsApp')] || 0;
@@ -463,7 +463,7 @@
                     plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'top', color: '#333' } },
                     scales: {
                         y: { beginAtZero: true },
-                        x: {}
+                        x: { }
                     }
                 },
                 plugins: [ChartDataLabels]
@@ -493,15 +493,15 @@
             });
 
             // 4. NUEVA LLAMADA DE CARGA DE PLATAFORMA
-            loadPlatformData();
+            loadPlatformData(); 
 
         } catch (err) {
             console.error('Failed to load conversaciones data', err);
         }
     }
 
-    // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
-    // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
+  // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
+  // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
     (function initTabFromUrl() {
         const params = new URLSearchParams(window.location.search);
         const tabFromUrl = params.get('tab');
@@ -514,14 +514,14 @@
         }
     })();
 
-    // Resize handlers
-    window.addEventListener('resize', () => {
-        if (overviewChart) overviewChart.resize();
-        if (remainingChart) remainingChart.resize();
-        if (dailyConversationsChart) dailyConversationsChart.resize();
-        // RESIZE DE NUEVAS GRÁFICAS
-        if (platformConversationsChart) platformConversationsChart.resize();
-        if (platformContactsChart) platformContactsChart.resize();
-    });
+  // Resize handlers
+  window.addEventListener('resize', () => {
+      if (overviewChart) overviewChart.resize();
+      if (remainingChart) remainingChart.resize();
+      if (dailyConversationsChart) dailyConversationsChart.resize();
+      // RESIZE DE NUEVAS GRÁFICAS
+      if (platformConversationsChart) platformConversationsChart.resize();
+      if (platformContactsChart) platformContactsChart.resize();
+  });
 </script>
 {% endblock %}
