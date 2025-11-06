@@ -8063,7 +8063,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    # texto_a_voz guarda el archivo localmente y devuelve la ruta/URL (asumo que es la ruta local)
+                    # texto_a_voz guarda el archivo localmente y devuelve la ruta/URL
                     audio_url = texto_a_voz(respuesta_text, filename, config) 
                     
                 except Exception as e:
@@ -8079,40 +8079,21 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 chat_id = numero.replace('tg_', '')
                 
                 # 1. Intento de enviar como audio si la generación fue exitosa
-                # audio_url debe ser la RUTA LOCAL del archivo .ogg
-                if telegram_token and audio_url and os.path.exists(audio_url) and not urlparse(audio_url).scheme in ('http', 'https'): # <-- VERIFICACIÓN RUTA LOCAL
+                if telegram_token and audio_url and os.path.exists(audio_url): # <-- SIMPLIFICACIÓN CLAVE
                     
                     app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_url}") 
                     
-                    sent_audio = send_telegram_voice(
-                        chat_id=chat_id, 
-                        audio_file_path=audio_url, # 👈 RUTA LOCAL
-                        token_bot=telegram_token, 
-                        caption=respuesta_text
-                    )
-                    
-                    if sent_audio:
-                        app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
-                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
-                        return True
+                    # Aseguramos que la ruta NO sea una URL (aunque el os.path.exists ya lo hace casi seguro)
+                    if urlparse(audio_url).scheme in ('http', 'https'):
+                         app.logger.warning("⚠️ TELEGRAM: audio_url es una URL pública, no una ruta local. Fallback a texto.")
+                         sent_audio = False
                     else:
-                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
-                        # Continuar a Fallback (envío de texto)
-                
-                # 2. Fallback a texto si no era audio, o si el envío de audio falló
-                if telegram_token:
-                    send_telegram_message(chat_id, respuesta_text, telegram_token) 
-                else:
-                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-                
-                # Registrar como TEXTO (ya sea que el envío fue por el send_telegram_message o si falló el audio)
-                registrar_respuesta_bot(
-                    numero, texto, respuesta_text, config, 
-                    incoming_saved=incoming_saved, 
-                    respuesta_tipo='texto',  
-                    respuesta_media_url=None   
-                )
-                return True
+                        sent_audio = send_telegram_voice(
+                            chat_id=chat_id, 
+                            audio_file_path=audio_url, # 👈 RUTA LOCAL
+                            token_bot=telegram_token, 
+                            caption=respuesta_text
+                        )
             
             else:
                 # Es WhatsApp (lógica existente)
