@@ -251,6 +251,29 @@
             <canvas id="dailyChart"></canvas>
         </div>
     </div>
+    <div id="pane-plataformas" class="tab-pane {% if request.args.get('tab') == 'plataformas' %}active{% endif %}">
+        <div class="stats" style="margin-top:0;">
+            <div class="stat-card" style="min-height:64px;height:64px;">
+                <strong>Conversaciones por WhatsApp:</strong>
+                <div id="whatsappConversations">—</div>
+            </div>
+            <div class="stat-card" style="min-height:64px;height:64px;">
+                <strong>Conversaciones por Telegram:</strong>
+                <div id="telegramConversations">—</div>
+            </div>
+        </div>
+
+        <div style="display:flex; gap:16px; margin-top: 1rem;">
+            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+                <h4 style="text-align: center; color: #333;">Conversaciones por Plataforma</h4>
+                <canvas id="platformConversationsChart"></canvas>
+            </div>
+            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+                <h4 style="text-align: center; color: #333;">Contactos por Plataforma</h4>
+                <canvas id="platformContactsChart"></canvas>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Chart.js y plugin datalabels -->
@@ -262,10 +285,83 @@
   let overviewChart = null;
   let remainingChart = null;
   let dailyChart = null;
-
+let platformConversationsChart = null;
+let platformContactsChart = null;
   // expose current period to JS (server value on load)
   const CURRENT_PERIOD = '{{ period }}';
+    async function loadPlatformData() {
+        try {
+            const res = await fetch(`/dashboard/platform-data`);
+            const json = await res.json();
+            if (json.error) {
+                console.error('Error fetching platform data', json.error);
+                return;
+            }
 
+            const convData = json.conversations;
+            const contactData = json.contacts;
+
+            // Actualizar tarjetas rápidas
+            const whatsappConv = convData.values[convData.labels.indexOf('WhatsApp')] || 0;
+            const telegramConv = convData.values[convData.labels.indexOf('Telegram')] || 0;
+            document.getElementById('whatsappConversations').innerText = whatsappConv;
+            document.getElementById('telegramConversations').innerText = telegramConv;
+
+            // Renderizar Conversaciones (Chart 1: Doughnut)
+            const convCtx = document.getElementById('platformConversationsChart').getContext('2d');
+            if (platformConversationsChart) platformConversationsChart.destroy();
+            platformConversationsChart = new Chart(convCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: convData.labels,
+                    datasets: [{
+                        data: convData.values,
+                        backgroundColor: ['#25D366', '#0088CC', '#34B7F1', '#ccc'], // WhatsApp, Telegram, etc.
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        datalabels: { color: 'white', formatter: (v) => v }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+            // Renderizar Contactos (Chart 2: Bar)
+            const contactCtx = document.getElementById('platformContactsChart').getContext('2d');
+            if (platformContactsChart) platformContactsChart.destroy();
+            platformContactsChart = new Chart(contactCtx, {
+                type: 'bar',
+                data: {
+                    labels: contactData.labels,
+                    datasets: [{
+                        label: 'Contactos',
+                        data: contactData.values,
+                        backgroundColor: contactData.labels.map(l => {
+                            if (l === 'WhatsApp') return '#25D366';
+                            if (l === 'Telegram') return '#0088CC';
+                            return '#1f4e79';
+                        }),
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { anchor: 'end', align: 'end', color: '#000', font: { weight: 'bold', size: 14 } }
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
+
+        } catch (err) {
+            console.error('Failed to load platform data', err);
+        }
+    }
   // --- Overview bar chart (existente) ---
   (function renderOverview(){
       const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
@@ -303,36 +399,28 @@
   })();
 
   // --- Tab handling ---
-  function showTab(tab) {
-      // remove active from all tab anchors
-      document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
+    // --- Modificar la Función showTab (alrededor de la línea 360) ---
+    function showTab(tab) {
+        // ... (código que remueve/añade active classes) ...
 
-      if (tab === 'overview') {
-          // For overview, activate only the period button matching CURRENT_PERIOD
-          let el = document.querySelector(`.tabs a[data-period="${CURRENT_PERIOD}"]`);
-          if (!el) {
-              // fallback: first overview anchor
-              el = document.querySelector('.tabs a[data-tab="overview"]');
-          }
-          if (el) el.classList.add('active');
-      } else {
-          // mark anchors that match the tab (normally only the conversation tab)
-          document.querySelectorAll(`.tabs a[data-tab="${tab}"]`).forEach(a => a.classList.add('active'));
-      }
+        // show/hide panes
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        const pane = document.getElementById('pane-' + tab);
+        if (pane) pane.classList.add('active');
 
-      // show/hide panes
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-      const pane = document.getElementById('pane-' + tab);
-      if (pane) pane.classList.add('active');
+        // 🚨 MODIFICACIÓN AQUÍ
+        if (tab === 'conversaciones') loadConversacionesData();
+        if (tab === 'plataformas') loadPlatformData(); // <--- LLAMADA DE CARGA DE DATOS PLATAFORMA
 
-      if (tab === 'conversaciones') loadConversacionesData();
-      // resize charts
-      setTimeout(() => {
-          if (overviewChart) overviewChart.resize();
-          if (remainingChart) remainingChart.resize();
-          if (dailyChart) dailyChart.resize();
-      }, 200);
-  }
+        // resize charts
+        setTimeout(() => {
+            if (overviewChart) overviewChart.resize();
+            if (remainingChart) remainingChart.resize();
+            if (dailyChart) dailyChart.resize();
+            if (platformConversationsChart) platformConversationsChart.resize(); // <--- RESIZE GRÁFICAS NUEVAS
+            if (platformContactsChart) platformContactsChart.resize();           // <--- RESIZE GRÁFICAS NUEVAS
+        }, 200);
+    }
 
 
   document.querySelectorAll('.tabs a').forEach(a => {
@@ -456,15 +544,17 @@
 
   // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
   // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
-  (function initTabFromUrl(){
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('tab') === 'overview') {
-          showTab('overview');
-      } else {
-          // default to conversaciones
-          showTab('conversaciones');
-      }
-  })();
+    (function initTabFromUrl() {
+        const params = new URLSearchParams(window.location.search);
+        const tabFromUrl = params.get('tab');
+
+        if (tabFromUrl === 'overview' || tabFromUrl === 'conversaciones' || tabFromUrl === 'plataformas') {
+            showTab(tabFromUrl);
+        } else {
+            // default to conversaciones
+            showTab('conversaciones');
+        }
+    })();
 
   // Resize handlers
   window.addEventListener('resize', () => {

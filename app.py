@@ -8541,7 +8541,68 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
+ 
+@app.route('/dashboard/platform-data')
+@login_required
+def dashboard_platform_data():
+    config = obtener_configuracion_por_host()
     
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Conteo de Conversaciones por Plataforma (contactos distintos)
+        # Usa COALESCE para Telegram (tg_%) y WhatsApp si la columna plataforma es NULL
+        cursor.execute("""
+            SELECT 
+                COALESCE(c.plataforma, 
+                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
+                ) AS platform, 
+                COUNT(DISTINCT conv.numero) AS conversation_count
+            FROM conversaciones conv
+            LEFT JOIN contactos c ON conv.numero = c.numero_telefono
+            GROUP BY platform
+            ORDER BY conversation_count DESC
+        """)
+        conversations_raw = cursor.fetchall()
+
+        # 2. Conteo de Contactos Totales por Plataforma
+        cursor.execute("""
+            SELECT 
+                COALESCE(plataforma, 'WhatsApp') AS platform, 
+                COUNT(*) AS contact_count
+            FROM contactos
+            GROUP BY platform
+            ORDER BY contact_count DESC
+        """)
+        contacts_raw = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+
+        # Formatear para Chart.js
+        conv_labels = [row['platform'] for row in conversations_raw]
+        conv_values = [row['conversation_count'] for row in conversations_raw]
+        
+        contact_labels = [row['platform'] for row in contacts_raw]
+        contact_values = [row['contact_count'] for row in contacts_raw]
+
+        return jsonify({
+            'conversations': {
+                'labels': conv_labels,
+                'values': conv_values
+            },
+            'contacts': {
+                'labels': contact_labels,
+                'values': contact_values
+            },
+            'timestamp': int(time.time() * 1000)
+        })
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en /dashboard/platform-data: {e}")
+        return jsonify({'error': str(e)}), 500    
+
 def extraer_nombre_desde_webhook(payload):
     """
     Extrae el nombre del contacto directamente desde el webhook de WhatsApp
