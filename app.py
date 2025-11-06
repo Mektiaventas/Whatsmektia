@@ -2927,6 +2927,7 @@ def completar_autorizacion():
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
      
+# Coloca esta función cerca de obtener_siguiente_asesor o donde definas ALERT_NUMBER.
 def obtener_numeros_a_excluir(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -3277,13 +3278,8 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # <--- MODIFICACIÓN CRÍTICA: EXCLUIR NÚMEROS INTERNOS --->
-        exclusion_list = obtener_numeros_a_excluir(config)
-        exclusion_clause = f"AND cm.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
-        # <--- FIN MODIFICACIÓN CRÍTICA --->
-
         # Obtener chats con nombres de contactos
-        cursor.execute(f"""
+        cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
@@ -3297,10 +3293,9 @@ def kanban_data(config=None):
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
-            WHERE 1=1 {exclusion_clause}  /* <-- APLICA FILTRO AQUÍ */
             GROUP BY cm.numero, cm.columna_id
             ORDER BY ultima_fecha DESC
-        """, exclusion_list)
+        """)
         chats = cursor.fetchall()
 
         # Convertir timestamps a ISO strings en zona tz_mx para JSON
@@ -4297,58 +4292,6 @@ def get_plan_for_domain(dominio):
     except Exception as e:
         app.logger.warning(f"⚠️ get_plan_for_domain error: {e}")
     return None
-
-@app.route('/asesor/alerts')
-@login_required
-def get_asesor_alerts():
-    config = obtener_configuracion_por_host()
-    
-    # Lógica simplificada: busca alertas en general (usando el tipo de mensaje 'alerta' guardado)
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-
-        # Buscamos en la tabla `conversaciones` las entradas que registramos con la función `pasar_contacto_asesor`
-        # Estas se registraron con el `telefono` del asesor y `respuesta_tipo='alerta'`
-        cursor.execute("""
-            SELECT 
-                c.numero, 
-                c.mensaje, 
-                c.respuesta, 
-                c.timestamp,
-                -- Extraemos el número del cliente desde el mensaje para el link
-                SUBSTRING_INDEX(SUBSTRING_INDEX(c.mensaje, 'CLIENTE ', -1), ' ', 1) AS numero_cliente
-            FROM conversaciones c
-            WHERE c.respuesta_tipo_mensaje = 'alerta'
-            ORDER BY c.timestamp DESC
-            LIMIT 50;
-        """)
-        
-        alerts_raw = cursor.fetchall()
-        
-        alerts = []
-        for alert in alerts_raw:
-            # Obtener el nombre de cliente a partir del número_cliente extraído
-            numero_cliente_limpio = re.sub(r'[\(\)]', '', alert.get('numero_cliente', '')).strip()
-            nombre_cliente = obtener_nombre_mostrado_por_numero(numero_cliente_limpio, config)
-
-            alerts.append({
-                'numero_asesor': alert['numero'],
-                'numero_cliente': numero_cliente_limpio,
-                'nombre_cliente': nombre_cliente,
-                'alerta_resumen': alert['respuesta'] or alert['mensaje'],
-                'timestamp_iso': alert['timestamp'].isoformat() if alert['timestamp'] else None,
-                # Link directo al chat del cliente
-                'chat_link': url_for('ver_chat', numero=numero_cliente_limpio)
-            })
-
-        cursor.close()
-        conn.close()
-
-        return jsonify({'success': True, 'alerts': alerts})
-    except Exception as e:
-        app.logger.error(f"🔴 Error en get_asesor_alerts: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
 
 def get_plan_status_for_user(username, config=None):
     """
@@ -10556,14 +10499,9 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # <--- MODIFICACIÓN CRÍTICA: EXCLUIR NÚMEROS INTERNOS --->
-    exclusion_list = obtener_numeros_a_excluir(config)
-    exclusion_clause = f"AND cm.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
-    # <--- FIN MODIFICACIÓN CRÍTICA --->
-
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
-    cursor.execute(f"""
+    cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
@@ -10584,10 +10522,9 @@ def ver_kanban(config=None):
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         LEFT JOIN conversaciones c ON c.numero = cm.numero
-        WHERE 1=1 {exclusion_clause}  /* <-- APLICA FILTRO AQUÍ */
         GROUP BY cm.numero, cm.columna_id
-        ORDER BY ultima_fecha DESC
-    """, exclusion_list)
+        ORDER BY ultima_fecha DESC;
+    """)
     chats = cursor.fetchall()
 
     # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
@@ -10606,7 +10543,7 @@ def ver_kanban(config=None):
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)  
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
 
 @app.route('/kanban/mover', methods=['POST'])
