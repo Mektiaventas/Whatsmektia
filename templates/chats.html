@@ -46,8 +46,6 @@
                         <img src="{{ avatar_src }}"
                              class="card-avatar" alt="Avatar"
                              onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-
-                        <!-- BANDERA AÑADIDA AQUÍ -->
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
@@ -106,12 +104,6 @@
 
                     <img src="{{ avatar_src_header }}" class="card-avatar" alt="Avatar"
                          style="width: 24px; height: 24px; border-radius: 4px; margin-right: 6px;">
-
-                    <!-- BANDERA EN EL HEADER DEL CHAT SELECCIONADO -->
-                    {% set bandera_header = selected | bandera %}
-                    {% if bandera_header %}
-                    <img src="{{ bandera_header }}" class="card-flag" alt="País" title="País" style="width: 20px; height: 14px; border-radius: 2px; margin-right: 6px;">
-                    {% endif %}
 
                     <span class="alias-view" data-num="{{ selected }}">
                         {{ selected_chat.nombre_mostrado if selected_chat else selected }}
@@ -764,18 +756,6 @@ function formatClientTime(serverTs) {
     return `${day}-${month} ${time}`;
 }
 
-// Función para obtener bandera (igual que en kanban)
-function getCountryFlag(numero) {
-    if (!numero) return null;
-    const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
-    const numStr = numero.toString().replace('+', '');
-    for (let i = 3; i > 0; i--) {
-        const pref = numStr.substring(0, i);
-        if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
-    }
-    return null;
-}
-
 /* State */
 let chatAutoRefresh = true;
 let refreshIntervalMs = 500;
@@ -819,7 +799,7 @@ function crearNuevoChatHTML(chat) {
             imagen = '/static/icons/telegram-icon-dos.png';
         }
         // === FIN ICONOS ===
-    const banderaUrl = getCountryFlag(num) || '';
+    const banderaUrl = escapeHtml(coalesce(chat.bandera, chat.flag, chat.flag_url, ''));
     const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
     const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
     const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
@@ -881,402 +861,441 @@ function actualizarIncrementalChats(chats) {
                         <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
                     </div>
                     <div class="card-meta-row">
-                        <span class="card-time">${chat.ultima_fecha||''}</span>
-                        ${(chat.sin_leer||0)>0?`<span class="card-unread">${chat.sin_leer}</span>`:''}
+                        <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
                     </div>
-                    <div class="card-msg">${chat.ultimo_mensaje||''}</div>
+                    <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                 </div>
             </a>`;
-            const newNode = tmp.firstElementChild;
-            container.insertBefore(newNode, container.firstElementChild);
+            const el = tmp.firstElementChild;
+            if (!el) continue;
+            container.insertBefore(el, container.firstElementChild);
+            const editBtn = el.querySelector('.edit-alias-btn');
+            if (editBtn) editBtn.addEventListener('click', onEditAliasClick);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
         }
     }
-    for (const [num, node] of existing) {
-        if (node) node.remove();
-    }
+
+    existing.forEach((node) => node.remove());
 }
 
-function actualizarChatExistente(node, chat) {
-    const num = chat.numero;
-    const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
-    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+try {
+    const msgsEl = document.getElementById('msgs');
+    if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+} catch (e) {
+    console.warn('Initial scroll to bottom failed:', e);
+}
+
+function actualizarChatExistente(elemento, chat) {
+    if (!elemento) return;
+    const nombre = coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, chat.numero);
+    const aliasView = elemento.querySelector('.alias-view');
+    if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
+
+    // === MANTENER LOS ICONOS CORRECTOS ===
+    const avatarImg = elemento.querySelector('.card-avatar');
+    if (avatarImg) {
+        // Determinar el icono correcto basado en el número/canal
+        let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
+        }
+
+        // Solo actualizar si es diferente
+        if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
+            avatarImg.setAttribute('src', nuevoAvatarSrc);
+        }
+    }
+    // === FIN MANTENER ICONOS ===
+
+
+
+    const timeEl = elemento.querySelector('.card-time');
+    if (timeEl) {
+        timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+    } else {
+        const titleRow = elemento.querySelector('.card-title-row');
+        if (titleRow) {
+            const span = document.createElement('span');
+            span.className = 'card-time';
+            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+            titleRow.appendChild(span);
+        }
+    }
+
+    const bandera = coalesce(chat.bandera, chat.flag, chat.flag_url, '');
+    let flagImg = elemento.querySelector('.card-flag');
+    if (bandera) {
+        if (flagImg) {
+            if (flagImg.getAttribute('src') !== bandera) flagImg.setAttribute('src', bandera);
+        } else {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const img = document.createElement('img');
+                img.className = 'card-flag';
+                img.alt = 'País';
+                img.title = 'País';
+                img.src = bandera;
+                titleRow.insertBefore(img, titleRow.querySelector('.alias-view'));
+            }
+        }
+    } else if (flagImg) {
+        flagImg.remove();
+    }
+
     const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
-    const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
-    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
-    const preview = tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
-
-    // Update alias view
-    const aliasView = node.querySelector('.alias-view');
-    if (aliasView && aliasView.textContent !== nombre) aliasView.textContent = nombre;
-
-    // Update time
-    const timeNode = node.querySelector('.card-time');
-    if (timeNode) timeNode.textContent = ultima ? formatClientTime(ultima) : '';
-
-    // Update unread
-    const unreadNode = node.querySelector('.card-unread');
+    const unreadEl = elemento.querySelector('.card-unread');
     if (sin_leer > 0) {
-        if (!unreadNode) {
-            const metaRow = node.querySelector('.card-meta-row');
+        if (unreadEl) unreadEl.textContent = sin_leer;
+        else {
+            const metaRow = elemento.querySelector('.card-meta-row');
             if (metaRow) {
                 const span = document.createElement('span');
                 span.className = 'card-unread';
                 span.textContent = sin_leer;
                 metaRow.appendChild(span);
             }
-        } else {
-            unreadNode.textContent = sin_leer;
         }
-    } else if (unreadNode) {
-        unreadNode.remove();
+    } else if (unreadEl) {
+        unreadEl.remove();
     }
 
-    // Update message preview
-    const msgNode = node.querySelector('.card-msg');
-    if (msgNode) msgNode.innerHTML = preview;
-
-    // Update selected class
-    if (selectedChatId && String(selectedChatId) === String(num)) {
-        node.classList.add('selected');
-    } else {
-        node.classList.remove('selected');
+    const editBtn = elemento.querySelector('.edit-alias-btn');
+    if (IS_ADMIN) {
+        if (!editBtn) {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'edit-alias-btn';
+                btn.dataset.num = chat.numero;
+                btn.title = 'Editar nombre';
+                btn.textContent = '✏️';
+                titleRow.appendChild(btn);
+                btn.addEventListener('click', onEditAliasClick);
+            }
+        } else {
+            editBtn.dataset.num = chat.numero;
+        }
+    } else if (editBtn) {
+        editBtn.remove();
     }
+
+    const msgEl = elemento.querySelector('.card-msg');
+    const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
+    if (msgEl && msgEl.textContent.trim() !== previewText) {
+        msgEl.textContent = previewText;
+        elemento.classList.add('new-message');
+        setTimeout(() => elemento.classList.remove('new-message'), 1200);
+    }
+
+    if (selectedChatId && String(selectedChatId) === String(chat.numero)) elemento.classList.add('selected');
+    else elemento.classList.remove('selected');
 }
 
-/* ===================== MESSAGES ===================== */
+/* ===================== MESSAGES POLLING & DEDUPE ===================== */
 
-function actualizarMensajes() {
-    if (!selectedChatId || !chatAutoRefresh) return;
-    fetch(`/chats/${selectedChatId}/mensajes/data?since=${lastMessageTimestamp}`, { cache: 'no-store' })
+function buildMessageKeyFor(m) {
+    const id = coalesce(m.id, m[0], m['id']);
+    if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
+        return 'id:' + String(id);
+    }
+    const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+    let ts = coalesce(m.ts_ms, m.ts, 0);
+    if (!ts && m.timestamp) {
+        const parsed = Date.parse(m.timestamp);
+        ts = isNaN(parsed) ? 0 : parsed;
+    }
+    ts = Number(ts) || 0;
+    const rounded = Math.floor(ts / 1000);
+    return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
+}
+
+function pollSelectedMessages() {
+    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
+
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
-            if (!data || !data.messages) return;
-            const ts = Number(data.timestamp) || Date.now();
-            if (ts <= lastMessageTimestamp) return;
-            lastMessageTimestamp = ts;
-            actualizarIncrementalMensajes(data.messages);
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
+
+            let maxTs = lastMessageTimestamp;
+
+            data.messages.forEach(m => {
+                let ts = 0;
+                if (m.timestamp) {
+                    ts = Date.parse(m.timestamp);
+                    if (!isNaN(ts)) {
+                        maxTs = Math.max(maxTs, ts);
+                    }
+                }
+            });
+
+            if (maxTs > lastMessageTimestamp) {
+                lastMessageTimestamp = maxTs + 1;
+            }
+
+            appendUserMessagesToPanel(data.messages);
+            appendAIResponsesToPanel(data.messages);
         })
-        .catch(err => console.error('Error actualizando mensajes:', err));
+        .catch(err => console.error('Error polling messages:', err));
 }
 
-function actualizarIncrementalMensajes(messages) {
+function appendAIResponsesToPanel(messages) {
     const container = document.getElementById('msgs');
     if (!container) return;
-    const existing = new Map();
-    container.querySelectorAll('.msg-box').forEach(node => {
-        const id = node.dataset.msgId;
-        if (id) existing.set(id, node);
-    });
+    let appended = false;
 
-    for (const msg of messages) {
-        const id = msg.id;
-        if (seenMessageKeys.has(id)) continue;
-        seenMessageKeys.add(id);
-        if (existing.has(id)) continue;
+    for (const m of messages) {
+        const aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
+        if (!aiText) continue;
 
-        const tmp = document.createElement('div');
-        const html = crearMensajeHTML(msg);
-        tmp.innerHTML = html;
-        const newNode = tmp.firstElementChild;
-        container.appendChild(newNode);
-    }
-    container.scrollTop = container.scrollHeight;
-}
-
-function crearMensajeHTML(msg) {
-    const isUser = msg.direccion === 'in';
-    const isManual = msg.mensaje === '[Mensaje manual desde web]' && msg.respuesta;
-    const isAI = !isUser && msg.respuesta && msg.respuesta !== '[Respuesta vacía]' && msg.mensaje !== '[Mensaje manual desde web]';
-    const timestamp = msg.timestamp ? formatClientTime(msg.timestamp) : '';
-    let content = '';
-
-    if (isManual) {
-        content = `
-        <div class="manual-indicator">📤 Mensaje enviado:</div>
-        <div class="text-message">${escapeHtml(msg.respuesta)}</div>`;
-    } else if (isAI) {
-        if (msg.respuesta_tipo_mensaje === 'imagen' && msg.respuesta_contenido_extra) {
-            content = `
-            <div class="image-message">
-                <img src="${msg.respuesta_contenido_extra}" alt="Imagen IA" class="whatsapp-image">
-                ${msg.respuesta && msg.respuesta !== 'Analiza esta imagen' && msg.respuesta !== 'El usuario envió una imagen' ? `<div class="image-caption">${escapeHtml(msg.respuesta)}</div>` : ''}
-            </div>`;
-        } else if (msg.respuesta_tipo_mensaje === 'audio' && msg.respuesta_contenido_extra) {
-            content = `
-            <div class="audio-player">
-                <audio id="audio-new-${Date.now()}" class="whatsapp-audio">
-                    <source src="${msg.respuesta_contenido_extra}" type="audio/mpeg">
-                    <source src="${msg.respuesta_contenido_extra}" type="audio/ogg">
-                </audio>
-                <div class="audio-controls">
-                    <button class="audio-play-btn" onclick="toggleAudio('audio-new-${Date.now()}', this)">▶️</button>
-                    <div class="audio-progress" onclick="seekAudio('audio-new-${Date.now()}', this, event)"><div class="audio-progress-bar"></div></div>
-                    <span class="audio-duration" id="duration-new-${Date.now()}">0:00</span>
-                    <a href="${msg.respuesta_contenido_extra}" download="audio-respuesta.mp3" class="audio-download-btn">⬇️</a>
-                </div>
-                ${msg.respuesta ? `<div class="audio-transcription"><strong>Respuesta:</strong> ${escapeHtml(msg.respuesta)}</div>` : ''}
-            </div>`;
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        let key;
+        if (id) {
+            key = 'ai:id:' + id;
+            if (seenMessageKeys.has(key)) continue;
         } else {
-            content = `<div class="text-message">${escapeHtml(msg.respuesta)}</div>`;
-        }
-    } else {
-        if (msg.es_imagen && msg.imagen_url) {
-            content = `
-            <div class="image-message">
-                <img src="${msg.imagen_url}" alt="Imagen" class="whatsapp-image">
-                ${msg.mensaje && msg.mensaje !== 'Analiza esta imagen' ? `<div class="image-caption">${escapeHtml(msg.mensaje)}</div>` : ''}
-            </div>`;
-        } else if (msg.tipo_mensaje === 'audio' && msg.contenido_extra) {
-            content = `
-            <div class="audio-player">
-                <audio id="audio-new-${Date.now()}" class="whatsapp-audio">
-                    <source src="${msg.contenido_extra}" type="audio/ogg">
-                    <source src="${msg.contenido_extra}" type="audio/mpeg">
-                </audio>
-                <div class="audio-controls">
-                    <button class="audio-play-btn" onclick="toggleAudio('audio-new-${Date.now()}', this)">▶️</button>
-                    <div class="audio-progress" onclick="seekAudio('audio-new-${Date.now()}', this, event)"><div class="audio-progress-bar"></div></div>
-                    <span class="audio-duration" id="duration-new-${Date.now()}">0:00</span>
-                    <a href="${msg.contenido_extra}" download="audio-mensaje.ogg" class="audio-download-btn">⬇️</a>
-                </div>
-                ${msg.transcripcion_audio ? `<div class="audio-transcription"><strong>Transcripción:</strong> ${escapeHtml(msg.transcripcion_audio)}</div>` : (msg.mensaje && msg.mensaje !== '[Mensaje manual desde web]' ? `<div class="audio-transcription"><strong>Mensaje:</strong> ${escapeHtml(msg.mensaje)}</div>` : '')}
-            </div>`;
-        } else {
-            content = `<div class="text-message">${escapeHtml(msg.mensaje)}</div>`;
-        }
-    }
-
-    const msgClass = isManual ? 'msg-manual' : (isAI ? 'msg-ai' : 'msg-user');
-    return `
-    <div class="msg-box ${msgClass}" data-msg-id="${msg.id || ''}">
-        <div class="message-content">${content}</div>
-        <div class="msg-meta">${timestamp}</div>
-    </div>`.trim();
-}
-
-/* ===================== ALIAS EDIT ===================== */
-
-function setupAliasEdit() {
-    document.addEventListener('click', e => {
-        const btn = e.target.closest('.edit-alias-btn');
-        if (!btn) return;
-        e.preventDefault();
-        const num = btn.dataset.num;
-        if (!num) return;
-        toggleAliasEdit(num);
-    });
-
-    document.addEventListener('input', e => {
-        const input = e.target;
-        if (!input.matches('.alias-edit input')) return;
-        const num = input.dataset.num;
-        if (!num) return;
-        if (aliasTimers.has(num)) clearTimeout(aliasTimers.get(num));
-        aliasTimers.set(num, setTimeout(() => guardarAlias(num, input.value), 800));
-    });
-
-    document.addEventListener('keydown', e => {
-        const input = e.target;
-        if (!input.matches('.alias-edit input')) return;
-        if (e.key === 'Enter') {
-            e.preventDefault();
-            const num = input.dataset.num;
-            if (!num) return;
-            guardarAlias(num, input.value);
-            toggleAliasEdit(num, false);
-        } else if (e.key === 'Escape') {
-            e.preventDefault();
-            const num = input.dataset.num;
-            if (!num) return;
-            toggleAliasEdit(num, false);
-        }
-    });
-
-    document.addEventListener('focusout', e => {
-        const input = e.target;
-        if (!input.matches('.alias-edit input')) return;
-        const num = input.dataset.num;
-        if (!num) return;
-        setTimeout(() => {
-            if (!document.activeElement || document.activeElement !== input) {
-                guardarAlias(num, input.value);
-                toggleAliasEdit(num, false);
+            let ts = Number(coalesce(m.ts_ms, 0));
+            if (!ts && m.timestamp) {
+                const parsed = Date.parse(m.timestamp);
+                ts = isNaN(parsed) ? Date.now() : parsed;
             }
-        }, 200);
-    });
-}
+            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+            if (seenMessageKeys.has(key)) continue;
+        }
 
-function toggleAliasEdit(num, forceState = null) {
-    if (isEditingAlias && isEditingAlias !== num) {
-        toggleAliasEdit(isEditingAlias, false);
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-ai';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta">${formatClientTime(tsVal)}</div>`;
+
+        container.appendChild(div);
+        appended = true;
+
+        seenMessageKeys.add(key);
+        if (id) seenMessageKeys.add('id:' + id);
     }
-    const container = document.querySelector(`[data-chat-num="${num}"]`);
-    const headerContainer = document.querySelector(`.chat-panel-header[data-num="${num}"]`);
-    if (!container && !headerContainer) return;
 
-    const view = container?.querySelector('.alias-view');
-    const edit = container?.querySelector('.alias-edit');
-    const input = container?.querySelector('.alias-edit input');
-    const headerView = headerContainer?.querySelector('.alias-view');
-    const headerEdit = headerContainer?.querySelector('.alias-edit');
-    const headerInput = headerContainer?.querySelector('.alias-edit input');
-
-    const newState = forceState !== null ? forceState : (view?.style.display !== 'none');
-    if (newState) {
-        isEditingAlias = num;
-        if (view) view.style.display = 'none';
-        if (edit) edit.style.display = 'inline';
-        if (input) { input.focus(); input.select(); }
-        if (headerView) headerView.style.display = 'none';
-        if (headerEdit) headerEdit.style.display = 'inline';
-        if (headerInput) { headerInput.focus(); headerInput.select(); }
-    } else {
-        isEditingAlias = false;
-        if (view) view.style.display = 'inline';
-        if (edit) edit.style.display = 'none';
-        if (headerView) headerView.style.display = 'inline';
-        if (headerEdit) headerEdit.style.display = 'none';
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
     }
 }
 
-function guardarAlias(num, nuevoAlias) {
-    if (!num) return;
-    const payload = { alias: nuevoAlias.trim() || null };
-    fetch(`/chats/${num}/alias`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.success) {
-            const view = document.querySelector(`[data-chat-num="${num}"] .alias-view`);
-            const headerView = document.querySelector(`.chat-panel-header[data-num="${num}"] .alias-view`);
-            if (view) view.textContent = data.nombre_mostrado || num;
-            if (headerView) headerView.textContent = data.nombre_mostrado || num;
-        } else {
-            console.error('Error guardando alias:', data.error);
+function appendUserMessagesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    let appended = false;
+
+    for (const m of messages) {
+        const key = buildMessageKeyFor(m);
+        if (!key) continue;
+        if (seenMessageKeys.has(key)) {
+            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+            continue;
         }
-    })
-    .catch(err => console.error('Error guardando alias:', err));
+
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+        if (!content || (respuesta && respuesta.trim().length > 0)) {
+            if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            seenMessageKeys.add(key);
+            continue;
+        }
+
+        let ts = coalesce(m.ts_ms, 0);
+        if (!ts && m.timestamp) {
+            const parsed = Date.parse(m.timestamp);
+            ts = isNaN(parsed) ? Date.now() : parsed;
+        }
+        ts = Number(ts) || Date.now();
+
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-user';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+
+        container.appendChild(div);
+        appended = true;
+        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        seenMessageKeys.add(key);
+    }
+
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
 }
 
-/* ===================== EMOJI PICKER ===================== */
+/* ===================== ALIAS EDITING & EMOJI ===================== */
 
-function setupEmojiPicker() {
-    const btn = document.getElementById('emoji-pick-btn');
-    const picker = document.getElementById('emoji-picker-list');
-    const input = document.getElementById('mensaje-texto');
-    if (!btn || !picker || !input) return;
-
-    const emojis = ['😀','😂','😍','🤔','😎','😢','😡','👍','👎','❤️','🔥','🎉','🤖','⭐','💯','👋','🙏','✌️','🤝','💪','👀','👁️','🧠','💔','💥','💫','💦','💨','🐶','🐱','🦁','🐯','🦒','🦊','🐻','🐼','🐨','🐵','🦄','🦓','🐴','🦌','🐮','🐷','🐭','🐹','🐰','🐻','🐔','🐧','🐦','🐤','🦆','🦅','🦉','🦇','🐺','🐗','🐝','🐛','🦋','🐌','🐞','🐜','🦗','🕷️','🦂','🐢','🐍','🦎','🦖','🦕','🐙','🦑','🦐','🦞','🦀','🐡','🐠','🐟','🐬','🐳','🐋','🦈','🐊','🐅','🐆','🦓','🦍','🦧','🐘','🦛','🦏','🐪','🐫','🦒','🦘','🐃','🐂','🐄','🐎','🐖','🐏','🐑','🐐','🦙','🐕','🐩','🐈','🐓','🦃','🦚','🦜','🦢','🦩','🐇','🦝','🦨','🦡','🦦','🦥','🐁','🐀','🐿️','🦔','🌵','🎄','🌲','🌳','🌴','🌱','🌿','☘️','🍀','🎍','🎋','🍃','🍂','🍁','🍄','🐚','🌾','💐','🌷','🌹','🥀','🌺','🌸','🌼','🌻','🌞','🌝','🌛','🌜','🌚','🌕','🌖','🌗','🌘','🌑','🌒','🌓','🌔','🌙','🌎','🌍','🌏','🪐','💫','⭐','🌟','✨','⚡','☄️','💥','🔥','🌈','☀️','🌤️','⛅','🌥️','☁️','🌦️','🌧️','⛈️','🌩️','🌨️','❄️','☃️','⛄','💨','💧','💦','☔','☂️','🌊','🎂','🍰','🧁','🥧','🍦','🍨','🍩','🍪','🎂','🍫','🍬','🍭','🍮','🍯','🍼','🥛','☕','🍵','🧃','🥤','🍶','🍺','🍻','🥂','🍷','🥃','🍸','🍹','🧉','🍾','🧊','🥄','🍴','🍽️','🥣','🥡','🥢','🧂','⚽','🏀','🏈','⚾','🥎','🎾','🏐','🏉','🥏','🎱','🪀','🏓','🏸','🏒','🏑','🥍','🏏','🎿','⛷️','🏂','🪂','🏋️','🤼','🤸','⛹️','🤾','🚴','🏇','🧘','🏄','🏊','🤽','🚣','🧗','🚵','🎯','🎮','🎲','🎰','🎳'];
-
-    picker.innerHTML = emojis.map(e => `<span class="emoji-option">${e}</span>`).join('');
-    picker.querySelectorAll('.emoji-option').forEach(span => {
-        span.addEventListener('click', () => {
-            const start = input.selectionStart;
-            const end = input.selectionEnd;
-            const text = input.value;
-            input.value = text.substring(0, start) + span.textContent + text.substring(end);
-            input.focus();
-            input.selectionStart = input.selectionEnd = start + span.textContent.length;
-            picker.style.display = 'none';
-        });
-    });
-
-    btn.addEventListener('click', () => {
-        picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
-    });
-
-    document.addEventListener('click', e => {
-        if (!picker.contains(e.target) && e.target !== btn) {
-            picker.style.display = 'none';
-        }
+function enhanceAliasButtons() {
+    document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+        btn.removeEventListener('click', onEditAliasClick);
+        btn.addEventListener('click', onEditAliasClick);
     });
 }
 
-/* ===================== AUDIO PLAYER ===================== */
+function onEditAliasClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content');
+    activarEdicionAlias(parent);
+}
 
-function toggleAudio(audioId, btn) {
-    const audio = document.getElementById(audioId);
+function activarEdicionAlias(parent) {
+    if (!parent) return;
+    const view = parent.querySelector('.alias-view');
+    const edit = parent.querySelector('.alias-edit');
+    if (!view || !edit) return;
+    const input = edit.querySelector('input[type=text]');
+    if (!input) return;
+    view.style.display = 'none';
+    edit.style.display = 'flex';
+    input.focus();
+    input.select();
+    isEditingAlias = true;
+
+    const finish = () => {
+        const nuevo = (input.value || '').trim();
+        edit.style.display = 'none';
+        view.style.display = '';
+        if (!nuevo) return;
+        view.textContent = nuevo;
+        fetch(`/contactos/${input.dataset.num}/alias`, {
+            method: 'POST',
+            body: new URLSearchParams({ alias: nuevo }),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+        .catch(err => console.warn('Error guardando alias:', err))
+        .finally(() => { isEditingAlias = false; });
+    };
+
+    input.onblur = () => setTimeout(finish, 0);
+    input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            finish();
+        }
+        if (ev.key === 'Escape') {
+            edit.style.display = 'none';
+            view.style.display = '';
+            isEditingAlias = false;
+        }
+    };
+}
+
+/* ===================== AUDIO & UI HELPERS ===================== */
+
+function toggleChatList() {
+    document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
+}
+
+function toggleAudio(id, btn) {
+    const audio = document.getElementById(id);
+    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
+    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
     if (!audio) return;
-    const progressBar = btn.closest('.audio-controls').querySelector('.audio-progress-bar');
-    const durationSpan = btn.closest('.audio-controls').querySelector('.audio-duration');
-
     if (audio.paused) {
         audio.play().then(() => {
             btn.textContent = '⏸️';
-            updateAudioProgress(audio, progressBar, durationSpan);
-        }).catch(err => console.error('Error playing audio:', err));
+            audio.ontimeupdate = () => {
+                if (audio.duration) {
+                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
+                    if (durSpan) {
+                        const m = Math.floor(audio.currentTime / 60);
+                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                        durSpan.textContent = `${m}:${s}`;
+                    }
+                }
+            };
+        }).catch(console.error);
     } else {
         audio.pause();
         btn.textContent = '▶️';
     }
 }
 
-function updateAudioProgress(audio, progressBar, durationSpan) {
-    if (!audio.duration) {
-        setTimeout(() => updateAudioProgress(audio, progressBar, durationSpan), 100);
-        return;
-    }
-    const update = () => {
-        if (audio.paused) return;
-        const percent = (audio.currentTime / audio.duration) * 100;
-        progressBar.style.width = percent + '%';
-        durationSpan.textContent = formatTime(audio.currentTime) + ' / ' + formatTime(audio.duration);
-        requestAnimationFrame(update);
-    };
-    update();
-}
-
-function seekAudio(audioId, progressBar, event) {
-    const audio = document.getElementById(audioId);
-    if (!audio || !audio.duration) return;
+function seekAudio(id, progressBar, evt) {
+    const audio = document.getElementById(id);
+    const inner = progressBar.querySelector('.audio-progress-bar');
     const rect = progressBar.getBoundingClientRect();
-    const percent = (event.clientX - rect.left) / rect.width;
-    audio.currentTime = percent * audio.duration;
+    const clickX = evt.clientX - rect.left;
+    if (audio && audio.duration) {
+        audio.currentTime = (clickX / rect.width) * audio.duration;
+        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+    }
 }
-
-function formatTime(seconds) {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
-}
-
-/* ===================== MOBILE CHAT LIST TOGGLE ===================== */
-
-function toggleChatList() {
-    const list = document.querySelector('.chat-list-v2');
-    if (list) list.classList.toggle('mobile-visible');
-}
-
-/* ===================== INIT ===================== */
 
 document.addEventListener('DOMContentLoaded', () => {
-    setupAliasEdit();
-    setupEmojiPicker();
+    console.log('DOM cargado - inicializando componentes');
+    enhanceAliasButtons();
 
-    // Initialize seen messages from DOM
-    document.querySelectorAll('.msg-box[data-msg-id]').forEach(node => {
-        const id = node.dataset.msgId;
-        if (id) seenMessageKeys.add(id);
-    });
-
-    // Start polling
-    chatsIntervalHandle = setInterval(actualizarListaChats, refreshIntervalMs);
-    if (selectedChatId) {
-        messagesIntervalHandle = setInterval(actualizarMensajes, messagePollIntervalMs);
+    // Start automatic chat-list refresh
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats();
+        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+            if (!document.hidden) actualizarListaChats();
+        }, refreshIntervalMs);
     }
 
-    // Auto-scroll messages to bottom
-    const msgsWrap = document.getElementById('msgs');
-    if (msgsWrap) msgsWrap.scrollTop = msgsWrap.scrollHeight;
-});
+    // Initialize message polling if chat is selected
+    function initMessagesStateFromDOM() {
+        try {
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
+            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            let maxTs = Number(lastMessageTimestamp) || 0;
+            nodes.forEach(n => {
+                const idAttr = n.getAttribute('data-msg-id');
+                const id = Number(idAttr) || 0;
+                if (id) {
+                    seenMessageKeys.add('id:' + String(id));
+                }
+            });
+            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+        } catch (e) {
+            console.warn('initMessagesStateFromDOM failed', e);
+        }
+    }
 
-// Cleanup on page unload
-window.addEventListener('beforeunload', () => {
-    if (chatsIntervalHandle) clearInterval(chatsIntervalHandle);
-    if (messagesIntervalHandle) clearInterval(messagesIntervalHandle);
+    if (selectedChatId) {
+        initMessagesStateFromDOM();
+        if (!messagesIntervalHandle) {
+            pollSelectedMessages();
+            messagesIntervalHandle = setInterval(() => {
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
+        } else {
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => {
+                    if (!document.hidden) actualizarListaChats();
+                }, refreshIntervalMs);
+            }
+            if (selectedChatId && !messagesIntervalHandle) {
+                initMessagesStateFromDOM();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
+        }
+    });
 });
 </script>
-{% endblock %} 
+{% endblock %}
+ 
