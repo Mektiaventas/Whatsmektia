@@ -38,11 +38,11 @@
             <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
                     <div class="card-title-row">
-                        <!---<div class="card-avatar-section">
+                        <div class="card-avatar-section">
                             <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
                                  class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-                        </div>--->
+                        </div>
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
@@ -682,10 +682,11 @@ function actualizarListaChats() {
 const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
 /* Generador coherente de HTML para nuevos elementos de la lista.
-   Produce exactamente la misma estructura que el template Jinja. */
+   Incluye avatar (imagen_url) y bandera. */
 function crearNuevoChatHTML(chat) {
     const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
     const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+    const imagen = escapeHtml(coalesce(chat.imagen_url, chat.avatar, '/static/icons/default-avatar.png'));
     const banderaUrl = escapeHtml(coalesce(chat.bandera, chat.flag, chat.flag_url, ''));
     const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
     const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
@@ -698,6 +699,9 @@ function crearNuevoChatHTML(chat) {
     <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
         <div class="card-content">
             <div class="card-title-row">
+                <div class="card-avatar-section">
+                    <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                </div>
                 ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
                 <span class="alias-view" data-num="${num}">${nombre}</span>
                 <span class="card-time">${ultima ? formatClientTime(ultima) : ''}</span>
@@ -778,6 +782,27 @@ function actualizarChatExistente(elemento, chat) {
     const nombre = coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, chat.numero);
     const aliasView = elemento.querySelector('.alias-view');
     if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
+
+    // Avatar: sólo actualizar si viene imagen nueva; si no viene, no lo tocamos (preservar)
+    const avatarImg = elemento.querySelector('.card-avatar');
+    const imagenUrl = coalesce(chat.imagen_url, chat.avatar, '');
+    if (imagenUrl) {
+        if (avatarImg) {
+            if (avatarImg.getAttribute('src') !== imagenUrl) avatarImg.setAttribute('src', imagenUrl);
+        } else {
+            const avatarSection = document.createElement('div');
+            avatarSection.className = 'card-avatar-section';
+            const img = document.createElement('img');
+            img.className = 'card-avatar';
+            img.alt = 'Avatar';
+            img.src = imagenUrl;
+            img.onerror = function () { this.onerror = null; this.src = '/static/icons/default-avatar.png'; };
+            avatarSection.appendChild(img);
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) titleRow.insertBefore(avatarSection, titleRow.firstChild);
+        }
+    }
+    // Nota: si no hay imagenUrl no hacemos cambio al avatar para evitar que se vuelva idéntico a otros.
 
     // Tiempo / card-time
     const timeEl = elemento.querySelector('.card-time');
