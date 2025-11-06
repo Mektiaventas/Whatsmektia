@@ -256,7 +256,6 @@
     </div>
 </div>
 
-<!-- Chart.js y plugin datalabels -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
 
@@ -461,7 +460,15 @@
 
             // 🆕 Chart: Platform Distribution (Doughnut)
             const platformCtx = document.getElementById('platformChart').getContext('2d');
-            const platformData = platformJson.conversations; // Usar el campo 'conversations' del JSON
+            const platformData = platformJson.conversations;
+
+            // Definir los colores y mapeo de iconos
+            const platformColors = ['#25D366', '#0088CC', '#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa'];
+            const iconMap = {
+                'WhatsApp': '/static/icons/whatsapp-icon.png',
+                'Telegram': '/static/icons/telegram-icon.png',
+                // Añade más plataformas si es necesario
+            };
 
             if (platformChart) platformChart.destroy();
             platformChart = new Chart(platformCtx, {
@@ -471,19 +478,54 @@
                     datasets: [{
                         label: 'Conversaciones por Plataforma',
                         data: platformData.values,
-                        // Colores de ejemplo
-                        backgroundColor: ['#1f4e79', '#3f80b5', '#60a3cc', '#81c6e3', '#a2e9fa'],
+                        backgroundColor: platformColors,
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: 'white',
+                                // 💥 Implementación de la función customizadora para usar iconos
+                                generateLabels: (chart) => {
+                                    const data = chart.data.datasets[0];
+                                    return data.data.map((value, i) => {
+                                        const label = chart.data.labels[i];
+                                        const iconUrl = iconMap[label]; // Obtener URL del icono
+
+                                        // Crear una etiqueta HTML personalizada si hay URL de icono
+                                        if (iconUrl) {
+                                            return {
+                                                // Usamos un pequeño hack HTML para inyectar la imagen en el texto de la leyenda
+                                                text: `<img src="${iconUrl}" style="height:16px; margin-right:6px; vertical-align:middle;"> ${label}`,
+                                                fillStyle: data.backgroundColor[i],
+                                                strokeStyle: data.borderColor,
+                                                lineWidth: data.borderWidth,
+                                                // Se usa index y hidden para que Chart.js pueda controlar la visibilidad al hacer clic
+                                                hidden: chart.getDatasetMeta(0).data[i].hidden,
+                                                index: i
+                                            };
+                                        }
+
+                                        // Retornar etiqueta estándar si no hay icono mapeado
+                                        return {
+                                            text: label,
+                                            fillStyle: data.backgroundColor[i],
+                                            strokeStyle: data.borderColor,
+                                            lineWidth: data.borderWidth,
+                                            hidden: chart.getDatasetMeta(0).data[i].hidden,
+                                            index: i
+                                        };
+                                    });
+                                }
+                            }
+                        },
                         datalabels: {
                             color: 'white',
                             formatter: (value, context) => {
-                                // Muestra porcentaje junto con el valor
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
                                 const percentage = Math.round((value / total) * 100) + '%';
                                 return percentage;
@@ -497,7 +539,30 @@
                         }
                     }
                 },
-                plugins: [ChartDataLabels]
+                plugins: [
+                    ChartDataLabels,
+                    // Plugin para habilitar HTML en la leyenda
+                    {
+                        id: 'htmlLegend',
+                        afterUpdate: (chart) => {
+                            // Buscar el contenedor <ul> generado por Chart.js
+                            const ul = chart.legend.legendItems[0]?.element.closest('ul');
+                            if (ul) {
+                                ul.style.listStyle = 'none'; // Asegurar que no haya viñetas
+                                ul.querySelectorAll('li').forEach((li, i) => {
+                                    // Obtener la etiqueta generada por generateLabels
+                                    const item = chart.options.plugins.legend.labels.generateLabels(chart)[i];
+                                    // Si la etiqueta contiene la imagen, inyectarla
+                                    if (item && item.text.includes('<img')) {
+                                        li.style.cursor = 'pointer';
+                                        const text = li.querySelector('span'); // El texto visible está dentro de un span
+                                        if (text) text.innerHTML = item.text;
+                                    }
+                                });
+                            }
+                        }
+                    }
+                ]
             });
 
 
@@ -523,7 +588,7 @@
       if (overviewChart) overviewChart.resize();
       if (remainingChart) remainingChart.resize();
       if (dailyChart) dailyChart.resize();
-      if (platformChart) platformChart.resize(); // 🆕 Nuevo resize
+      if (platformChart) platformChart.resize(); // 🆕 Asegurar que el nuevo gráfico también se redimensiona
   });
 </script>
 {% endblock %}
