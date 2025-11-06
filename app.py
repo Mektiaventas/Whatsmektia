@@ -7609,6 +7609,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     incoming_saved: boolean indicating the webhook already persisted the incoming message
                     (so callers can avoid double-saving). Default False for backward compatibility.
     """ 
+    from urllib.parse import urlparse 
+    from os.path import basename, join 
+    import os # Asegurar que 'os' también esté importado/disponible
     try:
         if config is None:
             config = obtener_configuracion_por_host()
