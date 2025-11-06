@@ -264,7 +264,9 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     Convierte texto a audio usando la API de OpenAI TTS (tts-1), lo guarda como OGG/OPUS
     y devuelve la URL pública para WhatsApp.
     """
-
+    import os
+    import requests
+    from openai import OpenAI
     
     try:
         from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegurar que las variables globales son accesibles
