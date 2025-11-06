@@ -9891,14 +9891,23 @@ def obtener_url_archivo_telegram(file_id, token):
 
 def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
     """
-    Envía un archivo de audio (nota de voz, usualmente OGG) a Telegram usando el método sendVoice.
+    Envía un archivo de audio (nota de voz, usualmente OGG/OPUS) a Telegram usando el método sendVoice.
+    
     chat_id: ID del chat de Telegram (solo el número, no el prefijo 'tg_').
     audio_file_path: Ruta del archivo .ogg en tu servidor local.
     """
+    import requests
+    import os
+    
     send_voice_url = f"https://api.telegram.org/bot{token_bot}/sendVoice"
     
     # ⚠️ Telegram espera el archivo como un archivo de subida, no una URL
     try:
+        # Verificar si el archivo existe antes de intentar abrirlo
+        if not os.path.exists(audio_file_path):
+            app.logger.error(f"❌ TELEGRAM: Archivo de audio no encontrado: {audio_file_path}")
+            return False
+
         # Abrir el archivo de audio en modo binario
         with open(audio_file_path, 'rb') as audio_file:
             files = {'voice': audio_file}
@@ -9908,15 +9917,19 @@ def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
             
             # Realizar la solicitud POST multipart/form-data
             response = requests.post(send_voice_url, files=files, data=data, timeout=30)
-            response.raise_for_status() # Lanza un error si la solicitud falló
+            
+            # 💥 BLOQUE DE DIAGNÓSTICO DETALLADO 💥
+            if response.status_code != 200:
+                app.logger.error(f"❌ TELEGRAM ERROR {response.status_code} al enviar voz. Respuesta API: {response.text}")
+                # Forzar la excepción para ser capturada en el bloque 'except'
+                response.raise_for_status() 
+            # 💥 FIN BLOQUE DE DIAGNÓSTICO 💥
             
             app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {chat_id}")
             return True
             
-    except FileNotFoundError:
-        app.logger.error(f"❌ TELEGRAM: Archivo de audio no encontrado: {audio_file_path}")
-        return False
     except requests.exceptions.RequestException as e:
+        # Se captura el error lanzado por response.raise_for_status() o un error de conexión
         app.logger.error(f"❌ TELEGRAM: Error al enviar audio: {e}")
         return False
     except Exception as e:
