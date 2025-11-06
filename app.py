@@ -7612,7 +7612,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     try:
         if config is None:
             config = obtener_configuracion_por_host()
-
+        # 💥 NUEVA LÍNEA: Obtener la configuración completa (que incluye el tono de 'personalizacion')
+        cfg_full = load_config(config) 
+        tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
         texto_norm = (texto or "").strip().lower()
         # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
         if es_imagen and imagen_base64:
