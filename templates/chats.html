@@ -33,56 +33,81 @@
             <input type="text" placeholder="Buscar chats..." class="search-input">
         </div>
 
-        <div class="chat-items">
-            {% for chat in chats %}
-            <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
-                <div class="card-content">
-                    <div class="card-title-row">
-                        <div class="card-avatar-section">
-                            <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
-                                 class="card-avatar" alt="Avatar"
-                                 onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-                        </div>
-                        {% set bandera = chat.numero | bandera %}
-                        {% if bandera %}
-                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-                        {% endif %}
+        <!-- En la línea ~35, cambia esta sección: -->
+        <div class="card-title-row">
+            <div class="card-avatar-section">
+                <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                     class="card-avatar" alt="Avatar"
+                     onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
+            </div>
+            {% set bandera = chat.numero | bandera %}
+            {% if bandera %}
+            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+            {% endif %}
 
-                        <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
-                        <span class="card-time">
-                            {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha|format_time_24h }}
-                            {% endif %}
-                        </span>
-                        <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
-                        </span>
+            <span class="alias-view" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
+            <span class="card-time">
+                {% if chat.ultima_fecha %}
+                {{ chat.ultima_fecha|format_time_24h }}
+                {% endif %}
+            </span>
+            <span class="alias-edit" style="display:none;">
+                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" maxlength="100" style="width:110px;">
+            </span>
 
-                        {% if is_admin %}
-                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
-                        {% endif %}
-                    </div>
+            {% if is_admin %}
+            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
+            {% endif %}
+        </div>
 
-                    <div class="card-meta-row">
+        <!-- POR ESTA ESTRUCTURA (similar al kanban): -->
+        <div class="card-title-row">
+            <div class="card-avatar-section">
+                <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
+                     class="card-avatar" alt="Avatar"
+                     onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
+            </div>
+            {% set bandera = chat.numero | bandera %}
+            {% if bandera %}
+            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+            {% endif %}
+
+            <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+
+            {% if is_admin %}
+            <span class="alias-edit" style="display:none;">
+                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
+            </span>
+            <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
+            {% endif %}
+
+            <span class="card-time">
+                {% if chat.ultima_fecha %}
+                {{ chat.ultima_fecha|format_time_24h }}
+                {% endif %}
+            </span>
+        </div>
+
+        <div class="card-meta-row">
 
 
-                        {% if chat.sin_leer and chat.sin_leer > 0 %}
-                        <span class="card-unread">{{ chat.sin_leer }}</span>
-                        {% endif %}
-                    </div>
+            {% if chat.sin_leer and chat.sin_leer > 0 %}
+            <span class="card-unread">{{ chat.sin_leer }}</span>
+            {% endif %}
+        </div>
 
-                    <div class="card-msg">
-                        {% if chat.ultimo_mensaje %}
-                        {% if chat.tipo_mensaje == 'imagen' %}
-                        📷 Imagen
-                        {% else %}
-                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
-                        {% endif %}
-                        {% else %}
-                        &nbsp;
-                        {% endif %}
-                    </div>
-                </div>
+        <div class="card-msg">
+            {% if chat.ultimo_mensaje %}
+            {% if chat.tipo_mensaje == 'imagen' %}
+            📷 Imagen
+            {% else %}
+            {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+            {% endif %}
+            {% else %}
+            &nbsp;
+            {% endif %}
+        </div>
+</div>
             </a>
             {% endfor %}
         </div>
@@ -93,28 +118,24 @@
         {% if selected %}
         <div class="chat-panel-header" data-num="{{ selected }}">
             <div class="chat-header-info">
+
                 <div class="chat-title">
-                    <span class="alias-view">
+                    <span class="alias-view" data-num="{{ selected }}">
                         {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
                     </span>
-                    <span class="alias-edit" style="display:none;">
-                        {% set chat_info_edit = chats | selectattr("numero", "equalto", selected) | first %}
-                        <input type="text" value="{{ chat_info_edit.alias if chat_info_edit and chat_info_edit.alias else (chat_info_edit.nombre if chat_info_edit and chat_info_edit.nombre else '') }}"
-                               data-num="{{ selected }}" maxlength="100">
-                    </span>
+
                     {% if is_admin %}
-                    <button type="button"
-                            class="edit-alias-btn"
-                            data-num="{{ selected }}"
-                            title="Editar nombre"
-                            onclick="activarEdicionAlias(this.closest('.card-title-row') || this.closest('.chat-title') || this.closest('.card-content'))"
-                            onpointerdown="activarEdicionAlias(this.closest('.card-title-row') || this.closest('.chat-title') || this.closest('.card-content'))">
-                        ✏️
-                    </button>
+                    <span class="alias-edit" style="display:none;">
+                        {% set chat_info = (chats | selectattr('numero', 'equalto', selected) | first) %}
+                        <input type="text"
+                               value="{{ chat_info.alias if chat_info and chat_info.alias else (chat_info.nombre if chat_info and chat_info.nombre else selected) }}"
+                               data-num="{{ selected }}"
+                               maxlength="100"
+                               style="width:110px;">
+                    </span>
+                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">✏️</button>
                     {% endif %}
-                </div>
-                <span class="chat-number">{{ selected }}</span>
-            </div>
+                </div> 
 
             <div class="chat-controls">
                 <span class="badge {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}bg-success{% else %}bg-warning{% endif %}">
@@ -606,6 +627,91 @@
     .emoji-picker-list {
         z-index: 1400 !important;
     }
+
+    .emoji-picker-list {
+        z-index: 1400 !important;
+    }
+
+    /* ===== ESTILOS COMPACTOS PARA CHATS (IGUAL QUE KANBAN) ===== */
+    .card-avatar {
+        width: 24px !important;
+        height: 24px !important;
+        border-radius: 4px !important;
+        margin-right: 0px;
+        flex: 0 0 auto;
+        object-fit: cover !important;
+    }
+
+    .card-title-row { 
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+
+        .card-title-row .alias-view {
+            font-size: 0.82rem;
+            font-weight: 600;
+            line-height: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: calc(100% - 90px);
+        }
+
+    .card-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        margin-left: 6px;
+    }
+
+        .card-meta-row span {
+            font-size: 0.62rem;
+            color: rgba(255,255,255,0.9);
+            line-height: 1;
+        }
+
+    .edit-alias-btn {
+        font-size: 11px;
+        padding: 1px 3px;
+        margin-left: 6px;
+    }
+
+    .card-msg {
+        font-size: 0.75rem;
+        color: #e2e5ed;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: normal;
+        min-height: 1rem;
+        font-weight: 400;
+        max-width: 70%;
+        letter-spacing: 0.01rem;
+        margin-top: 2px;
+    }
+
+    .card-unread {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #00E091;
+        color: #fff;
+        border-radius: 10px;
+        padding: 0.5px 8px;
+        font-size: 0.89em;
+        font-weight: 600;
+        min-width: 14px;
+        text-align: center;
+        box-shadow: 0 0 5px #00e09144;
+        z-index: 2;
+    }
+</style> 
 </style>
 
 <script>
@@ -1367,7 +1473,7 @@ function seekAudio(id, progressBar, evt) {
                     messagesIntervalHandle = setInterval(() => { if (!document.hidden) pollSelectedMessages(); }, messagePollIntervalMs);
                 }
             }
-        });
+        }); 
     });
 </script>
-{% endblock %}  
+{% endblock %}   
