@@ -42,253 +42,313 @@
 
         .plan-box .plan-details {
             display: inline-flex;
-            gap: 12px;
-            align-items: center;
-            flex-wrap: wrap;
+            flex-direction: column;
+            white-space: normal;
         }
 
-    .plan-metric {
-        display: inline-block;
-        margin-right: 8px;
-        white-space: nowrap;
-    }
+        .plan-box .plan-icon {
+            font-size: 1.2rem;
+        }
+
+        .plan-box .plan-text {
+            font-weight: bold;
+        }
+
+        .plan-box .plan-limit {
+            font-size: 0.8rem;
+            opacity: 0.7;
+            margin-top: -3px;
+        }
+
 
     .tabs {
-        margin-bottom: 0.3rem; /* bring tabs a bit closer */
+        display: flex;
+        gap: 1rem;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+        margin-bottom: 1rem;
     }
 
         .tabs a {
-            padding: 8px 8px; /* slightly slimmer buttons */
+            padding: 8px 15px;
             text-decoration: none;
-            border-radius: 20px;
-            border: 2px solid #1f4e79;
-            color: #1f4e79;
-            margin-right: 10px;
-            display: inline-block;
-            margin-bottom: 8px;
-            cursor: pointer;
-            font-size: 0.95rem;
+            color: #fff;
+            opacity: 0.7;
+            font-weight: 500;
+            transition: opacity 0.2s, background-color 0.2s;
+            border-bottom: 3px solid transparent;
         }
 
             .tabs a.active {
-                background-color: #1f4e79;
-                color: white;
+                opacity: 1;
+                font-weight: 600;
+                border-bottom: 3px solid #007bff; /* Color de acento */
             }
 
-    /* Stats container: make it more compact and cards sized close to plan-box */
-    .stats {
-        margin-top: 6px; /* small lift */
-        display: flex;
-        flex-wrap: wrap;
-        gap: 0.6rem;
-        align-items: flex-start;
-        justify-content: flex-start;
-    }
-
-    /* Adjusted: make stat cards nearly the width of plan-box (half each) so they match visually */
-    .stat-card {
-        background: rgba(255, 255, 255, 0.95);
-        /* reduced internal vertical padding and extra horizontal padding for compactness */
-        padding: 4px 8px;
-        border-radius: 8px;
-        border-left: 6px solid #1f4e79;
-        width: auto;
-        /* fixed: valid calc syntax with spaces around the minus */
-        flex: 1 1 calc(50% - 0.6rem); /* ~half of plan-box max-width (420px) so two cards align closely with plan-box width */
-        display: flex;
-        flex-direction: column;
-        /* remove gap between title and value so they sit tighter */
-        gap: 0;
-        font-size: 0.78rem;
-        align-items: center;
-        justify-content: center;
-        text-align: center;
-        box-sizing: border-box;
-        /* keep min-height small to allow compact layout */
-        min-height: 30px;
-    }
-
-        /* make the numeric value stand out and allow full height */
-        .stat-card > div {
-            font-size: 1.05rem;
-            font-weight: 600;
-            color: #222;
-            line-height: 1.1;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            /* use full width so the inner element doesn't artificially constrain the card */
-            width: 100%;
-            box-sizing: border-box;
-            /* remove extra padding so value sits closer to the title */
-            padding: 0;
-            margin-top: 2px;
-            overflow: visible; /* allow full number to show */
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        .stat-card strong {
-            display: block;
-            font-size: 0.78rem;
-            font-weight: 300;
-            color: #333;
-            /* minimal spacing between title and value */
-            margin-bottom: 2px;
-            line-height: 1;
-        }
-
-    .chart-container {
-        margin-top: 1rem; /* slightly less gap above charts */
-        width: 100%;
-        position: relative;
-        height: 400px;
-    }
-    /* Responsive */
-    @media (max-width: 768px) {
-        .header-row {
-            flex-direction: column;
-            align-items: stretch;
-        }
-
-        .plan-box {
-            justify-content: flex-start;
-            white-space: normal;
-            overflow: visible;
-            max-width: 100%;
-            padding: 10px;
-            font-size: 0.95rem;
-        }
-
-        .stats {
-            flex-direction: column;
-            gap: 0.5rem;
-        }
-
-        /* reduce min-height for narrow screens but keep enough space */
-        .stat-card {
-            min-height: 20px;
-        }
-
-            .stat-card > div {
-                font-size: 1.1rem;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
+            .tabs a:hover {
+                opacity: 0.9;
+                background-color: rgba(255,255,255,0.05);
             }
 
-        .tabs a {
-            padding: 8px 12px;
-            font-size: 0.9rem;
-        }
-    }
-
-    /* Hidden by default for tab panes */
     .tab-pane {
         display: none;
+        padding-top: 1rem;
     }
 
         .tab-pane.active {
             display: block;
         }
+
+    /* Cards */
+    .stats {
+        display: flex;
+        gap: 1rem;
+        flex-wrap: wrap;
+        margin-bottom: 1rem;
+    }
+
+    .stat-card {
+        background: rgba(255,255,255,0.06);
+        padding: 15px;
+        border-radius: 8px;
+        flex: 1;
+        min-width: 150px;
+        color: white;
+        min-height: 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        text-align: center;
+    }
+
+        .stat-card strong {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .stat-card div {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #007bff; /* Color de acento */
+        }
+
+    .chart-container {
+        position: relative;
+        /* Estilos ajustados para que las gráficas sean visibles */
+    }
 </style>
 
-<div style="max-width: 1200px; margin: 0 auto; padding: 0.6rem 1rem;">
-    <!-- reduced top padding to lift content -->
-    <div class="header-row">
-        <h1>Dashboard General</h1>
+<div class="header-row">
+    <h1>Dashboard General</h1>
+    <div class="plan-box" title="{{ plan_info.descripcion }}">
+        <span class="plan-icon">🌟</span>
+        <div class="plan-details">
+            <span class="plan-text">Plan: {{ plan_info.nombre }}</span>
 
-        {# Mostrar información del plan si está disponible #}
-        {% if plan_info %}
-        <div class="plan-box" title="{{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}">
-            <strong style="margin-right:6px;">Plan Info:</strong>
-            <div class="plan-details">
-                <span class="plan-metric"><strong>Plan:</strong> {{ plan_info.plan_name or ('ID: ' ~ (plan_info.plan_id or 'N/A')) }}</strong></span>
-                <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }}</span>
-                <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }}</span>
-                <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
-            </div>
-        </div>
-        {% endif %}
-    </div>
+            <span class="plan-limit">Límite: {{ (plan_info.limite_mensajes_total | default(0)) | int }}</span>
 
-    <div class="tabs" style="margin-bottom: 0.3rem;">
-        <div class="tabs" style="margin-bottom: 0.3rem;">
-            <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
-            <a data-tab="overview" data-period="year" class="{{ 'active' if period == 'year' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=year">Último año (mensual)</a>
-            <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=month">Últimos 30 días</a>
-        </div>
-    </div>
-
-    {# Removed global stats (Chats distintos / Respuestas enviadas) per request.
-    Only conversation-related metrics live inside the Conversaciones pane. #}
-
-    <!-- Overview pane (shown only when tab=overview) -->
-    <div id="pane-overview" class="tab-pane {% if request.args.get('tab') == 'overview' %}active{% endif %}">
-        <div class="chart-container">
-            <canvas id="barChart" style="display: block; box-sizing: border-box; height: 400px; width: 1168px;" width="1460" height="500"></canvas>
-        </div>
-    </div>
-
-    <!-- Conversaciones pane (default when no tab param) -->
-    <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') %}active{% endif %}">
-        <div class="stats" style="margin-top:0;">
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones disponibles (plan):</strong>
-                <div id="planDisponibles">—</div>
-            </div>
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones consumidas (plan):</strong>
-                <div id="planConsumidos">—</div>
-            </div>
-        </div>
-
-        <div class="chart-container" style="height:300px;">
-            <canvas id="remainingChart"></canvas>
-        </div>
-
-        <div class="chart-container" style="height:400px;">
-            <canvas id="dailyChart"></canvas>
-        </div>
-    </div>
-    <div id="pane-plataformas" class="tab-pane {% if request.args.get('tab') == 'plataformas' %}active{% endif %}">
-        <div class="stats" style="margin-top:0;">
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones por WhatsApp:</strong>
-                <div id="whatsappConversations">—</div>
-            </div>
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones por Telegram:</strong>
-                <div id="telegramConversations">—</div>
-            </div>
-        </div>
-
-        <div style="display:flex; gap:16px; margin-top: 1rem;">
-            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
-                <h4 style="text-align: center; color: #333;">Conversaciones por Plataforma</h4>
-                <canvas id="platformConversationsChart"></canvas>
-            </div>
-            <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
-                <h4 style="text-align: center; color: #333;">Contactos por Plataforma</h4>
-                <canvas id="platformContactsChart"></canvas>
-            </div>
         </div>
     </div>
 </div>
 
-<!-- Chart.js y plugin datalabels -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+<div class="tabs" style="margin-bottom: 0.3rem;">
+    <a data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Conversaciones</a>
+    <a data-tab="overview" data-period="year" class="{{ 'active' if period == 'year' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=year">Último año (mensual)</a>
+    <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=month">Últimos 30 días</a>
+</div>
 
+<div id="pane-conversaciones" class="tab-pane {{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">
+    <div class="stats">
+        <div class="stat-card">
+            <strong>Conversaciones iniciadas hoy:</strong>
+            <div id="conversacionesHoy">—</div>
+        </div>
+        <div class="stat-card">
+            <strong>Mensajes recibidos hoy:</strong>
+            <div id="mensajesRecibidosHoy">—</div>
+        </div>
+        <div class="stat-card">
+            <strong>Mensajes enviados hoy:</strong>
+            <div id="mensajesEnviadosHoy">—</div>
+        </div>
+        <div class="stat-card">
+            <strong>Tasa de respuesta IA:</strong>
+            <div id="tasaRespuestaIA">—</div>
+        </div>
+    </div>
+
+    <div style="display:flex; gap:16px; margin-top: 1rem;">
+        <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+            <h4 style="text-align: center; color: #333;">Conversaciones por Columna (Hoy)</h4>
+            <canvas id="dailyConversationsChart"></canvas>
+        </div>
+        <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+            <h4 style="text-align: center; color: #333;">Mensajes Restantes</h4>
+            <canvas id="remainingChart"></canvas>
+        </div>
+    </div>
+
+    <h2 style="color: white; margin-top: 2rem; margin-bottom: 1rem; font-size: 1.5rem;">Resumen por Plataforma</h2>
+    <div class="stats" style="margin-top: 0;">
+        <div class="stat-card" style="min-height:64px;height:64px;">
+            <strong>Conversaciones por WhatsApp:</strong>
+            <div id="whatsappConversations">—</div>
+        </div>
+        <div class="stat-card" style="min-height:64px;height:64px;">
+            <strong>Conversaciones por Telegram:</strong>
+            <div id="telegramConversations">—</div>
+        </div>
+    </div>
+
+    <div style="display:flex; gap:16px; margin-top: 1rem; margin-bottom: 2rem;">
+        <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+            <h4 style="text-align: center; color: #333;">Conversaciones por Plataforma (Total)</h4>
+            <canvas id="platformConversationsChart"></canvas>
+        </div>
+        <div class="chart-container" style="flex: 1; height:350px; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+            <h4 style="text-align: center; color: #333;">Contactos por Plataforma (Total)</h4>
+            <canvas id="platformContactsChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<div id="pane-overview" class="tab-pane {{ 'active' if request.args.get('tab') == 'overview' else '' }}">
+    <div class="stats">
+        <div class="stat-card">
+            <strong>Total Mensajes (Período):</strong>
+            <div id="totalMensajesPeriodo">—</div>
+        </div>
+        <div class="stat-card">
+            <strong>Total Conversaciones (Período):</strong>
+            <div id="totalConversacionesPeriodo">—</div>
+        </div>
+    </div>
+    <div class="chart-container" style="height:400px; margin-top: 1rem; background: rgba(255,255,255,0.9); padding: 12px; border-radius: 8px;">
+        <h4 style="text-align: center; color: #333;">Actividad de Conversación ({{ 'Mensual' if period == 'year' else 'Diaria' }})</h4>
+        <canvas id="overviewChart"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 <script>
-  // Variables globales para charts
-let overviewChart = null;
-let remainingChart = null;
-let dailyChart = null;
-let platformConversationsChart = null;
-let platformContactsChart = null;
-  // expose current period to JS (server value on load)
-  const CURRENT_PERIOD = '{{ period }}';
+    Chart.register(ChartDataLabels);
+
+    let overviewChart = null;
+    let dailyConversationsChart = null;
+    let remainingChart = null;
+
+    // NUEVAS VARIABLES GLOBALES PARA GRÁFICAS DE PLATAFORMA
+    let platformConversationsChart = null;
+    let platformContactsChart = null;
+
+    // Función para cambiar de pestaña
+    function showTab(tab) {
+        document.querySelectorAll('.tabs a').forEach(a => {
+            a.classList.remove('active');
+            if (a.getAttribute('data-tab') === tab) {
+                // Si el tab es overview, activa solo el enlace con el periodo actual
+                if (tab === 'overview') {
+                    const period = (new URLSearchParams(window.location.search)).get('period') || 'year';
+                    if (a.getAttribute('data-period') === period) {
+                        a.classList.add('active');
+                    }
+                } else {
+                    a.classList.add('active');
+                }
+            }
+        });
+
+        // show/hide panes
+        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+        const pane = document.getElementById('pane-' + tab);
+        if (pane) pane.classList.add('active');
+
+        // Cargar datos al cambiar de pestaña
+        if (tab === 'overview') loadOverviewData();
+        if (tab === 'conversaciones') loadConversacionesData();
+
+        // resize charts
+        setTimeout(() => {
+            if (overviewChart) overviewChart.resize();
+            if (remainingChart) remainingChart.resize();
+            if (dailyConversationsChart) dailyConversationsChart.resize();
+            // RESIZE DE NUEVAS GRÁFICAS
+            if (platformConversationsChart) platformConversationsChart.resize();
+            if (platformContactsChart) platformContactsChart.resize();
+        }, 200);
+    }
+
+    // Manejar el clic en las pestañas
+    document.querySelectorAll('.tabs a').forEach(a => {
+        a.addEventListener('click', function (e) {
+            const tab = this.getAttribute('data-tab');
+            if (tab !== 'overview') {
+                e.preventDefault();
+                // Actualizar URL solo para el tab de conversaciones si es diferente
+                if ((new URLSearchParams(window.location.search)).get('tab') !== tab) {
+                    history.pushState(null, '', `?tab=${tab}`);
+                }
+                showTab(tab);
+            }
+            // Los tabs de overview ya manejan la URL con href
+        });
+    });
+
+    // --- FUNCIONES DE CARGA DE DATOS ---
+
+    async function loadOverviewData() {
+        // Carga y renderizado de overviewChart (mensual/anual)
+        const period = (new URLSearchParams(window.location.search)).get('period') || 'year';
+        try {
+            const res = await fetch(`/dashboard/overview-data?period=${period}`);
+            const json = await res.json();
+
+            document.getElementById('totalMensajesPeriodo').innerText = json.total_mensajes;
+            document.getElementById('totalConversacionesPeriodo').innerText = json.total_conversaciones;
+
+            const ctx = document.getElementById('overviewChart').getContext('2d');
+            if (overviewChart) overviewChart.destroy();
+            overviewChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: json.labels,
+                    datasets: [
+                        {
+                            label: 'Mensajes Recibidos',
+                            data: json.data_recibidos,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                            tension: 0.4,
+                            pointRadius: 4
+                        },
+                        {
+                            label: 'Mensajes Enviados',
+                            data: json.data_enviados,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            backgroundColor: 'rgba(54, 162, 235, 0.2)',
+                            tension: 0.4,
+                            pointRadius: 4
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { position: 'top', labels: { color: '#333' } }, datalabels: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { color: '#333' }, grid: { color: 'rgba(0,0,0,0.08)' } },
+                        x: { ticks: { color: '#333' }, grid: { color: 'rgba(0,0,0,0.06)' } }
+                    }
+                }
+            });
+
+        } catch (err) {
+            console.error('Failed to load overview data', err);
+        }
+    }
+
+    // NUEVA FUNCIÓN DE CARGA DE DATOS DE PLATAFORMA
     async function loadPlatformData() {
         try {
             // Asegúrate de que el endpoint /dashboard/platform-data esté en app.py
@@ -303,7 +363,7 @@ let platformContactsChart = null;
             const contactData = json.contacts;
 
             // Actualizar tarjetas rápidas
-            // Si no existe la plataforma, el valor es 0
+            // Nota: Si no existe la plataforma, el valor es 0
             const whatsappConv = convData.values[convData.labels.indexOf('WhatsApp')] || 0;
             const telegramConv = convData.values[convData.labels.indexOf('Telegram')] || 0;
             document.getElementById('whatsappConversations').innerText = whatsappConv;
@@ -367,206 +427,104 @@ let platformContactsChart = null;
             console.error('Failed to load platform data', err);
         }
     }
-  // --- Overview bar chart (existente) ---
-  (function renderOverview(){
-      const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
-      if (!ctx) return;
-      const rawValues = {{ values| tojson }};
-      const maxValor = rawValues.length ? Math.max(...rawValues) : 0;
-      const maxAuto = Math.ceil((maxValor * 1.1) / 5) * 5;
-      const data = {
-            labels: {{ labels| tojson }},
-        datasets: [{
-            label: 'Mensajes por número',
-            data: rawValues,
-            backgroundColor: '#1f4e79'
-        }]
-      };
-      if (overviewChart) overviewChart.destroy();
-      overviewChart = new Chart(ctx, {
-        type: 'bar',
-        data: data,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          animation: { duration: 0 },
-          plugins: {
-            legend: { display: false },
-            datalabels: { anchor: 'end', align: 'end', color: '#fff', font: { weight: 'bold', size: 14 } }
-          },
-          scales: {
-            y: { beginAtZero: true, suggestedMax: maxAuto, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-            x: { ticks: { maxRotation: 45, minRotation: 45, color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } }
-          }
-        },
-        plugins: [ChartDataLabels]
-      });
-  })();
-
-  // --- Tab handling ---
-    // --- Modificar la Función showTab (alrededor de la línea 360) ---
-    function showTab(tab) {
-        // ... (código que remueve/añade active classes) ...
-
-        // show/hide panes
-        document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-        const pane = document.getElementById('pane-' + tab);
-        if (pane) pane.classList.add('active');
-
-        // 🚨 MODIFICACIÓN AQUÍ
-        if (tab === 'conversaciones') loadConversacionesData();
-        if (tab === 'plataformas') loadPlatformData();
-
-        // resize charts
-        setTimeout(() => {
-            if (overviewChart) overviewChart.resize();
-            if (remainingChart) remainingChart.resize();
-            if (dailyChart) dailyChart.resize();
-            if (platformConversationsChart) platformConversationsChart.resize(); // <--- RESIZE GRÁFICAS NUEVAS
-            if (platformContactsChart) platformContactsChart.resize();           // <--- RESIZE GRÁFICAS NUEVAS
-        }, 200);
-    }
 
 
-  document.querySelectorAll('.tabs a').forEach(a => {
-      a.addEventListener('click', function(e){
-          const tab = this.getAttribute('data-tab') || 'overview';
-          const dp = this.getAttribute('data-period'); // period attribute, if any
-          const url = new URL(window.location);
-
-          // Always prevent default: we control navigation explicitly to avoid races
-          e.preventDefault();
-
-          // update tab param in url
-          if (tab === 'conversaciones') {
-              url.searchParams.set('tab', 'conversaciones');
-          } else {
-              url.searchParams.set('tab', 'overview');
-          }
-
-          // If this is a period button, do a full navigation so server re-renders page with new data
-          if (dp) {
-              url.searchParams.set('period', dp);
-              // Use full href navigation (reliable)
-              window.location.href = url.toString();
-              return;
-          }
-
-          // For tabs handled client-side, update history and show tab
-          window.history.replaceState({}, '', url);
-          showTab(tab);
-      });
-  });
-
-
-  // --- Load data and render conversations charts ---
     async function loadConversacionesData() {
+        // Carga y renderizado de dailyConversationsChart y remainingChart
         try {
-            // For the dailyChart we now want the last 3 months aggregated by month:
-            const period = '3months';
-
-            const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
+            const res = await fetch(`/dashboard/conversaciones-data`);
             const json = await res.json();
-            if (json.error) {
-                console.error('Error fetching conversaciones data', json.error);
-                return;
-            }
 
-            // compute plan-related metrics
-            const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
-            const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
-            const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
+            // 1. Actualizar Stats Cards
+            document.getElementById('conversacionesHoy').innerText = json.conversaciones_hoy;
+            document.getElementById('mensajesRecibidosHoy').innerText = json.mensajes_recibidos_hoy;
+            document.getElementById('mensajesEnviadosHoy').innerText = json.mensajes_enviados_hoy;
+            document.getElementById('tasaRespuestaIA').innerText = json.tasa_respuesta_ia + '%';
 
-            // actualizar métricas superiores (only disponibles y consumidos)
-            const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
-            const elDisponibles = document.getElementById('planDisponibles');
-            const elConsumidos = document.getElementById('planConsumidos');
-            if (elDisponibles) elDisponibles.innerText = disponibles;
-            if (elConsumidos) elConsumidos.innerText = consumed;
+            // 2. Gráfica 1: dailyConversationsChart (Barras)
+            const dailyCtx = document.getElementById('dailyConversationsChart').getContext('2d');
+            if (dailyConversationsChart) dailyConversationsChart.destroy();
+            dailyConversationsChart = new Chart(dailyCtx, {
+                type: 'bar',
+                data: {
+                    labels: json.daily_labels,
+                    datasets: [{
+                        label: 'Conversaciones',
+                        data: json.daily_data,
+                        backgroundColor: json.daily_labels.map(l => {
+                            if (l === 'Abierta') return '#28a745'; // verde
+                            if (l === 'Cerrada') return '#dc3545'; // rojo
+                            if (l === 'No Aplica') return '#6c757d'; // gris
+                            if (l === 'Llamada') return '#ffc107'; // amarillo
+                            return '#007bff'; // azul
+                        }),
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false }, datalabels: { anchor: 'end', align: 'top', color: '#333' } },
+                    scales: {
+                        y: { beginAtZero: true },
+                        x: {}
+                    }
+                },
+                plugins: [ChartDataLabels]
+            });
 
-            // Chart: Remaining / Consumed (pie-like)
-            const remCtx = document.getElementById('remainingChart').getContext('2d');
-            const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
-            const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
-
+            // 3. Gráfica 2: remainingChart (Doughnut)
+            const remainingCtx = document.getElementById('remainingChart').getContext('2d');
             if (remainingChart) remainingChart.destroy();
-            remainingChart = new Chart(remCtx, {
+            remainingChart = new Chart(remainingCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: pieLabels,
+                    labels: ['Mensajes Restantes', 'Mensajes Utilizados'],
                     datasets: [{
-                        data: pieData,
-                        backgroundColor: ['#e74c3c', '#2ecc71']
+                        data: [json.mensajes_restantes, json.mensajes_utilizados],
+                        backgroundColor: ['#007bff', 'rgba(255, 99, 132, 1)'],
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'bottom', labels: { color: 'white' } },
-                        datalabels: { color: 'white', formatter: (v) => v }
+                        legend: { position: 'bottom', labels: { color: '#333' } },
+                        datalabels: { color: 'white', formatter: (v) => v, font: { weight: 'bold' } }
                     }
                 },
                 plugins: [ChartDataLabels]
             });
 
-            // Chart: Monthly conversations (last 3 months)
-            const dailyCtx = document.getElementById('dailyChart').getContext('2d');
-            const dailyLabels = json.labels || [];
-            const dailyValues = json.values || [];
-
-            if (dailyChart) dailyChart.destroy();
-            dailyChart = new Chart(dailyCtx, {
-                type: 'line',
-                data: {
-                    labels: dailyLabels,
-                    datasets: [{
-
-                                    label: 'Conversaciones nuevas (últimos 90 días)',
-                                    data: dailyValues,
-                                    borderColor: '#1f4e79',
-                                    backgroundColor: 'rgba(31,78,121,0.15)',
-                                    fill: true,
-                                    tension: 0.2,
-                                    pointRadius: 4
-                                }]
-                        },
-                            options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false }, datalabels: { display: false } },
-                            scales: {
-                                y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-                                x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
-                            }
-                        }
-                        });
+            // 4. NUEVA LLAMADA DE CARGA DE PLATAFORMA
+            loadPlatformData();
 
         } catch (err) {
             console.error('Failed to load conversaciones data', err);
         }
     }
 
-  // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
-  // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
+    // Si la pestaña inicial solicitada en URL es conversaciones, cargar datos.
+    // Ahora conversaciones es la pestaña por defecto cuando no hay ?tab=
     (function initTabFromUrl() {
         const params = new URLSearchParams(window.location.search);
         const tabFromUrl = params.get('tab');
 
-        // 🚨 MODIFICACIÓN AQUÍ
-        if (tabFromUrl === 'overview' || tabFromUrl === 'conversaciones' || tabFromUrl === 'plataformas') {
-            showTab(tabFromUrl);
+        if (tabFromUrl === 'overview') {
+            showTab('overview');
         } else {
             // default to conversaciones
             showTab('conversaciones');
         }
     })();
 
-  // Resize handlers
-  window.addEventListener('resize', () => {
-      if (overviewChart) overviewChart.resize();
-      if (remainingChart) remainingChart.resize();
-      if (dailyChart) dailyChart.resize();
-  });
+    // Resize handlers
+    window.addEventListener('resize', () => {
+        if (overviewChart) overviewChart.resize();
+        if (remainingChart) remainingChart.resize();
+        if (dailyConversationsChart) dailyConversationsChart.resize();
+        // RESIZE DE NUEVAS GRÁFICAS
+        if (platformConversationsChart) platformConversationsChart.resize();
+        if (platformContactsChart) platformContactsChart.resize();
+    });
 </script>
 {% endblock %}
