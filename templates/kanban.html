@@ -5,11 +5,6 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
 
 <style>
-    /*
-        ========================================
-        | ESTILOS MEJORADOS: LIMPIO Y VIVO     |
-        ========================================
-    */
     @keyframes fadeIn {
         from {
             opacity: 0;
@@ -24,267 +19,279 @@
 
     @keyframes highlightPulse {
         0% {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255,255,255,0.1);
         }
 
         50% {
-            background-color: rgba(135, 206, 250, 0.4); /* Azul Cielo Suave */
+            background-color: rgba(255,224,130,0.4);
         }
 
         100% {
-            background-color: rgba(255, 255, 255, 0.1);
+            background-color: rgba(255,255,255,0.1);
         }
     }
 
-    /* Contenedor del Kanban (Fondo más claro/neutral) */
-    .kanban-board {
-        display: flex;
-        gap: 16px; /* Aumentar espacio entre columnas */
-        padding: 16px;
-        background-color: #f0f2f5; /* Fondo general muy claro */
-        height: 100vh; /* Para ocupar toda la altura visible */
-    }
-
-    /* Columna Kanban */
-    .kanban-column {
-        min-width: 280px;
-        max-width: 300px;
-        width: 100%;
-        background-color: #e8ebf0; /* Fondo de columna gris claro */
-        border-radius: 12px; /* Bordes redondeados */
-        padding: 12px;
-        box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05); /* Sombra suave */
-        display: flex;
-        flex-direction: column;
-    }
-
-    /* Encabezado de Columna */
-    .column-header {
-        display: flex;
-        align-items: center;
-        padding-bottom: 10px;
-        margin-bottom: 10px;
-        border-bottom: 3px solid var(--col-color, #999); /* Acento de color bajo el encabezado */
-        color: #333; /* Texto oscuro */
-    }
-
-        .column-header h3 {
-            flex-grow: 1;
-            font-size: 1.1rem;
-            font-weight: 600;
-            margin: 0;
-            padding-left: 8px;
+    @keyframes gentleShake {
+        0%,100% {
+            transform: translateX(0);
         }
 
-    /* Lista de Chats (Scrollable area) */
-    .column-list {
-        overflow-y: auto;
-        padding-right: 4px; /* Espacio para la barra de scroll */
-        flex-grow: 1;
+        25% {
+            transform: translateX(-3px);
+        }
+
+        75% {
+            transform: translateX(3px);
+        }
     }
 
-    /* Tarjeta de Chat (La Card) */
+    .kanban-card.new-message {
+        animation: fadeIn .5s ease-out, highlightPulse 2s ease-in-out, gentleShake .5s ease-in-out;
+    }
+
     .kanban-card {
-        display: block;
-        padding: 12px; /* Mayor padding */
-        margin-bottom: 10px;
-        border-radius: 8px;
-        background-color: #ffffff; /* Fondo de tarjeta blanco puro */
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08); /* Sombra de tarjeta ligera */
-        border-left: 4px solid var(--col-color, #ccc); /* Borde izquierdo con el color de la columna */
-        transition: all 0.2s ease;
-        text-decoration: none;
-        color: inherit;
+        transition: all .3s ease;
     }
 
-        .kanban-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); /* Sombra más pronunciada al hacer hover */
+    .add-chat-btn {
+        background: #2196f3;
+        border: none;
+        color: #fff;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+    }
+
+        .add-chat-btn:hover {
+            background: #1976d2;
         }
 
-    /* Contenido de la Tarjeta */
+    /* Icono de columna y selector */
+    .col-icon {
+        width: 32px;
+        height: 32px;
+        margin-right: 6px;
+        cursor: pointer;
+        border-radius: 4px;
+        object-fit: contain;
+        background: #ffffff22;
+        padding: 2px;
+    }
+    .card-time { 
+        font-size: small;
+    }
+    .icon-picker {
+        position: absolute;
+        background: #1f2630;
+        border: 1px solid #2e3a46;
+        border-radius: 4px;
+        padding: 3px;
+        display: none;
+        z-index: 9999;
+        box-shadow: 0 10px 24px -12px rgba(0,0,0,.5);
+    }
+
+        .icon-picker button {
+            width: 32px;
+            height: 32px;
+            margin: 2px;
+            font-size: 18px;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            border-radius: 6px;
+        }
+
+            .icon-picker button:hover {
+                background: #2b3440;
+            }
+
+    /* =========================
+       COMPACT/OVERRIDES FOR KANBAN
+       ========================= */
+    /* smaller overall typography for kanban area */
+    .kanban-board,
+    .kanban-column,
+    .kanban-card,
     .card-content {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        width: 100%;
+        font-size: 1px; /* slightly smaller base */
+    }
+
+    /* make column icon about half size (override previous) */
+    .col-icon {
+        width: 40px !important;
+        height: 40px !important;
+        margin-right: 6px;
+        padding: 0 !important;
+        background: transparent !important;
+    }
+
+    /* avatar inside card: reduce to ~50% of typical size */
+    .card-avatar {
+        width: 24px !important;
+        height: 24px !important;
+        border-radius: 1px !important;
+        margin-right: 0px;
+        flex: 0 0 auto;
+        object-fit: cover !important;
     }
 
     .card-title-row {
         display: flex;
         align-items: center;
-        gap: 8px;
-        width: 100%;
+        gap: 1px;
+        min-width: 0;
+        flex: 1 1 auto;
     }
 
-        .card-title-row .alias-view {
-            font-size: 0.95rem;
-            font-weight: 700;
-            color: #333;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            flex-grow: 1;
+    .card-title-row .alias-view {
+        font-size: 0.82rem;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: calc(100% - 90px);
+    }
+
+    .card-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 0 0 auto;
+        margin-left: 6px;
+    }
+
+        .card-meta-row span {
+            font-size: 0.62rem;
+            color: rgba(255,255,255,0.9);
+            line-height: 1;
         }
 
-    /* Avatar / Flag */
-    .card-avatar {
-        width: 30px !important;
-        height: 30px !important;
-        border-radius: 50% !important; /* Circular */
-        border: 2px solid #eee;
+    /* ensure edit button smaller */
+    .edit-alias-btn {
+        font-size: 11px;
+        padding: 1px 3px;
+        margin-left: 6px;
     }
 
-    .card-flag {
-        width: 18px;
-        height: 14px;
-        border-radius: 3px;
-        margin-left: -12px;
-        z-index: 5;
-    }
-
-    /* Último Mensaje (más legible) */
+    /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        font-size: 0.8rem;
-        color: #555;
+        font-size: 0.6rem;
+        color: rgba(255,255,255,0.95);
+        margin-left: 0px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%;
+        line-height: 1;
+    }
+    .card-msg {
+        color: #e2e5ed;
+        font-size: 0.6rem;
         display: -webkit-box;
-        -webkit-line-clamp: 2;
+        -webkit-line-clamp: 2; /* Muestra máximo 2 líneas */
         -webkit-box-orient: vertical;
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: normal;
-        min-height: auto;
-        font-weight: 400;
-        margin-top: 4px;
-    }
-
-    /* Badge de No Leídos (más prominente) */
-    .card-unread {
-        position: static; /* Ajuste para ser parte del flujo */
-        margin-left: auto; /* Mover a la derecha */
-        background-color: #ff5722; /* Rojo/Naranja Vibrante */
-        color: white;
-        border-radius: 999px;
-        padding: 2px 8px;
+        white-space: normal; /* Permite saltos de línea */
+        min-height: 1rem;
         font-size: 0.75rem;
-        font-weight: bold;
-        box-shadow: 0 0 5px #ff572280;
+        font-weight: 400;
+        max-width: 70%;
+        letter-spacing: 0.01rem;
+        margin-top: 2px;
     }
 
-    /* Tiempo */
-    .card-time {
-        font-size: 0.7rem;
-        color: #888;
-        padding-left: 10px;
+    .card-content {
+        display: flex;
+        align-items: flex-start;
+        gap: 0px;
+        padding: 0px 0px;
     }
 
-    /* Icon Picker / Edición (Ajustes de color para fondo claro) */
-    .icon-picker {
-        background: #fff;
-        border: 1px solid #ccc;
-        box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
     }
 
-        .icon-picker button:hover {
-            background: #f0f0f0;
-        }
-
-    .edit-alias-btn {
-        color: #007bff;
-        background: none;
-        border: none;
-        cursor: pointer;
-        padding: 0;
-        margin-left: 6px;
-        font-size: 0.8rem;
+    /* shrink unread badge */
+    .card-unread {
+        font-size: 0.65rem;
+        padding: 1px 4px;
+        border-radius: 999px;
     }
 
-    /* --- ESTILOS DE ALERTA FLOTANTE (Mantenidos) --- */
-    .floating-alerts-container {
-        position: fixed;
-        bottom: 20px;
+    /* tweak delete button size */
+    .delete-col-btn {
+        font-size: 16px;
+        line-height: 1;
+        padding: 0 6px;
+    }
+    .card-unread {
+        position: absolute;
+        top: 19px;
         right: 20px;
-        z-index: 1000;
-        width: 350px;
-        max-height: 95vh;
+        background: #00E091;
+        color: #fff;
+        border-radius: 10px;
+        padding: 0.5px 8px;
+        font-size: 0.89em;
+        font-weight: 600;
+        min-width: 14px;
+        text-align: center;
+        box-shadow: 0 0 5px #00e09144;
+        z-index: 2;
+    }
+    /* make kanban cards slightly more compact vertically */
+    .kanban-card {
+        display: block;
+        padding: 0 6px;
+        margin-bottom: 6px;
+        border-radius: 15px;
+        min-height: 28px; /* very compact */
+        line-height: 1;
+        overflow: hidden;
     }
 
-    .alerts-button {
-        background-color: #f7931e;
-        color: white;
-        border: none;
-        border-radius: 50%;
-        width: 60px;
-        height: 60px;
-        font-size: 24px;
-        cursor: pointer;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        transition: background-color 0.3s;
-        position: absolute;
-        bottom: 0;
-        right: 0;
+    /* reduce spacing inside the meta row to compact further */
+    .card-meta-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
     }
 
-        .alerts-button:hover {
-            background-color: #e08418;
+    /* responsive: keep compactness on small screens */
+    @media (max-width: 768px) {
+        .col-icon {
+            width: 20px !important;
+            height: 20px !important;
         }
 
-    .alerts-badge {
-        position: absolute;
-        top: 0;
-        right: 0;
-        background-color: #ff3333;
-        color: white;
-        border-radius: 50%;
-        padding: 5px 8px;
-        font-size: 12px;
-        font-weight: bold;
-        transform: translate(25%, -25%);
+        .card-avatar {
+            width: 10px !important;
+            height: 10px !important;
+            margin-right: 6px;
+        }
+
+        .card-msg {
+            font-size: 0.68rem;
+        }
+
+        .card-title-row .alias-view {
+            font-size: 0.80rem;
+            max-width: calc(100% - 80px);
+        }
+
+        .kanban-card {
+            min-height: 26px;
+            margin-bottom: 4px;
+        }
     }
-
-    .alerts-dropdown {
-        background: #fff; /* Fondo blanco para las alertas */
-        border: 1px solid #ccc;
-        border-radius: 8px;
-        padding: 10px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-        max-height: 95vh;
-        overflow-y: auto;
-        position: absolute;
-        bottom: 70px;
-        right: 0;
-        display: none;
-        width: 100%;
-        font-size: 0.9rem;
-        color: #333; /* Texto oscuro */
-    }
-
-        .alerts-dropdown.visible {
-            display: block;
-        }
-
-    .alert-item {
-        padding: 8px;
-        border-bottom: 1px solid #f0f0f0;
-        cursor: pointer;
-        transition: background-color 0.2s;
-    }
-
-        .alert-item:hover {
-            background-color: #fafafa;
-        }
-
-        .alert-item:last-child {
-            border-bottom: none;
-        }
-
-        .alert-item strong {
-            color: #f7931e;
-        }
-
-        .alert-item p {
-            color: #555;
-        }
 </style>
 
 <div id="kanban-board" class="kanban-board">
