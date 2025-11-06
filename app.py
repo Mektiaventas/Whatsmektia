@@ -7612,9 +7612,12 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     try:
         if config is None:
             config = obtener_configuracion_por_host()
-        # 💥 NUEVA LÍNEA: Obtener la configuración completa (que incluye el tono de 'personalizacion')
+
+        # 💥 INICIO CORRECCIÓN 1: CARGA DE CONFIGURACIÓN Y TONO (PARA OpenAI TTS)
         cfg_full = load_config(config) 
         tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
+        # 💥 FIN CORRECCIÓN 1
+
         texto_norm = (texto or "").strip().lower()
         # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
         if es_imagen and imagen_base64:
@@ -7765,7 +7768,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
-        cfg_full = load_config(config)
+        # cfg_full ya está cargado
         asesores_block = format_asesores_block(cfg_full)
                  # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
         try:
@@ -8011,20 +8014,14 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
-                # El envío por Telegram requeriría lógica específica aquí si el document_field es una ruta local
-                # y el cliente es Telegram. Asumiendo que document_field es una URL accesible públicamente:
-                
                 # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
                 if numero.startswith('tg_'):
                     telegram_token = config.get('telegram_token')
                     if telegram_token:
                         chat_id = numero.replace('tg_', '')
-                        # Telegram tiene método sendDocument, pero la implementación aquí
-                        # depende de si document_field es ruta local o URL
-                        # Usaremos el send_message de texto con URL como fallback simple si no hay sendDocument
-                        # 💥 CORRECCIÓN: Intenta enviar documento por sendDocument
+                        # 💥 CORRECCIÓN DE DOCUMENTO: Asumir que la URL es HTTPS (corregida en enviar_catalogo)
                         if not enviar_telegram_documento(chat_id, document_field, token_bot=telegram_token):
-                             # Fallback si sendDocument falla (ej: por la URL HTTP/HTTPS)
+                             # Fallback si sendDocument falla 
                              send_telegram_message(chat_id, f"{respuesta_text}\n\nDescarga el documento aquí: {document_field}", telegram_token)
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
@@ -8082,24 +8079,32 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
-            audio_url = None
+            # --- Variables de Audio Globales ---
+            audio_url_publica = None # URL HTTPS (para WhatsApp)
+            audio_path_local = None  # Ruta de archivo local (para Telegram y limpieza)
             is_telegram_client = numero.startswith('tg_')
 
             # --- Generación de Audio si es necesario ---
-            # 💥 CORRECCIÓN DE LÓGICA DE AUDIO: 
-            # El audio se genera si el usuario envió un audio (es_audio=True)
             should_respond_with_voice = es_audio 
             
             if should_respond_with_voice and respuesta_text: 
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    # texto_a_voz guarda el archivo localmente y devuelve la ruta/URL (asumo que es la ruta local)
-                    audio_url = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
+                    # 💥 LLAMADA CRÍTICA: texto_a_voz ahora devuelve la URL pública y guarda el archivo local
+                    audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado) 
+                    
+                    # 💥 DEDUCIR RUTA LOCAL para Telegram y limpieza
+                    if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
+                        # Asumimos que la URL proxy tiene el nombre de archivo en la ruta
+                        filename_only = basename(urlparse(audio_url_publica).path)
+                        # UPLOAD_FOLDER debe ser accesible globalmente aquí
+                        audio_path_local = os.path.join(UPLOAD_FOLDER, filename_only)
+                        app.logger.info(f"💾 Audio Ruta Local deducida: {audio_path_local}")
                     
                 except Exception as e:
                     app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
-                    audio_url = None # Forzar fallback a texto
+                    audio_url_publica = None # Forzar fallback a texto
             
             
             # --- LÓGICA DE ENVÍO MULTICANAL (Telegram y WhatsApp) ---
@@ -8108,30 +8113,31 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 # Es Telegram
                 telegram_token = config.get('telegram_token')
                 chat_id = numero.replace('tg_', '')
+                sent_audio = False
                 
                 # 1. Intento de enviar como audio si la generación fue exitosa
-                # audio_url debe ser la RUTA LOCAL del archivo .ogg
-                if telegram_token and audio_url and os.path.exists(audio_url) and not urlparse(audio_url).scheme in ('http', 'https'): # <-- VERIFICACIÓN RUTA LOCAL
+                # audio_path_local debe ser la RUTA LOCAL del archivo .ogg
+                if telegram_token and audio_path_local and os.path.exists(audio_path_local): 
                     
-                    app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_url}") 
+                    app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_path_local}") 
                     
                     sent_audio = send_telegram_voice(
                         chat_id=chat_id, 
-                        audio_file_path=audio_url, # 👈 RUTA LOCAL
+                        audio_file_path=audio_path_local, # 👈 USAR RUTA LOCAL
                         token_bot=telegram_token, 
                         caption=respuesta_text
                     )
                     
+                    # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DEL ENVÍO DE TELEGRAM (SIEMPRE LIMPIAR)
+                    try:
+                        os.remove(audio_path_local) 
+                        app.logger.info(f"🗑️ Archivo de audio temporal eliminado (Telegram): {audio_path_local}")
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo eliminar archivo de audio {audio_path_local}: {e}")
+
                     if sent_audio:
                         app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
-                        # 💥 CORRECCIÓN: Eliminar el archivo de audio local
-                        try:
-                            os.remove(audio_url) 
-                            app.logger.info(f"🗑️ Archivo de audio temporal eliminado: {audio_url}")
-                        except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo eliminar archivo de audio {audio_url}: {e}")
-        
-                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
                         return True
                     else:
                         app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
@@ -8142,7 +8148,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 else:
                     app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 
-                # Registrar como TEXTO (ya sea que el envío fue por el send_telegram_message o si falló el audio)
+                # Registrar como TEXTO
                 registrar_respuesta_bot(
                     numero, texto, respuesta_text, config, 
                     incoming_saved=incoming_saved, 
@@ -8152,47 +8158,25 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 return True
             
             else:
-                # Es WhatsApp (lógica existente)
-                if audio_url: # audio_url es la RUTA LOCAL (ej: /app/uploads/respuesta_...ogg)
+                # Es WhatsApp
+                sent_audio = False
+                
+                if audio_url_publica: # Audio URL ya es pública (deducida)
                     
-                    # 💥 CORRECCIÓN CRÍTICA PARA WHATSAPP: Convertir la ruta local a una URL pública proxy
-                    # Se ejecuta si audio_url NO es ya una URL (es decir, es una ruta de archivo local)
-                    if not urlparse(audio_url).scheme in ('http', 'https'):
-                        from os.path import basename
-                        # Necesario para extraer solo el nombre del archivo del path local
-                        filename_audio = basename(audio_url) 
-                        
-                        # Construir la URL pública que WhatsApp puede descargar
-                        dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-                        
-                        # Forzar HTTPS para compatibilidad y seguridad (CRÍTICO)
-                        base_url = dominio if dominio.startswith('http') else f"https://{dominio}"
-                        if base_url.startswith('http://'):
-                             base_url = base_url.replace('http://', 'https://')
-                             
-                        # Se asume que /proxy-audio/ sirve archivos desde UPLOAD_FOLDER
-                        audio_url_publica = f"{base_url}/proxy-audio/{filename_audio}"
-                        
-                        app.logger.info(f"🔊 WHATSAPP: Convirtiendo ruta local a URL pública proxy: {audio_url_publica}")
-                        
-                    else:
-                        # Si por alguna razón texto_a_voz devolvió una URL, la usamos
-                        audio_url_publica = audio_url 
-
-                    # Intento de enviar audio por WhatsApp (usando la URL pública/proxy)
+                    # 💥 WHATSAPP: USAR URL PÚBLICA DIRECTAMENTE
                     sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
                     
+                    # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DEL ENVÍO DE WHATSAPP
+                    # (Solo se necesita limpiar si no lo hizo Telegram)
+                    if audio_path_local and os.path.exists(audio_path_local):
+                         try:
+                             os.remove(audio_path_local)
+                             app.logger.info(f"🗑️ Archivo de audio temporal eliminado (WhatsApp): {audio_path_local}")
+                         except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo eliminar archivo local: {e}")
+                        
                     if sent_audio:
                          app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
-                         
-                         # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DE ENVÍO POR WHATSAPP
-                         # (Importante para evitar que se rompa el proxy si otro proceso intenta acceder)
-                         try:
-                             os.remove(audio_url)
-                             app.logger.info(f"🗑️ Archivo de audio temporal eliminado después de envío por WhatsApp: {audio_url}")
-                         except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo eliminar archivo local después de envío por WhatsApp: {e}")
-                         
                          # Registrar con la URL pública
                          registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
                          return True
@@ -8203,6 +8187,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, respuesta_text, config) 
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
                 return True
+
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")

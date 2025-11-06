@@ -259,23 +259,16 @@ def convertir_audio(audio_path):
         logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
         return None
 
-def texto_a_voz(texto, filename, config=None, voz=None): # <-- SE AÑADE EL PARÁMETRO 'voz'
+def texto_a_voz(texto, filename, config=None, voz=None):
     """
-    Convierte texto a audio usando la API de OpenAI TTS (tts-1) y lo guarda como OGG/OPUS.
+    Convierte texto a audio usando la API de OpenAI TTS (tts-1), lo guarda como OGG/OPUS
+    y devuelve la URL pública para WhatsApp.
     """
-    import os
-    import requests
-    from openai import OpenAI # Ya está en tu archivo
-    
-    # Asegúrate de que UPLOAD_FOLDER esté disponible globalmente o se defina aquí si es necesario
-    # from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegura que estas vars sean accesibles
 
-    # 1. Obtener claves y configurar cliente
+    
     try:
         from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegurar que las variables globales son accesibles
     except ImportError:
-        # Fallback si se ejecuta fuera de Flask context
-        # DEBES ASEGURARTE DE QUE ESTAS VARIABLES ESTÉN DISPONIBLES
         logger.error("🔴 No se pudo importar UPLOAD_FOLDER o OPENAI_API_KEY desde app.")
         return None
 
@@ -285,34 +278,45 @@ def texto_a_voz(texto, filename, config=None, voz=None): # <-- SE AÑADE EL PAR�
 
     client = OpenAI(api_key=OPENAI_API_KEY)
     
-    # 2. Definición del Tono/Voz
-    VOZ_DEFECTO = "nova" # Voz femenina clara, excelente por defecto
-    
-    # 💥 LÓGICA DE TONALIDAD: Usa el valor del parámetro 'voz' o la voz por defecto
+    # 1. Definición del Tono/Voz (la lógica ya la implementamos)
+    VOZ_DEFECTO = "nova"
     if voz and isinstance(voz, str) and voz.strip() in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']:
         VOZ_A_USAR = voz.strip()
     else:
         VOZ_A_USAR = VOZ_DEFECTO
-        if voz:
-            logger.warning(f"⚠️ Tonalidad '{voz}' no es válida para OpenAI. Usando '{VOZ_DEFECTO}'.")
 
     output_path = os.path.join(UPLOAD_FOLDER, f"{filename}.ogg")
     
-    logger.info(f"🔊 OPENAI TTS: Generando audio para {output_path} con voz: {VOZ_A_USAR}")
-
     try:
-        # 3. Llamada a la API de OpenAI TTS usando la VOZ_A_USAR
+        # 2. Llamada a la API de OpenAI TTS
         response = client.audio.speech.create(
             model="tts-1",
-            voice=VOZ_A_USAR, # <-- ESTE ES EL CAMBIO CLAVE
+            voice=VOZ_A_USAR, 
             input=texto,
+            response_format="opus" # <-- Formato requerido por Telegram
         )
         
-        # 4. Guardar archivo OGG/OPUS (formato requerido por Telegram/WhatsApp)
+        # 3. Guardar archivo OGG/OPUS (ruta local)
         response.stream_to_file(output_path)
 
-        logger.info(f"✅ Archivo OGG guardado localmente: {output_path}")
-        return output_path
+        # 4. Construir URL pública (para WhatsApp)
+        dominio_conf = config.get('dominio') if isinstance(config, dict) else None
+        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
+        
+        # 💥 FORZAR HTTPS para compatibilidad total con WhatsApp y Telegram
+        if not dominio.startswith('http'):
+            dominio = 'https://' + dominio
+        if dominio.startswith('http://'):
+             dominio = dominio.replace('http://', 'https://')
+
+        # Asumir que /uploads/ es servido públicamente (o usar /proxy-audio/ si está configurado)
+        # Usaremos el proxy que configuramos en app.py para servirlo desde la ruta local de forma segura
+        audio_url_publica = f"{dominio.rstrip('/')}/proxy-audio/{os.path.basename(output_path)}"
+
+        logger.info(f"🌐 URL pública generada (proxy): {audio_url_publica} (Ruta local: {output_path})")
+        
+        # DEVOLVER la URL pública, aunque el archivo exista localmente
+        return audio_url_publica
         
     except Exception as e:
         logger.error(f"🔴 Error al llamar a la API de OpenAI TTS: {e}")
