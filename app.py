@@ -8165,7 +8165,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         # Construir la URL pública que WhatsApp puede descargar
                         dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
                         
-                        # Forzar HTTPS para compatibilidad y seguridad (crítico para Telegram/WhatsApp)
+                        # Forzar HTTPS para compatibilidad y seguridad (CRÍTICO)
                         base_url = dominio if dominio.startswith('http') else f"https://{dominio}"
                         if base_url.startswith('http://'):
                              base_url = base_url.replace('http://', 'https://')
@@ -8186,6 +8186,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                          app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
                          
                          # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DE ENVÍO POR WHATSAPP
+                         # (Importante para evitar que se rompa el proxy si otro proceso intenta acceder)
                          try:
                              os.remove(audio_url)
                              app.logger.info(f"🗑️ Archivo de audio temporal eliminado después de envío por WhatsApp: {audio_url}")
@@ -8202,7 +8203,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 enviar_mensaje(numero, respuesta_text, config) 
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
                 return True
-
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
