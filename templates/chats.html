@@ -42,7 +42,7 @@
                             <img src="{{ chat.imagen_url or url_for('static', filename='icons/default-avatar.png') }}"
                                  class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='{{ url_for('static', filename='icons/default-avatar.png') }}';">
-                        </div>-->
+                        </div>--->
                         {% set bandera = chat.numero | bandera %}
                         {% if bandera %}
                         <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
@@ -64,7 +64,7 @@
                     </div>
 
                     <div class="card-meta-row">
-                        
+
 
                         {% if chat.sin_leer and chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
@@ -678,6 +678,42 @@ function actualizarListaChats() {
         .catch(err => console.error('Error actualizando lista de chats:', err));
 }
 
+// Constante pública con permiso de administrador (true/false)
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+/* Generador coherente de HTML para nuevos elementos de la lista.
+   Produce exactamente la misma estructura que el template Jinja. */
+function crearNuevoChatHTML(chat) {
+    const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+    const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+    const banderaUrl = escapeHtml(coalesce(chat.bandera, chat.flag, chat.flag_url, ''));
+    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
+    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+    const preview = tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+    const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+
+    return `
+    <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+            <div class="card-title-row">
+                ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
+                <span class="alias-view" data-num="${num}">${nombre}</span>
+                <span class="card-time">${ultima ? formatClientTime(ultima) : ''}</span>
+                <span class="alias-edit" style="display:none;">
+                    <input type="text" value="${escapeHtml(coalesce(chat.alias, chat.nombre, num))}" data-num="${num}" maxlength="100" style="width:110px;">
+                </span>
+                ${IS_ADMIN ? `<button type="button" class="edit-alias-btn" data-num="${num}" title="Editar nombre">✏️</button>` : ''}
+            </div>
+            <div class="card-meta-row">
+                ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+            </div>
+            <div class="card-msg">${preview}</div>
+        </div>
+    </a>`.trim();
+}
+
     function actualizarIncrementalChats(chats) {
         const container = document.querySelector('.chat-items');
         if (!container) return;
@@ -738,10 +774,88 @@ function actualizarListaChats() {
     }
 
 function actualizarChatExistente(elemento, chat) {
+    if (!elemento) return;
+    const nombre = coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, chat.numero);
     const aliasView = elemento.querySelector('.alias-view');
-    if (aliasView && aliasView.textContent.trim() !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+    if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
+
+    // Tiempo / card-time
     const timeEl = elemento.querySelector('.card-time');
-    if (timeEl && chat.ultima_fecha) timeEl.textContent = formatClientTime(chat.ultima_fecha);
+    if (timeEl) {
+        timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+    } else {
+        // Si no existe, intentamos añadirlo al row
+        const titleRow = elemento.querySelector('.card-title-row');
+        if (titleRow) {
+            const span = document.createElement('span');
+            span.className = 'card-time';
+            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+            titleRow.appendChild(span);
+        }
+    }
+
+    // Bandera
+    const bandera = coalesce(chat.bandera, chat.flag, chat.flag_url, '');
+    let flagImg = elemento.querySelector('.card-flag');
+    if (bandera) {
+        if (flagImg) {
+            if (flagImg.getAttribute('src') !== bandera) flagImg.setAttribute('src', bandera);
+        } else {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const img = document.createElement('img');
+                img.className = 'card-flag';
+                img.alt = 'País';
+                img.title = 'País';
+                img.src = bandera;
+                titleRow.insertBefore(img, titleRow.querySelector('.alias-view'));
+            }
+        }
+    } else if (flagImg) {
+        flagImg.remove();
+    }
+
+    // Sin leer
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const unreadEl = elemento.querySelector('.card-unread');
+    if (sin_leer > 0) {
+        if (unreadEl) unreadEl.textContent = sin_leer;
+        else {
+            const metaRow = elemento.querySelector('.card-meta-row');
+            if (metaRow) {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = sin_leer;
+                metaRow.appendChild(span);
+            }
+        }
+    } else if (unreadEl) {
+        unreadEl.remove();
+    }
+
+    // Botón editar (admin)
+    const editBtn = elemento.querySelector('.edit-alias-btn');
+    if (IS_ADMIN) {
+        if (!editBtn) {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'edit-alias-btn';
+                btn.dataset.num = chat.numero;
+                btn.title = 'Editar nombre';
+                btn.textContent = '✏️';
+                titleRow.appendChild(btn);
+                btn.addEventListener('click', onEditAliasClick);
+            }
+        } else {
+            editBtn.dataset.num = chat.numero;
+        }
+    } else if (editBtn) {
+        editBtn.remove();
+    }
+
+    // Preview del último mensaje
     const msgEl = elemento.querySelector('.card-msg');
     const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
     if (msgEl && msgEl.textContent.trim() !== previewText) {
@@ -749,6 +863,10 @@ function actualizarChatExistente(elemento, chat) {
         elemento.classList.add('new-message');
         setTimeout(() => elemento.classList.remove('new-message'), 1200);
     }
+
+    // Mantener la clase selected en base a selectedChatId
+    if (selectedChatId && String(selectedChatId) === String(chat.numero)) elemento.classList.add('selected');
+    else elemento.classList.remove('selected');
 }
 
 /* ===================== MESSAGES POLLING & DEDUPE ===================== */
@@ -1227,4 +1345,4 @@ function seekAudio(id, progressBar, evt) {
         });
     });
 </script>
-{% endblock %}
+{% endblock %}  
