@@ -120,20 +120,22 @@
             <div class="chat-header-info">
 
                 <div class="chat-title">
-                    <span class="alias-view" data-num="{{ selected }}" data-nombre="{{ (chats | selectattr('numero', 'equalto', selected) | first).nombre if (chats | selectattr('numero', 'equalto', selected) | first) else '' }}" data-alias="{{ (chats | selectattr('numero', 'equalto', selected) | first).alias if (chats | selectattr('numero', 'equalto', selected) | first) else '' }}">
+                    <span class="alias-view" data-num="{{ selected }}">
                         {{ (chats | selectattr("numero", "equalto", selected) | first).nombre_mostrado if (chats | selectattr("numero", "equalto", selected) | first) else selected }}
                     </span>
 
                     {% if is_admin %}
                     <span class="alias-edit" style="display:none;">
-                        <input type="text" value="{{ (chats | selectattr('numero', 'equalto', selected) | first).alias if (chats | selectattr('numero', 'equalto', selected) | first and (chats | selectattr('numero', 'equalto', selected) | first).alias else ((chats | selectattr('numero', 'equalto', selected) | first).nombre if (chats | selectattr('numero', 'equalto', selected) | first) else selected) }}"
-                               data-num="{{ selected }}" data-alias="{{ (chats | selectattr('numero', 'equalto', selected) | first).alias if (chats | selectattr('numero', 'equalto', selected) | first) else '' }}" data-nombre="{{ (chats | selectattr('numero', 'equalto', selected) | first).nombre if (chats | selectattr('numero', 'equalto', selected) | first) else '' }}" maxlength="100" style="width:110px;">
+                        {% set chat_info = (chats | selectattr('numero', 'equalto', selected) | first) %}
+                        <input type="text"
+                               value="{{ chat_info.alias if chat_info and chat_info.alias else (chat_info.nombre if chat_info and chat_info.nombre else selected) }}"
+                               data-num="{{ selected }}"
+                               maxlength="100"
+                               style="width:110px;">
                     </span>
                     <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">✏️</button>
                     {% endif %}
-                </div>
-                <span class="chat-number">{{ selected }}</span>
-            </div>
+                </div> 
 
             <div class="chat-controls">
                 <span class="badge {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}bg-success{% else %}bg-warning{% endif %}">
@@ -640,7 +642,7 @@
         object-fit: cover !important;
     }
 
-    .card-title-row {
+    .card-title-row { 
         display: flex;
         align-items: center;
         gap: 6px;
