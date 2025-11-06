@@ -41,6 +41,9 @@ from flask import session, g
 from flask import url_for
 from urllib.parse import urlparse
 import threading
+from urllib.parse import urlparse 
+from os.path import basename, join 
+import os # Asegurar que 'os' también esté importado/disponible
 
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
@@ -7609,17 +7612,15 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     incoming_saved: boolean indicating the webhook already persisted the incoming message
                     (so callers can avoid double-saving). Default False for backward compatibility.
     """ 
-    from urllib.parse import urlparse 
-    from os.path import basename, join 
-    import os # Asegurar que 'os' también esté importado/disponible
     try:
+        # 💥 INICIO CORRECCIÓN DE IMPORTACIÓN Y CONFIGURACIÓN
         if config is None:
             config = obtener_configuracion_por_host()
 
-        # 💥 INICIO CORRECCIÓN 1: CARGA DE CONFIGURACIÓN Y TONO (PARA OpenAI TTS)
+        # Carga de configuración y tono (para OpenAI TTS)
         cfg_full = load_config(config) 
         tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
-        # 💥 FIN CORRECCIÓN 1
+        # 💥 FIN CORRECCIÓN DE IMPORTACIÓN Y CONFIGURACIÓN
 
         texto_norm = (texto or "").strip().lower()
         # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
@@ -7852,6 +7853,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             user_content["catalogo"] = catalog_list
             app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
         else:
+            app_content["catalogo"] = catalog_list
             app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
 
         payload_messages = [
@@ -8102,6 +8104,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                         # Asumimos que la URL proxy tiene el nombre de archivo en la ruta
                         filename_only = basename(urlparse(audio_url_publica).path)
                         # UPLOAD_FOLDER debe ser accesible globalmente aquí
+                        # Necesitamos importar UPLOAD_FOLDER si no está disponible aquí
+                        try:
+                            from app import UPLOAD_FOLDER 
+                        except ImportError:
+                            app.logger.error("🔴 UPLOAD_FOLDER no accesible. Asumiendo ruta relativa.")
+                            UPLOAD_FOLDER = 'uploads' # Fallback
+                            
                         audio_path_local = os.path.join(UPLOAD_FOLDER, filename_only)
                         app.logger.info(f"💾 Audio Ruta Local deducida: {audio_path_local}")
                     
@@ -8169,15 +8178,9 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     # 💥 WHATSAPP: USAR URL PÚBLICA DIRECTAMENTE
                     sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
                     
-                    # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DEL ENVÍO DE WHATSAPP
-                    # (Solo se necesita limpiar si no lo hizo Telegram)
-                    if audio_path_local and os.path.exists(audio_path_local):
-                         try:
-                             os.remove(audio_path_local)
-                             app.logger.info(f"🗑️ Archivo de audio temporal eliminado (WhatsApp): {audio_path_local}")
-                         except Exception as e:
-                            app.logger.warning(f"⚠️ No se pudo eliminar archivo local: {e}")
-                        
+                    # 💥 CORRECCIÓN CRÍTICA: NO LIMPIAR AQUÍ PARA EVITAR EL 404 DE LA CONDICIÓN DE CARRERA
+                    # Se mantiene la limpieza de archivos en una tarea externa/scheduler
+                    
                     if sent_audio:
                          app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
                          # Registrar con la URL pública
@@ -10380,14 +10383,31 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy-audio/<path:audio_url>')
-def proxy_audio(audio_url):
-    """Proxy para evitar problemas de CORS con archivos de audio"""
+@app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
+def proxy_audio(filename):
+    """
+    Sirve archivos de audio (OGG/MP3) desde UPLOAD_FOLDER localmente.
+    Esto permite que WhatsApp/Telegram descarguen el archivo generado.
+    """
+    from werkzeug.exceptions import abort
+    
     try:
-        response = requests.get(audio_url, timeout=10)
-        return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
+        # Asegúrate de que UPLOAD_FOLDER sea accesible (ya está importado globalmente)
+        from app import UPLOAD_FOLDER
+        
+        # Servir el archivo directamente desde la carpeta de subidas
+        # El nombre del archivo ya está 'secured' por texto_a_voz
+        return send_from_directory(
+            directory=UPLOAD_FOLDER, 
+            path=filename, # Usamos path=filename para ser explícitos
+            mimetype='audio/ogg', # Forzamos el MIME type correcto para notas de voz
+            as_attachment=False
+        )
+
     except Exception as e:
-        return str(e), 500
+        app.logger.error(f"🔴 ERROR 500 en proxy_audio para {filename}: {e}")
+        # Retornar un error 404 o 500 si el archivo no se encuentra o hay un fallo
+        abort(404)
 
 @app.route('/privacy-policy')
 def privacy_policy():
