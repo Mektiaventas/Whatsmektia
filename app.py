@@ -10279,6 +10279,7 @@ def ver_kanban(config=None):
 
     return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
+
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
         config = obtener_configuracion_por_host()
@@ -10690,7 +10691,7 @@ def actualizar_kanban_inmediato(numero, config=None):
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id)
             VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id), fecha_actualizacion = CURRENT_TIMESTAMP
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id)
         """, (numero, nueva_columna))
         conn.commit()
         cursor.close()
