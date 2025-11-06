@@ -259,63 +259,75 @@ def convertir_audio(audio_path):
         logger.error(f"🔴 Error convirtiendo audio: {str(e)}")
         return None
 
-def texto_a_voz(texto, filename, config=None, voz=None): # <-- SE AÑADE EL PARÁMETRO 'voz'
-    """
-    Convierte texto a audio usando la API de OpenAI TTS (tts-1) y lo guarda como OGG/OPUS.
-    """
-    import os
-    import requests
-    from openai import OpenAI # Ya está en tu archivo
-    
-    # Asegúrate de que UPLOAD_FOLDER esté disponible globalmente o se defina aquí si es necesario
-    # from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegura que estas vars sean accesibles
-
-    # 1. Obtener claves y configurar cliente
+def texto_a_voz(texto, filename, config=None):
+    """Convierte texto a audio usando Google TTS y devuelve URL pública verificable."""
+    if config is None:
+        try:
+            from app import obtener_configuracion_por_host
+            config = obtener_configuracion_por_host()
+        except Exception:
+            config = None
     try:
-        from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegurar que las variables globales son accesibles
-    except ImportError:
-        # Fallback si se ejecuta fuera de Flask context
-        # DEBES ASEGURARTE DE QUE ESTAS VARIABLES ESTÉN DISPONIBLES
-        logger.error("🔴 No se pudo importar UPLOAD_FOLDER o OPENAI_API_KEY desde app.")
-        return None
+        if gTTS is None:
+            logger.error("🔴 texto_a_voz: gTTS no está instalado")
+            return None
+        import os
 
-    if not OPENAI_API_KEY:
-        logger.error("🔴 La clave de OPENAI_API_KEY no está configurada.")
-        return None
+        # --- INICIO DE LA CORRECCIÓN ---
+        # Importar UPLOAD_FOLDER desde app.py (la carpeta pública correcta)
+        try:
+            from app import UPLOAD_FOLDER
+        except ImportError:
+            logger.warning("⚠️ No se pudo importar UPLOAD_FOLDER, usando fallback 'uploads/'")
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            UPLOAD_FOLDER = os.path.join(base_dir, 'uploads')
 
-    client = OpenAI(api_key=OPENAI_API_KEY)
-    
-    # 2. Definición del Tono/Voz
-    VOZ_DEFECTO = "nova" # Voz femenina clara, excelente por defecto
-    
-    # 💥 LÓGICA DE TONALIDAD: Usa el valor del parámetro 'voz' o la voz por defecto
-    if voz and isinstance(voz, str) and voz.strip() in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']:
-        VOZ_A_USAR = voz.strip()
-    else:
-        VOZ_A_USAR = VOZ_DEFECTO
-        if voz:
-            logger.warning(f"⚠️ Tonalidad '{voz}' no es válida para OpenAI. Usando '{VOZ_DEFECTO}'.")
+        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+        filepath = os.path.join(UPLOAD_FOLDER, f"{filename}.mp3")
+        # --- FIN DE LA CORRECCIÓN ---
 
-    output_path = os.path.join(UPLOAD_FOLDER, f"{filename}.ogg")
-    
-    logger.info(f"🔊 OPENAI TTS: Generando audio para {output_path} con voz: {VOZ_A_USAR}")
+        # Generar y guardar MP3
+        tts = gTTS(text=texto, lang='es', slow=False)
+        tts.save(filepath)
 
-    try:
-        # 3. Llamada a la API de OpenAI TTS usando la VOZ_A_USAR
-        response = client.audio.speech.create(
-            model="tts-1",
-            voice=VOZ_A_USAR, # <-- ESTE ES EL CAMBIO CLAVE
-            input=texto,
-        )
-        
-        # 4. Guardar archivo OGG/OPUS (formato requerido por Telegram/WhatsApp)
-        response.stream_to_file(output_path)
+        # Verificar que el archivo se creó
+        if not os.path.isfile(filepath):
+            logger.error(f"🔴 texto_a_voz: archivo no encontrado después de gTTS: {filepath}")
+            return None
 
-        logger.info(f"✅ Archivo OGG guardado localmente: {output_path}")
-        return output_path
-        
+        # Construir URL pública robusta
+        dominio_conf = None
+        try:
+            if isinstance(config, dict):
+                dominio_conf = config.get('dominio')
+        except Exception:
+            dominio_conf = None
+
+        dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
+        if not dominio.startswith('http'):
+            dominio = 'https://' + dominio
+
+        # --- INICIO DE LA CORRECCIÓN DE URL ---
+        # Apuntar a /uploads/ en lugar de /static/audio/respuestas/
+        audio_url = f"{dominio.rstrip('/')}/uploads/{filename}.mp3"
+        # --- FIN DE LA CORRECCIÓN DE URL ---
+
+        # Intentar HEAD para validar accesibilidad (no bloqueante en producción)
+        try:
+            resp = requests.head(audio_url, timeout=6, allow_redirects=True)
+            if resp.status_code >= 400:
+                logger.warning(f"⚠️ texto_a_voz: HEAD {audio_url} returned {resp.status_code}. The URL may not be publicly accessible.")
+            else:
+                ct = resp.headers.get('content-type', '')
+                logger.info(f"🎵 texto_a_voz: audio saved and reachable. HEAD status {resp.status_code} content-type={ct}")
+        except Exception as e:
+            logger.warning(f"⚠️ texto_a_voz: unable to HEAD audio_url ({audio_url}): {e}")
+
+        logger.info(f"🌐 URL pública generada: {audio_url} (archivo: {filepath})")
+        return audio_url
+
     except Exception as e:
-        logger.error(f"🔴 Error al llamar a la API de OpenAI TTS: {e}")
+        logger.error(f"Error en texto_a_voz: {e}")
         return None
 
 def enviar_mensaje(numero, texto, config=None):
