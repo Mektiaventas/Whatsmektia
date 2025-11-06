@@ -8148,10 +8148,23 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
                     if sent_audio:
                         app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
-                        registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
+                        
+                        # 💥 LIMPIEZA DE ARCHIVO LOCAL DESPUÉS DEL ENVÍO DE TELEGRAM (SIEMPRE LIMPIAR)
+                        try:
+                            os.remove(audio_path_local) 
+                            app.logger.info(f"🗑️ Archivo de audio temporal eliminado (Telegram): {audio_path_local}")
+                        except Exception as e:
+                            app.logger.warning(f"⚠️ No se pudo eliminar archivo de audio {audio_path_local}: {e}")
+
+                        # 🚨 CORRECCIÓN FINAL: CAMBIAR audio_url_publica a None para Telegram
+                        registrar_respuesta_bot(
+                            numero, texto, respuesta_text, config, 
+                            incoming_saved=incoming_saved, 
+                            respuesta_tipo='audio', 
+                            respuesta_media_url=None # <--- CAMBIO CRÍTICO: NO GUARDAR URL PROXY
+                        )
                         return True
                     else:
-                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
                 
                 # 2. Fallback a texto si no era audio, o si el envío de audio falló
                 if telegram_token:
@@ -8164,7 +8177,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     numero, texto, respuesta_text, config, 
                     incoming_saved=incoming_saved, 
                     respuesta_tipo='texto',  
-                    respuesta_media_url=None   
+                    respuesta_media_url=None  
                 )
                 return True
             
