@@ -80,9 +80,11 @@
         background: #ffffff22;
         padding: 2px;
     }
-    .card-time { 
+
+    .card-time {
         font-size: small;
     }
+
     .icon-picker {
         position: absolute;
         background: #1f2630;
@@ -110,236 +112,279 @@
             }
 
     /* =========================
-       COMPACT/OVERRIDES FOR KANBAN
+       MEJORAS EN DISEÑO KANBAN
        ========================= */
-    /* smaller overall typography for kanban area */
-    .kanban-board,
-    .kanban-column,
-    .kanban-card,
-    .card-content {
-        font-size: 1px; /* slightly smaller base */
-    }
-    .kanban-column {
-        flex-shrink: 0;
-        flex-basis: 280px;
-        width: 280px;
-        margin-right: 15px;
-        /* AÑADIDO/MODIFICADO: Establecer una altura máxima que obligue al scroll 
-           a aparecer antes del final de la ventana. */
-        height: 100%;
-        max-height: 85vh; /* REDUCE ESTE VALOR (ej: 85% de la altura visible) */
-        /* AÑADIDO: Forzar el scroll vertical dentro de la columna para ver todas las tarjetas */
-        overflow-y: auto;
-    }
-    .kanban-board {
+    .kanban-card {
         display: flex;
-        overflow-x: auto;
-        flex-wrap: nowrap;
-        width: 100%;
-        /* AÑADIDO/MODIFICADO: Asegura que el tablero use la altura máxima disponible 
-           y el scroll sea visible justo al final de la ventana de contenido */
+        flex-direction: column;
+        padding: 8px 10px;
+        margin-bottom: 8px;
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        transition: all 0.2s ease;
+        min-height: auto;
         height: auto;
-        padding-bottom: 20px; /* Espacio extra para que la barra no quede pegada al fondo */
-    }
-    /* make column icon about half size (override previous) */
-    .col-icon {
-        width: 40px !important;
-        height: 40px !important;
-        margin-right: 6px;
-        padding: 0 !important;
-        background: transparent !important;
-    }
-
-    /* avatar inside card: reduce to ~50% of typical size */
-    .card-avatar {
-        width: 24px !important;
-        height: 24px !important;
-        border-radius: 1px !important;
-        margin-right: 0px;
-        flex: 0 0 auto;
-        object-fit: cover !important;
-    }
-
-    .card-title-row {
-        display: flex;
-        align-items: center;
-        gap: 1px;
-        min-width: 0;
-        flex: 1 1 auto;
-    }
-
-    .card-title-row .alias-view {
-        font-size: 0.82rem;
-        font-weight: 600;
-        line-height: 1;
-        white-space: nowrap;
+        position: relative;
         overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: calc(100% - 90px);
     }
 
-    .card-meta-row {
+        .kanban-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+    .card-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 4px;
+    }
+
+    /* Primera fila: Avatar, bandera, nombre y botón de editar */
+    .card-top-row {
         display: flex;
         align-items: center;
         gap: 6px;
+        min-width: 0;
         flex: 0 0 auto;
-        margin-left: 6px;
     }
 
-        .card-meta-row span {
-            font-size: 0.62rem;
-            color: rgba(255,255,255,0.9);
-            line-height: 1;
+    .card-avatar-section {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .card-avatar {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 50% !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .card-flag {
+        width: 18px !important;
+        height: 12px !important;
+        border-radius: 2px !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .card-name-section {
+        flex-grow: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .alias-view {
+        font-size: 0.85rem;
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .edit-alias-btn {
+        font-size: 12px;
+        padding: 2px 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.2s;
+    }
+
+        .edit-alias-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
 
-    /* ensure edit button smaller */
-    .edit-alias-btn {
-        font-size: 11px;
-        padding: 1px 3px;
-        margin-left: 6px;
+    /* Segunda fila: Mensaje y fecha */
+    .card-bottom-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        margin-top: 2px;
     }
 
     .card-msg {
         color: #e2e5ed;
         font-size: 0.75rem;
-        font-weight: 500;
-        margin-top: 0px;
-        line-height: 1; /* Hacemos el line-height más compacto */
-        /* Reglas clave para que ocupe el espacio y se limite */
-        flex-grow: 1;
-        flex-shrink: 1;
-        min-width: 0;
-        /* Limitar a una sola línea con ellipsis para dejar espacio a la fecha */
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-    }
-
-    /* Estilo para la fecha a la derecha */
-    .card-time.card-meta-right {
-        font-size: 0.62rem;
-        color: rgba(255,255,255,0.7);
-        white-space: nowrap;
-        text-align: right;
-        /* Reglas clave para la alineación */
-        flex-grow: 0;
-        flex-shrink: 0; /* No se encoge, siempre mantiene el ancho de la fecha */
-        margin-left: 75%; /* Espacio entre el mensaje (ellipsis) y la fecha */
-        margin-top: 0px; /* Alineación vertical con el mensaje */
-        /* Aseguramos que la fecha quede pegada a la derecha de la tarjeta */
-        margin-right: 0;
-        /* Eliminamos order: 2, el orden natural en el HTML ya lo posiciona correctamente */
-        margin-bottom: 8px;
-    }
-
-    .card-msg .card-time {
-        font-size: 0.62rem; /* Más pequeño para el tiempo */
-        color: rgba(255,255,255,0.7);
-        white-space: nowrap; /* Asegura que la hora no se rompa */
-        flex: 0 0 40%; /* El tiempo ocupa hasta el 40% y no crece ni se encoge */
-        line-height: 1;
-        align-self: flex-end;
-        text-align: right; /* Alinea el texto de la hora a la derecha */
-    }
-
-    .card-msg:not(.card-time) {
-        max-width: 90%;
-        flex-shrink: initial;
+        font-weight: 400;
+        line-height: 1.3;
         flex-grow: 1;
         min-width: 0;
-        display: -webkit-box;
-        -webkit-line-clamp: 1;
-        -webkit-box-orient: vertical;
+        max-width: 75%;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
     }
 
-    .card-content {
-        display: flex;
-        flex-wrap: wrap; /* Permite que los elementos de abajo (mensaje/fecha) envuelvan */
-        align-items: flex-start;
-        gap: 0px;
-        padding: 0px 0px;
-        width: 100%;
-    }
-
-    .card-title-row {
-        flex: 1 1 100%; /* Hace que ocupe todo el ancho de la línea */
-        margin-bottom: 2px;
-    }
-
-    .card-meta-row {
-        display: none;
-    }
-
-    /* shrink unread badge */
-    .card-unread {
+    .card-time {
         font-size: 0.65rem;
-        padding: 1px 4px;
-        border-radius: 999px;
+        color: rgba(255, 255, 255, 0.6);
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-left: 8px;
+        align-self: flex-end;
+        padding-bottom: 2px;
     }
 
-    /* tweak delete button size */
-    .delete-col-btn {
-        font-size: 16px;
-        line-height: 1;
-        padding: 0 6px;
-    }
+    /* Indicador de mensajes no leídos */
     .card-unread {
         position: absolute;
-        top: 19px;
-        right: 20px;
+        top: 8px;
+        right: 8px;
         background: #00E091;
         color: #fff;
         border-radius: 10px;
-        padding: 0.5px 8px;
-        font-size: 0.89em;
+        padding: 1px 6px;
+        font-size: 0.7rem;
         font-weight: 600;
-        min-width: 14px;
+        min-width: 18px;
         text-align: center;
-        box-shadow: 0 0 5px #00e09144;
+        box-shadow: 0 0 5px rgba(0, 224, 145, 0.4);
         z-index: 2;
     }
-    /* make kanban cards slightly more compact vertically */
-    .kanban-card {
-        display: block;
-        padding: 0 6px;
-        margin-bottom: 6px;
-        border-radius: 15px;
-        min-height: 28px; /* very compact */
-        line-height: 1;
-        overflow: hidden;
-        height: 70px;
+
+    /* Mejoras en la columna */
+    .kanban-column {
+        flex-shrink: 0;
+        flex-basis: 280px;
+        width: 280px;
+        margin-right: 15px;
+        background: rgba(30, 39, 46, 0.6);
+        border-radius: 12px;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        height: calc(100vh - 120px);
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        overflow-x: hidden;
     }
 
+        .kanban-column::-webkit-scrollbar {
+            width: 6px;
+        }
 
-    /* responsive: keep compactness on small screens */
+        .kanban-column::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+
+        .kanban-column::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+            .kanban-column::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+
+    /* Encabezado de columna */
+    .column-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .col-name {
+        flex-grow: 1;
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin: 0;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+
+        .col-name:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .col-name:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+    /* Botones de columna */
+    .add-chat-btn, .delete-col-btn {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        margin-left: 6px;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .add-chat-btn {
+        background: rgba(33, 150, 243, 0.7);
+    }
+
+    .delete-col-btn {
+        background: rgba(244, 67, 54, 0.7);
+    }
+
+    /* Responsive */
     @media (max-width: 768px) {
-        .col-icon {
-            width: 20px !important;
-            height: 20px !important;
+        .kanban-card {
+            padding: 6px 8px;
+            margin-bottom: 6px;
         }
 
         .card-avatar {
-            width: 10px !important;
+            width: 24px !important;
+            height: 24px !important;
+        }
+
+        .card-flag {
+            width: 16px !important;
             height: 10px !important;
-            margin-right: 6px;
+        }
+
+        .alias-view {
+            font-size: 0.8rem;
         }
 
         .card-msg {
-            font-size: 0.68rem;
+            font-size: 0.7rem;
+            max-width: 70%;
         }
 
-        .card-title-row .alias-view {
-            font-size: 0.80rem;
-            max-width: calc(100% - 80px);
+        .card-time {
+            font-size: 0.6rem;
         }
 
-        .kanban-card {
-            min-height: 26px;
-            margin-bottom: 4px;
+        .card-unread {
+            font-size: 0.65rem;
+            padding: 0 5px;
+            min-width: 16px;
+        }
+
+        .kanban-column {
+            flex-basis: 240px;
+            width: 240px;
+            margin-right: 10px;
+            padding: 10px;
         }
     }
 </style>
@@ -363,7 +408,8 @@
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
-                    <div class="card-title-row">
+                    <!-- Fila 1: Avatar, bandera, nombre y botón de editar -->
+                    <div class="card-top-row">
                         <div class="card-avatar-section">
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
@@ -373,33 +419,35 @@
                             <img src="{{ avatar_src }}"
                                  class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            {% set bandera = chat.numero | bandera %}
+                            {% if bandera %}
+                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% endif %}
                         </div>
-                        {% set bandera = chat.numero | bandera %}
-                        {% if bandera %}
-                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-                        <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
-                        <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
-                        </span>
-
+                        <div class="card-name-section">
+                            <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+                            <span class="alias-edit" style="display:none;">
+                                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
+                            </span>
+                        </div>
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
-                    <div class="card-meta-row">
-                        {% endif %}
 
-                        {% if chat.sin_leer > 0 %}
-                        <span class="card-unread">{{ chat.sin_leer }}</span>
-                        {% endif %}
-                    </div>
-                    <span class="card-time card-meta-right">
-                        {% if chat.ultima_fecha %}
-                        {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
-                        {% endif %}
-                    </span>
-                    <div class="card-msg card-msg-left">
-                        {{ chat.ultimo_mensaje or "&nbsp;" }}
+                    <!-- Fila 2: Mensaje y fecha -->
+                    <div class="card-bottom-row">
+                        <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+                        <div class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
                     </div>
                 </div>
+
+                <!-- Indicador de mensajes no leídos -->
+                {% if chat.sin_leer > 0 %}
+                <span class="card-unread">{{ chat.sin_leer }}</span>
+                {% endif %}
             </a>
             {% endfor %}
         </div>
@@ -563,7 +611,6 @@
     }
 
     /* Eliminar columna */
-    /* Eliminar columna */
     function bindDeleteButtons() {
         document.querySelectorAll('.delete-col-btn').forEach(btn => {
             if (btn.dataset.bound === '1') return; btn.dataset.bound = '1';
@@ -572,10 +619,6 @@
                 const colId = btn.dataset.colId;
                 const totalCols = document.querySelectorAll('.kanban-column').length;
                 if (totalCols <= 1) { alert('No se puede eliminar la última columna'); return; }
-
-                // --- INICIO DE MODIFICACIÓN: ELIMINAR EL DIÁLOGO CONFIRM ---
-                // if (!confirm('¿Seguro que deseas eliminar esta columna? Los chats se moverán a otra.')) return;
-                // --- FIN DE MODIFICACIÓN ---
 
                 fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
                     .then(res => res.json())
@@ -706,7 +749,7 @@
 
         // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
         let fechaFormateada = '';
-        const timeElement = elemento.querySelector('.card-msg .card-time'); // Buscar el SPAN del tiempo DENTRO de .card-msg
+        const timeElement = elemento.querySelector('.card-bottom-row .card-time');
 
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
@@ -729,37 +772,13 @@
         // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
 
         // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
-        const msgElement = elemento.querySelector('.card-msg');
+        const msgElement = elemento.querySelector('.card-bottom-row .card-msg');
         const nuevoMensaje = chat.ultimo_mensaje || '';
         let mensajeActualizado = false;
 
         if (msgElement) {
-            let ultimoNodo = null;
-
-            // Iterar sobre los nodos hijos para encontrar el nodo de texto que representa el mensaje.
-            // Debe ser el último nodo de texto, después de los elementos SPAN (como card-time).
-            msgElement.childNodes.forEach(node => {
-                // Solo consideramos nodos de tipo TEXTO (nodeType === 3)
-                if (node.nodeType === 3) {
-                    // Si el nodo actual no está vacío, lo marcamos como el "último nodo de texto"
-                    if (node.textContent.trim() !== '') {
-                        ultimoNodo = node;
-                    }
-                    // Si encontramos un nodo Element (ej: <span>), reseteamos, 
-                    // ya que el mensaje de texto debe ser el último componente.
-                    if (node.nodeType === 1) {
-                        ultimoNodo = null;
-                    }
-                }
-            });
-
-            if (ultimoNodo && ultimoNodo.textContent !== nuevoMensaje) {
-                // Si encontramos un nodo de texto, actualizamos su contenido
-                ultimoNodo.textContent = nuevoMensaje;
-                mensajeActualizado = true;
-            } else if (!ultimoNodo) {
-                // Si no encontramos un nodo de texto (o está vacío), lo insertamos al final
-                msgElement.insertAdjacentText('beforeend', nuevoMensaje);
+            if (msgElement.textContent !== nuevoMensaje) {
+                msgElement.textContent = nuevoMensaje;
                 mensajeActualizado = true;
             }
         }
@@ -773,20 +792,16 @@
         }
         // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
 
-
         // 3. Actualizar el contador de mensajes no leídos
         const unread = elemento.querySelector('.card-unread');
         if (chat.sin_leer > 0) {
             if (unread) unread.textContent = chat.sin_leer;
             else {
-                // Si no existe, lo creamos y lo añadimos a .card-meta-row
-                const metaRow = elemento.querySelector('.card-meta-row');
-                if (metaRow) {
-                    const span = document.createElement('span');
-                    span.className = 'card-unread';
-                    span.textContent = chat.sin_leer;
-                    metaRow.appendChild(span);
-                }
+                // Si no existe, lo creamos y lo añadimos
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = chat.sin_leer;
+                elemento.appendChild(span);
             }
         } else if (unread) unread.remove();
     }
@@ -798,30 +813,34 @@
         const html = `
     <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
         <div class="card-content">
-            <div class="card-title-row">
+            <!-- Fila 1: Avatar, bandera, nombre y botón de editar -->
+            <div class="card-top-row">
                 <div class="card-avatar-section">
                     <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
                          class="card-avatar" alt="Avatar"
                          onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
                 </div>
-                ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
-                {% if es_admin %}
-                <span class="alias-edit" style="display:none;">
-                    <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
-                </span>
-                {% endif %}
+                <div class="card-name-section">
+                    <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
+                    <span class="alias-edit" style="display:none;">
+                        <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
+                    </span>
+                </div>
                 <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
             </div>
-            <div class="card-meta-row">
-                <span class="card-num">${chat.numero}</span>
-                <span class="card-time">
+
+            <!-- Fila 2: Mensaje y fecha -->
+            <div class="card-bottom-row">
+                <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
+                <div class="card-time">
                     ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}
-                </span>
-                ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
+                </div>
             </div>
-            <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
         </div>
+
+        <!-- Indicador de mensajes no leídos -->
+        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
     </a>`;
         columna.insertAdjacentHTML('beforeend', html);
         setTimeout(() => {
@@ -981,7 +1000,7 @@
                 btn.addEventListener('click', function (e) {
                     e.preventDefault(); e.stopPropagation();
                     // Encontrar contenedor correcto dentro de la tarjeta
-                    const parent = this.closest('.card-title-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
+                    const parent = this.closest('.card-top-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
                     if (!parent) return;
                     activarEdicionAlias(parent);
                 });
