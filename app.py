@@ -8765,7 +8765,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         elif tipo_mensaje == 'audio': # Si ya se marcó como audio
             pass
         else:
-            tipo_mensaje = 'texto' # Default
+            tipo_mensaje = 'texto' # Default 
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
