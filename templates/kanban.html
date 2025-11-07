@@ -356,12 +356,12 @@
                         {% endif %}
                     </div>
                     <div class="card-msg">
+                        {{ chat.ultimo_mensaje or "&nbsp;" }}
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
                             {% endif %}
                         </span>
-                        {{ chat.ultimo_mensaje or "&nbsp;" }}
                     </div>
                 </div>
             </a>
