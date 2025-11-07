@@ -5799,7 +5799,8 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
     """
     Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
     También notifica al asesor seleccionado (opcional) y registra la alerta 
-    en el historial del asesor para visibilidad en Kanban/Chats.
+    en el historial del asesor para visibilidad en Kanban/Chats, REUTILIZANDO 
+    el hilo de conversación existente del asesor.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5830,6 +5831,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
 
         if enviado:
             # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
+            # Nota: Esto registra una conversación donde el mensaje es la solicitud y la respuesta es el contacto del asesor.
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
             app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
         else:
@@ -5854,7 +5856,6 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
                 # Preguntar a la IA por un resumen breve (1-3 líneas)
                 resumen = None
                 try:
-                    # Usando DeepSeek para el resumen (como en tu código original)
                     prompt = f"""
 Resume en 1-5 líneas en español, con lenguaje natural, el contexto principal de la conversación
 del cliente para que un asesor humano lo entienda rápidamente. Usa SOLO el historial a continuación.
@@ -5867,10 +5868,8 @@ Devuelve únicamente el resumen breve (1-3 líneas).
 """
                     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
                     payload = {
-                        "model": "deepseek-chat",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2,
-                        "max_tokens": 200
+                        "model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2, "max_tokens": 200
                     }
                     r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
                     r.raise_for_status()
@@ -5888,6 +5887,7 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     else:
                         resumen = "Sin historial disponible."
 
+                # Mensaje completo que se enviará al asesor
                 texto_asesor = (
                     f"🚨 *ALERTA: Cliente requiere atención humana*\n\n"
                     f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
@@ -5901,21 +5901,31 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
                 
-                mensaje_alerta_kanban = f"[ALERTA DE CLIENTE REQUERIDA] {cliente_mostrado} ({numero_cliente})"
+                # --- INICIO: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
+                
+                # Usamos una estructura simple: el asesor 'recibe' un mensaje
+                # cuyo contenido es la alerta, y que no tiene respuesta de la IA.
+                
+                # 1. Asegurar contacto y meta del ASESOR (teléfono)
+                inicializar_chat_meta(telefono, config)
+                actualizar_info_contacto(telefono, config)
 
+                # 2. Guardar la ALERTA como un mensaje ENTRANTE (sin respuesta) en el hilo del asesor.
+                #    Esto asegura que el mensaje aparezca en la lista de chats como "último mensaje".
+                #    El campo 'mensaje' debe contener el texto de la alerta para que se muestre.
                 guardar_mensaje_inmediato(
                     telefono, 
-                    mensaje_alerta_kanban, 
+                    texto_asesor, # El cuerpo completo de la alerta
                     config,
                     imagen_url=None, 
                     es_imagen=False, 
-                    tipo_mensaje='alerta', # Usamos 'alerta' como tipo para que se guarde en contenido_extra
-                    contenido_extra=texto_asesor # Guardamos el cuerpo completo de la alerta aquí
+                    tipo_mensaje='alerta_interna', # Nuevo tipo para diferenciar
+                    contenido_extra=f"Cliente: {numero_cliente}, Resumen: {resumen}" 
                 )
-
                 app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
-                
-                # 2. Mover el chat del ASESOR (telefono) a columna 'Asesores' si existe.
+                # --- FIN: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
+
+                # 3. Mover el chat del ASESOR (telefono) a columna 'Asesores' si existe.
                 try:
                     col_asesores_id = obtener_id_columna_asesores(config)
                     if col_asesores_id:
@@ -5927,7 +5937,7 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
 
 
-                # 3. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
+                # 4. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
                 actualizar_columna_chat(numero_cliente, 3, config)
                 app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
             except Exception as e:
