@@ -543,24 +543,26 @@
         }
 
         /* make list a fixed overlay off-canvas by default */
-        .chat-list-v2 .card-title-row .alias-view {
-            font-size: 0.82rem !important;
-            font-weight: 600 !important;
-            line-height: 1 !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            max-width: calc(100% - 70px) !important; /* ← CAMBIADO de 90px a 70px */
-            margin-right: auto !important; /* ← AGREGA esta línea */
-        } 
+        .chat-list-v2 {
+            position: fixed;
+            left: -100%;
+            top: 0;
+            height: 100vh;
+            z-index: 1000;
+            background: var(--bg-card);
+            transition: left 0.3s ease;
+            width: var(--left-width);
+        }
 
             .chat-list-v2.mobile-visible {
+                left: 0;
                 transform: translateX(0);
             }
-             
+
         .chat-panel-v2 {
             margin-left: 0;
             padding-right: 8px;
+            width: 100%;
         }
 
         .mobile-chat-toggle {
@@ -572,33 +574,31 @@
     @media (max-width: 480px) {
         .chat-layout-v2 {
             padding: 8px;
-        } 
+        }
 
         .chat-list-v2 {
-            width: 92vw;
-        }
- 
-        .alias-view {
-            font-weight: 600;
-            font-size: 14px;
-            color: var(--text-light);
-            display: inline-block;
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            max-width: 200px; /* Aumenta este valor */
-            flex: 1; /* Agrega esto */
-            margin-right: 8px; /* Agrega esto */
+            width: 85vw;
         }
 
-        .card-avatar-section {
-            width: 40px;
-            height: 40px;
-        }
+            .chat-list-v2 .alias-view {
+                font-size: 0.85rem !important;
+                font-weight: 600 !important;
+                max-width: calc(100% - 60px) !important;
+            }
 
-        .card-time {
-            font-size: 11px;
-        }
+            .chat-list-v2 .card-avatar {
+                width: 28px !important;
+                height: 28px !important;
+            }
+
+            .chat-list-v2 .card-flag {
+                width: 18px !important;
+                height: 12px !important;
+            }
+
+            .chat-list-v2 .card-time {
+                font-size: 0.65rem !important;
+            }
 
         .chat-panel-v2 {
             padding-left: 6px;
@@ -647,72 +647,130 @@
         .emoji-option:hover {
             background-color: #f0f0f0 !important;
         }
-         
 
-    /* ===== ESTILOS COMPACTOS PARA CHATS (IGUAL QUE KANBAN) ===== */
-    .chat-list-v2 .card-avatar {
-        width: 24px !important;
-        height: 24px !important;
-        border-radius: 4px !important;
-        margin-right: 0px !important;
-        flex: 0 0 auto !important;
-        object-fit: cover !important;
+    /* ===== ESTILOS IDÉNTICOS A KANBAN PARA LISTA DE CHATS ===== */
+    .chat-list-v2 .kanban-card {
+        display: flex;
+        flex-direction: column;
+        padding: 5px 11px;
+        margin-bottom: 8px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgb(255, 255, 255);
+        transition: all 0.2s ease;
+        min-height: auto;
+        height: auto;
+        position: relative;
+        overflow: hidden;
+        border-block-color: antiquewhite;
     }
 
+    .chat-list-v2 .card-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 4px;
+    }
+
+    /* Primera fila: Avatar, bandera, nombre - IDÉNTICO A KANBAN */
     .chat-list-v2 .card-title-row {
         display: flex !important;
         align-items: center !important;
         gap: 6px !important;
         min-width: 0 !important;
-        flex: 1 1 auto !important;
-    }
-
-        .chat-list-v2 .card-title-row .alias-view {
-            font-size: 0.82rem !important;
-            font-weight: 600 !important;
-            line-height: 1 !important;
-            white-space: nowrap !important;
-            overflow: hidden !important;
-            text-overflow: ellipsis !important;
-            max-width: calc(100% - 90px) !important;
-        }
-
-    .chat-list-v2 .card-meta-row {
-        display: flex !important;
-        align-items: center !important;
-        gap: 6px !important;
         flex: 0 0 auto !important;
-        margin-left: 6px !important;
     }
 
-        .chat-list-v2 .card-meta-row span {
-            font-size: 0.62rem !important;
-            color: rgba(255,255,255,0.9) !important;
-            line-height: 1 !important;
+    .chat-list-v2 .card-avatar-section {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .chat-list-v2 .card-avatar {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 50% !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-list-v2 .card-flag {
+        width: 18px !important;
+        height: 12px !important;
+        border-radius: 2px !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-list-v2 .card-name-section {
+        flex-grow: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-list-v2 .alias-view {
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        max-width: calc(190px) !important;
+        flex: 1 1 auto !important;
+        color: #e2e5ed !important;
+        margin-right: auto !important;
+    }
+
+        /* Colores por plataforma igual que Kanban */
+        .chat-list-v2 .alias-view.is-whatsapp {
+            color: #00ff10 !important;
         }
 
-    .chat-list-v2 .edit-alias-btn {
-        font-size: 11px !important;
-        padding: 1px 3px !important;
-        margin-left: 6px !important;
+        .chat-list-v2 .alias-view.is-telegram {
+            color: #00bfff !important;
+        }
+
+    /* Segunda fila: Mensaje y fecha - IDÉNTICO A KANBAN */
+    .chat-list-v2 .card-bottom-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        margin-top: 2px;
     }
 
     .chat-list-v2 .card-msg {
+        color: #fff !important;
         font-size: 0.75rem !important;
-        color: #e2e5ed !important;
-        display: -webkit-box !important;
-        -webkit-line-clamp: 2 !important;
-        -webkit-box-orient: vertical !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-        white-space: normal !important;
-        min-height: 1rem !important;
         font-weight: 400 !important;
-        max-width: 70% !important;
-        letter-spacing: 0.01rem !important;
-        margin-top: 2px !important;
+        line-height: 1.3 !important;
+        flex-grow: 1;
+        min-width: 0;
+        max-width: 75%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
+    .chat-list-v2 .card-time {
+        font-size: 0.65rem !important;
+        color: rgba(255, 255, 255, 0.6) !important;
+        white-space: nowrap !important;
+        flex-shrink: 0;
+        margin-left: 8px;
+        align-self: flex-end;
+        padding-bottom: 2px;
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+    }
+
+    /* Indicador de mensajes no leídos - IDÉNTICO A KANBAN */
     .chat-list-v2 .card-unread {
         position: absolute !important;
         top: 8px !important;
@@ -720,13 +778,18 @@
         background: #00E091 !important;
         color: #fff !important;
         border-radius: 10px !important;
-        padding: 0.5px 8px !important;
-        font-size: 0.89em !important;
+        padding: 1px 6px !important;
+        font-size: 0.7rem !important;
         font-weight: 600 !important;
-        min-width: 14px !important;
+        min-width: 18px !important;
         text-align: center !important;
-        box-shadow: 0 0 5px #00e09144 !important;
+        box-shadow: 0 0 5px rgba(0, 224, 145, 0.4) !important;
         z-index: 2 !important;
+    }
+
+    /* Eliminar estilos viejos que causan conflicto */
+    .chat-list-v2 .card-meta-row {
+        display: none !important;
     }
 
     /* Estilos para el header del chat seleccionado */
@@ -739,7 +802,7 @@
         .chat-title .alias-view {
             font-size: 1rem;
             font-weight: 600;
-            white-space: nowrap;
+            white-space: nowrap; 
             overflow: hidden;
             text-overflow: ellipsis;
             max-width: 200px;
@@ -748,7 +811,7 @@
         .chat-title .edit-alias-btn {
             font-size: 12px;
             padding: 2px 4px;
-        }
+        } 
 </style>
 <script>
 /* Small helpers */
@@ -784,22 +847,22 @@ function truncate(str, n) {
         let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
         if (isNaN(d.getTime())) d = new Date();
 
-        // Convertir a hora de México (Central Time)
-        const options = {
-            timeZone: 'America/Mexico_City',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        };
-
-        const time = d.toLocaleTimeString('es-MX', options);
+        // Formato IDÉNTICO al Kanban: día-mes hora:minuto
         const day = d.getDate();
         const month = d.toLocaleString('es-MX', {
             month: 'short',
             timeZone: 'America/Mexico_City'
+        }).toLowerCase().replace('.', '').trim();
+
+        const time = d.toLocaleTimeString('es-MX', {
+            timeZone: 'America/Mexico_City',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
         });
 
-        return `${day}-${month} ${time}`;
+        // Formato exacto igual a Kanban: "d-mes   hh:mm"
+        return `${day}-${month}   ${time}`;
     } 
     // Función para obtener bandera (igual que en kanban)
     function getCountryFlag(numero) {
@@ -846,41 +909,51 @@ function actualizarListaChats() {
 
 const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
-function crearNuevoChatHTML(chat) {
+    function crearNuevoChatHTML(chat) {
         const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
         const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
 
-        // === ICONOS CORRECTOS (WhatsApp/Telegram) ===
+        // Determinar plataforma y clase CSS
+        const isTelegram = num.startsWith('tg_') || chat.canal === 'Telegram';
+        const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
+
         let imagen = '/static/icons/whatsapp-icon.png';
-        if (num.startsWith('tg_') || chat.canal === 'Telegram') {
+        if (isTelegram) {
             imagen = '/static/icons/telegram-icon-dos.png';
         }
-        // === FIN ICONOS ===
-    const banderaUrl = getCountryFlag(num) || '';
-    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
-    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
-    const tipo_mensaje = coalesce(chat.tipo_mensaje, chat.last_type, '');
-    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
-    const preview = tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
-    const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
 
-    return `
+        const banderaUrl = getCountryFlag(num) || '';
+        const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+        const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+        const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+        const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+        const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+
+        return `
     <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
         <div class="card-content">
+            <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
             <div class="card-title-row">
                 <div class="card-avatar-section">
                     <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
                 </div>
-                ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
-                <span class="alias-view" data-num="${num}">${nombre}</span>
-                <span class="card-time">${ultima ? formatClientTime(ultima) : ''}</span>
-
+                <div class="card-name-section">
+                    <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
+                </div>
             </div>
-            <div class="card-msg">${preview}</div>
-        </div>
-    </a>`.trim(); 
-}
 
+            <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
+            <div class="card-bottom-row">
+                <div class="card-msg">${preview}</div>
+                <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
+            </div>
+
+            <!-- Indicador de mensajes no leídos -->
+            ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+        </div>
+    </a>`.trim();
+    } 
 function actualizarIncrementalChats(chats) {
     const container = document.querySelector('.chat-items');
     if (!container) return;
