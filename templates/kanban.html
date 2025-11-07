@@ -204,43 +204,35 @@
         /* Reglas clave para la alineación */
         flex-grow: 0;
         flex-shrink: 0; /* No se encoge, siempre mantiene el ancho de la fecha */
-        margin-left: 10px; /* Espacio entre el mensaje (ellipsis) y la fecha */
+        margin-left: 170px; /* Espacio entre el mensaje (ellipsis) y la fecha */
         margin-top: 0px; /* Alineación vertical con el mensaje */
         /* Aseguramos que la fecha quede pegada a la derecha de la tarjeta */
         margin-right: 0;
         /* Eliminamos order: 2, el orden natural en el HTML ya lo posiciona correctamente */
     }
 
-        /* Estilo para el tiempo dentro del mensaje */
-        /* Estilo para el tiempo dentro del mensaje: 40% del espacio, no se encoge */
-        .card-msg .card-time {
-            font-size: 0.62rem; /* Más pequeño para el tiempo */
-            color: rgba(255,255,255,0.7);
-            white-space: nowrap; /* Asegura que la hora no se rompa */
-            flex: 0 0 40%; /* El tiempo ocupa hasta el 40% y no crece ni se encoge */
-            line-height: 1;
-            align-self: flex-end;
-            text-align: right; /* Alinea el texto de la hora a la derecha */
-        }
+    .card-msg .card-time {
+        font-size: 0.62rem; /* Más pequeño para el tiempo */
+        color: rgba(255,255,255,0.7);
+        white-space: nowrap; /* Asegura que la hora no se rompa */
+        flex: 0 0 40%; /* El tiempo ocupa hasta el 40% y no crece ni se encoge */
+        line-height: 1;
+        align-self: flex-end;
+        text-align: right; /* Alinea el texto de la hora a la derecha */
+    }
 
-        /* Contenido del mensaje (el nodo de texto que envuelve el mensaje): 60% del espacio */
-        .card-msg:not(.card-time) {
-            /* Nota: Esto selecciona el contenedor .card-msg, pero la proporción se aplica 
-           al nodo de texto del mensaje. Usaremos flex-basis en el contenedor 
-           mientras que el mensaje envuelve: */
-            /* Usamos un max-width para forzar la ocupación del 60% al mensaje de texto */
-            max-width: 100%;
-            flex-shrink: 1;
-            flex-grow: 1; /* Permite que el mensaje crezca hasta su límite (60%) */
-            min-width: 0;
-            /* Reglas para el texto del mensaje */
-            display: -webkit-box;
-            -webkit-line-clamp: 1; /* Muestra máximo 2 líneas del mensaje */
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: normal;
-        }
+    .card-msg:not(.card-time) {
+        max-width: 90%;
+        flex-shrink: initial;
+        flex-grow: 1;
+        min-width: 0;
+        display: -webkit-box;
+        -webkit-line-clamp: 1;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
 
     .card-content {
         display: flex;
