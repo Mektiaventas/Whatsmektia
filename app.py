@@ -11125,11 +11125,8 @@ def actualizar_kanban_inmediato(numero, config=None):
 def actualizar_columna_chat(numero, columna_id, config=None):
     """
     Safely update chat_meta.columna_id for a given chat.
-    - Verifies the target columna_id exists in kanban_columnas.
-    - If it doesn't exist, tries to find a column named like 'Resueltos'.
-    - If still not found, creates a new 'Resueltos' column and uses its id.
-    This prevents foreign-key errors when code attempts to move chats to a hard-coded id
-    that may have been deleted in that tenant DB.
+    MODIFICADO: No crea la columna si la solicitada (Vendidos/Resueltos) no existe.
+    En su lugar, hace fallback a la columna 'En Conversación' (ID 2).
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -11139,63 +11136,64 @@ def actualizar_columna_chat(numero, columna_id, config=None):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        original_columna_id = columna_id
 
-        # 1) If the target column id does not exist, attempt fallbacks
+        # 1. Verificar si la ID solicitada existe
         cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_id,))
         if cursor.fetchone() is None:
-            app.logger.warning(f"⚠️ Target kanban_columnas id={columna_id} not found in DB {config.get('db_name')}. Attempting fallback lookup/create.")
-
-            # Try to find a column named 'Resueltos' (case-insensitive, tolerant)
-            cursor.execute("SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE LOWER(%s) LIMIT 1", ('%resueltos%',))
+            # La ID solicitada (e.g., ID 4 'Resueltos') no existe.
+            
+            # 2. Intentar encontrar una columna por nombre ("Vendidos" o "Resueltos")
+            cursor.execute("""
+                SELECT id FROM kanban_columnas 
+                WHERE LOWER(nombre) LIKE '%%vendido%%' OR LOWER(nombre) LIKE '%%resuelto%%' 
+                LIMIT 1
+            """)
             row = cursor.fetchone()
+            
             if row:
-                new_col_id = row[0]
-                app.logger.info(f"ℹ️ Fallback: found 'Cerrados' column id={new_col_id}. Using it instead of requested id={columna_id}.")
-                columna_id = new_col_id
+                # 3. Éxito: Columna encontrada por nombre
+                columna_id = row[0]
+                app.logger.info(f"ℹ️ Fallback: Target ID {original_columna_id} no existe. Usando columna encontrada por nombre: {columna_id}.")
             else:
-                # Create a new 'Resueltos' column at the end
-                try:
-                    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
-                    next_ord_row = cursor.fetchone()
-                    next_ord = int(next_ord_row[0]) if next_ord_row and next_ord_row[0] is not None else 1
-                except Exception:
-                    next_ord = 1
-
-                default_icon = '/static/icons/default-avatar.png'
-                color = '#6c757d'
-                cursor.execute(
-                    "INSERT INTO kanban_columnas (nombre, orden, color, icono) VALUES (%s, %s, %s, %s)",
-                    ('Vendidos', next_ord, color, default_icon)
-                )
-                conn.commit()
-                columna_id = cursor.lastrowid
-                app.logger.info(f"✅ Created missing 'Vendidos' column id={columna_id} in DB {config.get('db_name')}")
-
-        # 2) Perform the update now that columna_id is guaranteed to exist
+                # 4. Fracaso: La columna no existe ni por ID ni por nombre. Usar columna de FALLBACK SEGURO (ID 2 = En Conversación).
+                
+                # Primero, obtener la columna actual para evitar moverla si no es necesario
+                meta = obtener_chat_meta(numero, config)
+                current_col = meta['columna_id'] if meta and meta.get('columna_id') else 1 # Usar 1 (Nuevos) si no hay meta
+                
+                # Definir columna segura de fallback
+                columna_fallback = 2 # 'En Conversación'
+                
+                # Verificamos que la columna de fallback exista.
+                cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_fallback,))
+                if cursor.fetchone() is not None:
+                     app.logger.warning(f"⚠️ Target columna 'Resueltos/Vendidos' no existe. Usando columna de fallback seguro: {columna_fallback}.")
+                     columna_id = columna_fallback
+                else:
+                     # Si ni siquiera existe 'En Conversación', usamos la columna actual.
+                     app.logger.warning(f"⚠️ Fallback seguro (ID 2) no existe. Manteniendo columna actual ({current_col}) para {numero}.")
+                     columna_id = current_col 
+                     
+        # 5. Realizar el update
         cursor.execute("""
             UPDATE chat_meta SET columna_id = %s 
             WHERE numero = %s;
         """, (columna_id, numero))
         conn.commit()
-        app.logger.info(f"✅ Chat {numero} columna updated to {columna_id} in DB {config.get('db_name')}")
+        app.logger.info(f"✅ Chat {numero} columna actualizada a {columna_id} en DB {config.get('db_name')}")
 
     except Exception as e:
-        # Log the underlying DB error for diagnostics
-        app.logger.error(f"❌ actualizar_columna_chat failed for numero={numero} columna_id={columna_id} on DB {config.get('db_name')}: {e}")
+        app.logger.error(f"❌ actualizar_columna_chat falló para numero={numero} columna_id={original_columna_id}: {e}")
         try:
-            if conn:
-                conn.rollback()
-        except:
-            pass
+            if conn: conn.rollback()
+        except: pass
         raise
     finally:
         try:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-        except:
-            pass
+            if cursor: cursor.close()
+            if conn: conn.close()
+        except: pass
 
 # --- Función actualizar_info_contacto ---
 def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
