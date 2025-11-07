@@ -53,13 +53,6 @@
 
                         <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
 
-                        {% if is_admin %}
-                        <span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
-                        </span>
-                        <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
-                        {% endif %}
-
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha|format_time_24h }}
@@ -410,7 +403,8 @@
         flex-direction: column;
         gap: 6px;
         color: var(--text-light);
-    }
+        position: relative; /* ← AGREGAR ESTA LÍNEA */
+    } 
 
     .card-title-row {
         display: flex;
@@ -450,12 +444,18 @@
     }
 
     .card-time {
-        margin-left: auto;
-        font-size: 12px;
+        position: absolute !important;
+        top: 8px !important;
+        right: 8px !important;
+        font-size: 0.7rem !important;
         opacity: 0.85;
         color: #d1d5db;
+        background: rgba(0,0,0,0.3);
+        padding: 2px 6px;
+        border-radius: 4px;
+        z-index: 2;
     }
-
+     
     .card-msg {
         font-size: 13px;
         color: #d1d5db;
@@ -571,15 +571,23 @@
     @media (max-width: 480px) {
         .chat-layout-v2 {
             padding: 8px;
-        }
+        } 
 
         .chat-list-v2 {
             width: 92vw;
         }
-
+ 
         .alias-view {
-            max-width: 120px;
-            font-size: 13px;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-light);
+            display: inline-block;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px; /* Aumenta este valor */
+            flex: 1; /* Agrega esto */
+            margin-right: 8px; /* Agrega esto */
         }
 
         .card-avatar-section {
@@ -611,10 +619,34 @@
         transform: translateY(-2px);
     }
 
+    /* Agregar esto al final del CSS */
     .emoji-picker-list {
-        z-index: 1400 !important;
+        z-index: 10000 !important;
+        background: white !important;
+        border: 1px solid #ccc !important;
+        border-radius: 8px !important;
+        padding: 8px !important;
+        max-width: 320px !important;
+        max-height: 200px !important;
+        overflow-y: auto !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
     }
 
+    .emoji-option {
+        font-size: 20px !important;
+        background: none !important;
+        border: 0 !important;
+        cursor: pointer !important;
+        padding: 5px !important;
+        margin: 2px !important;
+        border-radius: 4px !important;
+        transition: background-color 0.2s !important;
+    }
+
+        .emoji-option:hover {
+            background-color: #f0f0f0 !important;
+        }
+         
 
     /* ===== ESTILOS COMPACTOS PARA CHATS (IGUAL QUE KANBAN) ===== */
     .chat-list-v2 .card-avatar {
@@ -827,17 +859,11 @@ function crearNuevoChatHTML(chat) {
                 ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
                 <span class="alias-view" data-num="${num}">${nombre}</span>
                 <span class="card-time">${ultima ? formatClientTime(ultima) : ''}</span>
-                <span class="alias-edit" style="display:none;">
-                    <input type="text" value="${escapeHtml(coalesce(chat.alias, chat.nombre, num))}" data-num="${num}" maxlength="100" style="width:110px;">
-                </span>
-                ${IS_ADMIN ? `<button type="button" class="edit-alias-btn" data-num="${num}" title="Editar nombre">✏️</button>` : ''}
-            </div>
-            <div class="card-meta-row">
-                ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+
             </div>
             <div class="card-msg">${preview}</div>
         </div>
-    </a>`.trim();
+    </a>`.trim(); 
 }
 
 function actualizarIncrementalChats(chats) {
@@ -1448,7 +1474,7 @@ function seekAudio(id, progressBar, evt) {
                 }, messagePollIntervalMs);
             } 
         } 
-    });
+    }); 
 });
 </script>
 {% endblock %}   
