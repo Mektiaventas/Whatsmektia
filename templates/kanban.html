@@ -178,22 +178,34 @@
         margin-left: 6px;
     }
 
-    /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        /* Usar Flexbox para alinear el tiempo a la derecha */
         color: #e2e5ed;
         font-size: 0.75rem;
         font-weight: 400;
-        letter-spacing: 0.01rem;
         margin-top: 2px;
-        min-height: 1rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-end;
-        gap: 8px; /* Espacio entre el mensaje y la hora */
-        /* IMPORTANTE: Permitir que el mensaje ocupe todo el ancho disponible si no hay fecha, 
-           pero limitar su expansión para la proporción 60/40 */
-        width: 100%;
+        line-height: 1;
+        /* Ocupa el espacio restante después de la fecha */
+        flex: 1 1 auto;
+        min-width: 0;
+        /* Limitar a una sola línea con ellipsis para dejar espacio a la fecha */
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 100%; /* Ajustado por el flex */
+    }
+
+    /* Estilo para la fecha a la derecha */
+    .card-time.card-meta-right {
+        /* Se usa la clase 'card-time' que ya existía en tu CSS, pero la mejoramos */
+        font-size: 0.62rem;
+        color: rgba(255,255,255,0.7);
+        white-space: nowrap;
+        text-align: right;
+        flex: 0 0 auto; /* No crece ni se encoge, toma el ancho natural */
+        margin-left: auto; /* Empuja el elemento a la derecha dentro del contenedor flex wrap */
+        padding-left: 10px; /* Espacio entre el mensaje y la fecha */
+        margin-top: 2px; /* Alineación vertical con el mensaje */
+        order: 2; /* Asegura que vaya al final de la línea */
     }
 
         /* Estilo para el tiempo dentro del mensaje */
@@ -214,7 +226,7 @@
            al nodo de texto del mensaje. Usaremos flex-basis en el contenedor 
            mientras que el mensaje envuelve: */
             /* Usamos un max-width para forzar la ocupación del 60% al mensaje de texto */
-            max-width: 60%;
+            max-width: 100%;
             flex-shrink: 1;
             flex-grow: 1; /* Permite que el mensaje crezca hasta su límite (60%) */
             min-width: 0;
@@ -229,15 +241,23 @@
 
     .card-content {
         display: flex;
+        flex-wrap: wrap; /* Permite que los elementos de abajo (mensaje/fecha) envuelvan */
         align-items: flex-start;
         gap: 0px;
         padding: 0px 0px;
+        width: 100%; /* Asegura que el contenido use todo el ancho */
     }
 
     .card-title-row {
-        display: flex;
-        align-items: center;
-        gap: 6px;
+        /* ... código existente ... */
+        flex: 1 1 100%; /* Hace que ocupe todo el ancho de la línea */
+        margin-bottom: 2px;
+    }
+
+    .card-meta-row {
+        /* ... código existente ... */
+        /* Eliminamos el margin-left: 6px para que no estorbe */
+        margin-left: 0px;
     }
 
     /* shrink unread badge */
@@ -279,12 +299,6 @@
         overflow: hidden;
     }
 
-    /* reduce spacing inside the meta row to compact further */
-    .card-meta-row {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
 
     /* responsive: keep compactness on small screens */
     @media (max-width: 768px) {
@@ -362,13 +376,13 @@
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
-                    <div class="card-msg">
+                    <span class="card-time card-meta-right">
+                        {% if chat.ultima_fecha %}
+                        {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                        {% endif %}
+                    </span>
+                    <div class="card-msg card-msg-left">
                         {{ chat.ultimo_mensaje or "&nbsp;" }}
-                        <span class="card-time">
-                            {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
-                            {% endif %}
-                        </span>
                     </div>
                 </div>
             </a>
