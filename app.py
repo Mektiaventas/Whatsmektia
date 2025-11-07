@@ -6398,7 +6398,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
         # Primero asegurar que el contacto existe con su información actualizada
-        timestamp_local_mx = datetime.now(tz_mx)
+        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
@@ -6408,7 +6408,7 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen)
             VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s)
-        """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url,timestamp_local_mx.strftime('%Y-%m-%d %H:%M:%S'), imagen_url, es_imagen))
+        """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen))
 
         conn.commit()
         cursor.close()
@@ -8748,7 +8748,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     try:
         # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
-        timestamp_local_mx = datetime.now(tz_mx)
+
         # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
 
@@ -8770,7 +8770,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
             VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
-        """, (numero, texto_limpio,timestamp_local_mx.strftime('%Y-%m-%d %H:%M:%S'), imagen_url, es_imagen, tipo_mensaje, contenido_extra))
+        """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
         # --- FIN MODIFICADO ---
 
         # Get the ID of the inserted message for tracking
