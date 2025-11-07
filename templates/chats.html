@@ -860,17 +860,25 @@ function truncate(str, n) {
     return str.length > n ? str.substring(0, n) + '...' : str;
 }
 
+    // chats.html (Línea ~334)
     function formatClientTime(serverTs) {
+        // Asumimos que serverTs ya está en UTC o es un timestamp numérico válido
         let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
         if (isNaN(d.getTime())) d = new Date();
 
         // Formato IDÉNTICO al Kanban: día-mes hora:minuto
         const day = d.getDate();
+
+        // 🚨 CORRECCIÓN CLAVE: Eliminar la zona horaria y usar el TZ del cliente/servidor.
+        // Asumimos que el objeto 'd' ya fue creado a partir de un timestamp de México
+        // o que el navegador lo ajusta correctamente a la hora local del cliente.
         const month = d.toLocaleString('es-MX', {
             month: 'short',
+            // ELIMINADO: timeZone: 'America/Mexico_City'
         }).toLowerCase().replace('.', '').trim();
 
         const time = d.toLocaleTimeString('es-MX', {
+            // ELIMINADO: timeZone: 'America/Mexico_City',
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
@@ -878,7 +886,7 @@ function truncate(str, n) {
 
         // Formato exacto igual a Kanban: "d-mes   hh:mm"
         return `${day}-${month}   ${time}`;
-    } 
+    }
     // Función para obtener bandera (igual que en kanban)
     function getCountryFlag(numero) {
         if (!numero) return null;

@@ -2603,7 +2603,7 @@ def get_chat_messages(telefono):
                     msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
                 
                 # Convertir a string ISO para JSON (esto es lo que Date.parse() en JS espera)
-                msg['timestamp'] = msg['timestamp'].isoformat()
+                msg['timestamp'] = msg['timestamp'].astimezone(tz_mx).isoformat()
         
         return jsonify({'messages': new_messages})
         
