@@ -331,21 +331,22 @@
                         <span class="alias-edit" style="display:none;">
                             <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
                         </span>
-                        <span class="card-time">
-                            {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
-                            {% endif %}
-                        </span>
+
                         <button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>
                     </div>
                     <div class="card-meta-row">
                         {% endif %}
-                        
+
                         {% if chat.sin_leer > 0 %}
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
                     <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+                    <span class="card-time">
+                        {% if chat.ultima_fecha %}
+                        {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                        {% endif %}
+                    </span>
                 </div>
             </a>
             {% endfor %}
