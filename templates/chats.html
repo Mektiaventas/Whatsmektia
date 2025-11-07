@@ -37,50 +37,55 @@
             {% for chat in chats %}
             <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
+                    <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
                     <div class="card-title-row">
-                        {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
-                        {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
-                        {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
-                        {% endif %}
-
-                        <img src="{{ avatar_src }}"
-                             class="card-avatar" alt="Avatar"
-                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                        {% set bandera = chat.numero | bandera %}
-                        {% if bandera %}
-                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-                        {% endif %}
-
-                        <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
-
-                        <span class="card-time">
-                            {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha|format_time_24h }}
+                        <div class="card-avatar-section">
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% endif %}
-                        </span>
+
+                            <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            {% set bandera = chat.numero | bandera %}
+                            {% if bandera %}
+                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% endif %}
+                        </div>
+                        <div class="card-name-section">
+                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' or chat.numero.startswith('tg_') else 'is-whatsapp' %}
+                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
+                        </div>
                     </div>
 
-                    <div class="card-meta-row">
-                        {% if chat.sin_leer and chat.sin_leer > 0 %}
-                        <span class="card-unread">{{ chat.sin_leer }}</span>
-                        {% endif %}
+                    <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
+                    <div class="card-bottom-row">
+                        <div class="card-msg">
+                            {% if chat.ultimo_mensaje %}
+                            {% if chat.tipo_mensaje == 'imagen' %}
+                            📷 Imagen
+                            {% else %}
+                            {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+                            {% endif %}
+                            {% else %}
+                            &nbsp;
+                            {% endif %}
+                        </div>
+                        <div class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
                     </div>
 
-                    <div class="card-msg">
-                        {% if chat.ultimo_mensaje %}
-                        {% if chat.tipo_mensaje == 'imagen' %}
-                        📷 Imagen
-                        {% else %}
-                        {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
-                        {% endif %}
-                        {% else %}
-                        &nbsp;
-                        {% endif %}
-                    </div>
+                    <!-- Indicador de mensajes no leídos -->
+                    {% if chat.sin_leer and chat.sin_leer > 0 %}
+                    <span class="card-unread">{{ chat.sin_leer }}</span>
+                    {% endif %}
                 </div>
             </a>
             {% endfor %}
-        </div>
+        </div> 
     </aside>
 
     <!-- Centro: Mensajes -->
@@ -187,7 +192,11 @@
                     </div>
                     {% endif %}
                 </div>
-                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+                <div class="msg-meta">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div> 
             </div>
             {% endif %}
 
@@ -199,7 +208,11 @@
                         {{ msg.respuesta }}
                     </div>
                 </div>
-                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+                <div class="msg-meta">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div> 
             </div>
             {% endif %}
 
@@ -248,7 +261,11 @@
                     {% endif %}
 
                 </div>
-                <div class="msg-meta">{{ msg.timestamp|format_time_24h }}</div>
+                <div class="msg-meta">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div> 
             </div>
             {% endif %}
             {% endfor %}
@@ -318,12 +335,12 @@
                     <span class="stat-label">Última actividad:</span>
                     <span class="stat-value">
                         {% if mensajes and mensajes[-1].timestamp %}
-                        {{ mensajes[-1].timestamp|format_time_24h }}
+                        {{ mensajes[-1].timestamp.strftime('%-d-%b   ').lower() }} {{ mensajes[-1].timestamp.strftime('%H:%M') }}
                         {% else %}
                         N/A
                         {% endif %}
-                    </span>
-                </div>
+                    </span> 
+                </div> 
             </div>
         </div>
         {% endif %}
@@ -913,8 +930,8 @@ const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
         const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
         const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
 
-        // Determinar plataforma y clase CSS
-        const isTelegram = num.startsWith('tg_') || chat.canal === 'Telegram';
+        // DETERMINAR PLATAFORMA SIEMPRE - no solo cuando hay chat seleccionado
+        const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
         const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
 
         let imagen = '/static/icons/whatsapp-icon.png';
