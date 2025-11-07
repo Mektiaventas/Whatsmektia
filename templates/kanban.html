@@ -183,11 +183,12 @@
         font-size: 0.75rem;
         font-weight: 500;
         margin-top: 0px;
-        line-height: 2;
-        flex: 1 1 auto;
+        line-height: 1; /* Hacemos el line-height más compacto */
+        /* Reglas clave para que ocupe el espacio y se limite */
         flex-grow: 1;
         flex-shrink: 1;
         min-width: 0;
+        /* Limitar a una sola línea con ellipsis para dejar espacio a la fecha */
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -196,17 +197,18 @@
 
     /* Estilo para la fecha a la derecha */
     .card-time.card-meta-right {
-        /* Se usa la clase 'card-time' que ya existía en tu CSS, pero la mejoramos */
         font-size: 0.62rem;
         color: rgba(255,255,255,0.7);
         white-space: nowrap;
         text-align: right;
-        flex: 0 0 auto; /* No crece ni se encoge, toma el ancho natural */
-        margin-left: auto; /* Empuja el elemento a la derecha dentro del contenedor flex wrap */
-        padding-left: 10px; /* Espacio entre el mensaje y la fecha */
-        margin-top: 2px; /* Alineación vertical con el mensaje */
-        order: 2; /* Asegura que vaya al final de la línea */
-        margin-bottom: 2px;
+        /* Reglas clave para la alineación */
+        flex-grow: 0;
+        flex-shrink: 0; /* No se encoge, siempre mantiene el ancho de la fecha */
+        margin-left: 10px; /* Espacio entre el mensaje (ellipsis) y la fecha */
+        margin-top: 0px; /* Alineación vertical con el mensaje */
+        /* Aseguramos que la fecha quede pegada a la derecha de la tarjeta */
+        margin-right: 0;
+        /* Eliminamos order: 2, el orden natural en el HTML ya lo posiciona correctamente */
     }
 
         /* Estilo para el tiempo dentro del mensaje */
@@ -246,19 +248,16 @@
         align-items: flex-start;
         gap: 0px;
         padding: 0px 0px;
-        width: 100%; /* Asegura que el contenido use todo el ancho */
+        width: 100%;
     }
 
     .card-title-row {
-        /* ... código existente ... */
         flex: 1 1 100%; /* Hace que ocupe todo el ancho de la línea */
         margin-bottom: 2px;
     }
 
     .card-meta-row {
-        /* ... código existente ... */
-        /* Eliminamos el margin-left: 6px para que no estorbe */
-        margin-left: 0px;
+        display: none;
     }
 
     /* shrink unread badge */
