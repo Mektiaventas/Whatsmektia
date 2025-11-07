@@ -9116,7 +9116,8 @@ def ver_chats():
           cont.alias,
           cont.nombre,
           (SELECT mensaje FROM conversaciones 
-           WHERE numero = conv.numero 
+           WHERE numero = conv.numero
+           AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%'
            ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
           MAX(conv.timestamp) AS ultima_fecha
         FROM conversaciones conv
