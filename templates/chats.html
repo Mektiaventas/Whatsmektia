@@ -398,15 +398,15 @@
     }
 
     .card-content {
-        padding: 8px;
+        padding: 10px 8px; /* Más padding vertical */
         display: flex;
         flex-direction: column;
-        gap: 6px;
+        gap: 4px; /* Menor gap para más espacio */
         color: var(--text-light);
         position: relative;
-        min-height: 70px; /* Agrega esta línea para espacio inferior */
+        min-height: 80px; /* Aumentado a 80px */
+        padding-bottom: 16px; /* Espacio extra en la parte inferior */
     } 
-
     .card-title-row {
         display: flex;
         align-items: center;
@@ -448,19 +448,17 @@
 
     .card-time {
         position: absolute !important;
-        bottom: 8px !important;
+        bottom: 4px !important; /* Cambiado de 12px a 4px - MUCHO más abajo */
         right: 8px !important;
-        font-size: 0.7rem !important;
+        font-size: 0.65rem !important; /* Un poco más pequeño */
         opacity: 0.85;
         color: #d1d5db;
-        background: rgba(0,0,0,0.3);
-        padding: 2px 6px;
-        border-radius: 4px;
+        background: rgba(0,0,0,0.4); /* Fondo más oscuro para mejor contraste */
+        padding: 1px 4px; /* Padding reducido */
+        border-radius: 3px;
         z-index: 2;
-        /* Agrega estas líneas para mejor centrado */
-        transform: translateX(0);
         white-space: nowrap;
-    }  
+    } 
     .card-msg { 
         font-size: 13px;
         color: #d1d5db;
@@ -552,13 +550,14 @@
             white-space: nowrap !important;
             overflow: hidden !important;
             text-overflow: ellipsis !important;
-            max-width: calc(100% - 70px) !important; /* Aumentado de 90px a 70px */
+            max-width: calc(100% - 70px) !important; /* ← CAMBIADO de 90px a 70px */
+            margin-right: auto !important; /* ← AGREGA esta línea */
         } 
 
             .chat-list-v2.mobile-visible {
                 transform: translateX(0);
             }
-
+             
         .chat-panel-v2 {
             margin-left: 0;
             padding-right: 8px;
@@ -1401,7 +1400,23 @@ function seekAudio(id, progressBar, evt) {
     document.addEventListener('DOMContentLoaded', () => {
         console.log('DOM cargado - inicializando componentes');
         enhanceAliasButtons();
-        setupEmojiPicker(); 
+
+        // INICIALIZACIÓN DIRECTA DE EMOJIS
+        if (typeof setupEmojiPicker === 'function') {
+            setupEmojiPicker();
+            console.log('Emoji picker inicializado');
+        } else {
+            console.warn('setupEmojiPicker no disponible, usando fallback');
+            // Fallback básico
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            const picker = document.getElementById('emoji-picker-list');
+            if (emojiBtn && picker) {
+                emojiBtn.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    picker.style.display = picker.style.display === 'none' ? 'block' : 'none';
+                });
+            }
+        } 
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
