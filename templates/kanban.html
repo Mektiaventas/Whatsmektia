@@ -183,16 +183,15 @@
         font-size: 0.75rem;
         font-weight: 500;
         margin-top: 0px;
-        line-height: 1; /* Hacemos el line-height más compacto */
-        /* Reglas clave para que ocupe el espacio y se limite */
-        flex-grow: 1;
-        flex-shrink: 1;
+        line-height: 1;
+        /* REGLA CLAVE 50%: toma el 50% del espacio, se encoge si es necesario y crece para llenar */
+        flex: 1 1 50%;
         min-width: 0;
-        /* Limitar a una sola línea con ellipsis para dejar espacio a la fecha */
+        /* Limitar a una sola línea con ellipsis */
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 100%;
+        max-width: 50%; /* Limita el crecimiento más allá del 50% */
     }
 
     /* Estilo para la fecha a la derecha */
@@ -201,37 +200,9 @@
         color: rgba(255,255,255,0.7);
         white-space: nowrap;
         text-align: right;
-        /* Reglas clave para la alineación */
-        flex-grow: 0;
-        flex-shrink: 0; /* No se encoge, siempre mantiene el ancho de la fecha */
-        margin-left: 170px; /* Espacio entre el mensaje (ellipsis) y la fecha */
-        margin-top: 0px; /* Alineación vertical con el mensaje */
-        /* Aseguramos que la fecha quede pegada a la derecha de la tarjeta */
-        margin-right: 0;
-        /* Eliminamos order: 2, el orden natural en el HTML ya lo posiciona correctamente */
-    }
-
-    .card-msg .card-time {
-        font-size: 0.62rem; /* Más pequeño para el tiempo */
-        color: rgba(255,255,255,0.7);
-        white-space: nowrap; /* Asegura que la hora no se rompa */
-        flex: 0 0 40%; /* El tiempo ocupa hasta el 40% y no crece ni se encoge */
-        line-height: 1;
-        align-self: flex-end;
-        text-align: right; /* Alinea el texto de la hora a la derecha */
-    }
-
-    .card-msg:not(.card-time) {
-        max-width: 90%;
-        flex-shrink: initial;
-        flex-grow: 1;
-        min-width: 0;
-        display: -webkit-box;
-        -webkit-line-clamp: 1;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        /* REGLA CLAVE 50%: toma el 50% del espacio, no se encoge, se ancla a la derecha */
+        flex: 0 0 50%;
+        margin-left: 5px; /* Pequeño espacio para la separación visual */
     }
 
     .card-content {
@@ -280,6 +251,7 @@
         box-shadow: 0 0 5px #00e09144;
         z-index: 2;
     }
+
     /* make kanban cards slightly more compact vertically */
     .kanban-card {
         display: block;
@@ -308,7 +280,16 @@
         .card-msg {
             font-size: 0.68rem;
         }
-
+        /* Nuevo contenedor para mensaje + fecha */
+        .card-message-row {
+            display: flex;
+            align-items: flex-end; /* Alinea la fecha y mensaje a la parte inferior */
+            justify-content: space-between;
+            flex: 1 1 100%; /* Ocupa todo el ancho de la tarjeta */
+            width: 100%;
+            margin-top: 2px;
+            line-height: 1.1; /* Ajuste para que el texto se vea bien */
+        }
         .card-title-row .alias-view {
             font-size: 0.80rem;
             max-width: calc(100% - 80px);
@@ -368,13 +349,15 @@
                         <span class="card-unread">{{ chat.sin_leer }}</span>
                         {% endif %}
                     </div>
-                    <span class="card-time card-meta-right">
-                        {% if chat.ultima_fecha %}
-                        {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
-                        {% endif %}
-                    </span>
-                    <div class="card-msg card-msg-left">
-                        {{ chat.ultimo_mensaje or "&nbsp;" }}
+                    <div class="card-message-row">
+                        <div class="card-msg card-msg-left">
+                            {{ chat.ultimo_mensaje or "&nbsp;" }}
+                        </div>
+                        <span class="card-time card-meta-right">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </span>
                     </div>
                 </div>
             </a>
@@ -678,7 +661,8 @@
 
         // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
         let fechaFormateada = '';
-        const timeElement = elemento.querySelector('.card-msg .card-time'); // Buscar el SPAN del tiempo DENTRO de .card-msg
+        // Buscar el SPAN del tiempo AHORA FUERA del .card-msg
+        const timeElement = elemento.querySelector('.card-time.card-meta-right');
 
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
@@ -700,40 +684,15 @@
         }
         // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
 
-        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
+        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE SIMPLE ---
         const msgElement = elemento.querySelector('.card-msg');
         const nuevoMensaje = chat.ultimo_mensaje || '';
         let mensajeActualizado = false;
 
-        if (msgElement) {
-            let ultimoNodo = null;
-
-            // Iterar sobre los nodos hijos para encontrar el nodo de texto que representa el mensaje.
-            // Debe ser el último nodo de texto, después de los elementos SPAN (como card-time).
-            msgElement.childNodes.forEach(node => {
-                // Solo consideramos nodos de tipo TEXTO (nodeType === 3)
-                if (node.nodeType === 3) {
-                    // Si el nodo actual no está vacío, lo marcamos como el "último nodo de texto"
-                    if (node.textContent.trim() !== '') {
-                        ultimoNodo = node;
-                    }
-                    // Si encontramos un nodo Element (ej: <span>), reseteamos, 
-                    // ya que el mensaje de texto debe ser el último componente.
-                    if (node.nodeType === 1) {
-                        ultimoNodo = null;
-                    }
-                }
-            });
-
-            if (ultimoNodo && ultimoNodo.textContent !== nuevoMensaje) {
-                // Si encontramos un nodo de texto, actualizamos su contenido
-                ultimoNodo.textContent = nuevoMensaje;
-                mensajeActualizado = true;
-            } else if (!ultimoNodo) {
-                // Si no encontramos un nodo de texto (o está vacío), lo insertamos al final
-                msgElement.insertAdjacentText('beforeend', nuevoMensaje);
-                mensajeActualizado = true;
-            }
+        // Simplemente actualizamos el contenido de texto del div.card-msg
+        if (msgElement && msgElement.textContent.trim() !== nuevoMensaje.trim()) {
+            msgElement.textContent = nuevoMensaje;
+            mensajeActualizado = true;
         }
 
         // Aplicar la animación si el mensaje fue actualizado y no está vacío
@@ -743,7 +702,7 @@
                 setTimeout(() => elemento.classList.remove('new-message'), 2500);
             }
         }
-        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
+        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE SIMPLE ---
 
 
         // 3. Actualizar el contador de mensajes no leídos
@@ -751,13 +710,22 @@
         if (chat.sin_leer > 0) {
             if (unread) unread.textContent = chat.sin_leer;
             else {
-                // Si no existe, lo creamos y lo añadimos a .card-meta-row
-                const metaRow = elemento.querySelector('.card-meta-row');
+                // ... (código para recrear el badge si es necesario, sin cambios)
+                const metaRow = elemento.querySelector('.card-meta-row'); // Asumiendo que metaRow sigue siendo el padre, aunque esté oculto
                 if (metaRow) {
                     const span = document.createElement('span');
                     span.className = 'card-unread';
                     span.textContent = chat.sin_leer;
                     metaRow.appendChild(span);
+                } else {
+                    // Fallback si meta-row está display:none, buscar el card-content (padre)
+                    const cardContent = elemento.querySelector('.card-content');
+                    if (cardContent) {
+                        const span = document.createElement('span');
+                        span.className = 'card-unread';
+                        span.textContent = chat.sin_leer;
+                        cardContent.appendChild(span);
+                    }
                 }
             }
         } else if (unread) unread.remove();
