@@ -190,7 +190,22 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+        /* Color por defecto (puedes elegir uno neutro o WhatsApp como base) */
+        color: #e2e5ed; /* Blanco/gris claro por defecto */
+
+        max-width: calc(100% - 90px); /* Mantener la restricción de ancho */
+        flex: 1 1 auto; /* Permitir que ocupe el espacio */
     }
+
+        /* Color para WhatsApp (Verde) */
+        .alias-view.is-whatsapp {
+            color: #00ff10; /* Verde brillante */
+        }
+
+        /* Color para Telegram (Azul) */
+        .alias-view.is-telegram {
+            color: #00bfff; /* Azul Telegram/cielo */
+        }
 
     .edit-alias-btn {
         font-size: 12px;
@@ -218,7 +233,7 @@
     }
 
     .card-msg {
-        color: #e2e5ed;
+        color: #fff;
         font-size: 0.75rem;
         font-weight: 400;
         line-height: 1.3;
@@ -425,7 +440,8 @@
                             {% endif %}
                         </div>
                         <div class="card-name-section">
-                            <span class="alias-view" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
+                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
                             <span class="alias-edit" style="display:none;">
                                 <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
                             </span>
