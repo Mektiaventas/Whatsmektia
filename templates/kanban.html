@@ -179,39 +179,46 @@
     }
 
     /* message: single line only, ellipsis — enforced for all browsers */
-    /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        /* Eliminamos las reglas de una sola línea/ellipsis forzada */
+        /* Usar Flexbox para alinear el tiempo a la derecha */
         color: #e2e5ed;
-        font-size: 0.75rem; /* Ajustado para la apariencia */
+        font-size: 0.75rem;
         font-weight: 400;
         letter-spacing: 0.01rem;
         margin-top: 2px;
         min-height: 1rem;
-        /* Nuevo: Usar Flexbox para alinear el tiempo a la derecha */
         display: flex;
         justify-content: space-between;
-        align-items: flex-end; /* Alinea tiempo abajo */
+        align-items: flex-end;
         gap: 8px; /* Espacio entre el mensaje y la hora */
+        /* IMPORTANTE: Permitir que el mensaje ocupe todo el ancho disponible si no hay fecha, 
+           pero limitar su expansión para la proporción 60/40 */
+        width: 100%;
     }
 
         /* Estilo para el tiempo dentro del mensaje */
+        /* Estilo para el tiempo dentro del mensaje: 40% del espacio, no se encoge */
         .card-msg .card-time {
             font-size: 0.62rem; /* Más pequeño para el tiempo */
             color: rgba(255,255,255,0.7);
             white-space: nowrap; /* Asegura que la hora no se rompa */
-            flex-shrink: 0; /* Evita que se encoja */
-            order: 1; /* Posiciona la hora al final (derecha) */
+            flex: 0 0 40%; /* El tiempo ocupa hasta el 40% y no crece ni se encoge */
             line-height: 1;
-            align-self: flex-end; /* Asegura la alineación inferior en flex */
-            margin-left: auto; /* Empuja a la derecha */
+            align-self: flex-end;
+            text-align: right; /* Alinea el texto de la hora a la derecha */
         }
 
-        /* Contenido del mensaje: le damos espacio suficiente */
+        /* Contenido del mensaje (el nodo de texto que envuelve el mensaje): 60% del espacio */
         .card-msg:not(.card-time) {
-            order: 0; /* Posiciona el mensaje al inicio (izquierda) */
-            flex-grow: 1;
-            min-width: 0; /* Necesario para que el texto haga ellipsis o wrap */
+            /* Nota: Esto selecciona el contenedor .card-msg, pero la proporción se aplica 
+           al nodo de texto del mensaje. Usaremos flex-basis en el contenedor 
+           mientras que el mensaje envuelve: */
+            /* Usamos un max-width para forzar la ocupación del 60% al mensaje de texto */
+            max-width: 60%;
+            flex-shrink: 1;
+            flex-grow: 1; /* Permite que el mensaje crezca hasta su límite (60%) */
+            min-width: 0;
+            /* Reglas para el texto del mensaje */
             display: -webkit-box;
             -webkit-line-clamp: 2; /* Muestra máximo 2 líneas del mensaje */
             -webkit-box-orient: vertical;
