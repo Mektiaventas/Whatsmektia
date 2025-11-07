@@ -1153,13 +1153,21 @@ function enhanceAliasButtons() {
     });
 }
 
-function onEditAliasClick(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = e.currentTarget;
-    const parent = btn.closest('.card-title-row') || btn.closest('.chat-content') || btn.closest('.card-content');
-    activarEdicionAlias(parent);
-}
+    function onEditAliasClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const btn = e.currentTarget;
+
+        // Buscar el contenedor padre correcto - IMPORTANTE para el chat del centro
+        const parent = btn.closest('.card-title-row') ||
+            btn.closest('.chat-title') ||
+            btn.closest('.chat-content') ||
+            btn.closest('.card-content');
+
+        if (parent) {
+            activarEdicionAlias(parent);
+        }
+    } 
 
     function activarEdicionAlias(parent) {
         if (!parent) return;
@@ -1223,7 +1231,9 @@ function onEditAliasClick(e) {
         };
     }
 
-    /* ===================== EMOJI PICKER ===================== */
+ 
+   
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
 
     function setupEmojiPicker() {
         const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
@@ -1381,9 +1391,7 @@ function seekAudio(id, progressBar, evt) {
     document.addEventListener('DOMContentLoaded', () => {
         console.log('DOM cargado - inicializando componentes');
         enhanceAliasButtons();
-
-        // INICIALIZAR EMOJI PICKER - AGREGA ESTA LÍNEA
-        setupEmojiPicker();
+        setupEmojiPicker(); 
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
@@ -1427,7 +1435,7 @@ function seekAudio(id, progressBar, evt) {
         if (document.hidden) {
             chatAutoRefresh = false;
         } else {
-            chatAutoRefresh = true;
+            chatAutoRefresh = true; 
             if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
                 chatsIntervalHandle = setInterval(() => {
                     if (!document.hidden) actualizarListaChats();
@@ -1436,10 +1444,10 @@ function seekAudio(id, progressBar, evt) {
             if (selectedChatId && !messagesIntervalHandle) {
                 initMessagesStateFromDOM();
                 messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages(); 
+                    if (!document.hidden) pollSelectedMessages();   
                 }, messagePollIntervalMs);
-            }
-        }
+            } 
+        } 
     });
 });
 </script>
