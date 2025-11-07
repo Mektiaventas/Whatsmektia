@@ -660,36 +660,92 @@
 
     function actualizarChatExistente(elemento, chat) {
         const aliasView = elemento.querySelector('.alias-view');
+        // 1. Actualizar el nombre mostrado si ha cambiado
         if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
 
-        const timeElement = elemento.querySelector('.card-time');
+        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
+        let fechaFormateada = '';
+        const timeElement = elemento.querySelector('.card-msg .card-time'); // Buscar el SPAN del tiempo DENTRO de .card-msg
+
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
-            const dia = fechaObj.getDate();
-            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' });
-            const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-            const fechaFormateada = `${dia}-${mes} ${hora}`;
-            if (timeElement.textContent !== fechaFormateada) timeElement.textContent = fechaFormateada;
-        }
 
+            // Replicar el formato de Jinja (%-d-%b   ) (%H:%M)
+            const dia = fechaObj.getDate();
+            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+            const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+            // Construir el formato final exacto: d-mes hh:mm
+            fechaFormateada = `${dia}-${mes}   ${hora}`;
+
+            // Compara y actualiza el SPAN del tiempo si es necesario
+            if (timeElement.textContent.trim() !== fechaFormateada) {
+                timeElement.textContent = fechaFormateada;
+            }
+        } else if (timeElement) {
+            timeElement.textContent = ''; // Limpiar el tiempo si no hay fecha
+        }
+        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
+
+        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
         const msgElement = elemento.querySelector('.card-msg');
         const nuevoMensaje = chat.ultimo_mensaje || '';
-        if (msgElement && msgElement.textContent !== nuevoMensaje) {
-            msgElement.textContent = nuevoMensaje;
-            if (nuevoMensaje) {
+        let mensajeActualizado = false;
+
+        if (msgElement) {
+            let ultimoNodo = null;
+
+            // Iterar sobre los nodos hijos para encontrar el nodo de texto que representa el mensaje.
+            // Debe ser el último nodo de texto, después de los elementos SPAN (como card-time).
+            msgElement.childNodes.forEach(node => {
+                // Solo consideramos nodos de tipo TEXTO (nodeType === 3)
+                if (node.nodeType === 3) {
+                    // Si el nodo actual no está vacío, lo marcamos como el "último nodo de texto"
+                    if (node.textContent.trim() !== '') {
+                        ultimoNodo = node;
+                    }
+                    // Si encontramos un nodo Element (ej: <span>), reseteamos, 
+                    // ya que el mensaje de texto debe ser el último componente.
+                    if (node.nodeType === 1) {
+                        ultimoNodo = null;
+                    }
+                }
+            });
+
+            if (ultimoNodo && ultimoNodo.textContent !== nuevoMensaje) {
+                // Si encontramos un nodo de texto, actualizamos su contenido
+                ultimoNodo.textContent = nuevoMensaje;
+                mensajeActualizado = true;
+            } else if (!ultimoNodo) {
+                // Si no encontramos un nodo de texto (o está vacío), lo insertamos al final
+                msgElement.insertAdjacentText('beforeend', nuevoMensaje);
+                mensajeActualizado = true;
+            }
+        }
+
+        // Aplicar la animación si el mensaje fue actualizado y no está vacío
+        if (mensajeActualizado) {
+            if (nuevoMensaje.trim()) {
                 elemento.classList.add('new-message');
                 setTimeout(() => elemento.classList.remove('new-message'), 2500);
             }
         }
+        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
 
+
+        // 3. Actualizar el contador de mensajes no leídos
         const unread = elemento.querySelector('.card-unread');
         if (chat.sin_leer > 0) {
             if (unread) unread.textContent = chat.sin_leer;
             else {
-                const span = document.createElement('span');
-                span.className = 'card-unread';
-                span.textContent = chat.sin_leer;
-                elemento.querySelector('.card-meta-row').appendChild(span);
+                // Si no existe, lo creamos y lo añadimos a .card-meta-row
+                const metaRow = elemento.querySelector('.card-meta-row');
+                if (metaRow) {
+                    const span = document.createElement('span');
+                    span.className = 'card-unread';
+                    span.textContent = chat.sin_leer;
+                    metaRow.appendChild(span);
+                }
             }
         } else if (unread) unread.remove();
     }
