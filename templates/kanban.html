@@ -179,32 +179,46 @@
     }
 
     /* message: single line only, ellipsis — enforced for all browsers */
+    /* message: single line only, ellipsis — enforced for all browsers */
     .card-msg {
-        font-size: 0.6rem;
-        color: rgba(255,255,255,0.95);
-        margin-left: 0px;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        max-width: 100%;
-        line-height: 1;
-    }
-    .card-msg {
+        /* Eliminamos las reglas de una sola línea/ellipsis forzada */
         color: #e2e5ed;
-        font-size: 0.6rem;
-        display: -webkit-box;
-        -webkit-line-clamp: 2; /* Muestra máximo 2 líneas */
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: normal; /* Permite saltos de línea */
-        min-height: 1rem;
-        font-size: 0.75rem;
+        font-size: 0.75rem; /* Ajustado para la apariencia */
         font-weight: 400;
-        max-width: 70%;
         letter-spacing: 0.01rem;
         margin-top: 2px;
+        min-height: 1rem;
+        /* Nuevo: Usar Flexbox para alinear el tiempo a la derecha */
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end; /* Alinea tiempo abajo */
+        gap: 8px; /* Espacio entre el mensaje y la hora */
     }
+
+        /* Estilo para el tiempo dentro del mensaje */
+        .card-msg .card-time {
+            font-size: 0.62rem; /* Más pequeño para el tiempo */
+            color: rgba(255,255,255,0.7);
+            white-space: nowrap; /* Asegura que la hora no se rompa */
+            flex-shrink: 0; /* Evita que se encoja */
+            order: 1; /* Posiciona la hora al final (derecha) */
+            line-height: 1;
+            align-self: flex-end; /* Asegura la alineación inferior en flex */
+            margin-left: auto; /* Empuja a la derecha */
+        }
+
+        /* Contenido del mensaje: le damos espacio suficiente */
+        .card-msg:not(.card-time) {
+            order: 0; /* Posiciona el mensaje al inicio (izquierda) */
+            flex-grow: 1;
+            min-width: 0; /* Necesario para que el texto haga ellipsis o wrap */
+            display: -webkit-box;
+            -webkit-line-clamp: 2; /* Muestra máximo 2 líneas del mensaje */
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal;
+        }
 
     .card-content {
         display: flex;
@@ -342,12 +356,12 @@
                         {% endif %}
                     </div>
                     <div class="card-msg">
-                    {{ chat.ultimo_mensaje or "&nbsp;" }}
                         <span class="card-time">
                             {% if chat.ultima_fecha %}
                             {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
                             {% endif %}
                         </span>
+                        {{ chat.ultimo_mensaje or "&nbsp;" }}
                     </div>
                 </div>
             </a>
