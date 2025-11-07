@@ -3285,7 +3285,8 @@ def kanban_data(config=None):
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                WHERE numero = cm.numero 
+                WHERE numero = cm.numero
+                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
@@ -10507,7 +10508,8 @@ def ver_kanban(config=None):
             cm.columna_id,
             MAX(c.timestamp) AS ultima_fecha,
             (SELECT mensaje FROM conversaciones 
-             WHERE numero = cm.numero 
+             WHERE numero = cm.numero
+             AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
