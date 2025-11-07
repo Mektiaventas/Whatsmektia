@@ -404,6 +404,8 @@
     }
 </style>
 
+
+
 <div id="kanban-board" class="kanban-board">
     {% for col in columnas %}
     <div class="kanban-column" data-col-id="{{ col.id }}" data-orden="{{ col.orden }}">
@@ -443,8 +445,8 @@
                             {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
                             <!--<span class="alias-edit" style="display:none;">
-                            <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
-                        </span>-->
+                                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
+                            </span>-->
                         </div>
                         <!--<button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>-->
                     </div>
