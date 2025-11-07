@@ -441,10 +441,10 @@
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 280px !important; /* Aumentado de 220px a 280px */
+        max-width: 200px !important; /* Reducido de 280px a 200px */
+        margin-right: auto !important; /* Fuerza a estar más a la izquierda */
         flex: 1;
-        margin-right: auto;
-    } 
+    }
 
     .card-time {
         position: absolute !important;
@@ -460,8 +460,8 @@
         /* Agrega estas líneas para mejor centrado */
         transform: translateX(0);
         white-space: nowrap;
-    } 
-    .card-msg {
+    }  
+    .card-msg { 
         font-size: 13px;
         color: #d1d5db;
         opacity: 0.95;
@@ -781,14 +781,27 @@ function truncate(str, n) {
     return str.length > n ? str.substring(0, n) + '...' : str;
 }
 
-function formatClientTime(serverTs) {
-    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
-    if (isNaN(d.getTime())) d = new Date();
-    const day = d.getDate();
-    const month = d.toLocaleString('es-MX', { month: 'short' });
-    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-    return `${day}-${month} ${time}`;
-    }
+    function formatClientTime(serverTs) {
+        let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+        if (isNaN(d.getTime())) d = new Date();
+
+        // Convertir a hora de México (Central Time)
+        const options = {
+            timeZone: 'America/Mexico_City',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        };
+
+        const time = d.toLocaleTimeString('es-MX', options);
+        const day = d.getDate();
+        const month = d.toLocaleString('es-MX', {
+            month: 'short',
+            timeZone: 'America/Mexico_City'
+        });
+
+        return `${day}-${month} ${time}`;
+    } 
     // Función para obtener bandera (igual que en kanban)
     function getCountryFlag(numero) {
         if (!numero) return null;
@@ -802,13 +815,14 @@ function formatClientTime(serverTs) {
     } 
 /* State */
 let chatAutoRefresh = true;
-let refreshIntervalMs = 500;
-let messagePollIntervalMs = 1200;
+let refreshIntervalMs = 5000;
+let messagePollIntervalMs = 5000;
 let selectedChatId = {{ selected|tojson }};
 let lastChatsTimestamp = 0;
 let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
+let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
 let isEditingAlias = false;
-let aliasTimers = new Map();
+let aliasTimers = new Map(); 
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
 
@@ -1442,9 +1456,9 @@ function seekAudio(id, progressBar, evt) {
                 messagesIntervalHandle = setInterval(() => {
                     if (!document.hidden) pollSelectedMessages();   
                 }, messagePollIntervalMs);
-            }  
+            }     
         } 
     }); 
-});  
+});          
 </script>
 {% endblock %}   
