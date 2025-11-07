@@ -9335,7 +9335,7 @@ def ver_chat(numero):
             selected=numero, 
             IA_ESTADOS=IA_ESTADOS,
             tenant_config=config,
-            is_admin=is_admin
+            is_admin=is_admin,
             lastMessageTimestamp=last_message_ts_ms
         )
         
