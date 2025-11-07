@@ -9283,6 +9283,7 @@ def ver_chat(numero):
             LIMIT 1;
         """, (numero,))
         chats = cursor.fetchall()
+        last_message_ts_ms = 0
         # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
@@ -9310,6 +9311,9 @@ def ver_chat(numero):
                     msg['timestamp'] = tz_mx.localize(msg['timestamp'])
                 else:
                     msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+        if msgs and msgs[-1].get('timestamp'): # <--- AÑADIDO LA COMPROBACIÓN
+            # Obtener timestamp en milisegundos para el polling de JS
+            last_message_ts_ms = msgs[-1]['timestamp'].timestamp() * 1000
 
         cursor.close()
         conn.close()
