@@ -5901,23 +5901,35 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
                 
-                # <--- REGISTRO DE LA ALERTA PARA EL ASESOR (Para visibilidad en Kanban/Chats) --->
-                # Asegura que el chat del asesor aparezca en el CRM si el número del asesor es uno de los números configurados.
-                guardar_conversacion(
+                mensaje_alerta_kanban = f"[ALERTA DE CLIENTE REQUERIDA] {cliente_mostrado} ({numero_cliente})"
+
+                guardar_mensaje_inmediato(
                     telefono, 
-                    f"[ALERTA: CLIENTE {cliente_mostrado} ({numero_cliente})]", 
-                    texto_asesor, 
+                    mensaje_alerta_kanban, 
                     config,
-                    respuesta_tipo='alerta', # Tipo para identificar que es una alerta automática
-                    respuesta_media_url=f"https://wa.me/{numero_cliente.lstrip('+')}" # Link directo al cliente para la UI
+                    imagen_url=None, 
+                    es_imagen=False, 
+                    tipo_mensaje='alerta', # Usamos 'alerta' como tipo para que se guarde en contenido_extra
+                    contenido_extra=texto_asesor # Guardamos el cuerpo completo de la alerta aquí
                 )
+
+                app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
                 
-                # Mueve el chat del cliente (numero_cliente) a columna 'Esperando Respuesta' (3)
+                # 2. Mover el chat del ASESOR (telefono) a columna 'Asesores' si existe.
+                try:
+                    col_asesores_id = obtener_id_columna_asesores(config)
+                    if col_asesores_id:
+                        actualizar_columna_chat(telefono, col_asesores_id, config)
+                        app.logger.info(f"📊 Chat del asesor {telefono} movido a columna Asesores ({col_asesores_id}).")
+                    else:
+                        app.logger.warning("⚠️ Columna 'Asesores' no encontrada. No se movió el chat del asesor.")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
+
+
+                # 3. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
                 actualizar_columna_chat(numero_cliente, 3, config)
                 app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
-                
-                # <--- FIN REGISTRO DE ALERTA PARA EL ASESOR --->
-                
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}")
 
