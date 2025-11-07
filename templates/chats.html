@@ -196,7 +196,7 @@
                     {% if msg.timestamp %}
                     {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
-                </div> 
+                </div>
             </div>
             {% endif %}
 
@@ -868,11 +868,9 @@ function truncate(str, n) {
         const day = d.getDate();
         const month = d.toLocaleString('es-MX', {
             month: 'short',
-            timeZone: 'America/Mexico_City'
         }).toLowerCase().replace('.', '').trim();
 
         const time = d.toLocaleTimeString('es-MX', {
-            timeZone: 'America/Mexico_City',
             hour: '2-digit',
             minute: '2-digit',
             hour12: false
