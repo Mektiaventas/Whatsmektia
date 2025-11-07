@@ -3273,7 +3273,20 @@ def kanban_data(config=None):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-
+        col_asesores_id = obtener_id_columna_asesores(config)
+        numeros_asesores = obtener_numeros_asesores_db(config)
+        
+        # Lógica para mover chats de asesores a la columna "Asesores" si existe
+        if col_asesores_id and numeros_asesores:
+            placeholders = ', '.join(['%s'] * len(numeros_asesores))
+            # Mover a la columna de asesores si el número es de un asesor
+            cursor.execute(f"""
+                UPDATE chat_meta
+                SET columna_id = %s
+                WHERE numero IN ({placeholders}) AND columna_id != %s
+            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+            conn.commit()
+            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
         # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
@@ -4544,6 +4557,41 @@ def seleccionar_mejor_doc(docs, query):
     except Exception as e:
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
+
+def obtener_id_columna_asesores(config=None):
+    """Busca el ID de la columna 'Asesores' (o similar) o devuelve None si no existe."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        # Buscar columna cuyo nombre contenga 'Asesor' o 'Agente'
+        cursor.execute(
+            "SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE '%%asesor%%' OR LOWER(nombre) LIKE '%%agente%%' LIMIT 1"
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo ID columna Asesores: {e}")
+        return None
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+def obtener_numeros_asesores_db(config=None):
+    """Devuelve una tupla de todos los números de teléfono de los asesores configurados."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', [])
+        numeros = tuple({(a.get('telefono') or '').strip() for a in asesores_list if a.get('telefono')})
+        return numeros
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
+        return tuple()
 
 def enviar_catalogo(numero, original_text=None, config=None):
     """
@@ -10500,6 +10548,21 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
+    # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
+    col_asesores_id = obtener_id_columna_asesores(config)
+    numeros_asesores = obtener_numeros_asesores_db(config)
+
+    # Lógica para mover chats de asesores a la columna "Asesores" si existe
+    if col_asesores_id and numeros_asesores:
+        placeholders = ', '.join(['%s'] * len(numeros_asesores))
+        # Mover a la columna de asesores si el número es de un asesor
+        cursor.execute(f"""
+            UPDATE chat_meta
+            SET columna_id = %s
+            WHERE numero IN ({placeholders}) AND columna_id != %s
+        """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+        conn.commit()
+        app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
@@ -10932,13 +10995,15 @@ def actualizar_kanban_inmediato(numero, config=None):
     """Updates the Kanban board immediately when a message is received.
 
     Behavior:
-    - If there are any incoming messages without respuesta (respuesta IS NULL)
-      for this numero, set columna = 1 ("Nuevos").
-    - Otherwise fall back to previous logic (existing conversation -> columna 2).
+    - If the number is an ASESOR, moves the chat to the 'Asesores' column (if it exists).
+    - If the number is a CLIENT, moves to 'Nuevos' (1) if there are unread messages.
+    - Otherwise defaults to 'En Conversación' (2) if there is history.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
+    conn = None
+    cursor = None
     try:
         # Ensure chat_meta exists
         meta = obtener_chat_meta(numero, config)
@@ -10949,31 +11014,42 @@ def actualizar_kanban_inmediato(numero, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Count unread incoming messages (respuesta IS NULL)
-        cursor.execute("""
-            SELECT COUNT(*) FROM conversaciones
-            WHERE numero = %s AND respuesta IS NULL
-        """, (numero,))
-        row = cursor.fetchone()
-        sin_leer = int(row[0]) if row and row[0] is not None else 0
+        # Obtener ID de la columna de asesores y la lista de números
+        col_asesores_id = obtener_id_columna_asesores(config)
+        numeros_asesores = obtener_numeros_asesores_db(config)
+        es_asesor = numero in numeros_asesores
 
-        # Decide target column: if any unread -> Nuevos (1). Else En Conversación (2)
-        if sin_leer > 0:
-            nueva_columna = 1
-            app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+        # 1. Lógica para chats de Asesores
+        if es_asesor and col_asesores_id:
+            nueva_columna = col_asesores_id
+            app.logger.info(f"📊 {numero} es un asesor -> moviendo a columna Asesores ({col_asesores_id})")
         else:
-            # Existing conversation heuristic: put in "En Conversación"
-            # If there's no history at all, still default to Nuevos (1)
-            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
-            total_msgs = int(cursor.fetchone()[0] or 0)
-            if total_msgs == 0:
-                nueva_columna = 1
-                app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
-            else:
-                nueva_columna = 2
-                app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+            # 2. Lógica para chats de Clientes
+            # Contar mensajes entrantes sin respuesta (respuesta IS NULL)
+            cursor.execute("""
+                SELECT COUNT(*) FROM conversaciones
+                WHERE numero = %s AND respuesta IS NULL
+            """, (numero,))
+            row = cursor.fetchone()
+            sin_leer = int(row[0]) if row and row[0] is not None else 0
 
-        # Persist update to chat_meta
+            # Decidir columna objetivo para clientes:
+            if sin_leer > 0:
+                nueva_columna = 1 # Nuevos (ID 1 por defecto)
+                app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+            else:
+                # Verificar si hay historial
+                cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
+                total_msgs = int(cursor.fetchone()[0] or 0)
+                
+                if total_msgs == 0:
+                    nueva_columna = 1 # Nuevos (si es el primer mensaje y no tiene historial)
+                    app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
+                else:
+                    nueva_columna = 2 # En Conversación (ID 2 por defecto)
+                    app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+
+        # 3. Persistir actualización a chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id)
             VALUES (%s, %s)
@@ -10988,11 +11064,10 @@ def actualizar_kanban_inmediato(numero, config=None):
     except Exception as e:
         app.logger.error(f"❌ Error updating Kanban immediately: {e}")
         try:
-            cursor.close()
-        except:
-            pass
-        try:
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
         except:
             pass
         return False
