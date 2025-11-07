@@ -5907,21 +5907,19 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                 # cuyo contenido es la alerta, y que no tiene respuesta de la IA.
                 
                 # 1. Asegurar contacto y meta del ASESOR (teléfono)
+                # 1. Asegurar contacto y meta del ASESOR (teléfono)
                 inicializar_chat_meta(telefono, config)
                 actualizar_info_contacto(telefono, config)
 
-                # 2. Guardar la ALERTA como un mensaje ENTRANTE (sin respuesta) en el hilo del asesor.
-                #    Esto asegura que el mensaje aparezca en la lista de chats como "último mensaje".
-                #    El campo 'mensaje' debe contener el texto de la alerta para que se muestre.
-                guardar_mensaje_inmediato(
+                # 2. Guardar la ALERTA como una RESPUESTA DEL SISTEMA (lado derecho).
+                guardar_respuesta_sistema(
                     telefono, 
-                    texto_asesor, # El cuerpo completo de la alerta
+                    texto_asesor, # Se guarda en el campo 'respuesta'
                     config,
-                    imagen_url=None, 
-                    es_imagen=False, 
-                    tipo_mensaje='alerta_interna', # Nuevo tipo para diferenciar
-                    contenido_extra=f"Cliente: {numero_cliente}, Resumen: {resumen}" 
+                    respuesta_tipo='alerta_interna', 
+                    respuesta_media_url=f"Cliente: {numero_cliente}, Resumen: {resumen}" 
                 )
+
                 app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
                 # --- FIN: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
 
@@ -8468,6 +8466,36 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
+        return False
+
+def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
+    """Guarda una entrada en conversaciones como respuesta del sistema (columna derecha)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
+
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Insertar como respuesta del BOT/Sistema: mensaje nulo, respuesta = texto, timestamp
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp)
+            VALUES (%s, NULL, %s, %s, %s, UTC_TIMESTAMP())
+        """, (numero, respuesta_limpia, respuesta_tipo, respuesta_media_url))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"💾 Alerta registrada como respuesta del sistema para {numero}")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error al guardar respuesta del sistema para {numero}: {e}")
         return False
 
 def cotizar_proyecto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
