@@ -181,17 +181,17 @@
     .card-msg {
         color: #e2e5ed;
         font-size: 0.75rem;
-        font-weight: 400;
-        margin-top: 2px;
-        line-height: 1;
-        /* Ocupa el espacio restante después de la fecha */
+        font-weight: 500;
+        margin-top: 0px;
+        line-height: 2;
         flex: 1 1 auto;
+        flex-grow: 1;
+        flex-shrink: 1;
         min-width: 0;
-        /* Limitar a una sola línea con ellipsis para dejar espacio a la fecha */
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 100%; /* Ajustado por el flex */
+        max-width: 100%;
     }
 
     /* Estilo para la fecha a la derecha */
@@ -206,6 +206,7 @@
         padding-left: 10px; /* Espacio entre el mensaje y la fecha */
         margin-top: 2px; /* Alineación vertical con el mensaje */
         order: 2; /* Asegura que vaya al final de la línea */
+        margin-bottom: 2px;
     }
 
         /* Estilo para el tiempo dentro del mensaje */
