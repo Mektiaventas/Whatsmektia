@@ -1188,45 +1188,45 @@ function pollSelectedMessages() {
             let aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
             if (!aiText) continue;
 
-            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
-            aiText = aiText.replace(/^\s+/, ''); // Eliminar espacios al inicio
-            aiText = aiText.replace(/^\n+/, ''); // Eliminar saltos de línea al inicio
-        // === FIN DE LAS LÍNEAS NUEVAS === 
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        let key;
-        if (id) {
-            key = 'ai:id:' + id;
-            if (seenMessageKeys.has(key)) continue;
-        } else {
-            let ts = Number(coalesce(m.ts_ms, 0));
-            if (!ts && m.timestamp) {
-                const parsed = Date.parse(m.timestamp);
-                ts = isNaN(parsed) ? Date.now() : parsed;
+            // ELIMINAR ESPACIOS INICIALES DE FORMA AGRESIVA
+            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
+            aiText = aiText.trimStart(); // Método moderno adicional
+
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let key;
+            if (id) {
+                key = 'ai:id:' + id;
+                if (seenMessageKeys.has(key)) continue;
+            } else {
+                let ts = Number(coalesce(m.ts_ms, 0));
+                if (!ts && m.timestamp) {
+                    const parsed = Date.parse(m.timestamp);
+                    ts = isNaN(parsed) ? Date.now() : parsed;
+                }
+                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+                if (seenMessageKeys.has(key)) continue;
             }
-            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
-            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
-            if (seenMessageKeys.has(key)) continue;
+
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-ai';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+            const fechaFormateada = formatClientTime(tsVal);
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            container.appendChild(div);
+            appended = true;
+
+            seenMessageKeys.add(key);
+            if (id) seenMessageKeys.add('id:' + id);
         }
 
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-ai';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-        const fechaFormateada = formatClientTime(tsVal);
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`; 
-
-        container.appendChild(div);
-        appended = true;
-
-        seenMessageKeys.add(key);
-        if (id) seenMessageKeys.add('id:' + id);
-    }
-
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    } 
 
     function appendUserMessagesToPanel(messages) {
         const container = document.getElementById('msgs');
@@ -1234,7 +1234,7 @@ function pollSelectedMessages() {
         let appended = false;
 
         for (const m of messages) {
-            const key = buildMessageKeyFor(m);
+            const key = buildMessageKeyFor(m); 
             if (!key) continue;
             if (seenMessageKeys.has(key)) {
                 const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
@@ -1247,8 +1247,8 @@ function pollSelectedMessages() {
             const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
 
             // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
-            content = content.replace(/^\s+/, ''); // Eliminar espacios al inicio
-            content = content.replace(/^\n+/, ''); // Eliminar saltos de línea al inicio
+            content = content.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
+            content = content.trimStart();
             // === FIN DE LAS LÍNEAS NUEVAS ===
 
             if (!content || (respuesta && respuesta.trim().length > 0)) {
