@@ -9180,7 +9180,7 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # FIX: Contar el total de sesiones (nuevas_conversaciones) en el periodo.
+        # ✅ CORRECCIÓN 1: CHAT_COUNTS AHORA USA NUEVAS_CONVERSACIONES EN EL PERIODO
         cursor.execute(
             "SELECT COUNT(id) FROM nuevas_conversaciones WHERE timestamp >= %s;",
             (start,)
@@ -9201,7 +9201,7 @@ def home():
         """, (start,))
         messages_per_chat = cursor.fetchall()
 
-        # FIX: total_responded contará el total de contactos, para que no disminuya.
+        # total_responded mantiene el conteo de contactos (para que no disminuya al borrar)
         cursor.execute(
             "SELECT COUNT(numero_telefono) FROM contactos;"
         )
@@ -9234,9 +9234,10 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
+        # ✅ CORRECCIÓN 2: GRAFICA ANUAL AHORA USA NUEVAS_CONVERSACIONES
         sql = """
             SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
-            FROM nuevas_conversaciones c1 -- Usar la nueva tabla
+            FROM nuevas_conversaciones c1 
             WHERE c1.timestamp >= %s
             GROUP BY y, m
             ORDER BY y, m
@@ -9262,13 +9263,13 @@ def home():
             labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
             values.append(counts_map.get(key, 0))
 
-        # keep top-level stats for compatibility (not shown in current template but safe)
-        # FIX: Contar el total de contactos para la métrica principal.
-        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
+        # ✅ CORRECCIÓN 3: CHAT_COUNTS (TOTAL) AHORA USA NUEVAS_CONVERSACIONES (SIN PERIODO)
+        # Esto cuenta todas las sesiones iniciadas históricamente.
+        cursor.execute("SELECT COUNT(id) FROM nuevas_conversaciones;")
         chat_counts_row = cursor.fetchone()
         chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
-        # FIX: total_responded también usa el total de contactos para evitar decrementos.
+        # total_responded mantiene el conteo de contactos (para evitar decrementos).
         cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
         total_responded_row = cursor.fetchone()
         total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
