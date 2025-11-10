@@ -9306,7 +9306,7 @@ def ver_chat(numero):
         """, (numero,))
         chat = cursor.fetchall()
 
-        for chat in chats:
+        for chat in chatso:
             if chat.get('ultima_fecha'):
                 # Si el timestamp ya tiene timezone info, convertirlo
                 if chat['ultima_fecha'].tzinfo is not None:
@@ -9318,7 +9318,7 @@ def ver_chat(numero):
         cursor.close()
         conn.close()
         
-        app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
+        app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(chatso)} mensajes")
 
         # Ensure chat_meta exists and move the chat to "En Conversación" when user opens it.
         # This makes opening the chat immediately reflect the agent activity in the kanban.
