@@ -9308,13 +9308,13 @@ def ver_chat(numero):
 
         # Convertir timestamps
         for msg in msgs:
-            if msg.get('ultima_fecha'):
+            if msg.get('timestamp'):
                 # Si el timestamp ya tiene timezone info, convertirlo
-                if msg['ultima_fecha'].tzinfo is not None:
-                    msg['ultima_fecha'] = msg['ultima_fecha'].astimezone(tz_mx)
+                if msg['timestamp'].tzinfo is not None:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
                 else:
                     # Si no tiene timezone, asumir que es UTC y luego convertir
-                    msg['ultima_fecha'] = pytz.utc.localize(msg['ultima_fecha']).astimezone(tz_mx)
+                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
 
             
 
