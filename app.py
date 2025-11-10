@@ -9243,6 +9243,8 @@ def ver_chats():
     chats = cursor.fetchall()
     # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
     for chat in chats:
+        if chat.get('numero') is None:
+            chat['numero'] = ''
         if chat.get('ultima_fecha'):
             # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
@@ -9324,13 +9326,14 @@ def ver_chat(numero):
         # Convertir timestamps
         for msg in msgs:
             if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is None:
-                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
-                else:
+                # Si el timestamp ya tiene timezone info, convertirlo
+                if msg['timestamp'].tzinfo is not None:
                     msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-        if msgs and msgs[-1].get('timestamp'): # <--- AÑADIDO LA COMPROBACIÓN
-            # Obtener timestamp en milisegundos para el polling de JS
-            last_message_ts_ms = msgs[-1]['timestamp'].timestamp() * 1000
+                else:
+                    # Si no tiene timezone, asumir que es UTC y luego convertir
+                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
+
+            
 
         cursor.close()
         conn.close()

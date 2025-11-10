@@ -41,13 +41,13 @@
                     <div class="card-title-row">
                         <div class="card-avatar-section">
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
-                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% if (chat.numero|default('')).startswith('tg_') or chat.canal == 'Telegram' %}
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% endif %}
 
                             <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                            {% set bandera = chat.numero | bandera %}
+                            {% set bandera = chat.numero|default('') | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                             {% endif %}
@@ -1503,7 +1503,6 @@ function seekAudio(id, progressBar, evt) {
         enhanceAliasButtons();
 
         // INICIALIZACIÓN DIRECTA DE EMOJIS
-       
         setupEmojiPicker();
         console.log('Emoji picker inicializado');
 
