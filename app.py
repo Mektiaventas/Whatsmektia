@@ -501,14 +501,18 @@ def login():
         usuario = request.form.get('usuario', '').strip()
         password = request.form.get('password', '')
         cliente = obtener_cliente_por_user(usuario)
-
+        sesiones = MAX_CONCURRENT_SESSIONS
         if cliente and verificar_password(password, cliente['password']):
             # 1) Cleanup stale sessions to avoid false positives
             desactivar_sesiones_antiguas(cliente['user'], SESSION_ACTIVE_WINDOW_MINUTES)
 
             # 2) Enforce concurrent sessions limit
             active_count = contar_sesiones_activas(cliente['user'], within_minutes=SESSION_ACTIVE_WINDOW_MINUTES)
-            if active_count >= MAX_CONCURRENT_SESSIONS:
+            if cliente['shema'] == 'mektia':
+                sesiones = 10
+            else: 
+                sesiones = MAX_CONCURRENT_SESSIONS
+            if active_count >= sesiones:
                 flash(f"❌ Este usuario ya tiene {active_count} sesiones activas. Cierra una sesión para continuar.", 'error')
                 return render_template('login.html'), 429
 
