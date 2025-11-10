@@ -436,28 +436,33 @@
             dailyChart = new Chart(dailyCtx, {
                 type: 'line',
                 data: {
-                    labels: dailyLabels,
-                    datasets: [{
-
-                                    label: 'Conversaciones nuevas (últimos 90 días)',
-                                    data: dailyValues,
-                                    borderColor: '#1f4e79',
-                                    backgroundColor: 'rgba(31,78,121,0.15)',
-                                    fill: true,
-                                    tension: 0.2,
-                                    pointRadius: 4
-                                }]
-                        },
-                            options: {
-                            responsive: true,
-                            maintainAspectRatio: false,
-                            plugins: { legend: { display: false }, datalabels: { display: false } },
-                            scales: {
-                                y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-                                x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                    // ... data ...
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        datalabels: { // HABILITAR DATALABELS
+                            display: true,
+                            color: 'white',
+                            align: 'end', // Posición encima del punto/línea
+                            anchor: 'end', // Anclaje al final (arriba)
+                            offset: 4,     // Separación del punto
+                            formatter: (value) => value > 0 ? value : null, // Mostrar solo si el valor es > 0
+                            font: {
+                                weight: 'bold',
+                                size: 10 // Tamaño de fuente pequeño para no saturar
                             }
                         }
-                        });
+                    },
+                    scales: {
+                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } }
+                        // ...
+                    }
+                },
+                plugins: [ChartDataLabels] // ASEGURAR QUE EL PLUGIN SE CARGUE
+            });
 
             // 🆕 Chart: Platform Distribution (Doughnut)
             const platformCtx = document.getElementById('platformChart').getContext('2d');
