@@ -1,4 +1,6 @@
-﻿import traceback
+﻿#from tkinter import SE 
+import traceback
+#import telegram
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -12,7 +14,7 @@ from flask import render_template_string
 import pytz
 import os
 import logging
-import json 
+import json  
 import base64 
 import argparse
 import math
@@ -28,7 +30,7 @@ from decimal import Decimal
 import re
 import io
 from werkzeug.utils import secure_filename
-from PIL import Image
+from PIL import Image 
 from openai import OpenAI
 import PyPDF2
 import fitz 
@@ -39,7 +41,17 @@ from flask import session, g
 from flask import url_for
 from urllib.parse import urlparse
 import threading
+from urllib.parse import urlparse 
+from os.path import basename, join 
+import os # Asegurar que 'os' también esté importado/disponible
 
+MASTER_COLUMNS = [
+    'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
+    'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
+    'imagen', 'status ws', 'catalogo', 'catalogo 2', 'catalogo 3', 'proveedor',
+    'inscripcion', 'mensualidad', 'moneda', 'unidad', 'cantidad_minima',
+    'tipo_descuento', 'descuento'
+]
 
 try:
     # preferred location
@@ -77,6 +89,23 @@ def format_time_24h(dt):
     except Exception as e:
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
+
+@app.template_filter('whatsapp_format')
+def whatsapp_format(text): 
+    """Convierte formato de WhatsApp (*texto* -> negrita, _texto_ -> cursiva) a HTML"""
+    if not text:
+        return ""
+    
+    # Negritas: *texto* -> <strong>texto</strong>
+    text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
+    
+    # Cursivas: _texto_ -> <em>texto</em>
+    text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
+    
+    # Tachado: ~texto~ -> <del>texto</del>
+    text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
+    
+    return text 
 # ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
@@ -91,8 +120,8 @@ SESSION_ACTIVE_WINDOW_MINUTES = int(os.getenv("SESSION_ACTIVE_WINDOW_MINUTES", "
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
-client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
-# ——— Configuración Multi-Tenant ———
+client = OpenAI(api_key=OPENAI_API_KEY)  # ✅ 
+# ——— Configuración Multi-Tenant ——— #
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
@@ -110,7 +139,8 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("UNILOVA_DB_USER"),
         'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
         'db_name': os.getenv("UNILOVA_DB_NAME"),
-        'dominio': 'unilova.mektia.com'
+        'dominio': 'unilova.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_UNILOVA")
     },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
@@ -160,7 +190,7 @@ NUMEROS_CONFIG = {
 }
 
 soli = "cita"
-servicios_clave = [
+servicios_clave = [ 
             'página web', 'sitio web', 'ecommerce', 'tienda online',
             'aplicación', 'app', 'software', 'sistema',
             'marketing', 'seo', 'redes sociales', 'publicidad',
@@ -255,7 +285,8 @@ def public_image_url(imagen_url):
         return imagen_url
 
 app.add_template_filter(public_image_url, 'public_img')
-
+#holi que tal
+#muy bien   
 def get_clientes_conn():
     return mysql.connector.connect(
         host=os.getenv("CLIENTES_DB_HOST"),
@@ -263,6 +294,61 @@ def get_clientes_conn():
         password=os.getenv("CLIENTES_DB_PASSWORD"),
         database=os.getenv("CLIENTES_DB_NAME")
     )
+def descargar_template_excel(columnas):
+    """Genera un archivo Excel con los encabezados de columna dados y sin datos."""
+    try:
+        # Crea un DataFrame vacío con las columnas especificadas
+        df = pd.DataFrame(columns=columnas)
+        
+        # Usa BytesIO para guardar el archivo Excel en memoria
+        output = io.BytesIO()
+        
+        # Exporta el DataFrame a Excel
+        # Usamos engine='xlsxwriter' para compatibilidad en el buffer
+        df.to_excel(output, index=False, sheet_name='Plantilla_Productos', engine='xlsxwriter')
+        
+        output.seek(0) # Mover el puntero al inicio del archivo
+        return output
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error generando template Excel: {e}")
+        return None
+
+# --- Nuevo endpoint para descargar el template ---
+@app.route('/configuracion/precios/descargar-template', methods=['GET'])
+def descargar_template():
+    """Descarga el template de Excel con las columnas requeridas (seleccionables)."""
+    
+    cols_param = request.args.get('cols')
+    
+    if cols_param:
+        # Convertir la cadena separada por comas en una lista de columnas
+        requested_columns = [col.strip() for col in cols_param.split(',') if col.strip()]
+        
+        # Filtrar para asegurar que solo se usan columnas válidas
+        columnas_template = [col for col in requested_columns if col in MASTER_COLUMNS]
+    else:
+        # Fallback: si no se especifica ninguna columna, usar todas
+        columnas_template = MASTER_COLUMNS
+        
+    # Validar que al menos se seleccionó una columna
+    if not columnas_template:
+        return "Debe seleccionar al menos una columna para descargar el template.", 400
+
+    output = descargar_template_excel(columnas_template) # Esta función ya fue definida
+    
+    if output:
+        fecha_str = datetime.now().strftime('%Y%m%d')
+        filename = f"Plantilla_Productos_{fecha_str}.xlsx"
+        
+        # Devolver el archivo como respuesta de descarga
+        return Response(
+            output,
+            mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f"attachment;filename={filename}"}
+        )
+    
+    return "Error generando el archivo", 500
 
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
@@ -324,7 +410,8 @@ def login_required(f):
 
 RUTAS_PUBLICAS = {
     'login', 'logout', 'webhook', 'webhook_verification',
-    'static', 'debug_headers', 'debug_dominio', 'diagnostico'
+    'static', 'debug_headers', 'debug_dominio', 'diagnostico',
+    'telegram_webhook_multitenant'
 }
 @app.before_request
 def proteger_rutas():
@@ -902,7 +989,12 @@ def importar_productos_desde_excel(filepath, config=None):
             'catalogo 3': 'catalogo3',
             'proveedor': 'proveedor',
             'inscripcion': 'inscripcion',
-            'mensualidad': 'mensualidad'
+            'mensualidad': 'mensualidad',
+            'moneda': 'moneda',
+            'unidad': 'unidad',
+            'cantidad_minima': 'cantidad_minima',
+            'tipo_descuento': 'tipo_descuento',
+            'descuento': 'descuento'
         }
 
         for excel_col, db_col in column_mapping.items():
@@ -1013,7 +1105,8 @@ def importar_productos_desde_excel(filepath, config=None):
         campos_esperados = [
             'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'precio_mayoreo', 'precio_menudeo',
-            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor','inscripcion', 'mensualidad'
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor','inscripcion', 'mensualidad',
+            'moneda','unidad','cantidad_minima','tipo_descuento','descuento'
         ]
 
         productos_importados = 0
@@ -1061,7 +1154,7 @@ def importar_productos_desde_excel(filepath, config=None):
                     if not str(producto.get(campo, '')).strip():
                         producto[campo] = " "
 
-                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad']:
+                for campo in ['costo', 'precio_mayoreo', 'precio_menudeo','inscripcion','mensualidad','descuento','cantidad_minima']:
                     try:
                         valor = producto.get(campo, '')
                         valor_str = str(valor).strip()
@@ -1098,15 +1191,21 @@ def importar_productos_desde_excel(filepath, config=None):
                     producto.get('catalogo3', ''),
                     producto.get('proveedor', ''),
                     producto.get('inscripcion', '0.00'),
-                    producto.get('mensualidad', '0.00')
+                    producto.get('mensualidad', '0.00'),
+                    producto.get('moneda', 'MXN'),
+                    producto.get('unidad', 'pieza'),
+                    producto.get('cantidad_minima', '1.00'),
+                    producto.get('tipo_descuento', 'porcentaje'),
+                    producto.get('descuento', '0.00')
                 ]
 
                 cursor.execute("""
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
                         descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
-                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad, 
+                        moneda, unidad, cantidad_minima, tipo_descuento, descuento
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
@@ -1117,7 +1216,12 @@ def importar_productos_desde_excel(filepath, config=None):
                         status_ws=VALUES(status_ws),
                         imagen=VALUES(imagen),
                         inscripcion=VALUES(inscripcion),
-                        mensualidad=VALUES(mensualidad)
+                        mensualidad=VALUES(mensualidad),
+                        moneda=VALUES(moneda),
+                        unidad=VALUES(unidad),
+                        cantidad_minima=VALUES(cantidad_minima),
+                        tipo_descuento=VALUES(tipo_descuento),
+                        descuento=VALUES(descuento)
                 """, values)
 
                 # Si asignamos una imagen, actualizar también la fila de imagenes_productos.sku con el sku recién insertado
@@ -1649,7 +1753,14 @@ def validar_y_limpiar_servicio(servicio):
             'catalogo': '',
             'catalogo2': '',
             'catalogo3': '',
-            'proveedor': ''
+            'proveedor': '',
+            'inscripcion': '0.00',
+            'mensualidad': '0.00',
+            'moneda': 'MXN',
+            'unidad': 'pieza',
+            'cantidad_minima': '1.00',
+            'tipo_descuento': 'porcentaje',
+            'descuento': '0.00'
         }
 
         for campo, valor_default in campos_texto.items():
@@ -1734,7 +1845,14 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     servicio.get('catalogo', '').strip(),
                     servicio.get('catalogo2', '').strip(),
                     servicio.get('catalogo3', '').strip(),
-                    servicio.get('proveedor', '').strip()
+                    servicio.get('proveedor', '').strip(),
+                    servicio.get('inscripcion', '0.00'),
+                    servicio.get('mensualidad', '0.00'),
+                    servicio.get('moneda', 'MXN').strip(),
+                    servicio.get('unidad', 'pieza').strip(),
+                    servicio.get('cantidad_minima', '1.00'),
+                    servicio.get('tipo_descuento', 'porcentaje').strip(),
+                    servicio.get('descuento', '0.00')
                 ]
             
                 # Validar precios
@@ -1749,10 +1867,10 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                     INSERT INTO precios (
                         sku, categoria, subcategoria, linea, modelo,
                         descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
-                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor
-                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                         imagen, status_ws, catalogo, catalogo2, catalogo3, proveedor, inscripcion, mensualidad,
+                         moneda, unidad, cantidad_minima, tipo_descuento, descuento
+                    ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     ON DUPLICATE KEY UPDATE
-       
                         categoria=VALUES(categoria),
                         subcategoria=VALUES(subcategoria),
                         descripcion=VALUES(descripcion),
@@ -1760,7 +1878,14 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                         precio_mayoreo=VALUES(precio_mayoreo),
                         precio_menudeo=VALUES(precio_menudeo),
                         imagen=VALUES(imagen),
-                        status_ws=VALUES(status_ws)
+                        status_ws=VALUES(status_ws),
+                        inscripcion=VALUES(inscripcion),
+                        mensualidad=VALUES(mensualidad),
+                        moneda=VALUES(moneda),
+                        unidad=VALUES(unidad),
+                        cantidad_minima=VALUES(cantidad_minima),
+                        tipo_descuento=VALUES(tipo_descuento),
+                        descuento=VALUES(descuento)
                 """, campos)
                 
                 servicios_guardados += 1
@@ -2061,7 +2186,6 @@ def eliminar_columna_kanban(columna_id):
     conn.close()
     return jsonify({'success': True, 'columna_destino': columna_destino})
 
-
 @app.route('/kanban/columna/<int:columna_id>/icono', methods=['POST'])
 def actualizar_icono_columna(columna_id):
     config = obtener_configuracion_por_host()
@@ -2104,6 +2228,7 @@ def actualizar_icono_columna(columna_id):
         return jsonify({'error': 'Error actualizando icono'}), 500
     finally:
         cursor.close(); conn.close()
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2495,7 +2620,7 @@ def get_chat_messages(telefono):
                     msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
                 
                 # Convertir a string ISO para JSON (esto es lo que Date.parse() en JS espera)
-                msg['timestamp'] = msg['timestamp'].isoformat()
+                msg['timestamp'] = msg['timestamp'].astimezone(tz_mx).isoformat()
         
         return jsonify({'messages': new_messages})
         
@@ -2818,7 +2943,124 @@ def completar_autorizacion():
         app.logger.error(f"❌ Error en completar_autorizacion: {e}")
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
-         
+     
+# Coloca esta función cerca de obtener_siguiente_asesor o donde definas ALERT_NUMBER.
+def obtener_numeros_a_excluir(config=None):
+    if config is None:
+        config = obtener_configuracion_por_host()
+    cfg_full = load_config(config) 
+    asesores_list = cfg_full.get('asesores_list', [])
+    
+    numeros_a_excluir = {
+        (a.get('telefono') or '').strip() 
+        for a in asesores_list 
+        if a.get('telefono')
+    }
+    
+    if ALERT_NUMBER:
+        numeros_a_excluir.add(ALERT_NUMBER)
+        
+    numeros_a_excluir.add('5214493432744') # Tu número
+    numeros_a_excluir.add('5214491182201') # Otro número
+
+    numeros_a_excluir.discard('')
+    return tuple(numeros_a_excluir)
+
+@app.route('/dashboard/platform-data')
+@login_required
+def dashboard_platform_data():
+    config = obtener_configuracion_por_host()
+    
+    try:
+        # --- 1. Obtener números a excluir (Asesores y ALERT_NUMBER) ---
+        cfg_full = load_config(config) 
+        asesores_list = cfg_full.get('asesores_list', [])
+        
+        # Recopilar todos los números de teléfono de los asesores configurados
+        numeros_a_excluir = {
+            (a.get('telefono') or '').strip() 
+            for a in asesores_list 
+            if a.get('telefono')
+        }
+        
+        # Añadir números de alerta
+        if ALERT_NUMBER:
+            numeros_a_excluir.add(ALERT_NUMBER)
+        # Añadir tu número personal
+        numeros_a_excluir.add('5214493432744')
+        numeros_a_excluir.add('5214491182201')
+        
+        # Limpiar números vacíos
+        numeros_a_excluir.discard('')
+
+        # Convertir a una lista/tupla para usar en la cláusula SQL IN
+        exclusion_list = tuple(numeros_a_excluir)
+        
+        if exclusion_list:
+            app.logger.info(f"📊 Excluyendo números internos del dashboard: {exclusion_list}")
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # 2. Conteo de Conversaciones por Plataforma (Clientes)
+        # Filtramos `conv.numero` para excluir los números internos
+        exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
+        
+        # Consulta de Conversaciones
+        cursor.execute(f"""
+            SELECT 
+                COALESCE(c.plataforma, 
+                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
+                ) AS platform, 
+                COUNT(DISTINCT conv.numero) AS conversation_count
+            FROM conversaciones conv
+            LEFT JOIN contactos c ON conv.numero = c.numero_telefono
+            WHERE 1=1 {exclusion_clause}
+            GROUP BY platform
+            ORDER BY conversation_count DESC
+        """, exclusion_list)
+        conversations_raw = cursor.fetchall()
+
+        # 3. Conteo de Contactos Totales por Plataforma (Clientes)
+        # Filtramos `numero_telefono` para excluir los números internos
+        # Usamos la misma lista de exclusión
+        cursor.execute(f"""
+            SELECT 
+                COALESCE(plataforma, 'WhatsApp') AS platform, 
+                COUNT(*) AS contact_count
+            FROM contactos
+            WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
+            GROUP BY platform
+            ORDER BY contact_count DESC
+        """, exclusion_list)
+        contacts_raw = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+
+        # Formatear para Chart.js (sin cambios)
+        conv_labels = [row['platform'] for row in conversations_raw]
+        conv_values = [row['conversation_count'] for row in conversations_raw]
+        
+        contact_labels = [row['platform'] for row in contacts_raw]
+        contact_values = [row['contact_count'] for row in contacts_raw]
+
+        return jsonify({
+            'conversations': {
+                'labels': conv_labels,
+                'values': conv_values
+            },
+            'contacts': {
+                'labels': contact_labels,
+                'values': contact_values
+            },
+            'timestamp': int(time.time() * 1000)
+        })
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en /dashboard/platform-data: {e}")
+        return jsonify({'error': str(e)}), 500
+
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
     """Versión mejorada que usa el historial de conversación para extraer información y detalles del servicio"""
     if config is None:
@@ -3005,18 +3247,38 @@ def debug_dominio():
     </ul>
     """
 
+# --- Modificación en la definición de la función ---
 def get_country_flag(numero):
+    """
+    Determina la URL de la bandera o ícono de la plataforma basado en el número.
+    Prioridad: 1. Telegram Icono, 2. Bandera de País, 3. Icono de WhatsApp por defecto.
+    """
     if not numero:
         return None
     numero = str(numero)
-    if numero.startswith('+'):
-        numero = numero[1:]
+    
+    # --- 1. LÓGICA: ÍCONO DE TELEGRAM (MÁXIMA PRIORIDAD) ---
+    if numero.startswith('tg_'):
+        # Devuelve la URL estática del ícono de Telegram
+        return url_for('static', filename='icons/telegram-icon.png')
+    
+    # --- 2. LÓGICA: BANDERA DE PAÍS (WHATSAPP) ---
+    # Limpia el número quitando el '+' si existe (ej. +52449...)
+    numero_limpio = numero.lstrip('+')
+    
+    # Busca el prefijo de país más largo posible (3, 2 o 1 dígito)
     for i in range(3, 0, -1):
-        prefijo = numero[:i]
+        prefijo = numero_limpio[:i]
+        
+        # Asume que PREFIJOS_PAIS es un diccionario global que mapea '52' -> 'mx'
         if prefijo in PREFIJOS_PAIS:
             codigo = PREFIJOS_PAIS[prefijo]
+            # Devuelve la bandera del país
             return f"https://flagcdn.com/24x18/{codigo}.png"
-    return None
+            
+    # --- 3. LÓGICA: IMAGEN LOCAL POR DEFECTO PARA WHATSAPP (FALLBACK) ---
+    # Si no se detectó prefijo de país conocido ni era Telegram
+    return url_for('static', filename='icons/whatsapp-icon.png')
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
 app.add_template_filter(get_country_flag, 'bandera')
@@ -3028,7 +3290,20 @@ def kanban_data(config=None):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-
+        col_asesores_id = obtener_id_columna_asesores(config)
+        numeros_asesores = obtener_numeros_asesores_db(config)
+        
+        # Lógica para mover chats de asesores a la columna "Asesores" si existe
+        if col_asesores_id and numeros_asesores:
+            placeholders = ', '.join(['%s'] * len(numeros_asesores))
+            # Mover a la columna de asesores si el número es de un asesor
+            cursor.execute(f"""
+                UPDATE chat_meta
+                SET columna_id = %s
+                WHERE numero IN ({placeholders}) AND columna_id != %s
+            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+            conn.commit()
+            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
         # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
@@ -3040,7 +3315,8 @@ def kanban_data(config=None):
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                WHERE numero = cm.numero 
+                WHERE numero = cm.numero
+                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
@@ -4299,6 +4575,41 @@ def seleccionar_mejor_doc(docs, query):
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
 
+def obtener_id_columna_asesores(config=None):
+    """Busca el ID de la columna 'Asesores' (o similar) o devuelve None si no existe."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        # Buscar columna cuyo nombre contenga 'Asesor' o 'Agente'
+        cursor.execute(
+            "SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE '%%asesor%%' OR LOWER(nombre) LIKE '%%agente%%' LIMIT 1"
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo ID columna Asesores: {e}")
+        return None
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
+def obtener_numeros_asesores_db(config=None):
+    """Devuelve una tupla de todos los números de teléfono de los asesores configurados."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', [])
+        numeros = tuple({(a.get('telefono') or '').strip() for a in asesores_list if a.get('telefono')})
+        return numeros
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
+        return tuple()
+
 def enviar_catalogo(numero, original_text=None, config=None):
     """
     Intenta enviar el PDF público más relevante (documents_publicos),
@@ -5504,7 +5815,9 @@ def obtener_siguiente_asesor(config=None):
 def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
     """
     Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
-    También notifica al asesor seleccionado (opcional).
+    También notifica al asesor seleccionado (opcional) y registra la alerta 
+    en el historial del asesor para visibilidad en Kanban/Chats, REUTILIZANDO 
+    el hilo de conversación existente del asesor.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5517,14 +5830,31 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
+        # 1. ENVIAR MENSAJE AL CLIENTE (Confirma que se pasará a un asesor)
         texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}"
-        enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        
+        # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
+        if numero_cliente.startswith('tg_'):
+            telegram_token = config.get('telegram_token')
+            if telegram_token:
+                chat_id = numero_cliente.replace('tg_', '')
+                enviado = send_telegram_message(chat_id, texto_cliente, telegram_token) 
+            else:
+                app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                enviado = False
+        else:
+            enviado = enviar_mensaje(numero_cliente, texto_cliente, config)
+        # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
         if enviado:
+            # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
+            # Nota: Esto registra una conversación donde el mensaje es la solicitud y la respuesta es el contacto del asesor.
             guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
             app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
         else:
             app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
 
+        # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR
         if notificar_asesor and telefono:
             try:
                 # Obtener nombre mostrado del cliente
@@ -5555,10 +5885,8 @@ Devuelve únicamente el resumen breve (1-3 líneas).
 """
                     headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
                     payload = {
-                        "model": "deepseek-chat",
-                        "messages": [{"role": "user", "content": prompt}],
-                        "temperature": 0.2,
-                        "max_tokens": 200
+                        "model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.2, "max_tokens": 200
                     }
                     r = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
                     r.raise_for_status()
@@ -5567,27 +5895,68 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                     if isinstance(raw, list):
                         raw = " ".join([(it.get('text') if isinstance(it, dict) else str(it)) for it in raw])
                     resumen = str(raw).strip()
-                    # Keep it compact
                     resumen = re.sub(r'\s*\n\s*', ' ', resumen)[:400]
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo generar resumen IA para asesor: {e}")
-                    # Fallback: usar primer/último mensaje corto
                     if historial:
                         ultimo = historial[-1].get('mensaje') or ''
                         resumen = (ultimo[:200] + '...') if len(ultimo) > 200 else ultimo
                     else:
                         resumen = "Sin historial disponible."
 
+                # Mensaje completo que se enviará al asesor
                 texto_asesor = (
+                    f"🚨 *ALERTA: Cliente requiere atención humana*\n\n"
                     f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
-                    f"🔎 Resumen rápido del chat para que lo atiendas:\n{resumen}\n\n"
+                    f"🔎 *Resumen rápido del chat para que lo atiendas:*\n{resumen}\n\n"
+                    f"🔗 *Link Directo (si aplica):* https://wa.me/{numero_cliente.lstrip('+')}\n\n"
                     "Por favor, estate atento para contactarlo si corresponde."
                 )
 
-                enviar_mensaje(telefono, texto_asesor, config)
+                # Envío de la alerta por WhatsApp (si el asesor está en WhatsApp)
+                if not telefono.startswith('tg_'):
+                    enviar_mensaje(telefono, texto_asesor, config)
                 app.logger.info(f"📤 Notificación enviada al asesor {telefono}")
+                
+                # --- INICIO: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
+                
+                # Usamos una estructura simple: el asesor 'recibe' un mensaje
+                # cuyo contenido es la alerta, y que no tiene respuesta de la IA.
+                
+                # 1. Asegurar contacto y meta del ASESOR (teléfono)
+                # 1. Asegurar contacto y meta del ASESOR (teléfono)
+                inicializar_chat_meta(telefono, config)
+                actualizar_info_contacto(telefono, config)
+
+                # 2. Guardar la ALERTA como una RESPUESTA DEL SISTEMA (lado derecho).
+                guardar_respuesta_sistema(
+                    telefono, 
+                    texto_asesor, # Se guarda en el campo 'respuesta'
+                    config,
+                    respuesta_tipo='alerta_interna', 
+                    respuesta_media_url=f"Cliente: {numero_cliente}, Resumen: {resumen}" 
+                )
+
+                app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
+                # --- FIN: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
+
+                # 3. Mover el chat del ASESOR (telefono) a columna 'Asesores' si existe.
+                try:
+                    col_asesores_id = obtener_id_columna_asesores(config)
+                    if col_asesores_id:
+                        actualizar_columna_chat(telefono, col_asesores_id, config)
+                        app.logger.info(f"📊 Chat del asesor {telefono} movido a columna Asesores ({col_asesores_id}).")
+                    else:
+                        app.logger.warning("⚠️ Columna 'Asesores' no encontrada. No se movió el chat del asesor.")
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
+
+
+                # 4. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
+                actualizar_columna_chat(numero_cliente, 3, config)
+                app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
             except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo notificar al asesor {telefono}: {e}")
+                app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}")
 
         return enviado
     except Exception as e:
@@ -6285,7 +6654,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
             return True
     
     return False
-         
+
 def es_mensaje_repetido(numero, mensaje_actual, config=None):
     """Verifica si el mensaje actual es muy similar al anterior"""
     if config is None:
@@ -7410,6 +7779,72 @@ def start_good_morning_scheduler():
     GOOD_MORNING_THREAD_STARTED = True
     app.logger.info("✅ Good morning scheduler thread launched")
 
+# --- Función de Envío de Documento/PDF a Telegram (FALTANTE) ---
+def enviar_telegram_documento(chat_id, document_field, token_bot, caption='Documento adjunto'):
+    """
+    Envía un documento a Telegram.
+    document_field puede ser una URL HTTP o una ruta de archivo local.
+    """
+    send_document_url = f"https://api.telegram.org/bot{token_bot}/sendDocument"
+    
+    # Prepara la carga de datos
+    data = {'chat_id': chat_id, 'caption': caption}
+    
+    try:
+        # Si es una URL pública (HTTP/HTTPS), Telegram puede descargarla directamente
+        if urlparse(document_field).scheme in ('http', 'https'):
+            data['document'] = document_field
+            response = requests.post(send_document_url, data=data, timeout=30)
+        
+        # Si es una ruta de archivo local, debe enviarse como multipart/form-data
+        elif os.path.exists(document_field):
+            with open(document_field, 'rb') as doc_file:
+                files = {'document': doc_file}
+                response = requests.post(send_document_url, files=files, data=data, timeout=30)
+        
+        # Si no es URL ni ruta local, falla
+        else:
+            app.logger.error(f"❌ TELEGRAM DOC: Documento no es URL ni ruta local existente: {document_field}")
+            return False
+        
+        response.raise_for_status()
+        app.logger.info(f"✅ TELEGRAM: Documento enviado a {chat_id}")
+        return True
+        
+    except requests.exceptions.RequestException as e:
+        app.logger.error(f"❌ TELEGRAM DOC: Error al enviar documento: {e}")
+        return False
+    except Exception as e:
+        app.logger.error(f"❌ TELEGRAM DOC: Error inesperado: {e}")
+        return False
+
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
+# --- Función de Envío de Mensajes de Texto a Telegram (NECESARIA para Fallback) ---
+# (Si ya tienes esta función definida, puedes omitirla)
+def send_telegram_message(chat_id, text, token):
+    """Envía un mensaje de texto a un chat de Telegram."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'Markdown' # Para que Markdown funcione
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error enviando mensaje a Telegram chat_id={chat_id}: {e}")
+        return False
+
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -7417,10 +7852,16 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     Flujo unificado para procesar un mensaje entrante.
     incoming_saved: boolean indicating the webhook already persisted the incoming message
                     (so callers can avoid double-saving). Default False for backward compatibility.
-    """
+    """ 
     try:
+        # 💥 INICIO CORRECCIÓN DE CONFIGURACIÓN Y TONO
         if config is None:
             config = obtener_configuracion_por_host()
+
+        # Carga de configuración y tono (para OpenAI TTS)
+        cfg_full = load_config(config) 
+        tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
+        # 💥 FIN CORRECCIÓN DE CONFIGURACIÓN Y TONO
 
         texto_norm = (texto or "").strip().lower()
         # --- INICIO DE LA MODIFICACIÓN: ANÁLISIS DE IMAGEN CON OPENAI ---
@@ -7438,14 +7879,37 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 
                 if respuesta_vision:
                     # Si OpenAI respondió, enviar esa respuesta y terminar
-                    enviar_mensaje(numero, respuesta_vision, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_vision, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, respuesta_vision, config) 
+                    # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
                     registrar_respuesta_bot(numero, texto, respuesta_vision, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
                     return True  # Termina el procesamiento aquí
                 else:
                     # Si OpenAI falló, enviar un fallback
                     app.logger.warning("⚠️ OpenAI (gpt-4o) no devolvió respuesta para la imagen.")
                     fallback_msg = "Recibí tu imagen, pero no pude analizarla en este momento. ¿Podrías describirla?"
-                    enviar_mensaje(numero, fallback_msg, config)
+                    
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, fallback_msg, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, fallback_msg, config) 
+                    # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+
                     registrar_respuesta_bot(numero, texto, fallback_msg, config, imagen_url=public_url, es_imagen=True, incoming_saved=incoming_saved)
                     return True # Termina el procesamiento aquí
 
@@ -7543,13 +8007,13 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         for t in transferencia:
             try:
                 transfer_list.append({
-                    "cuenta_bancaria": (p.get('transferencia_numero') or '').strip(),
-                    "nombre_transferencia": (p.get('transferencia_nombre') or '').strip(),
-                    "banco_transferencia": str(p.get('transferencia_banco') or "")
+                    "cuenta_bancaria": (t.get('transferencia_numero') or '').strip(),
+                    "nombre_transferencia": (t.get('transferencia_nombre') or '').strip(),
+                    "banco_transferencia": str(t.get('transferencia_banco') or "")
                 })
             except Exception:
                 continue
-        cfg_full = load_config(config)
+        # cfg_full ya está cargado
         asesores_block = format_asesores_block(cfg_full)
                  # --- NEW: expose negocio.description and negocio.que_hace to the AI context ---
         try:
@@ -7601,7 +8065,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) NO INVENTES NINGÚN PROGRAMA, DIPLOMADO, CARRERA, SKU, NI PRECIO. Solo puedes usar los items EXACTOS que están en el catálogo JSON recibido.
 2) Si el usuario pregunta por "programas" o "qué programas tienes", responde listando únicamente los servicios/ SKUs presentes en el catálogo JSON.
 3) Si el usuario solicita detalles de un programa, devuelve precios/datos únicamente si el SKU o nombre coincide con una entrada del catálogo. Si no hay coincidencia exacta, responde que "no está en el catálogo" y pregunta si quiere que busques algo similar.
-4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que no hay PDF publicado.
+4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que "no hay PDF publicado".
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) Devuelve intent == DATOS_TRANSFERENCIA si el usuario pregunta por "datos de transferencia", "cuenta bancaria", "cómo hacer la transferencia" o similares y el usuario no esta en proceso de compra.
 7) El JSON debe tener estas claves mínimas:
@@ -7630,7 +8094,10 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             user_content["catalogo"] = catalog_list
             app.logger.info("🔎 producto_aplica=SI_APLICA -> including full catalog in DeepSeek payload")
         else:
+            # 💥 CORRECCIÓN CRÍTICA: Cambiar app_content por user_content
+            user_content["catalogo"] = catalog_list 
             app.logger.info("🔎 producto_aplica=NO_APLICA -> omitting full catalog from DeepSeek payload")
+            # ⬆️ FIN CORRECCIÓN ⬆️
 
         payload_messages = [
             {"role": "system", "content": system_prompt},
@@ -7653,7 +8120,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             app.logger.warning("⚠️ IA no devolvió JSON en procesar_mensaje_unificado. Respuesta cruda: " + raw[:300])
             fallback_text = re.sub(r'\s+', ' ', raw)[:1000]
             if fallback_text:
-                enviar_mensaje(numero, fallback_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL (FALLBACK) ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, fallback_text, telegram_token) 
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    enviar_mensaje(numero, fallback_text, config) 
                 registrar_respuesta_bot(numero, texto, fallback_text, config, incoming_saved=incoming_saved)
                 return True
             return False
@@ -7685,13 +8161,31 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     break
             if not found:
                 app.logger.warning("⚠️ IA intentó guardar cita con servicio que NO está en catálogo. Abortando guardar.")
-                enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo. ¿Cuál programa te interesa exactamente?", config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, "Lo siento, ese programa no está en nuestro catálogo.", telegram_token) 
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    enviar_mensaje(numero, "Lo siento, ese programa no está en nuestro catálogo.", config) 
                 registrar_respuesta_bot(numero, texto, "Lo siento, ese programa no está en nuestro catálogo.", config, incoming_saved=incoming_saved)
                 return True
         if intent == "COTIZAR":
             cotizar_text = cotizar_proyecto(numero, config=config)
             if cotizar_text:
-                enviar_mensaje(numero, cotizar_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, cotizar_text, telegram_token) 
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    enviar_mensaje(numero, cotizar_text, config) 
                 registrar_respuesta_bot(numero, texto, cotizar_text, config, incoming_saved=incoming_saved)
                 return True
         # ENVIAR_DOCUMENTO fallback si IA pidió documento pero no lo pasó
@@ -7709,7 +8203,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
-                enviar_mensaje(numero, comprar_producto_text, config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, comprar_producto_text, telegram_token) 
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    enviar_mensaje(numero, comprar_producto_text, config) 
                 registrar_respuesta_bot(numero, texto, comprar_producto_text, config, incoming_saved=incoming_saved)
                 return True
         # GUARDAR CITA
@@ -7731,7 +8234,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             try:
                 sent = enviar_imagen(numero, image_field, config)
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, respuesta_text, config) 
                 
                 # --- CORREGIDO ---
                 # Guardar el nombre de archivo o URL cruda (http)
@@ -7750,20 +8262,70 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         # ENVIAR DOCUMENTO (explicit)
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
-                enviar_documento(numero, document_field, os.path.basename(document_field), config)
+                # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        # 💥 CORRECCIÓN DE DOCUMENTO: Asumir que la URL es HTTPS (corregida en enviar_catalogo)
+                        if not enviar_telegram_documento(chat_id, document_field, token_bot=telegram_token):
+                             # Fallback si sendDocument falla 
+                             send_telegram_message(chat_id, f"{respuesta_text}\n\nDescarga el documento aquí: {document_field}", telegram_token)
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    # WhatsApp
+                    enviar_documento(numero, document_field, os.path.basename(document_field), config)
+                
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
+                    # Registrar respuesta de texto (ya sea que se envió el doc o el link)
+                    pass
+                    
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
-
         # PASAR A ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
+            
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-            if respuesta_text:
-                enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+            
+            # 🚨 CORRECCIÓN: Definir el mensaje final que se enviará y se registrará
+            
+            # 1. Usar la respuesta de la IA si existe, si no, usar un mensaje por defecto.
+            mensaje_respuesta_final = respuesta_text or "El asistente pasó la conversación a un asesor humano."
+            
+            # 2. Si se pasó al asesor, registrar el evento de log.
+            if sent:
+                app.logger.info(f"👤 Contacto {numero} pasado a asesor exitosamente. Respuesta: '{mensaje_respuesta_final}'")
+            else:
+                app.logger.warning(f"⚠️ Falló la acción de pasar a asesor para {numero}.")
+                
+            
+            # 3. Enviar el mensaje FINAL al cliente (si no estaba vacío)
+            if mensaje_respuesta_final:
+                
+                # --- LÓGICA DE ENVÍO MULTICANAL (texto de confirmación) ---
+                if numero.startswith('tg_'):
+                    telegram_token = config.get('telegram_token')
+                    if telegram_token:
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, mensaje_respuesta_final, telegram_token) 
+                    else:
+                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                else:
+                    enviar_mensaje(numero, mensaje_respuesta_final, config) 
+                # --- FIN LÓGICA DE ENVÍO MULTICANAL ---
+            
+            # 💾 REGISTRAR EL EVENTO EN CONVERSACIONES
+            # Usamos mensaje_respuesta_final para que el asesor vea EXACTAMENTE lo que se envió.
+            registrar_respuesta_bot(
+                numero, 
+                texto, # Mensaje original del usuario
+                mensaje_respuesta_final, # Mensaje enviado al cliente, visible en el chat
+                config, 
+                incoming_saved=incoming_saved
+            )
             return True
         # PASAR DATOS TRANSFERENCIA
         if intent == "DATOS_TRANSFERENCIA":
@@ -7771,62 +8333,147 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             if not sent:
                 # Si no se pudieron enviar los datos, entonces usar la respuesta de la IA como fallback
                 if respuesta_text:
-                    enviar_mensaje(numero, respuesta_text, config)
-                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
+                    # --- INICIO LÓGICA DE ENVÍO MULTICANAL ---
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            send_telegram_message(chat_id, respuesta_text, telegram_token) 
+                        else:
+                            app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                    else:
+                        enviar_mensaje(numero, respuesta_text, config) 
+                    registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved)
             else:
                 app.logger.info(f"ℹ️ enviar_datos_transferencia devolvió sent={sent}, omitiendo respuesta_text redundante.")
             return True
-        # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
             # Aplicar restricciones
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
             
-            # --- INICIO DE LA CORRECCIÓN ---
-            if es_audio:
-                # Si el usuario envió un audio, intentamos responder con audio
+            # --- Variables de Audio Globales ---
+            audio_url_publica = None # URL HTTPS (para WhatsApp)
+            audio_path_local = None  # Ruta de archivo local (para Telegram y limpieza)
+            is_telegram_client = numero.startswith('tg_')
+
+            # --- Generación de Audio si es necesario ---
+            should_respond_with_voice = es_audio 
+            
+            if should_respond_with_voice and respuesta_text: 
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    audio_url = texto_a_voz(respuesta_text, filename, config)
+                    # 💥 LLAMADA CRÍTICA: texto_a_voz ahora devuelve la URL pública y guarda el archivo local
+                    audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado) 
                     
-                    if audio_url:
-                        sent_audio = enviar_mensaje_voz(numero, audio_url, config)
-                        
-                        if sent_audio:
-                            # ÉXITO AUDIO: Enviar y registrar como audio
-                            app.logger.info(f"✅ Respuesta de audio enviada a {numero}")
-                            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
-                            return True
-                        else:
-                            app.logger.warning("⚠️ Falló el envío del mensaje de voz. Enviando como texto.")
-                    else:
-                        app.logger.warning("⚠️ Falló la generación de audio (texto_a_voz). Enviando como texto.")
-                
+                    # 💥 DEDUCIR RUTA LOCAL para Telegram y limpieza
+                    if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
+                        # Asumimos que la URL proxy tiene el nombre de archivo en la ruta
+                        filename_only = basename(urlparse(audio_url_publica).path)
+                        # UPLOAD_FOLDER debe ser accesible globalmente aquí
+                        try:
+                            from app import UPLOAD_FOLDER 
+                        except ImportError:
+                            app.logger.error("🔴 UPLOAD_FOLDER no accesible. Asumiendo ruta relativa.")
+                            UPLOAD_FOLDER = 'uploads' # Fallback
+                            
+                        audio_path_local = os.path.join(UPLOAD_FOLDER, filename_only)
+                        app.logger.info(f"💾 Audio Ruta Local deducida: {audio_path_local}")
+                    
                 except Exception as e:
                     app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
-                    app.logger.error(traceback.format_exc())
-                    # Fallback a enviar texto si algo falla
+                    audio_url_publica = None # Forzar fallback a texto
             
-            # FALLBACK A TEXTO:
-            # (Ocurre si 'es_audio' era False, o si la generación/envío de audio falló)
-            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
-            enviar_mensaje(numero, respuesta_text, config)
             
-            # REGISTRAR COMO TEXTO (Esta es la corrección clave)
-            registrar_respuesta_bot(
-                numero, texto, respuesta_text, config, 
-                incoming_saved=incoming_saved, 
-                respuesta_tipo='texto',  # <-- Corregido
-                respuesta_media_url=None   # <-- Corregido
-            )
-            return True
-            # --- FIN DE LA CORRECCIÓN ---
-            # Fallback: Enviar como texto si no era audio o si el audio falló
-            app.logger.info("📤 Enviando respuesta como TEXTO (fallback).")
-            enviar_mensaje(numero, respuesta_text, config)
-            registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url)
-            return True
+            # --- LÓGICA DE ENVÍO MULTICANAL (Telegram y WhatsApp) ---
+            
+            if is_telegram_client:
+                # Es Telegram
+                telegram_token = config.get('telegram_token')
+                chat_id = numero.replace('tg_', '')
+                sent_audio = False
+                
+                # 1. Intento de enviar como audio si la generación fue exitosa
+                # audio_path_local debe ser la RUTA LOCAL del archivo .ogg
+                if telegram_token and audio_path_local and os.path.exists(audio_path_local): 
+                    
+                    app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_path_local}") 
+                    
+                    # Función de envío de audio de Telegram
+                    sent_audio = send_telegram_voice(
+                        chat_id=chat_id, 
+                        audio_file_path=audio_path_local, # 👈 USAR RUTA LOCAL
+                        token_bot=telegram_token, 
+                        caption=respuesta_text
+                    )
+                    
+                    # 💥 CAMBIO CRÍTICO: COMENTAR LA LIMPIEZA INMEDIATA PARA QUE EL PROXY WEB FUNCIONE
+                    # El archivo se debe mantener en disco para la reproducción web.
+                    # try:
+                    #     os.remove(audio_path_local) 
+                    #     app.logger.info(f"🗑️ Archivo de audio temporal eliminado (Telegram): {audio_path_local}")
+                    # except Exception as e:
+                    #     app.logger.warning(f"⚠️ No se pudo eliminar archivo de audio {audio_path_local}: {e}")
+
+                    if sent_audio:
+                        app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
+                        # Registrar con la URL pública/proxy (para la web)
+                        registrar_respuesta_bot(
+                            numero, texto, respuesta_text, config, 
+                            incoming_saved=incoming_saved, 
+                            respuesta_tipo='audio', 
+                            respuesta_media_url=audio_url_publica # <--- REVERTIDO A audio_url_publica
+                        )
+                        return True
+                    else:
+                        app.logger.warning("⚠️ TELEGRAM: Falló el envío del mensaje de voz. Enviando como texto.")
+                
+                # 2. Fallback a texto si no era audio, o si el envío de audio falló
+                if telegram_token:
+                    send_telegram_message(chat_id, respuesta_text, telegram_token) 
+                else:
+                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+                
+                # Registrar como TEXTO
+                registrar_respuesta_bot(
+                    numero, texto, respuesta_text, config, 
+                    incoming_saved=incoming_saved, 
+                    respuesta_tipo='texto',  
+                    respuesta_media_url=None   
+                )
+                return True
+            
+            else:
+                # Es WhatsApp
+                sent_audio = False
+                
+                if audio_url_publica: # Audio URL ya es pública (deducida)
+                    
+                    # 💥 WHATSAPP: USAR URL PÚBLICA DIRECTAMENTE
+                    sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
+                    
+                    # La limpieza del archivo se debe realizar en una tarea externa (scheduler o cron job).
+                    
+                    if sent_audio:
+                         app.logger.info(f"✅ WhatsApp: Respuesta de audio enviada a {numero}")
+                         
+                         # 🚨 CORRECCIÓN FINAL: ENVIAR RESPUESTA TEXTUAL POR SEPARADO
+                         if respuesta_text:
+                             enviar_mensaje(numero, respuesta_text, config)
+                             app.logger.info(f"✅ WhatsApp: Texto de respuesta adjunto enviado.")
+                             
+                         # Registrar con la URL pública
+                         registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
+                         return True
+                    else:
+                         app.logger.warning("⚠️ WhatsApp: Falló el envío de audio. Enviando como texto.")
+                        
+                # Fallback a texto (WhatsApp)
+                enviar_mensaje(numero, respuesta_text, config) 
+                registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
+                return True
+
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
@@ -7836,6 +8483,36 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
     except Exception as e:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
+        return False
+
+def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
+    """Guarda una entrada en conversaciones como respuesta del sistema (columna derecha)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
+
+        # Asegurar que el contacto existe
+        actualizar_info_contacto(numero, config)
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # Insertar como respuesta del BOT/Sistema: mensaje nulo, respuesta = texto, timestamp
+        cursor.execute("""
+            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp)
+            VALUES (%s, NULL, %s, %s, %s, UTC_TIMESTAMP())
+        """, (numero, respuesta_limpia, respuesta_tipo, respuesta_media_url))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        app.logger.info(f"💾 Alerta registrada como respuesta del sistema para {numero}")
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error al guardar respuesta del sistema para {numero}: {e}")
         return False
 
 def cotizar_proyecto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
@@ -8105,7 +8782,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         elif tipo_mensaje == 'audio': # Si ya se marcó como audio
             pass
         else:
-            tipo_mensaje = 'texto' # Default
+            tipo_mensaje = 'texto' # Default 
 
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
@@ -8135,7 +8812,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     except Exception as e:
         app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
-    
+ 
 def extraer_nombre_desde_webhook(payload):
     """
     Extrae el nombre del contacto directamente desde el webhook de WhatsApp
@@ -8554,7 +9231,8 @@ def ver_chats():
           cont.alias,
           cont.nombre,
           (SELECT mensaje FROM conversaciones 
-           WHERE numero = conv.numero 
+           WHERE numero = conv.numero
+           AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%'
            ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
           MAX(conv.timestamp) AS ultima_fecha
         FROM conversaciones conv
@@ -8565,6 +9243,8 @@ def ver_chats():
     chats = cursor.fetchall()
     # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
     for chat in chats:
+        if chat.get('numero') is None:
+            chat['numero'] = ''
         if chat.get('ultima_fecha'):
             # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
@@ -8622,6 +9302,7 @@ def ver_chat(numero):
             LIMIT 1;
         """, (numero,))
         chats = cursor.fetchall()
+        last_message_ts_ms = 0
         # Consulta para mensajes - INCLUYENDO IMÁGENES
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
@@ -8645,10 +9326,14 @@ def ver_chat(numero):
         # Convertir timestamps
         for msg in msgs:
             if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is None:
-                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
-                else:
+                # Si el timestamp ya tiene timezone info, convertirlo
+                if msg['timestamp'].tzinfo is not None:
                     msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
+                else:
+                    # Si no tiene timezone, asumir que es UTC y luego convertir
+                    msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
+
+            
 
         cursor.close()
         conn.close()
@@ -8674,7 +9359,8 @@ def ver_chat(numero):
             selected=numero, 
             IA_ESTADOS=IA_ESTADOS,
             tenant_config=config,
-            is_admin=is_admin
+            is_admin=is_admin,
+            lastMessageTimestamp=last_message_ts_ms
         )
         
     except Exception as e:
@@ -9400,9 +10086,9 @@ def configuracion_precios():
         guardado=False,
         precios=precios,
         precio_edit=None,
-        is_admin=is_admin
+        is_admin=is_admin,
+        master_columns=MASTER_COLUMNS
     )
-
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
@@ -9438,7 +10124,7 @@ def configuracion_precio_guardar():
             app.logger.warning("⚠️ _ensure_precios_subscription_columns falló (continuando)")
 
         # Process numeric price fields coming from form (empty -> None)
-        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad']:
+        for f in ['costo', 'precio', 'precio_mayoreo', 'precio_menudeo', 'inscripcion', 'mensualidad','descuento']:
             if f in data and data.get(f, '').strip() == '':
                 data[f] = None
 
@@ -9462,7 +10148,8 @@ def configuracion_precio_guardar():
             'sku', 'servicio', 'categoria', 'subcategoria', 'linea', 'modelo',
             'descripcion', 'medidas', 'costo', 'inscripcion', 'mensualidad',
             'precio', 'precio_mayoreo', 'precio_menudeo',
-            'moneda', 'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor'
+            'imagen', 'status_ws', 'catalogo', 'catalogo2', 'catalogo3', 'proveedor',
+            'moneda', 'unidad', 'cantidad_minima', 'tipo_descuento', 'descuento'
         ]
 
         # Get actual columns from DB and keep intersection (respect DB schema)
@@ -9547,6 +10234,249 @@ def debug_image(filename):
         'exists': exists,
         'url': url_for('serve_uploaded_file', filename=filename, _external=True)
     })
+
+# app.py, en cualquier lugar fuera de las rutas:
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    # 1. Obtener la ruta del archivo
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    
+    # 2. Construir la URL final de descarga
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
+# --- Función de Soporte para obtener URL de archivos de Telegram ---
+def obtener_url_archivo_telegram(file_id, token):
+    """Obtiene la URL de descarga de un archivo de Telegram a partir de su file_id."""
+    # 1. Obtener la ruta del archivo (file_path)
+    get_file_url = f"https://api.telegram.org/bot{token}/getFile"
+    response = requests.get(get_file_url, params={'file_id': file_id}, timeout=10)
+    response.raise_for_status()
+    file_path = response.json()['result']['file_path']
+    
+    # 2. Construir la URL final de descarga
+    download_url = f"https://api.telegram.org/file/bot{token}/{file_path}"
+    return download_url
+
+def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
+    """
+    Envía un archivo de audio (nota de voz, usualmente OGG/OPUS) a Telegram usando el método sendVoice.
+    
+    chat_id: ID del chat de Telegram (solo el número, no el prefijo 'tg_').
+    audio_file_path: Ruta del archivo .ogg en tu servidor local.
+    """
+    import requests
+    import os
+    
+    send_voice_url = f"https://api.telegram.org/bot{token_bot}/sendVoice"
+    
+    # ⚠️ Telegram espera el archivo como un archivo de subida, no una URL
+    try:
+        # Verificar si el archivo existe antes de intentar abrirlo
+        if not os.path.exists(audio_file_path):
+            app.logger.error(f"❌ TELEGRAM: Archivo de audio no encontrado: {audio_file_path}")
+            return False
+
+        # Abrir el archivo de audio en modo binario
+        with open(audio_file_path, 'rb') as audio_file:
+            files = {'voice': audio_file}
+            data = {'chat_id': chat_id}
+            if caption:
+                data['caption'] = caption
+            
+            # Realizar la solicitud POST multipart/form-data
+            response = requests.post(send_voice_url, files=files, data=data, timeout=30)
+            
+            # 💥 BLOQUE DE DIAGNÓSTICO DETALLADO 💥
+            if response.status_code != 200:
+                app.logger.error(f"❌ TELEGRAM ERROR {response.status_code} al enviar voz. Respuesta API: {response.text}")
+                # Forzar la excepción para ser capturada en el bloque 'except'
+                response.raise_for_status() 
+            # 💥 FIN BLOQUE DE DIAGNÓSTICO 💥
+            
+            app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {chat_id}")
+            return True
+            
+    except requests.exceptions.RequestException as e:
+        # Se captura el error lanzado por response.raise_for_status() o un error de conexión
+        app.logger.error(f"❌ TELEGRAM: Error al enviar audio: {e}")
+        return False
+    except Exception as e:
+        app.logger.error(f"❌ TELEGRAM: Error inesperado al enviar audio: {e}")
+        return False
+
+# --- Endpoint Multi-Tenant para Webhook de Telegram ---
+@app.route('/telegram_webhook/<token_bot>', methods=['POST'])
+def telegram_webhook_multitenant(token_bot):
+    try:
+        # 1. Detectar Configuración por Token
+        config = None
+        for key, cfg in NUMEROS_CONFIG.items():
+            if cfg.get('telegram_token') == token_bot:
+                config = cfg
+                break
+        
+        if not config:
+            app.logger.error(f"🔴 TELEGRAM: Token no reconocido: {token_bot[:10]}...")
+            return jsonify({'status': 'error', 'message': 'Token no reconocido'}), 401
+
+        payload = request.get_json()
+        if not payload or 'message' not in payload:
+            app.logger.info("⚠️ Telegram: no message in payload")
+            return 'OK', 200
+
+        msg = payload['message']
+        chat_id = msg['chat']['id']
+        
+        # Simula la estructura de WhatsApp para el número (tg_chatid)
+        numero_telegram = f"tg_{chat_id}"
+        
+        # --- 2. Inicializar Variables y Detectar Media/Texto ---
+        texto = ''
+        es_imagen = 'photo' in msg
+        es_audio = 'voice' in msg or 'audio' in msg
+        es_archivo = 'document' in msg
+        file_id = None
+        public_url = None
+        transcripcion = None
+        
+        if es_imagen:
+            # Telegram envía una lista de fotos; tomamos la última (la más grande)
+            file_id = msg['photo'][-1]['file_id']
+            texto = msg.get('caption') or "El usuario envió una imagen"
+            tipo_mensaje = 'imagen'
+        elif es_audio:
+            # voice es para notas de voz, audio es para archivos de música
+            audio_obj = msg.get('voice') or msg.get('audio')
+            file_id = audio_obj['file_id']
+            # El texto inicial es la transcripción si la obtenemos, sino la nota
+            texto = msg.get('caption') or "El usuario envió un audio"
+            tipo_mensaje = 'audio'
+        elif es_archivo:
+            file_id = msg['document']['file_id']
+            texto = msg.get('caption') or f"Archivo: {msg['document'].get('file_name','sin nombre')}"
+            tipo_mensaje = 'documento'
+        elif 'text' in msg:
+            texto = (msg['text'] or '').strip()
+            tipo_mensaje = 'texto'
+        else:
+            texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
+            tipo_mensaje = 'texto'
+
+        # --- 3. Obtener Nombre de Contacto (para DB) ---
+        from_user = msg.get('from', {})
+        first_name = from_user.get('first_name', '')
+        last_name = from_user.get('last_name', '')
+        nombre_telegram = f"{first_name} {last_name}".strip() if first_name or last_name else None
+        
+        app.logger.info(f"📥 Telegram Incoming ({config['dominio']}) {numero_telegram}: '{texto[:200]}' (Media: {es_imagen or es_audio or es_archivo})")
+
+        # --- 4. Procesar Archivo (si aplica) ---
+        if file_id:
+            try:
+                # Obtener la URL de descarga (temporal y directa de Telegram)
+                public_url = obtener_url_archivo_telegram(file_id, token_bot)
+                
+                if es_audio and public_url:
+                    # Necesitas una función para descargar y transcribir el audio de Telegram
+                    # Aquí la simulamos ya que requiere código adicional fuera de este extracto
+                    # Tu implementación de whatsapp.py debe ser extendida para descargar la URL de Telegram
+                    # y llamar a transcribir_audio_con_openai()
+                    try:
+                        # Simulando la descarga/transcripción
+                        # Si no hay forma de descargar el archivo a disco, la transcripción con OpenAI no funcionará
+                        # (OpenAI requiere el archivo para la transcripción)
+                        # Por ahora, solo usamos la transcripción del texto
+                        
+                        # PASO CRÍTICO: Descargar la URL (public_url) a un archivo temporal para luego transcribir
+                        audio_content = requests.get(public_url, timeout=15).content
+                        temp_ogg_path = os.path.join(UPLOAD_FOLDER, f"tg_audio_{chat_id}_{int(time.time())}.ogg")
+                        with open(temp_ogg_path, 'wb') as f:
+                            f.write(audio_content)
+                        
+                        # Llamar a la función de transcripción (asumiendo que convierte el ogg de Telegram a un formato compatible)
+                        transcripcion_resultado = transcribir_audio_con_openai(temp_ogg_path) 
+                        if transcripcion_resultado:
+                            transcripcion = transcripcion_resultado
+                            texto = transcripcion
+                            app.logger.info(f"🎤 Telegram Audio Transcrito: {transcripcion[:100]}...")
+                        
+                        # Limpiar archivo temporal después de transcribir
+                        try: os.remove(temp_ogg_path)
+                        except: pass
+                        
+                    except Exception as e_transcribe:
+                        app.logger.warning(f"⚠️ Telegram transcripción/descarga falló: {e_transcribe}")
+                        transcripcion = None
+                        
+                # Para imágenes y documentos, la URL pública es la URL directa de Telegram (expira rápido, pero sirve para la IA)
+            except Exception as e:
+                app.logger.error(f"❌ TELEGRAM: Error obteniendo URL de archivo: {e}")
+                public_url = None
+
+        # --- 5. Inicializar Contacto/Meta y Guardar Mensaje Entrante ---
+        try:
+            inicializar_chat_meta(numero_telegram, config)
+            actualizar_info_contacto(numero_telegram, config, nombre_telegram=nombre_telegram, plataforma='Telegram') 
+        except Exception as e:
+            app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
+
+        # Guardar el mensaje (incoming_saved=True para el procesador unificado)
+        # Usamos public_url en imagen_url/contenido_extra según el tipo
+        guardar_mensaje_inmediato(
+            numero_telegram, 
+            texto, 
+            config=config, 
+            imagen_url=public_url if es_imagen else None,
+            es_imagen=es_imagen,
+            tipo_mensaje=tipo_mensaje,
+            contenido_extra=public_url if public_url and not es_imagen else None
+        )
+
+        # --- 6. Procesa el mensaje con la lógica unificada ---
+        processed_ok = procesar_mensaje_unificado(
+            msg=msg,
+            numero=numero_telegram,
+            texto=texto,
+            es_imagen=es_imagen,
+            es_audio=es_audio,
+            es_archivo=es_archivo, # Pasar el flag de archivo
+            config=config, 
+            public_url=public_url,
+            imagen_base64=None, # No se puede obtener base64 sin descargar, no lo pasamos
+            transcripcion=transcripcion,
+            incoming_saved=True
+        )
+
+        if not processed_ok:
+            send_telegram_message(chat_id, "Lo siento, hubo un error interno al procesar tu mensaje.", token_bot)
+            
+        return 'OK', 200
+
+    except Exception as e:
+        app.logger.error(f"🔴 CRITICAL error in telegram_webhook: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Internal server error', 500
+
+# --- Función de Envío de Mensajes a Telegram ---
+def send_telegram_message(chat_id, text, token):
+    """Envía un mensaje de texto a un chat de Telegram."""
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {
+        'chat_id': chat_id,
+        'text': text,
+        'parse_mode': 'Markdown' # Para que Markdown funcione
+    }
+    try:
+        response = requests.post(url, json=payload, timeout=5)
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        app.logger.error(f"❌ Error enviando mensaje a Telegram chat_id={chat_id}: {e}")
+        return False
 
 @app.route('/debug-image-full/<path:image_path>')
 def debug_image_full(image_path):
@@ -9693,6 +10623,21 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
+    # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
+    col_asesores_id = obtener_id_columna_asesores(config)
+    numeros_asesores = obtener_numeros_asesores_db(config)
+
+    # Lógica para mover chats de asesores a la columna "Asesores" si existe
+    if col_asesores_id and numeros_asesores:
+        placeholders = ', '.join(['%s'] * len(numeros_asesores))
+        # Mover a la columna de asesores si el número es de un asesor
+        cursor.execute(f"""
+            UPDATE chat_meta
+            SET columna_id = %s
+            WHERE numero IN ({placeholders}) AND columna_id != %s
+        """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+        conn.commit()
+        app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
@@ -9702,7 +10647,8 @@ def ver_kanban(config=None):
             cm.columna_id,
             MAX(c.timestamp) AS ultima_fecha,
             (SELECT mensaje FROM conversaciones 
-             WHERE numero = cm.numero 
+             WHERE numero = cm.numero
+             AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
@@ -9740,6 +10686,7 @@ def ver_kanban(config=None):
 
     return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
+
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
         config = obtener_configuracion_por_host()
@@ -9771,14 +10718,31 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy-audio/<path:audio_url>')
-def proxy_audio(audio_url):
-    """Proxy para evitar problemas de CORS con archivos de audio"""
+@app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
+def proxy_audio(filename):
+    """
+    Sirve archivos de audio (OGG/MP3) desde UPLOAD_FOLDER localmente.
+    Esto permite que WhatsApp/Telegram descarguen el archivo generado.
+    """
+    from werkzeug.exceptions import abort
+    
     try:
-        response = requests.get(audio_url, timeout=10)
-        return Response(response.content, mimetype=response.headers.get('content-type', 'audio/ogg'))
+        # Asegúrate de que UPLOAD_FOLDER sea accesible (ya está importado globalmente)
+        from app import UPLOAD_FOLDER
+        
+        # Servir el archivo directamente desde la carpeta de subidas
+        # El nombre del archivo ya está 'secured' por texto_a_voz
+        return send_from_directory(
+            directory=UPLOAD_FOLDER, 
+            path=filename, # Usamos path=filename para ser explícitos
+            mimetype='audio/ogg', # Forzamos el MIME type correcto para notas de voz
+            as_attachment=False
+        )
+
     except Exception as e:
-        return str(e), 500
+        app.logger.error(f"🔴 ERROR 500 en proxy_audio para {filename}: {e}")
+        # Retornar un error 404 o 500 si el archivo no se encuentra o hay un fallo
+        abort(404)
 
 @app.route('/privacy-policy')
 def privacy_policy():
@@ -9999,13 +10963,14 @@ def inicializar_chat_meta(numero, config=None):
         contacto_existente = cursor.fetchone()
         
         # 2. Si no existe, crear el contacto básico
-        if not contacto_existente:
-            cursor.execute("""
+        cursor.execute("""
                 INSERT INTO contactos 
-                    (numero_telefono, plataforma, fecha_creacion) 
-                VALUES (%s, 'WhatsApp', NOW())
+                    (numero_telefono, plataforma, created_at) 
+                VALUES (%s, 'Telegram', UTC_TIMESTAMP()) 
+                -- ^^^ USAR created_at en lugar de fecha_creacion
+                -- y usar UTC_TIMESTAMP para forzar la creación inmediata del registro
             """, (numero,))
-            app.logger.info(f"✅ Contacto básico creado: {numero}")
+        app.logger.info(f"✅ Contacto básico creado: {numero}")
         
         # 3. Insertar/actualizar en chat_meta
         cursor.execute("""
@@ -10105,13 +11070,15 @@ def actualizar_kanban_inmediato(numero, config=None):
     """Updates the Kanban board immediately when a message is received.
 
     Behavior:
-    - If there are any incoming messages without respuesta (respuesta IS NULL)
-      for this numero, set columna = 1 ("Nuevos").
-    - Otherwise fall back to previous logic (existing conversation -> columna 2).
+    - If the number is an ASESOR, moves the chat to the 'Asesores' column (if it exists).
+    - If the number is a CLIENT, moves to 'Nuevos' (1) if there are unread messages.
+    - Otherwise defaults to 'En Conversación' (2) if there is history.
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
+    conn = None
+    cursor = None
     try:
         # Ensure chat_meta exists
         meta = obtener_chat_meta(numero, config)
@@ -10122,35 +11089,46 @@ def actualizar_kanban_inmediato(numero, config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Count unread incoming messages (respuesta IS NULL)
-        cursor.execute("""
-            SELECT COUNT(*) FROM conversaciones
-            WHERE numero = %s AND respuesta IS NULL
-        """, (numero,))
-        row = cursor.fetchone()
-        sin_leer = int(row[0]) if row and row[0] is not None else 0
+        # Obtener ID de la columna de asesores y la lista de números
+        col_asesores_id = obtener_id_columna_asesores(config)
+        numeros_asesores = obtener_numeros_asesores_db(config)
+        es_asesor = numero in numeros_asesores
 
-        # Decide target column: if any unread -> Nuevos (1). Else En Conversación (2)
-        if sin_leer > 0:
-            nueva_columna = 1
-            app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+        # 1. Lógica para chats de Asesores
+        if es_asesor and col_asesores_id:
+            nueva_columna = col_asesores_id
+            app.logger.info(f"📊 {numero} es un asesor -> moviendo a columna Asesores ({col_asesores_id})")
         else:
-            # Existing conversation heuristic: put in "En Conversación"
-            # If there's no history at all, still default to Nuevos (1)
-            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
-            total_msgs = int(cursor.fetchone()[0] or 0)
-            if total_msgs == 0:
-                nueva_columna = 1
-                app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
-            else:
-                nueva_columna = 2
-                app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+            # 2. Lógica para chats de Clientes
+            # Contar mensajes entrantes sin respuesta (respuesta IS NULL)
+            cursor.execute("""
+                SELECT COUNT(*) FROM conversaciones
+                WHERE numero = %s AND respuesta IS NULL
+            """, (numero,))
+            row = cursor.fetchone()
+            sin_leer = int(row[0]) if row and row[0] is not None else 0
 
-        # Persist update to chat_meta
+            # Decidir columna objetivo para clientes:
+            if sin_leer > 0:
+                nueva_columna = 1 # Nuevos (ID 1 por defecto)
+                app.logger.info(f"📊 {numero} tiene {sin_leer} mensajes sin leer -> moviendo a 'Nuevos' (1)")
+            else:
+                # Verificar si hay historial
+                cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s", (numero,))
+                total_msgs = int(cursor.fetchone()[0] or 0)
+                
+                if total_msgs == 0:
+                    nueva_columna = 1 # Nuevos (si es el primer mensaje y no tiene historial)
+                    app.logger.info(f"📊 {numero} sin historial -> moviendo a 'Nuevos' (1)")
+                else:
+                    nueva_columna = 2 # En Conversación (ID 2 por defecto)
+                    app.logger.info(f"📊 {numero} sin mensajes sin leer -> moviendo a 'En Conversación' (2)")
+
+        # 3. Persistir actualización a chat_meta
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id)
             VALUES (%s, %s)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id), fecha_actualizacion = CURRENT_TIMESTAMP
+            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id)
         """, (numero, nueva_columna))
         conn.commit()
         cursor.close()
@@ -10161,11 +11139,10 @@ def actualizar_kanban_inmediato(numero, config=None):
     except Exception as e:
         app.logger.error(f"❌ Error updating Kanban immediately: {e}")
         try:
-            cursor.close()
-        except:
-            pass
-        try:
-            conn.close()
+            if cursor:
+                cursor.close()
+            if conn:
+                conn.close()
         except:
             pass
         return False
@@ -10173,11 +11150,8 @@ def actualizar_kanban_inmediato(numero, config=None):
 def actualizar_columna_chat(numero, columna_id, config=None):
     """
     Safely update chat_meta.columna_id for a given chat.
-    - Verifies the target columna_id exists in kanban_columnas.
-    - If it doesn't exist, tries to find a column named like 'Resueltos'.
-    - If still not found, creates a new 'Resueltos' column and uses its id.
-    This prevents foreign-key errors when code attempts to move chats to a hard-coded id
-    that may have been deleted in that tenant DB.
+    MODIFICADO: No crea la columna si la solicitada (Vendidos/Resueltos) no existe.
+    En su lugar, hace fallback a la columna 'En Conversación' (ID 2).
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -10187,71 +11161,73 @@ def actualizar_columna_chat(numero, columna_id, config=None):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        original_columna_id = columna_id
 
-        # 1) If the target column id does not exist, attempt fallbacks
+        # 1. Verificar si la ID solicitada existe
         cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_id,))
         if cursor.fetchone() is None:
-            app.logger.warning(f"⚠️ Target kanban_columnas id={columna_id} not found in DB {config.get('db_name')}. Attempting fallback lookup/create.")
-
-            # Try to find a column named 'Resueltos' (case-insensitive, tolerant)
-            cursor.execute("SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE LOWER(%s) LIMIT 1", ('%resueltos%',))
+            # La ID solicitada (e.g., ID 4 'Resueltos') no existe.
+            
+            # 2. Intentar encontrar una columna por nombre ("Vendidos" o "Resueltos")
+            cursor.execute("""
+                SELECT id FROM kanban_columnas 
+                WHERE LOWER(nombre) LIKE '%%vendido%%' OR LOWER(nombre) LIKE '%%resuelto%%' 
+                LIMIT 1
+            """)
             row = cursor.fetchone()
+            
             if row:
-                new_col_id = row[0]
-                app.logger.info(f"ℹ️ Fallback: found 'Cerrados' column id={new_col_id}. Using it instead of requested id={columna_id}.")
-                columna_id = new_col_id
+                # 3. Éxito: Columna encontrada por nombre
+                columna_id = row[0]
+                app.logger.info(f"ℹ️ Fallback: Target ID {original_columna_id} no existe. Usando columna encontrada por nombre: {columna_id}.")
             else:
-                # Create a new 'Resueltos' column at the end
-                try:
-                    cursor.execute("SELECT COALESCE(MAX(orden), 0) + 1 AS next_ord FROM kanban_columnas")
-                    next_ord_row = cursor.fetchone()
-                    next_ord = int(next_ord_row[0]) if next_ord_row and next_ord_row[0] is not None else 1
-                except Exception:
-                    next_ord = 1
-
-                default_icon = '/static/icons/default-avatar.png'
-                color = '#6c757d'
-                cursor.execute(
-                    "INSERT INTO kanban_columnas (nombre, orden, color, icono) VALUES (%s, %s, %s, %s)",
-                    ('Vendidos', next_ord, color, default_icon)
-                )
-                conn.commit()
-                columna_id = cursor.lastrowid
-                app.logger.info(f"✅ Created missing 'Vendidos' column id={columna_id} in DB {config.get('db_name')}")
-
-        # 2) Perform the update now that columna_id is guaranteed to exist
+                # 4. Fracaso: La columna no existe ni por ID ni por nombre. Usar columna de FALLBACK SEGURO (ID 2 = En Conversación).
+                
+                # Primero, obtener la columna actual para evitar moverla si no es necesario
+                meta = obtener_chat_meta(numero, config)
+                current_col = meta['columna_id'] if meta and meta.get('columna_id') else 1 # Usar 1 (Nuevos) si no hay meta
+                
+                # Definir columna segura de fallback
+                columna_fallback = 2 # 'En Conversación'
+                
+                # Verificamos que la columna de fallback exista.
+                cursor.execute("SELECT id FROM kanban_columnas WHERE id = %s LIMIT 1", (columna_fallback,))
+                if cursor.fetchone() is not None:
+                     app.logger.warning(f"⚠️ Target columna 'Resueltos/Vendidos' no existe. Usando columna de fallback seguro: {columna_fallback}.")
+                     columna_id = columna_fallback
+                else:
+                     # Si ni siquiera existe 'En Conversación', usamos la columna actual.
+                     app.logger.warning(f"⚠️ Fallback seguro (ID 2) no existe. Manteniendo columna actual ({current_col}) para {numero}.")
+                     columna_id = current_col 
+                     
+        # 5. Realizar el update
         cursor.execute("""
             UPDATE chat_meta SET columna_id = %s 
             WHERE numero = %s;
         """, (columna_id, numero))
         conn.commit()
-        app.logger.info(f"✅ Chat {numero} columna updated to {columna_id} in DB {config.get('db_name')}")
+        app.logger.info(f"✅ Chat {numero} columna actualizada a {columna_id} en DB {config.get('db_name')}")
 
     except Exception as e:
-        # Log the underlying DB error for diagnostics
-        app.logger.error(f"❌ actualizar_columna_chat failed for numero={numero} columna_id={columna_id} on DB {config.get('db_name')}: {e}")
+        app.logger.error(f"❌ actualizar_columna_chat falló para numero={numero} columna_id={original_columna_id}: {e}")
         try:
-            if conn:
-                conn.rollback()
-        except:
-            pass
+            if conn: conn.rollback()
+        except: pass
         raise
     finally:
         try:
-            if cursor:
-                cursor.close()
-            if conn:
-                conn.close()
-        except:
-            pass
+            if cursor: cursor.close()
+            if conn: conn.close()
+        except: pass
 
-def actualizar_info_contacto(numero, config=None):
+# --- Función actualizar_info_contacto ---
+def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
     """Actualiza la información del contacto, priorizando los datos del webhook"""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Primero verificar si ya tenemos información reciente del webhook
+        # Primero verificar si ya tenemos información reciente
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
@@ -10264,7 +11240,8 @@ def actualizar_info_contacto(numero, config=None):
         contacto = cursor.fetchone()
         
         # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
-        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion'):
+        # PERO si recibimos un nombre de Telegram explícito, forzamos la actualización
+        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion') and not nombre_telegram:
             fecha_actualizacion = contacto['fecha_actualizacion']
             if isinstance(fecha_actualizacion, str):
                 fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
@@ -10278,29 +11255,57 @@ def actualizar_info_contacto(numero, config=None):
         cursor.close()
         conn.close()
         
+        # --- 🛠️ INICIO: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
+        if nombre_telegram or plataforma:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            nombre_a_usar = nombre_telegram
+            plataforma_a_usar = plataforma or 'WhatsApp'
+
+            # Insertar o actualizar el contacto (COALESCE mantiene el nombre existente si el nuevo es NULL)
+            cursor.execute("""
+                INSERT INTO contactos 
+                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
+                VALUES (%s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE 
+                    nombre = COALESCE(VALUES(nombre), nombre), 
+                    plataforma = VALUES(plataforma),
+                    fecha_actualizacion = NOW()
+            """, (numero, nombre_a_usar, plataforma_a_usar))
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            app.logger.info(f"✅ Información de contacto actualizada para {numero} (Plataforma: {plataforma_a_usar})")
+            return
+        # --- FIN: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
+
         # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
         try:
-            client = get_whatsapp_client()
+            # ⚠️ Código antiguo que hace un intento de actualización de nombre/imagen via WhatsApp Web (si es que existe la librería 'client')
             if client and client.is_logged_in:
                 nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
                 if nombre_whatsapp or imagen_whatsapp:
-                    app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
-                    
-                    conn = get_db_connection(config)
-                    cursor = conn.cursor()
-                    
-                    cursor.execute("""
-                        UPDATE contactos 
-                        SET nombre = COALESCE(%s, nombre),
-                            imagen_url = COALESCE(%s, imagen_url),
-                            fecha_actualizacion = NOW()
-                        WHERE numero_telefono = %s
-                    """, (nombre_whatsapp, imagen_whatsapp, numero))
-                    
-                    conn.commit()
-                    cursor.close()
-                    conn.close()
-                    return
+                            app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
+            
+                            conn = get_db_connection(config)
+                            cursor = conn.cursor()
+            
+                            # --- CORRECCIÓN: SOLO ACTUALIZAR COLUMNAS EXISTENTES ---
+                            cursor.execute("""
+                                UPDATE contactos 
+                                SET nombre = COALESCE(%s, nombre),
+                                    imagen_url = COALESCE(%s, imagen_url),
+                                    fecha_actualizacion = NOW() 
+                                    -- ^^^ Esta columna ya existe en tu esquema
+                                WHERE numero_telefono = %s
+                            """, (nombre_whatsapp, imagen_whatsapp, numero))
+            
+                            conn.commit()
+                            cursor.close()
+                            conn.close()
+                            return
         except Exception as e:
             app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
         
