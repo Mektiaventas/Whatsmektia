@@ -96,12 +96,15 @@ def whatsapp_format(text):
     if not text:
         return ""
     
+    # ELIMINAR ESPACIOS INICIALES
+    text = text.lstrip()
+    
     # Negritas: *texto* -> <strong>texto</strong>
     text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
     
     # Cursivas: _texto_ -> <em>texto</em>
     text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
-    
+     
     # Tachado: ~texto~ -> <del>texto</del>
     text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
     
