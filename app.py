@@ -4399,22 +4399,33 @@ def get_plan_status_for_user(username, config=None):
             cur_t = conn_t.cursor()
 
             # Intentar SQL con LAG() y PARTITION BY numero (MySQL 8+)
-            sql_sessions = """
-                SELECT COALESCE(SUM(is_new),0) FROM (
-                  SELECT numero, timestamp,
-                    CASE
-                      WHEN LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp) IS NULL
-                        OR TIMESTAMPDIFF(SECOND, LAG(timestamp) OVER (PARTITION BY numero ORDER BY timestamp), timestamp) >= 86400
-                      THEN 1 ELSE 0 END AS is_new
-                  FROM conversaciones
-                ) t
-            """
+            # ---------------------
+            # Contar conversaciones (sessions) en la BD del tenant
+            # (FIX: Usar la tabla 'nuevas_conversaciones' para reflejar sesiones de 23.59h)
+            # ---------------------
+            conversaciones_consumidas = 0
             try:
-                cur_t.execute(sql_sessions)
-                row = cur_t.fetchone()
-                conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
-                app.logger.info(f"🔎 Conversaciones (SQL LAG) => {conversaciones_consumidas}")
-            except Exception as sql_err:
+                if config is None:
+                    config = obtener_configuracion_por_host()
+                conn_t = get_db_connection(config)
+                cur_t = conn_t.cursor()
+
+                # ✅ NUEVA CONSULTA: Contar todos los registros de la tabla de sesiones
+                sql_sessions = "SELECT COUNT(id) FROM nuevas_conversaciones" 
+
+                try:
+                    cur_t.execute(sql_sessions)
+                    row = cur_t.fetchone()
+                    conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
+                    app.logger.info(f"🔎 Conversaciones Consumidas (nuevas_conversaciones) => {conversaciones_consumidas}")
+                except Exception as sql_err:
+                    app.logger.warning(f"⚠️ Conteo de nuevas_conversaciones falló: {sql_err}")
+                    conversaciones_consumidas = 0
+
+                cur_t.close(); conn_t.close()
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo contar conversaciones en tenant DB: {e}")
+                conversaciones_consumidas = 0
                 # Fallback a procesamiento en Python (compatible con MySQL < 8)
                 app.logger.warning(f"⚠️ Conteo por SQL LAG falló: {sql_err} — usando fallback en Python")
                 cur_t.execute("SELECT numero, timestamp FROM conversaciones ORDER BY numero, timestamp")
