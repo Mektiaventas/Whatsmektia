@@ -9304,18 +9304,16 @@ def ver_chat(numero):
             WHERE numero = %s 
             ORDER BY timestamp ASC;
         """, (numero,))
-        msgs = cursor.fetchall()
+        chat = cursor.fetchall()
 
-        # Convertir timestamps
-        for msg in msgs:
-            if msg.get('timestamp'):
-                if msg['timestamp'].tzinfo is None:
-                    msg['timestamp'] = tz_mx.localize(msg['timestamp'])
+        for chat in chats:
+            if chat.get('ultima_fecha'):
+                # Si el timestamp ya tiene timezone info, convertirlo
+                if chat['ultima_fecha'].tzinfo is not None:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 else:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-        if msgs and msgs[-1].get('timestamp'): # <--- AÑADIDO LA COMPROBACIÓN
-            # Obtener timestamp en milisegundos para el polling de JS
-            last_message_ts_ms = msgs[-1]['timestamp'].timestamp() * 1000
+                    # Si no tiene timezone, asumir que es UTC y luego convertir
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
 
         cursor.close()
         conn.close()
