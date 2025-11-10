@@ -253,11 +253,12 @@
                             <strong>Respuesta:</strong> {{ msg.respuesta }}
                         </div>
                         {% endif %}
-                    </div>
+                    </div> 
                     {% else %}
                     <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
-                    {% endif %}
+                    {% endif %} 
 
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
