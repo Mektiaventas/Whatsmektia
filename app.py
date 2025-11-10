@@ -9085,6 +9085,7 @@ def diagnostico():
         return jsonify({'error': str(e)})    
 
 @app.route('/home')
+@login_required
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
@@ -9096,11 +9097,15 @@ def home():
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        
+        # FIX: Contar el total de contactos para la métrica principal.
+        # Esto asegura que chat_counts nunca disminuya al borrar el historial de un chat.
         cursor.execute(
             "SELECT COUNT(numero_telefono) FROM contactos;"
         )
         chat_counts = cursor.fetchone()[0]
 
+        # Contar los mensajes por chat en el periodo (para la gráfica original)
         cursor.execute(""" 
             SELECT 
                 conv.numero,
@@ -9114,6 +9119,7 @@ def home():
         """, (start,))
         messages_per_chat = cursor.fetchall()
 
+        # FIX: total_responded también usa el total de contactos para evitar decrementos.
         cursor.execute(
             "SELECT COUNT(numero_telefono) FROM contactos;"
         )
@@ -9181,10 +9187,12 @@ def home():
             values.append(counts_map.get(key, 0))
 
         # keep top-level stats for compatibility (not shown in current template but safe)
+        # FIX: Contar el total de contactos para la métrica principal.
         cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
         chat_counts_row = cursor.fetchone()
         chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
+        # FIX: total_responded también usa el total de contactos para evitar decrementos.
         cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
         total_responded_row = cursor.fetchone()
         total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
