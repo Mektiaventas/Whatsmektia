@@ -436,7 +436,18 @@
             dailyChart = new Chart(dailyCtx, {
                 type: 'line',
                 data: {
-                    // ... data ...
+                    labels: dailyLabels,
+                    datasets: [{
+                        label: 'Conversaciones Nuevas',
+                        data: dailyValues,
+                        backgroundColor: '#1f4e79',
+                        borderColor: '#1f4e79',
+                        pointBackgroundColor: 'white',
+                        pointBorderColor: '#1f4e79',
+                        pointRadius: 3, // Puntos pequeños
+                        borderWidth: 2,
+                        tension: 0.3
+                    }]
                 },
                 options: {
                     responsive: true,
@@ -457,8 +468,8 @@
                         }
                     },
                     scales: {
-                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } }
-                        // ...
+                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
+                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
                     }
                 },
                 plugins: [ChartDataLabels] // ASEGURAR QUE EL PLUGIN SE CARGUE
