@@ -1218,9 +1218,11 @@ function pollSelectedMessages() {
         const container = document.getElementById('msgs');
         if (!container) return;
         let appended = false;
-
+         
         for (const m of messages) {
-            let aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
+            let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
+            // SOLO eliminar espacios iniciales, mantener trim() para el resto  
+            aiText = aiText.replace(/^\s+/, '').trim();
             if (!aiText) continue;
 
             // ELIMINAR ESPACIOS INICIALES DE FORMA AGRESIVA
@@ -1278,7 +1280,9 @@ function pollSelectedMessages() {
             }
 
             const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
+            // SOLO eliminar espacios iniciales, mantener trim() para el resto
+            content = content.replace(/^\s+/, '').trim();
             const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
 
             // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
