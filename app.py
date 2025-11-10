@@ -6402,6 +6402,82 @@ def actualizar_contactos():
     
     return f"✅ Actualizados {len(numeros)} contactos"
 
+def registrar_nueva_conversacion(numero, mensaje, config=None):
+    """
+    Guarda un registro en 'nuevas_conversaciones' si no existe un registro previo 
+    para ese número o si el último registro tiene más de 23.59 horas.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Asegurar que la tabla exista (debes ejecutar esto al inicializar la app)
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS nuevas_conversaciones (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                numero VARCHAR(20) NOT NULL,
+                mensaje TEXT,
+                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_numero (numero)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        
+        # 2. Obtener el último registro para este número
+        # (Usar UTC_TIMESTAMP() para consistencia con la inserción)
+        cursor.execute("""
+            SELECT timestamp 
+            FROM nuevas_conversaciones 
+            WHERE numero = %s
+            ORDER BY timestamp DESC
+            LIMIT 1
+        """, (numero,))
+        
+        ultimo_registro = cursor.fetchone()
+        
+        # 3. Determinar si se debe guardar un nuevo registro
+        debe_guardar = True
+        
+        if ultimo_registro and ultimo_registro.get('timestamp'):
+            ultimo_ts = ultimo_registro['timestamp']
+            
+            # Asegurar que el timestamp es aware (o naive si la DB es naive)
+            if ultimo_ts.tzinfo is None:
+                # Si es naive, asumimos que es la hora del servidor (UTC por defecto en MySQL)
+                ultimo_ts = pytz.utc.localize(ultimo_ts) 
+            
+            # Calcular diferencia con la hora actual (UTC)
+            ahora = datetime.now(pytz.utc)
+            diferencia = ahora - ultimo_ts
+            
+            # Si la diferencia es menor a 23 horas y 59 minutos (86340 segundos)
+            if diferencia.total_seconds() < 86340: 
+                debe_guardar = False
+        
+        # 4. Guardar si es necesario
+        if debe_guardar:
+            # Insertar un nuevo registro con el timestamp actual (UTC_TIMESTAMP() en la DB)
+            cursor.execute("""
+                INSERT INTO nuevas_conversaciones (numero, mensaje, timestamp)
+                VALUES (%s, %s, UTC_TIMESTAMP())
+            """, (numero, mensaje))
+            conn.commit()
+            app.logger.info(f"✅ Conversación registrada en nuevas_conversaciones para {numero}.")
+            
+        return debe_guardar
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error en registrar_nueva_conversacion para {numero}: {e}")
+        if conn: conn.rollback()
+        return False
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, respuesta_tipo='texto', respuesta_media_url=None):
     """Función compatible con la estructura actual de la base de datos.
     Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
@@ -9098,10 +9174,10 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # FIX: Contar el total de contactos para la métrica principal.
-        # Esto asegura que chat_counts nunca disminuya al borrar el historial de un chat.
+        # FIX: Contar el total de sesiones (nuevas_conversaciones) en el periodo.
         cursor.execute(
-            "SELECT COUNT(numero_telefono) FROM contactos;"
+            "SELECT COUNT(id) FROM nuevas_conversaciones WHERE timestamp >= %s;",
+            (start,)
         )
         chat_counts = cursor.fetchone()[0]
 
@@ -9119,7 +9195,7 @@ def home():
         """, (start,))
         messages_per_chat = cursor.fetchall()
 
-        # FIX: total_responded también usa el total de contactos para evitar decrementos.
+        # FIX: total_responded contará el total de contactos, para que no disminuya.
         cursor.execute(
             "SELECT COUNT(numero_telefono) FROM contactos;"
         )
@@ -9154,14 +9230,8 @@ def home():
 
         sql = """
             SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
-            FROM conversaciones c1
+            FROM nuevas_conversaciones c1 -- Usar la nueva tabla
             WHERE c1.timestamp >= %s
-              AND NOT EXISTS (
-                SELECT 1 FROM conversaciones c2
-                WHERE c2.numero = c1.numero
-                  AND c2.timestamp < c1.timestamp
-                  AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
-              )
             GROUP BY y, m
             ORDER BY y, m
         """
