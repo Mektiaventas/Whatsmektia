@@ -41,7 +41,7 @@
                     <div class="card-title-row">
                         <div class="card-avatar-section">
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
-                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% if (chat.numero|default('')).startswith('tg_') or chat.canal == 'Telegram' %}
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% endif %}
 
