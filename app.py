@@ -9181,11 +9181,11 @@ def home():
             values.append(counts_map.get(key, 0))
 
         # keep top-level stats for compatibility (not shown in current template but safe)
-        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= %s;", (start,))
+        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
         chat_counts_row = cursor.fetchone()
         chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
-        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE respuesta<>'' AND timestamp>= %s;", (start,))
+        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
         total_responded_row = cursor.fetchone()
         total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
 
