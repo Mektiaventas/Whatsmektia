@@ -1179,15 +1179,19 @@ function pollSelectedMessages() {
         .catch(err => console.error('Error polling messages:', err));
 }
 
-function appendAIResponsesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
+    function appendAIResponsesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
 
-    for (const m of messages) {
-        const aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
-        if (!aiText) continue;
+        for (const m of messages) {
+            let aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
+            if (!aiText) continue;
 
+            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
+            aiText = aiText.replace(/^\s+/, ''); // Eliminar espacios al inicio
+            aiText = aiText.replace(/^\n+/, ''); // Eliminar saltos de línea al inicio
+        // === FIN DE LAS LÍNEAS NUEVAS === 
         const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
         let key;
         if (id) {
@@ -1224,55 +1228,60 @@ function appendAIResponsesToPanel(messages) {
     }
 }
 
-function appendUserMessagesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
+    function appendUserMessagesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
 
-    for (const m of messages) {
-        const key = buildMessageKeyFor(m);
-        if (!key) continue;
-        if (seenMessageKeys.has(key)) {
-            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
-            continue;
-        }
+        for (const m of messages) {
+            const key = buildMessageKeyFor(m);
+            if (!key) continue;
+            if (seenMessageKeys.has(key)) {
+                const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+                if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+                continue;
+            }
 
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
-        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
-        if (!content || (respuesta && respuesta.trim().length > 0)) {
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+            const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+
+            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
+            content = content.replace(/^\s+/, ''); // Eliminar espacios al inicio
+            content = content.replace(/^\n+/, ''); // Eliminar saltos de línea al inicio
+            // === FIN DE LAS LÍNEAS NUEVAS ===
+
+            if (!content || (respuesta && respuesta.trim().length > 0)) {
+                if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+                seenMessageKeys.add(key);
+                continue;
+            }
+
+            let ts = coalesce(m.ts_ms, 0);
+            if (!ts && m.timestamp) {
+                const parsed = Date.parse(m.timestamp);
+                ts = isNaN(parsed) ? Date.now() : parsed;
+            }
+            ts = Number(ts) || Date.now();
+
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-user';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+            const fechaFormateada = formatClientTime(ts);
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            container.appendChild(div);
+            appended = true;
             if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
             seenMessageKeys.add(key);
-            continue;
+        } 
+
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
         }
-
-        let ts = coalesce(m.ts_ms, 0);
-        if (!ts && m.timestamp) {
-            const parsed = Date.parse(m.timestamp);
-            ts = isNaN(parsed) ? Date.now() : parsed;
-        }
-        ts = Number(ts) || Date.now();
-
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-user';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-        const fechaFormateada = formatClientTime(ts);
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
-
-        container.appendChild(div);
-        appended = true;
-        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-        seenMessageKeys.add(key);
-    }
-
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
-
+    } 
 /* ===================== ALIAS EDITING & EMOJI ===================== */
 
     function enhanceAliasButtons() {
