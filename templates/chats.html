@@ -41,13 +41,13 @@
                     <div class="card-title-row">
                         <div class="card-avatar-section">
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
-                            {% if (chat.numero|default('')).startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% endif %}
 
                             <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                            {% set bandera = chat.numero|default('') | bandera %}
+                            {% set bandera = chat.numero | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                             {% endif %}
@@ -194,10 +194,10 @@
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
-                </div> 
-            </div>
+                </div>  
+            </div> 
             {% endif %}
 
             {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
@@ -210,9 +210,9 @@
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
-                </div>
+                </div> 
             </div>
             {% endif %} 
 
@@ -260,10 +260,10 @@
                     </div>
                     {% endif %}
 
-                </div> 
+                </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
                 </div> 
             </div>
@@ -325,7 +325,7 @@
         </div>
 
         <div class="sidebar-section">
-            <h3>Información</h3>
+            <h3>Información</h3> 
             <div class="chat-info-stats">
                 <div class="stat-item">
                     <span class="stat-label">Total mensajes:</span>
@@ -489,20 +489,20 @@
         padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 4px;
+        gap: 4px; /* Reducir de 8px si es necesario */
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    } 
+    }
 
     .msg-box {
         max-width: 70%;
-        padding: 8px 12px;
+        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
         border-radius: 18px;
         box-sizing: border-box;
-        margin: 2px 0;
+        margin: 1px 0; /* Reducir de 2px a 1px */
         position: relative;
         word-wrap: break-word;
-    }
+    } 
 
     .msg-user {
         align-self: flex-end;
@@ -519,10 +519,12 @@
     }
 
     .text-message {
-        line-height: 1.4;
+        line-height: 1.2; /* Reducido de 1.4 */
         white-space: pre-wrap;
         font-size: 14px;
-    }
+        margin: 0; /* Agregar esto */
+        padding: 0; /* Agregar esto */
+    } 
      
     .msg-manual {
         align-self: end;
@@ -1503,6 +1505,7 @@ function seekAudio(id, progressBar, evt) {
         enhanceAliasButtons();
 
         // INICIALIZACIÓN DIRECTA DE EMOJIS
+       
         setupEmojiPicker();
         console.log('Emoji picker inicializado');
 
@@ -1564,5 +1567,5 @@ function seekAudio(id, progressBar, evt) {
         } 
     });       
 });          
-</script>
+</script> 
 {% endblock %}   
