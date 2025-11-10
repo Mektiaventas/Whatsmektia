@@ -47,7 +47,7 @@
 
                             <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
                                  onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                            {% set bandera = chat.numero | bandera %}
+                            {% set bandera = chat.numero|default('') | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
                             {% endif %}
