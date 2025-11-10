@@ -519,12 +519,12 @@
     }
 
     .text-message {
-        line-height: 1.2; /* Reducido de 1.4 */
-        white-space: pre-wrap;
+        line-height: 1.0; /* Reducir más si es necesario */
+        white-space: normal; /* Cambiar de pre-wrap a normal */
         font-size: 14px;
-        margin: 0; /* Agregar esto */
-        padding: 0; /* Agregar esto */
-    } 
+        margin: 0;
+        padding: 0;
+    }  
      
     .msg-manual {
         align-self: end;
@@ -1208,7 +1208,8 @@ function appendAIResponsesToPanel(messages) {
         div.className = 'msg-box msg-ai';
         if (id) div.setAttribute('data-msg-id', String(id));
         const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta">${formatClientTime(tsVal)}</div>`;
+        const fechaFormateada = formatClientTime(tsVal);
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`; 
 
         container.appendChild(div);
         appended = true;
@@ -1257,7 +1258,8 @@ function appendUserMessagesToPanel(messages) {
         div.className = 'msg-box msg-user';
         if (id) div.setAttribute('data-msg-id', String(id));
         if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+        const fechaFormateada = formatClientTime(ts);
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
         container.appendChild(div);
         appended = true;
