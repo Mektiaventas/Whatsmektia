@@ -9226,6 +9226,12 @@ def ver_chats():
     chats = cursor.fetchall()
     # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
     for chat in chats:
+        # Asegurar que 'numero' es un string, incluso si viene como None de la BD
+        if chat.get('numero') is None:
+            chat['numero'] = ''
+        
+        if chat.get('ultima_fecha'):
+    for chat in chats:
         if chat.get('ultima_fecha'):
             # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
