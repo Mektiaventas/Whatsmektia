@@ -9097,8 +9097,7 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor()
         cursor.execute(
-            "SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp>= %s;",
-            (start,)
+            "SELECT COUNT(numero_telefono) FROM contactos;"
         )
         chat_counts = cursor.fetchone()[0]
 
