@@ -187,7 +187,7 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
                         {{ msg.mensaje | safe }}
                     </div>
                     {% endif %}
@@ -204,10 +204,10 @@
             <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
-                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
                         {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
-                </div>
+                </div> 
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
                     {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
@@ -255,8 +255,7 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
-                        {{ msg.respuesta | whatsapp_format | safe }}
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
                     </div>
                     {% endif %}
 
@@ -267,7 +266,7 @@
                     {% endif %}
                 </div> 
             </div>
-            {% endif %}
+            {% endif %} 
             {% endfor %}
             {% else %}
             <div class="no-chat-selected">
