@@ -187,16 +187,16 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message">
-                        {{ msg.mensaje }}
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
+                        {{ msg.mensaje | safe }}
                     </div>
                     {% endif %}
                 </div>
-                <div class="msg-meta">
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
-                </div>
+                </div> 
             </div>
             {% endif %}
 
@@ -204,17 +204,17 @@
             <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
-                    <div class="text-message">
-                        {{ msg.respuesta }}
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                 </div>
-                <div class="msg-meta">
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
-                </div> 
+                </div>
             </div>
-            {% endif %}
+            {% endif %} 
 
             {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
             <div class="msg-box msg-ai" data-msg-id="{{ msg.id if msg.id else '' }}">
@@ -255,15 +255,15 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message">
-                        {{ msg.respuesta }}
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.4;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                     {% endif %}
 
-                </div>
-                <div class="msg-meta">
+                </div> 
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
                 </div> 
             </div>
@@ -335,7 +335,7 @@
                     <span class="stat-label">Última actividad:</span>
                     <span class="stat-value">
                         {% if mensajes and mensajes[-1].timestamp %}
-                        {{ mensajes[-1].timestamp.strftime('%-d-%b   ').lower() }} {{ mensajes[-1].timestamp.strftime('%H:%M') }}
+                        {{ mensajes[-1].timestamp.strftime('%H:%M') }}
                         {% else %}
                         N/A
                         {% endif %}
@@ -486,33 +486,44 @@
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
-        padding: 12px;
+        padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 4px;
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    }
+    } 
 
     .msg-box {
-        max-width: 85%;
-        padding: 8px;
-        border-radius: 8px;
+        max-width: 70%;
+        padding: 8px 12px;
+        border-radius: 18px;
         box-sizing: border-box;
+        margin: 2px 0;
+        position: relative;
+        word-wrap: break-word;
     }
 
     .msg-user {
         align-self: flex-end;
-        background: #0b78d1;
+        background: #005c4b;
         color: white;
+        border-bottom-right-radius: 5px;
     }
 
     .msg-ai {
         align-self: flex-start;
-        background: #111827;
-        color: #e5e7eb;
+        background: #202c33;
+        color: #e9edef;
+        border-bottom-left-radius: 5px;
     }
 
+    .text-message {
+        line-height: 1.4;
+        white-space: pre-wrap;
+        font-size: 14px;
+    }
+     
     .msg-manual {
         align-self: end;
         background: #0ea5a4;
@@ -1548,11 +1559,11 @@ function seekAudio(id, progressBar, evt) {
             if (selectedChatId && !messagesIntervalHandle) {
                 initMessagesStateFromDOM();
                 messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages();   
+                    if (!document.hidden) pollSelectedMessages();       
                 }, messagePollIntervalMs);
             }     
         } 
-    }); 
+    });       
 });          
 </script>
 {% endblock %}   
