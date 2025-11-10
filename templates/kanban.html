@@ -425,41 +425,23 @@
         <div class="column-list" data-col-id="{{ col.id }}">
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
-                <div class="card-content">
-                    <!-- Fila 1: Avatar, bandera, nombre y botón de editar -->
-                    <div class="card-top-row">
-                        <div class="card-avatar-section">
-                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
-                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
-                            {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
-                            {% endif %}
+                <div class="card-title-row">
+                    <div class="card-avatar-section">
+                        {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                        {% if (chat.numero|default('')).startswith('tg_') or chat.canal == 'Telegram' %}
+                        {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                        {% endif %}
 
-                            <img src="{{ avatar_src }}"
-                                 class="card-avatar" alt="Avatar"
-                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                            {% set bandera = chat.numero | bandera %}
-                            {% if bandera %}
-                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
-                            {% endif %}
-                        </div>
-                        <div class="card-name-section">
-                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
-                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
-                            <!--<span class="alias-edit" style="display:none;">
-                                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
-                            </span>-->
-                        </div>
-                        <!--<button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>-->
+                        <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
+                             onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                        {% set bandera = chat.numero|default('') | bandera %}
+                        {% if bandera %}
+                        <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                        {% endif %}
                     </div>
-
-                    <!-- Fila 2: Mensaje y fecha -->
-                    <div class="card-bottom-row">
-                        <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
-                        <div class="card-time">
-                            {% if chat.ultima_fecha %}
-                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
-                            {% endif %}
-                        </div>
+                    <div class="card-name-section">
+                        {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' or chat.numero.startswith('tg_') else 'is-whatsapp' %}
+                        <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
                     </div>
                 </div>
 
