@@ -89,6 +89,23 @@ def format_time_24h(dt):
     except Exception as e:
         app.logger.error(f"Error formateando fecha {dt}: {e}")
         return ""
+
+@app.template_filter('whatsapp_format')
+def whatsapp_format(text): 
+    """Convierte formato de WhatsApp (*texto* -> negrita, _texto_ -> cursiva) a HTML"""
+    if not text:
+        return ""
+    
+    # Negritas: *texto* -> <strong>texto</strong>
+    text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
+    
+    # Cursivas: _texto_ -> <em>texto</em>
+    text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
+    
+    # Tachado: ~texto~ -> <del>texto</del>
+    text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
+    
+    return text 
 # ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
@@ -103,8 +120,8 @@ SESSION_ACTIVE_WINDOW_MINUTES = int(os.getenv("SESSION_ACTIVE_WINDOW_MINUTES", "
 OPENAI_API_URL = "https://api.openai.com/v1/chat/completions"
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
-client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
-# ——— Configuración Multi-Tenant ———
+client = OpenAI(api_key=OPENAI_API_KEY)  # ✅ 
+# ——— Configuración Multi-Tenant ——— #
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
