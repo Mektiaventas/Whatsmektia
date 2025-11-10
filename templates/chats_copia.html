@@ -187,14 +187,14 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message">
-                        {{ msg.mensaje }}
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                        {{ msg.mensaje | safe }}
                     </div>
                     {% endif %}
                 </div>
-                <div class="msg-meta">
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
                 </div>
             </div>
@@ -204,13 +204,13 @@
             <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
-                    <div class="text-message">
-                        {{ msg.respuesta }}
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                 </div>
-                <div class="msg-meta">
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
                 </div>
             </div>
@@ -255,15 +255,15 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message">
-                        {{ msg.respuesta }}
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                     {% endif %}
 
                 </div>
-                <div class="msg-meta">
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
-                    {{ msg.timestamp.strftime('%-d-%b   ').lower() }} {{ msg.timestamp.strftime('%H:%M') }}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
                     {% endif %}
                 </div>
             </div>
@@ -335,7 +335,7 @@
                     <span class="stat-label">Última actividad:</span>
                     <span class="stat-value">
                         {% if mensajes and mensajes[-1].timestamp %}
-                        {{ mensajes[-1].timestamp.strftime('%-d-%b   ').lower() }} {{ mensajes[-1].timestamp.strftime('%H:%M') }}
+                        {{ mensajes[-1].timestamp.strftime('%H:%M') }}
                         {% else %}
                         N/A
                         {% endif %}
@@ -488,31 +488,44 @@
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
-        padding: 12px;
+        padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
+        gap: 4px; /* Reducir de 8px si es necesario */
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
     }
 
     .msg-box {
-        max-width: 85%;
-        padding: 8px;
-        border-radius: 8px;
+        max-width: 70%;
+        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
+        border-radius: 18px;
         box-sizing: border-box;
+        margin: 1px 0; /* Reducir de 2px a 1px */
+        position: relative;
+        word-wrap: break-word;
     }
 
     .msg-user {
         align-self: flex-end;
-        background: #0b78d1;
+        background: #005c4b;
         color: white;
+        border-bottom-right-radius: 5px;
     }
 
     .msg-ai {
         align-self: flex-start;
-        background: #111827;
-        color: #e5e7eb;
+        background: #202c33;
+        color: #e9edef;
+        border-bottom-left-radius: 5px;
+    }
+
+    .text-message {
+        line-height: 1.0; /* Reducir más si es necesario */
+        white-space: normal; /* Cambiar de pre-wrap a normal */
+        font-size: 14px;
+        margin: 0;
+        padding: 0;
     }
 
     .msg-manual {
@@ -1197,7 +1210,8 @@ function appendAIResponsesToPanel(messages) {
         div.className = 'msg-box msg-ai';
         if (id) div.setAttribute('data-msg-id', String(id));
         const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta">${formatClientTime(tsVal)}</div>`;
+        const fechaFormateada = formatClientTime(tsVal);
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
         container.appendChild(div);
         appended = true;
@@ -1246,7 +1260,8 @@ function appendUserMessagesToPanel(messages) {
         div.className = 'msg-box msg-user';
         if (id) div.setAttribute('data-msg-id', String(id));
         if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta">${formatClientTime(ts)}</div>`;
+        const fechaFormateada = formatClientTime(ts);
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
         container.appendChild(div);
         appended = true;
@@ -1557,4 +1572,4 @@ function seekAudio(id, progressBar, evt) {
     });
 });
 </script>
-{% endblock %}    
+{% endblock %}     
