@@ -7154,7 +7154,13 @@ def webhook():
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
-
+        # --- AÑADIR LÓGICA DE NUEVA CONVERSACIÓN AQUÍ ---
+        try:
+            # Llama a la función con el número, el texto y la configuración detectada
+            registrar_nueva_conversacion(numero, texto, config=config)
+        except Exception as e:
+            app.logger.error(f"❌ Error al registrar nueva conversación desde webhook: {e}")
+        # --- FIN LÓGICA AÑADIDA ---
         # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
         try:
             # --- MODIFICADO ---
@@ -10441,7 +10447,13 @@ def telegram_webhook_multitenant(token_bot):
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
             tipo_mensaje = 'texto'
-
+        # --- AÑADIR LÓGICA DE NUEVA CONVERSACIÓN AQUÍ ---
+        try:
+            # Llama a la función con el número, el texto y la configuración detectada
+            registrar_nueva_conversacion(numero, texto, config=config)
+        except Exception as e:
+            app.logger.error(f"❌ Error al registrar nueva conversación desde webhook: {e}")
+        # --- FIN LÓGICA AÑADIDA ---
         # --- 3. Obtener Nombre de Contacto (para DB) ---
         from_user = msg.get('from', {})
         first_name = from_user.get('first_name', '')
