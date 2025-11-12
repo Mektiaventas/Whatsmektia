@@ -851,32 +851,47 @@
     .msg-ai .text-message,
     .msg-manual .text-message {
         white-space: pre-wrap;
-        line-height: 1.3;
+        line-height: 1.3 !important; /* Forzar line-height consistente */
         text-indent: 0 !important;
         padding-left: 0 !important;
         margin-left: 0 !important;
         display: block;
         overflow-wrap: break-word;
+        /* NUEVAS PROPIEDADES PARA EVITAR ESPACIADO */
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
     }
 
-        /* Forzar que el primer carácter esté pegado al borde izquierdo */
-        .msg-ai .text-message::first-letter,
-        .msg-manual .text-message::first-letter {
-            margin-left: 0 !important;
-            padding-left: 0 !important;
-        }
-
-    /* Eliminar cualquier padding/margin interno del contenedor del mensaje */
     .msg-ai .message-content,
     .msg-manual .message-content {
-        padding-left: 0 !important;
-        margin-left: 0 !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
+
+    .msg-ai .text-message::first-line,
+    .msg-manual .text-message::first-line {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    } 
 
     /* SOLUCIÓN NUCLEAR - si persiste el espacio */
     .msg-ai .text-message {
         transform: translateX(-2px) !important;
-    } 
+    }
+    /* === AÑADE AQUÍ LA NUEVA CLASE === */
+    .text-message.no-initial-space {
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        line-height: 1.3 !important;
+    }
+
+        .text-message.no-initial-space::first-letter {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
+        } 
 </style>
 <script>
 /* Small helpers */
@@ -1218,16 +1233,16 @@ function pollSelectedMessages() {
         const container = document.getElementById('msgs');
         if (!container) return;
         let appended = false;
-         
+
         for (const m of messages) {
             let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
-            // SOLO eliminar espacios iniciales, mantener trim() para el resto  
-            aiText = aiText.replace(/^\s+/, '').trim();
-            if (!aiText) continue;
 
-            // ELIMINAR ESPACIOS INICIALES DE FORMA AGRESIVA
-            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
-            aiText = aiText.trimStart(); // Método moderno adicional
+            // ELIMINACIÓN MÁS AGRESIVA DE ESPACIOS
+            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios iniciales
+            aiText = aiText.replace(/\n\s*\n/g, '\n\n'); // Normaliza saltos múltiples
+            aiText = aiText.trim(); // Trim general
+
+            if (!aiText) continue;
 
             const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
             let key;
@@ -1250,10 +1265,12 @@ function pollSelectedMessages() {
             if (id) div.setAttribute('data-msg-id', String(id));
             const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
             const fechaFormateada = formatClientTime(tsVal);
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            // Aplicar clase especial para evitar espacios
+            div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
             container.appendChild(div);
-            appended = true;
+            appended = true; 
 
             seenMessageKeys.add(key);
             if (id) seenMessageKeys.add('id:' + id);
@@ -1263,8 +1280,7 @@ function pollSelectedMessages() {
             const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
             if (wasAtBottom) container.scrollTop = container.scrollHeight;
         }
-    } 
-
+    }
     function appendUserMessagesToPanel(messages) {
         const container = document.getElementById('msgs');
         if (!container) return;
