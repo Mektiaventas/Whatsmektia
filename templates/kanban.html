@@ -446,12 +446,7 @@
                         <div class="card-name-section">
                             {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
-                            <button class="btn-asignar-asesor" data-numero="{{ chat.numero }}"
-                                    onclick="asignarAsesor('{{ chat.numero }}')"
-                                    style="background: #4CAF50; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 10px; cursor: pointer; margin-top: 2px;">
-                                📞 Asignar Asesor
-                            </button>
-                        </div> 
+                        </div>
                     </div>
 
                     <!-- Fila 2: Mensaje y fecha -->
@@ -1067,7 +1062,7 @@
                 viewElement.style.display = '';
             }
         };
-    } 
+    }
 
     // Attach handlers to edit buttons that are already in DOM on load
     document.addEventListener('DOMContentLoaded', () => {
@@ -1087,34 +1082,5 @@
             console.error('Error binding edit-alias-btn handlers:', err);
         }
     });
-    // === FUNCIÓN PARA ASIGNAR ASESOR ===
-    function asignarAsesor(numero) {
-        if (!confirm('¿Estás seguro de que quieres asignar un asesor a este chat?')) {
-            return;
-        }
-
-        fetch(`/chats/${numero}/asignar-asesor`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            }
-        })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    alert(`✅ Asesor ${data.asesor_id} asignado correctamente`);
-                    // Recargar para ver los cambios
-                    setTimeout(() => {
-                        location.reload();
-                    }, 1000);
-                } else {
-                    alert('❌ Error: ' + data.error);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                alert('❌ Error al asignar asesor');
-            });
-    } 
 </script>
 {% endblock %}

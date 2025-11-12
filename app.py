@@ -4516,66 +4516,6 @@ def obtener_id_columna_asesores(config=None):
         if cursor: cursor.close()
         if conn: conn.close()
 
-def obtener_asesor_para_chat(numero, config=None):
-    """Asigna un asesor a un chat de forma round-robin y guarda en contactos.asesor_id"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # 1. Verificar si el contacto ya tiene un asesor asignado
-        cursor.execute("SELECT asesor_id FROM contactos WHERE numero_telefono = %s", (numero,))
-        contacto = cursor.fetchone()
-        
-        if contacto and contacto.get('asesor_id'):
-            # Si ya tiene asesor asignado, retornar ese mismo
-            app.logger.info(f"✅ Contacto {numero} ya tiene asesor asignado: {contacto['asesor_id']}")
-            return contacto['asesor_id']
-        
-        # 2. Obtener lista de asesores disponibles
-        cfg = load_config(config)
-        asesores_list = cfg.get('asesores_list', [])
-        
-        if not asesores_list:
-            app.logger.warning("⚠️ No hay asesores configurados")
-            return None
-        
-        # 3. Contar cuántos chats tiene cada asesor (para asignación round-robin)
-        asesor_counts = {}
-        for i, asesor in enumerate(asesores_list):
-            asesor_id = i  # Usar índice como ID del asesor
-            cursor.execute("""
-                SELECT COUNT(*) as count 
-                FROM contactos 
-                WHERE asesor_id = %s
-            """, (asesor_id,))
-            result = cursor.fetchone()
-            asesor_counts[asesor_id] = result['count'] if result else 0
-        
-        # 4. Encontrar el asesor con menos chats asignados
-        asesor_id_asignado = min(asesor_counts, key=asesor_counts.get)
-        
-        # 5. Actualizar el contacto con el asesor asignado
-        cursor.execute("""
-            UPDATE contactos 
-            SET asesor_id = %s 
-            WHERE numero_telefono = %s
-        """, (asesor_id_asignado, numero))
-        
-        conn.commit()
-        
-        app.logger.info(f"✅ Asesor {asesor_id_asignado} asignado a chat {numero} (total asesores: {len(asesores_list)})")
-        return asesor_id_asignado
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error asignando asesor: {e}")
-        return None
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-
 def obtener_numeros_asesores_db(config=None):
     """Devuelve una tupla de todos los números de teléfono de los asesores configurados."""
     if config is None:
@@ -4587,7 +4527,7 @@ def obtener_numeros_asesores_db(config=None):
         return numeros
     except Exception as e:
         app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
-        return tuple() 
+        return tuple()
 
 def enviar_catalogo(numero, original_text=None, config=None):
     """
@@ -4709,73 +4649,6 @@ def ver_citas(config=None):
     conn.close()
     
     return render_template('citas.html', citas=citas)
-
-
-@app.route('/chats/<numero>/asignar-asesor', methods=['POST'])
-def asignar_asesor_manual(numero):
-    """Endpoint para asignar manualmente un asesor a un chat"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        asesor_id = obtener_asesor_para_chat(numero, config)
-        
-        if asesor_id is not None:
-            # Mover el chat a la columna del asesor
-            col_asesores_id = obtener_id_columna_asesores(config)
-            if col_asesores_id:
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
-                cursor.execute(
-                    "INSERT INTO chat_meta (numero, columna_id) VALUES (%s, %s) ON DUPLICATE KEY UPDATE columna_id = %s",
-                    (numero, col_asesores_id, col_asesores_id)
-                )
-                conn.commit()
-                cursor.close()
-                conn.close()
-            
-            # Enviar notificación al asesor asignado
-            enviar_notificacion_asesor(numero, asesor_id, config)
-            
-            return jsonify({
-                'success': True, 
-                'asesor_id': asesor_id,
-                'mensaje': f'Asesor {asesor_id} asignado correctamente'
-            })
-        else:
-            return jsonify({
-                'success': False,
-                'error': 'No se pudo asignar un asesor'
-            }), 400
-            
-    except Exception as e:
-        app.logger.error(f"❌ Error en asignación manual de asesor: {e}")
-        return jsonify({
-            'success': False,
-            'error': 'Error interno del servidor'
-        }), 500
-
-def enviar_notificacion_asesor(numero, asesor_id, config=None):
-    """Envía notificación al asesor sobre el chat asignado"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        cfg = load_config(config)
-        asesores_list = cfg.get('asesores_list', [])
-        
-        if 0 <= asesor_id < len(asesores_list):
-            asesor = asesores_list[asesor_id]
-            telefono_asesor = asesor.get('telefono')
-            
-            if telefono_asesor:
-                mensaje = f"🔔 *NUEVO CHAT ASIGNADO*\n\nSe te ha asignado un nuevo chat:\n• Número: {numero}\n• Asesor: Tú (ID: {asesor_id})\n\nPor favor contacta al cliente pronto."
-                enviar_mensaje(telefono_asesor, mensaje, config)
-                app.logger.info(f"✅ Notificación enviada al asesor {asesor_id}")
-                
-    except Exception as e:
-        app.logger.error(f"❌ Error enviando notificación al asesor: {e}") 
-
-
 
 def load_config(config=None):
     if config is None:
