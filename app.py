@@ -5672,17 +5672,21 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None):
         return None
 
 def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
-    """Asigna un asesor a un cliente de forma persistente"""
+    """Asigna un asesor a un cliente de forma persistente, guardando el número de teléfono del asesor en la columna 'asesor_id'."""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Asegurar que existe la columna
+        # Asegurar que existe la columna (esta función debe estar definida en tu app.py)
         _ensure_asesor_id_column(config)
         
-        # Crear un identificador único para el asesor
-        asesor_id = f"{asesor.get('nombre', '').strip()}_{asesor.get('telefono', '').strip()}"
+        # 🔑 IDENTIFICADOR: Usar SOLO el número de teléfono del asesor como valor de la columna asesor_id
+        asesor_telefono = asesor.get('telefono', '').strip()
         
+        if not asesor_telefono:
+            app.logger.warning(f"⚠️ No se puede asignar asesor a {numero_cliente}: falta el teléfono del asesor.")
+            return
+            
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
@@ -5691,23 +5695,24 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
             UPDATE contactos 
             SET asesor_id = %s 
             WHERE numero_telefono = %s
-        """, (asesor_id, numero_cliente))
-        
-        # Si el contacto no existe, crearlo
+        """, (asesor_telefono, numero_cliente)) # <-- Usando asesor_telefono
+
+        # Si el contacto no existe, crearlo (esto es redundante si actualizar_info_contacto se llama antes, pero es seguro)
         if cursor.rowcount == 0:
             cursor.execute("""
                 INSERT INTO contactos (numero_telefono, asesor_id, nombre, plataforma) 
                 VALUES (%s, %s, %s, 'WhatsApp')
-            """, (numero_cliente, asesor_id, f"Cliente {numero_cliente}"))
+            """, (numero_cliente, asesor_telefono, f"Cliente {numero_cliente}")) # <-- Usando asesor_telefono
         
         conn.commit()
         cursor.close()
         conn.close()
         
-        app.logger.info(f"✅ Asesor {asesor.get('nombre')} asignado persistentemente a {numero_cliente}")
+        app.logger.info(f"✅ Asesor (tel: {asesor_telefono}) asignado persistentemente a {numero_cliente} en columna asesor_id.")
         
     except Exception as e:
-        app.logger.error(f"🔴 Error asignando asesor a cliente: {e}") 
+        app.logger.error(f"🔴 Error asignando asesor a cliente: {e}")
+
     def _infer_cliente_user_for_config(cfg):
         """Intenta encontrar el `user` en CLIENTES_DB asociado al tenant (heurístico)."""
         try:
