@@ -115,7 +115,7 @@ def whatsapp_format(text):
     # Tachado: ~texto~ -> <del>texto</del>
     text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
     
-    return text  
+    return text 
 # ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
