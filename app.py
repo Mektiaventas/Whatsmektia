@@ -3318,9 +3318,26 @@ def kanban_data(config=None):
             """, (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
             app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
+
         # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
+
+        # Obtener asesores desde la configuración
+        asesores = []
+        try:
+            cfg = load_config(config)
+            asesores_list = cfg.get('asesores_list', [])
+            for i, asesor in enumerate(asesores_list):
+                if asesor.get('nombre'):
+                    asesores.append({
+                        'id': 4 + i,  # Columnas de asesores empiezan en 4
+                        'nombre': asesor['nombre'],
+                        'telefono': asesor.get('telefono', ''),
+                        'email': asesor.get('email', '')
+                    })
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error obteniendo asesores: {e}")
 
         # Obtener chats con nombres de contactos
         cursor.execute("""
@@ -3334,7 +3351,8 @@ def kanban_data(config=None):
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                COALESCE(MAX(cont.plataforma), 'WhatsApp') AS canal
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -3352,7 +3370,6 @@ def kanban_data(config=None):
                     else:
                         chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
                 except Exception:
-                    # Fallback: intentar str() si algo raro ocurre
                     try:
                         chat['ultima_fecha'] = str(chat['ultima_fecha'])
                     except:
@@ -3364,14 +3381,14 @@ def kanban_data(config=None):
         return jsonify({
             'columnas': columnas,
             'chats': chats,
-            # Use milliseconds epoch so clients that compare with Date.now() work reliably
+            'asesores': asesores,
             'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
 
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e)}), 500 
 
 def sanitize_whatsapp_text(text):
     """
@@ -4523,18 +4540,94 @@ def obtener_id_columna_asesores(config=None):
         if cursor: cursor.close()
         if conn: conn.close()
 
-def obtener_numeros_asesores_db(config=None):
-    """Devuelve una tupla de todos los números de teléfono de los asesores configurados."""
+def determinar_columna_automatica(numero, config=None):
+    """Determina automáticamente la columna donde debe estar un chat según las reglas"""
     if config is None:
         config = obtener_configuracion_por_host()
+    
     try:
-        cfg = load_config(config)
-        asesores_list = cfg.get('asesores_list', [])
-        numeros = tuple({(a.get('telefono') or '').strip() for a in asesores_list if a.get('telefono')})
-        return numeros
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Obtener el historial reciente del chat
+        cursor.execute("""
+            SELECT mensaje, respuesta, timestamp 
+            FROM conversaciones 
+            WHERE numero = %s 
+            ORDER BY timestamp DESC 
+            LIMIT 10
+        """, (numero,))
+        historial = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        if not historial:
+            return 1  # Nuevos si no hay historial
+        
+        # Determinar estados
+        ultimo_mensaje_usuario = any(msg['mensaje'] for msg in historial if msg['mensaje'])
+        ultima_respuesta_ia = any(msg['respuesta'] for msg in historial if msg['respuesta'])
+        
+        # Verificar si se mencionó información de asesor
+        menciona_asesor = False
+        for msg in historial:
+            if msg['respuesta'] and any(keyword in msg['respuesta'].lower() for keyword in ['asesor', 'agente', 'especialista', 'ejecutivo']):
+                menciona_asesor = True
+                break
+        
+        # Lógica de columnas
+        if not ultimo_mensaje_usuario and not ultima_respuesta_ia:
+            return 1  # Nuevos
+        elif ultimo_mensaje_usuario and not ultima_respuesta_ia:
+            return 2  # En Conversación
+        elif ultima_respuesta_ia and not ultimo_mensaje_usuario:
+            return 3  # Esperando Respuesta
+        elif menciona_asesor:
+            # Asignar a asesor automáticamente (columna 4+)
+            return 4  # Primer asesor por defecto
+        
+        return 2  # Por defecto en Conversación
+        
     except Exception as e:
-        app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
-        return tuple()
+        app.logger.error(f"Error determinando columna automática: {e}")
+        return 1  # Por defecto en Nuevos
+
+def actualizar_columna_chat(numero, config=None):
+    """Actualiza la columna de un chat automáticamente según las reglas"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        nueva_columna = determinar_columna_automatica(numero, config)
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            UPDATE chat_meta 
+            SET columna_id = %s, fecha_actualizacion = NOW() 
+            WHERE numero = %s
+        """, (nueva_columna, numero))
+        
+        # Si no existe en chat_meta, insertar
+        if cursor.rowcount == 0:
+            cursor.execute("""
+                INSERT INTO chat_meta (numero, columna_id) 
+                VALUES (%s, %s)
+            """, (numero, nueva_columna))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Chat {numero} movido a columna {nueva_columna}")
+        return True
+        
+    except Exception as e:
+        app.logger.error(f"Error actualizando columna chat: {e}")
+        return False 
+
 
 def enviar_catalogo(numero, original_text=None, config=None):
     """
@@ -6984,6 +7077,26 @@ def webhook():
             app.logger.info("⚠️ Webhook: no messages in payload")
             return 'OK', 200
 
+        # AGREGAR ESTO: Obtener configuración
+        config = obtener_configuracion_por_host()
+
+        # Procesar cada mensaje
+        for mensaje_data in mensajes:
+            numero = mensaje_data.get('from')
+            
+            # ... aquí va tu código existente para procesar el mensaje ...
+            # (extraer texto, guardar en BD, etc.)
+            
+            # DESPUÉS de guardar el mensaje del usuario, AGREGA ESTA LÍNEA:
+            actualizar_columna_chat(numero, config)
+
+        return 'OK', 200
+
+    except Exception as e:
+        app.logger.error(f"🔴 Webhook error: {e}")
+        app.logger.error(traceback.format_exc())
+        return 'Internal server error', 500 
+
         # Try to persist contact info if provided (contacts structure)
         try:
             if ('contacts' in entry['changes'][0]['value']):
@@ -7311,7 +7424,7 @@ REGLA CRÍTICA DE FLUJO: El campo "ready_to_notify" solo debe ser 'true' si tien
 }}
 
 Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan datos clave (dirección/pago/nombre) inclúyelos en 'preguntas_faltantes'.
-""" # ← MODIFICADO: Se incluyó REGLA CRÍTICA para 'ready_to_notify' y 'nombre_cliente'
+"""
 
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {
@@ -7341,111 +7454,67 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
             app.logger.error(f"🔴 comprar_producto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:500]}")
             return None
 
-        respuesta_text = extracted.get('respuesta_text') or ""
-        productos = extracted.get('productos') or []
+        # 3) Validar extracción
+        if not extracted:
+            app.logger.warning("⚠️ comprar_producto: extracted vacío")
+            return None
+
+        # 4) Procesar datos extraídos
+        respuesta_text = extracted.get('respuesta_text', '')
+        productos = extracted.get('productos', [])
         metodo_pago = extracted.get('metodo_pago')
         direccion = extracted.get('direccion')
         nombre_cliente = extracted.get('nombre_cliente')
-        precio_total_ia = extracted.get('precio_total')
-        ready_to_notify = bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
-        confidence = float(extracted.get('confidence') or 0.0)
-        resumen = extracted.get('resumen_conversacion') or ""
-        preguntas_ia = extracted.get('preguntas_faltantes') or []
+        precio_total = extracted.get('precio_total')
+        confidence = extracted.get('confidence', 0.0)
+        preguntas_faltantes = extracted.get('preguntas_faltantes', [])
+        resumen = extracted.get('resumen_conversacion', 'Resumen no disponible.')
+        is_fully_ready = extracted.get('ready_to_notify', False)
 
-        # 3) Normalizar/enriquecer productos y calcular totales (mismo comportamiento)
+        # Normalizar productos
         productos_norm = []
-        suma_total = 0.0
-        any_price_known = False
         for p in productos:
-            try:
-                name_raw = (p.get('sku_o_nombre') or p.get('nombre') or p.get('sku') or '').strip()
-                qty = int(p.get('cantidad') or 0)
-                if qty <= 0:
-                    qty = 1
-                pu = None
-                if p.get('precio_unitario') not in (None, '', 0):
-                    try:
-                        pu = float(p.get('precio_unitario'))
-                    except Exception:
-                        pu = None
-
-                producto_db = None
-                if name_raw:
-                    producto_db = obtener_producto_por_sku_o_nombre(name_raw, config)
-                if not pu and producto_db:
-                    cand = producto_db.get('precio_menudeo') or producto_db.get('precio') or producto_db.get('costo') or producto_db.get('precio_mayoreo')
-                    try:
-                        if cand not in (None, ''):
-                            pu = float(re.sub(r'[^\d.]', '', str(cand)))
-                    except Exception:
-                        pu = None
-
-                precio_total_item = None
-                if pu is not None:
-                    precio_total_item = round(pu * qty, 2)
-                    suma_total += precio_total_item
-                    any_price_known = True
-                else:
-                    if p.get('precio_total_item') not in (None, ''):
-                        try:
-                            precio_total_item = float(re.sub(r'[^\d.]', '', str(p.get('precio_total_item'))))
-                            suma_total += precio_total_item
-                            any_price_known = True
-                        except Exception:
-                            precio_total_item = None
-
-                productos_norm.append({
-                    "sku_o_nombre": name_raw or None,
-                    "cantidad": qty,
-                    "precio_unitario": pu,
-                    "precio_total_item": precio_total_item,
-                    "catalog_row": producto_db
-                })
-            except Exception as e:
-                app.logger.warning(f"⚠️ comprar_producto: error procesando item {p}: {e}")
+            if not p.get('sku_o_nombre'):
                 continue
+            try:
+                qty = int(p.get('cantidad', 1))
+                pu = float(p.get('precio_unitario', 0.0))
+                pt = float(p.get('precio_total_item', 0.0))
+                productos_norm.append({
+                    'sku_o_nombre': p['sku_o_nombre'],
+                    'cantidad': qty,
+                    'precio_unitario': pu,
+                    'precio_total_item': pt
+                })
+            except (ValueError, TypeError):
+                productos_norm.append({
+                    'sku_o_nombre': p['sku_o_nombre'],
+                    'cantidad': p.get('cantidad', 1),
+                    'precio_unitario': p.get('precio_unitario'),
+                    'precio_total_item': p.get('precio_total_item')
+                })
 
-        precio_total_calc = round(suma_total, 2) if any_price_known else (float(precio_total_ia) if precio_total_ia not in (None, '') else None)
-
+        # Datos compra para notificación
         datos_compra = {
-            "productos": productos_norm,
-            "precio_total": precio_total_calc,
-            "metodo_pago": metodo_pago or None,
-            "direccion": direccion or None,
-            "nombre_cliente": nombre_cliente or None,
-            "numero_cliente": numero,
-            "ready_to_notify": ready_to_notify,
-            "confidence": confidence
+            'productos': productos_norm,
+            'metodo_pago': metodo_pago,
+            'direccion': direccion,
+            'nombre_cliente': nombre_cliente,
+            'precio_total': precio_total,
+            'confidence': confidence
         }
 
-        app.logger.info(f"🔍 comprar_producto - datos_compra normalizados: {json.dumps({'productos_count': len(productos_norm), 'precio_total': datos_compra['precio_total'], 'ready_to_notify': ready_to_notify, 'confidence': confidence}, ensure_ascii=False)}")
-        
-        # --- LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES (3.1) ---
-        _ready_from_ia = bool(extracted.get('ready_to_notify') if extracted.get('ready_to_notify') is not None else False)
-        
-        # Determinar si el pedido está *realmente* listo para ser notificado (todos los campos esenciales)
-        # Requerimos: ready_to_notify=true DE LA IA Y precio, pago, dirección, nombre
-        is_fully_ready = _ready_from_ia and \
-                         datos_compra.get('precio_total') is not None and \
-                         datos_compra.get('metodo_pago') and \
-                         datos_compra.get('direccion') and \
-                         datos_compra.get('nombre_cliente') and \
-                         len(productos_norm) > 0
+        # --- LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
+        respuesta_al_cliente = respuesta_text
 
-        if preguntas_ia and not is_fully_ready: # ← CORREGIDO: Usar is_fully_ready
-            # Si hay preguntas faltantes y NO está listo, genera la respuesta compuesta.
-            respuesta_al_cliente = (
-                f"{respuesta_text}\n\n"
-                "Para poder procesar tu compra, por favor responde a lo siguiente:\n\n"
-                + "\n".join(f"- {p}" for p in preguntas_ia)
-            )
-        else:
-            # Si está listo o si la IA no devolvió preguntas (debería estar listo), usa el texto de la IA.
-            respuesta_al_cliente = respuesta_text
+        # Si está listo o si la IA no devolvió preguntas (debería estar listo), usa el texto de la IA.
+        respuesta_al_cliente = respuesta_text
         # --- FIN LÓGICA DE RESPUESTA CON PREGUNTAS FALTANTES ---
-            # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
+
+        # REFUERZO DEL PROMPT PARA OBTENER SOLO UN RESUMEN BREVE DEL CONTEXTO
         contexto_resumido = "El cliente ha solicitado un pedido. Revisar historial para detalles." # <-- Valor de fallback inicial
         contexto_resumido = resumen 
+
         # 5) Evitar re-notificaciones (sin cambios)
         estado_actual = obtener_estado_conversacion(numero, config)
         already_notified = False
@@ -7493,11 +7562,11 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
                     f"• *Método de pago:* {datos_compra.get('metodo_pago')}\n"
                     f"• *Dirección:* {datos_compra.get('direccion')}\n"
                     f"• *Nombre Cliente:* {datos_compra.get('nombre_cliente') or 'FALTA POR CONFIRMAR'}\n\n"
-                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n" # ← CORREGIDO: Usar parafrasis
+                    f"💬 *Contexto (IA - resumen):*\n{contexto_resumido}\n"
                 )
 
                 mensaje_alerta += "\nPor favor, contactar al cliente para procesar pago y entrega."
-                # ... (resto de la lógica de notificación y kanban sin cambios)
+                
                 if asesor_email:
                     try:
                         service = autenticar_google_calendar(config)
@@ -7555,13 +7624,13 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
                 # If at least one notification was successfully sent, move the chat to "Resueltos" (closed)
                 try:
                     if notified_targets:
-                        # 4 = 'Resueltos' as created by crear_tablas_kanban default
-                        actualizar_columna_chat(numero, 4, config)
-                        app.logger.info(f"✅ Chat {numero} movido a 'Resueltos' (columna 4) tras notificación de pedido")
+                        # Dejar que la lógica automática determine la columna
+                        actualizar_columna_chat(numero, config)
+                        app.logger.info(f"✅ Chat {numero} movido automáticamente tras notificación de pedido")
                     else:
                         app.logger.info(f"ℹ️ comprar_producto: no se notificó a ningún objetivo; no se moverá el Kanban para {numero}")
                 except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo mover chat a columna 'Resueltos' para {numero}: {e}")
+                    app.logger.warning(f"⚠️ No se pudo mover chat automáticamente para {numero}: {e}")
 
             except Exception as e:
                 app.logger.error(f"🔴 Error notificando asesores tras compra confirmada: {e}")
@@ -7577,7 +7646,15 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
         # 7) Devolver la respuesta que debe enviarse al cliente (el llamador se encarga de enviar/registrar)
         if respuesta_al_cliente:
             respuesta_al_cliente = aplicar_restricciones(respuesta_al_cliente, numero, config)
-        return respuesta_al_cliente or None
+        
+        # 8) Actualizar columna automáticamente según las reglas
+        try:
+            actualizar_columna_chat(numero, config)
+            app.logger.info(f"✅ Columna actualizada automáticamente para {numero}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ Error actualizando columna para {numero}: {e}")
+        
+        return respuesta_al_cliente or None 
 
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 comprar_producto - request error: {e}")
@@ -7587,7 +7664,7 @@ Reglas: NO inventes precios; Incluye todos los productos y cantidades. Si faltan
     except Exception as e:
         app.logger.error(f"🔴 comprar_producto error: {e}")
         app.logger.error(traceback.format_exc())
-        return None
+        return None 
 
 # Add below existing helper functions (e.g. after other CREATE TABLE helpers)
 def _ensure_columnas_precios_table(conn):
@@ -8686,7 +8763,7 @@ Reglas: Prioriza la extracción de Medidas, Tipo de Superficie y Color/Acabado.
             
             # Mover a Resueltos (4) en Kanban
             try:
-                actualizar_columna_chat(numero, 4, config) # Columna 4 = Resueltos/Vendidos
+               actualizar_columna_chat(numero, config) # Columna 4 = Resueltos/Vendidos
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo mover chat a Resueltos tras cotización: {e}")
                 
@@ -10638,6 +10715,7 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
+    
     # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
     col_asesores_id = obtener_id_columna_asesores(config)
     numeros_asesores = obtener_numeros_asesores_db(config)
@@ -10654,27 +10732,36 @@ def ver_kanban(config=None):
         conn.commit()
         app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
 
-    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
+    # Obtener asesores desde la configuración para mostrar columnas dinámicas
+    asesores = []
+    try:
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', [])
+        for i, asesor in enumerate(asesores_list):
+            if asesor.get('nombre'):
+                asesores.append({
+                    'id': 4 + i,  # Columnas de asesores empiezan en 4
+                    'nombre': asesor['nombre'],
+                    'telefono': asesor.get('telefono', ''),
+                    'email': asesor.get('email', '')
+                })
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error obteniendo asesores: {e}")
+
+    # 2) Cargamos los chats con datos de contactos
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
             MAX(c.timestamp) AS ultima_fecha,
             (SELECT mensaje FROM conversaciones 
-             WHERE numero = cm.numero
+             WHERE numero = cm.numero 
              AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            MAX(cont.imagen_url) AS avatar,
-            MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre de perfil > número
-            COALESCE(
-                MAX(cont.alias), 
-                MAX(cont.nombre), 
-                cm.numero
-            ) AS nombre_mostrado,
+            COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
-             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+            COALESCE(MAX(cont.plataforma), 'WhatsApp') AS canal
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -10682,6 +10769,14 @@ def ver_kanban(config=None):
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
+
+    cursor.close()
+    conn.close()
+
+    return render_template('kanban.html', 
+                         columnas=columnas, 
+                         chats=chats,
+                         asesores=asesores) 
 
     # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
     for chat in chats:

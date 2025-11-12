@@ -408,7 +408,8 @@
 
 
 <div id="kanban-board" class="kanban-board">
-    {% for col in columnas %}
+    <!-- Columnas fijas: Nuevos, En Conversación, Esperando Respuesta -->
+    {% for col in columnas if col.id <= 3 %}
     <div class="kanban-column" data-col-id="{{ col.id }}" data-orden="{{ col.orden }}">
         <div class="column-header" style="--col-color: {{ col.color or '#37474f' }}">
             <img src="{{ col.icono or '/static/icons/default-avatar.png' }}"
@@ -445,11 +446,7 @@
                         <div class="card-name-section">
                             {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
-                            <!--<span class="alias-edit" style="display:none;">
-                                <input type="text" value="{{ chat.alias or chat.nombre or chat.numero }}" data-num="{{ chat.numero }}" data-alias="{{ chat.alias or '' }}" data-nombre="{{ chat.nombre or '' }}" maxlength="100" style="width:110px;">
-                            </span>-->
                         </div>
-                        <!--<button type="button" class="edit-alias-btn" data-num="{{ chat.numero }}" title="Editar nombre">✏️</button>-->
                     </div>
 
                     <!-- Fila 2: Mensaje y fecha -->
@@ -472,8 +469,65 @@
         </div>
     </div>
     {% endfor %}
-</div>
 
+    <!-- Columnas dinámicas de Asesores -->
+    {% for asesor in asesores %}
+    <div class="kanban-column" data-col-id="{{ asesor.id }}" data-orden="{{ asesor.id }}">
+        <div class="column-header" style="--col-color: #37474f">
+            <img src="/static/icons/advisor-icon.png" class="col-icon" alt="icono" title="Cambiar icono"
+                 data-col-id="{{ asesor.id }}"
+                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+            <h3 contenteditable="true" data-col-id="{{ asesor.id }}" class="col-name">{{ asesor.nombre }}</h3>
+            <button class="add-chat-btn" data-after="{{ asesor.id }}" title="Agregar columna a la derecha">+</button>
+            <button class="delete-col-btn" data-col-id="{{ asesor.id }}" title="Eliminar columna"
+                    style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">
+                ×
+            </button>
+        </div>
+        <div class="column-list" data-col-id="{{ asesor.id }}">
+            {% for chat in chats if chat.columna_id == asesor.id %}
+            <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
+                <div class="card-content">
+                    <div class="card-top-row">
+                        <div class="card-avatar-section">
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                            {% endif %}
+
+                            <img src="{{ avatar_src }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            {% set bandera = chat.numero | bandera %}
+                            {% if bandera %}
+                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% endif %}
+                        </div>
+                        <div class="card-name-section">
+                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
+                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+                        </div>
+                    </div>
+
+                    <div class="card-bottom-row">
+                        <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+                        <div class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if chat.sin_leer > 0 %}
+                <span class="card-unread">{{ chat.sin_leer }}</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div> 
 <div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
