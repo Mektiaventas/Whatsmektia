@@ -2313,6 +2313,17 @@ def inicializar_kanban_multitenant():
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
 
+
+@app.before_first_request
+def inicializar_sistema_asesores():
+    """Inicializa las tablas necesarias para el sistema de asesores"""
+    try:
+        config = obtener_configuracion_por_host()
+        _ensure_sistema_config_table(config)
+        _ensure_asesor_id_column(config)
+        app.logger.info("✅ Sistema de asesores persistentes inicializado")
+    except Exception as e:
+        app.logger.error(f"❌ Error inicializando sistema de asesores: {e}") 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
     if config is None:
@@ -5584,19 +5595,130 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
         app.logger.error(f"❌ Error guardando respuesta-imagen para {numero}: {e}")
         return False
 
-def obtener_siguiente_asesor(config=None):
+def obtener_siguiente_asesor(numero_cliente=None, config=None):
     """
-    Retorna el siguiente asesor disponible en forma round-robin.
-    Ahora también:
-      - Intenta inferir el usuario/cliente dueño del tenant (CLIENTES_DB) para obtener
-        el límite de asesores del plan y, si hay más asesores en la BD que los
-        permitidos por el plan, recorta automáticamente (eliminar_asesores_extras).
-      - Soporta lista JSON en `asesores_json` y columnas legacy `asesorN_nombre`/telefono.
-    Devuelve dict {'nombre','telefono'} o None si no hay asesores configurados.
+    Obtiene el siguiente asesor disponible.
+    Si se proporciona un número de cliente, verifica si ya tiene un asesor asignado.
+    Si no tiene asignación, asigna el siguiente asesor disponible.
     """
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    try:
+        # Primero asegurar que existe la columna asesor_id
+        _ensure_asesor_id_column(config)
+        _ensure_sistema_config_table(config)
+        
+        # Cargar configuración para obtener la lista de asesores
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', [])
+        
+        if not asesores_list:
+            app.logger.warning("⚠️ No hay asesores configurados")
+            return None
+        
+        # Si se proporciona un número de cliente, verificar si ya tiene asesor asignado
+        if numero_cliente:
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            
+            # Buscar si el cliente ya tiene un asesor asignado
+            cursor.execute("SELECT asesor_id FROM contactos WHERE numero_telefono = %s", (numero_cliente,))
+            contacto = cursor.fetchone()
+            
+            if contacto and contacto.get('asesor_id'):
+                # El cliente ya tiene un asesor asignado, buscar sus datos
+                asesor_id_existente = contacto['asesor_id']
+                for asesor in asesores_list:
+                    asesor_identifier = f"{asesor.get('nombre', '').strip()}_{asesor.get('telefono', '').strip()}"
+                    if asesor_identifier == asesor_id_existente:
+                        app.logger.info(f"✅ Cliente {numero_cliente} ya tiene asesor asignado: {asesor.get('nombre')}")
+                        cursor.close()
+                        conn.close()
+                        return asesor
+            
+            cursor.close()
+            conn.close()
+        
+        # Si no hay número de cliente o no tiene asesor asignado, proceder con la rotación normal
+        # Obtener el último asesor asignado para rotación
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        cursor.execute("SELECT valor FROM sistema_config WHERE clave = 'ultimo_asesor_asignado'")
+        resultado = cursor.fetchone()
+        
+        ultimo_indice = 0
+        if resultado:
+            try:
+                ultimo_indice = int(resultado['valor'])
+            except (ValueError, TypeError):
+                ultimo_indice = 0
+        
+        # Calcular siguiente índice (rotación circular)
+        siguiente_indice = (ultimo_indice + 1) % len(asesores_list)
+        siguiente_asesor = asesores_list[siguiente_indice]
+        
+        # Actualizar el último asesor asignado
+        cursor.execute("""
+            INSERT INTO sistema_config (clave, valor) 
+            VALUES ('ultimo_asesor_asignado', %s)
+            ON DUPLICATE KEY UPDATE valor = %s
+        """, (siguiente_indice, siguiente_indice))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"🔄 Asesor asignado: {siguiente_asesor.get('nombre')} (índice: {siguiente_indice})")
+        
+        # Si se proporcionó un número de cliente, guardar la asignación
+        if numero_cliente:
+            asignar_asesor_a_cliente(numero_cliente, siguiente_asesor, config)
+        
+        return siguiente_asesor
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error en obtener_siguiente_asesor: {e}")
+        return None
 
+def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
+    """Asigna un asesor a un cliente de forma persistente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Asegurar que existe la columna
+        _ensure_asesor_id_column(config)
+        
+        # Crear un identificador único para el asesor
+        asesor_id = f"{asesor.get('nombre', '').strip()}_{asesor.get('telefono', '').strip()}"
+        
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Actualizar el contacto con el asesor asignado
+        cursor.execute("""
+            UPDATE contactos 
+            SET asesor_id = %s 
+            WHERE numero_telefono = %s
+        """, (asesor_id, numero_cliente))
+        
+        # Si el contacto no existe, crearlo
+        if cursor.rowcount == 0:
+            cursor.execute("""
+                INSERT INTO contactos (numero_telefono, asesor_id, nombre, plataforma) 
+                VALUES (%s, %s, %s, 'WhatsApp')
+            """, (numero_cliente, asesor_id, f"Cliente {numero_cliente}"))
+        
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"✅ Asesor {asesor.get('nombre')} asignado persistentemente a {numero_cliente}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error asignando asesor a cliente: {e}") 
     def _infer_cliente_user_for_config(cfg):
         """Intenta encontrar el `user` en CLIENTES_DB asociado al tenant (heurístico)."""
         try:
@@ -5733,15 +5855,21 @@ def obtener_siguiente_asesor(config=None):
 
 def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
     """
-    Envía al cliente SOLO UN asesor (round-robin). Retorna True si se envió.
-    También notifica al asesor seleccionado (opcional) y registra la alerta 
-    en el historial del asesor para visibilidad en Kanban/Chats, REUTILIZANDO 
-    el hilo de conversación existente del asesor.
+    Envía al cliente SU ASESOR ASIGNADO PERSISTENTEMENTE. 
+    Si es la primera vez, asigna uno nuevo; si ya tiene, usa el mismo.
+    Retorna True si se envió.
+    También notifica al asesor seleccionado y registra la alerta 
+    en el historial del asesor para visibilidad en Kanban/Chats.
     """
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        asesor = obtener_siguiente_asesor(config)
+        # Asegurar que las tablas necesarias existan
+        _ensure_sistema_config_table(config)
+        _ensure_asesor_id_column(config)
+        
+        # Obtener el asesor (esta función ahora verifica asignaciones existentes)
+        asesor = obtener_siguiente_asesor(numero_cliente, config)
         if not asesor:
             app.logger.info("ℹ️ No hay asesores configurados para pasar contacto")
             return False
@@ -5749,8 +5877,8 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        # 1. ENVIAR MENSAJE AL CLIENTE (Confirma que se pasará a un asesor)
-        texto_cliente = f"📞 Te comparto el contacto de un asesor:\n\n• {nombre}\n• WhatsApp: {telefono}"
+        # 1. ENVIAR MENSAJE AL CLIENTE (Confirma que se pasará a SU ASESOR ASIGNADO)
+        texto_cliente = f"👨‍💼 *{nombre}* es tu asesor asignado.\n\n📞 Teléfono: {telefono}\n\n¡Estará encantado de ayudarte! Puedes contactarlo directamente."
         
         # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
         if numero_cliente.startswith('tg_'):
@@ -5767,9 +5895,8 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
 
         if enviado:
             # Registrar el evento en la CONVERSACIÓN DEL CLIENTE
-            # Nota: Esto registra una conversación donde el mensaje es la solicitud y la respuesta es el contacto del asesor.
-            guardar_conversacion(numero_cliente, f"Solicitud de asesor (rotación)", texto_cliente, config)
-            app.logger.info(f"✅ Contacto de asesor enviado a {numero_cliente}: {nombre} {telefono}")
+            guardar_conversacion(numero_cliente, f"Solicitud de asesor", texto_cliente, config)
+            app.logger.info(f"✅ Asesor {nombre} asignado persistentemente a {numero_cliente}")
         else:
             app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
 
@@ -5825,11 +5952,13 @@ Devuelve únicamente el resumen breve (1-3 líneas).
 
                 # Mensaje completo que se enviará al asesor
                 texto_asesor = (
-                    f"🚨 *ALERTA: Cliente requiere atención humana*\n\n"
-                    f"ℹ️ Se compartió tu contacto con cliente {numero_cliente} ({cliente_mostrado}).\n\n"
-                    f"🔎 *Resumen rápido del chat para que lo atiendas:*\n{resumen}\n\n"
-                    f"🔗 *Link Directo (si aplica):* https://wa.me/{numero_cliente.lstrip('+')}\n\n"
-                    "Por favor, estate atento para contactarlo si corresponde."
+                    f"🔔 *NUEVA ASIGNACIÓN PERSISTENTE*\n\n"
+                    f"Se te ha asignado un nuevo cliente de forma permanente:\n"
+                    f"📞 Cliente: {cliente_mostrado}\n"
+                    f"⏰ Hora: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+                    f"🔎 *Resumen del chat:*\n{resumen}\n\n"
+                    f"🔗 *Link Directo:* https://wa.me/{numero_cliente.lstrip('+')}\n\n"
+                    f"¡Por favor, contacta al cliente pronto!"
                 )
 
                 # Envío de la alerta por WhatsApp (si el asesor está en WhatsApp)
@@ -5839,10 +5968,6 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                 
                 # --- INICIO: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
                 
-                # Usamos una estructura simple: el asesor 'recibe' un mensaje
-                # cuyo contenido es la alerta, y que no tiene respuesta de la IA.
-                
-                # 1. Asegurar contacto y meta del ASESOR (teléfono)
                 # 1. Asegurar contacto y meta del ASESOR (teléfono)
                 inicializar_chat_meta(telefono, config)
                 actualizar_info_contacto(telefono, config)
@@ -5870,7 +5995,6 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
 
-
                 # 4. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
                 actualizar_columna_chat(numero_cliente, 3, config)
                 app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
@@ -5880,7 +6004,7 @@ Devuelve únicamente el resumen breve (1-3 líneas).
         return enviado
     except Exception as e:
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
-        return False
+        return False 
 
 @app.route('/chats/data')
 def obtener_datos_chat():
@@ -7605,6 +7729,76 @@ def _ensure_columnas_precios_table(conn):
     finally:
         cur.close()
 
+def _ensure_sistema_config_table(config=None): 
+    """Asegura que exista la tabla sistema_config para almacenar configuraciones del sistema"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS sistema_config (
+                clave VARCHAR(100) PRIMARY KEY,
+                valor TEXT,
+                actualizado TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("✅ Tabla sistema_config verificada/creada")
+    except Exception as e:
+        app.logger.error(f"❌ Error creando tabla sistema_config: {e}") 
+
+def _ensure_asesor_id_column(config=None):
+    """Asegura que la tabla contactos tenga la columna asesor_id"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'asesor_id'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN asesor_id VARCHAR(50) DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'asesor_id' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_id en contactos: {e}") 
+def _ensure_asesor_id_column(config=None):
+    """Asegura que la tabla contactos tenga la columna asesor_id"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'asesor_id'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN asesor_id VARCHAR(50) DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'asesor_id' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_id en contactos: {e}") 
+def _ensure_asesor_id_column(config=None):
+    """Asegura que la tabla contactos tenga la columna asesor_id"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'asesor_id'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN asesor_id VARCHAR(50) DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'asesor_id' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna asesor_id en contactos: {e}")
+
 @app.route('/configuracion/precios/columnas', methods=['GET'])
 def get_columnas_precios():
     """Return saved hidden columns for current tenant + table (query param 'table')"""
@@ -7630,29 +7824,160 @@ def get_columnas_precios():
         app.logger.warning(f"⚠️ get_columnas_precios error: {e}")
         return jsonify({'hidden': {}})
 
-@app.route('/configuracion/precios/columnas', methods=['POST'])
-def save_columnas_precios():
-    """Save hidden columns state for current tenant + table"""
-    config = obtener_configuracion_por_host()
-    data = request.get_json(silent=True) or {}
-    table = (data.get('table') or 'user')
-    hidden = data.get('hidden') or {}
+@app.route('/dashboard/conversaciones-data')
+@login_required
+def dashboard_conversaciones_data():
+    """
+    Devuelve JSON con:
+    - plan_info (si el usuario está autenticado)
+    - active_count: número de chats con actividad en las últimas 24h
+    - labels/values: por día (conversaciones contadas ese día, usando contactos.timestamp).
+    """
     try:
+        config = obtener_configuracion_por_host()
+        period = request.args.get('period', 'week')
+        now = datetime.now()
+
         conn = get_db_connection(config)
-        _ensure_columnas_precios_table(conn)
-        cur = conn.cursor()
-        cur.execute("""
-            INSERT INTO columnas_precios (tenant, table_name, hidden_json, updated_at)
-            VALUES (%s, %s, %s, NOW())
-            ON DUPLICATE KEY UPDATE hidden_json = VALUES(hidden_json), updated_at = NOW()
-        """, (config.get('dominio'), table, json.dumps(hidden, ensure_ascii=False)))
-        conn.commit()
-        cur.close()
+        cursor = conn.cursor()
+
+        # Caso especial: user asked previously '3months' -> now return up to last 90 days,
+        # but start the series at the first day that actually has data within that window.
+        if period == '3months':
+            # Find last day with data in contactos.timestamp
+            try:
+                cursor.execute("SELECT DATE(MAX(timestamp)) FROM contactos")
+                row = cursor.fetchone()
+                last_day = datetime.now().date() 
+                if row and row[0]:
+                    last_day = row[0].date() if hasattr(row[0], 'date') else datetime.strptime(str(row[0]), "%Y-%m-%d").date()
+            except Exception:
+                last_day = datetime.now().date()
+
+            # Window lower bound (maximum 90 days back)
+            window_start = last_day - timedelta(days=89)
+
+            # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (3 meses)
+            sql = """
+                SELECT DATE(timestamp) as dia, COUNT(*) as cnt
+                FROM contactos
+                WHERE timestamp IS NOT NULL AND DATE(timestamp) BETWEEN %s AND %s
+                GROUP BY DATE(timestamp)
+                ORDER BY DATE(timestamp)
+            """
+            cursor.execute(sql, (window_start, last_day))
+            rows = cursor.fetchall()
+
+            # Map counts by date string 'YYYY-MM-DD'
+            counts_map = {}
+            for r in rows:
+                try:
+                    dia = r[0]
+                    if hasattr(dia, 'strftime'):
+                        key = dia.strftime('%Y-%m-%d')
+                    else:
+                        key = str(dia)
+                    cnt = int(r[1] or 0)
+                    counts_map[key] = cnt
+                except Exception:
+                    continue
+
+            # If there are no days with data in the window, return an empty (or single-day) series
+            if not counts_map:
+                labels = []
+                values = []
+            else:
+                # Find earliest date within counts_map (first day that has data)
+                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
+                earliest_with_data = min(parsed_dates)
+
+                # Ensure earliest_with_data is not earlier than window_start
+                if earliest_with_data < window_start:
+                    earliest_with_data = window_start
+
+                # Build labels from earliest_with_data .. last_day (inclusive)
+                labels = []
+                values = []
+                days_range = (last_day - earliest_with_data).days + 1
+                for i in range(days_range):
+                    d = earliest_with_data + timedelta(days=i)
+                    key = d.strftime('%Y-%m-%d')
+                    labels.append(key)
+                    values.append(counts_map.get(key, 0))
+
+            # Chats activos: distinct numero with message in last 24h
+            # Se sigue usando la tabla 'conversaciones' para esta métrica, ya que requiere el historial de mensajes.
+            cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+            active_count_row = cursor.fetchone()
+            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+            cursor.close()
+            conn.close()
+
+            # Plan info if user authenticated
+            plan_info = None
+            try:
+                au = session.get('auth_user')
+                if au and au.get('user'):
+                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
+            except Exception:
+                plan_info = None
+
+            return jsonify({
+                'labels': labels,
+                'values': values,
+                'active_count': active_count,
+                'plan_info': plan_info or {}
+            })
+
+        # --- fallback: previous daily behavior for week/month ---
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
+        # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (semana/mes)
+        cursor.execute("""
+            SELECT DATE(timestamp) as dia, COUNT(*) as cnt
+            FROM contactos
+            WHERE timestamp IS NOT NULL AND timestamp >= %s
+            GROUP BY DATE(timestamp)
+            ORDER BY DATE(timestamp)
+        """, (start,))
+
+        rows = cursor.fetchall()
+        labels = []
+        values = []
+        for r in rows:
+            dia = r[0]
+            if hasattr(dia, 'strftime'):
+                labels.append(dia.strftime('%Y-%m-%d'))
+            else:
+                labels.append(str(dia))
+            values.append(int(r[1] or 0))
+
+        # Chats activos: distinct numero with message in last 24h (mantiene lógica de historial)
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        active_count_row = cursor.fetchone()
+        active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+        cursor.close()
         conn.close()
-        return jsonify({'success': True})
+
+        plan_info = None
+        try:
+            au = session.get('auth_user')
+            if au and au.get('user'):
+                plan_info = get_plan_status_for_user(au.get('user'), config=config)
+        except Exception:
+            plan_info = None
+
+        return jsonify({ 
+            'labels': labels,
+            'values': values,
+            'active_count': active_count,
+            'plan_info': plan_info or {}
+        })
     except Exception as e:
-        app.logger.error(f"🔴 save_columnas_precios error: {e}")
-        return jsonify({'success': False, 'error': str(e)}), 500
+        app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
+        return jsonify({'error': str(e)}), 500 
 
 @app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
 def reset_columnas_precios():
@@ -7845,6 +8170,97 @@ def send_telegram_message(chat_id, text, token):
     except Exception as e:
         app.logger.error(f"❌ Error enviando mensaje a Telegram chat_id={chat_id}: {e}")
         return False
+
+def manejar_solicitud_asesor(numero, mensaje, config=None):
+    """Maneja la solicitud de un asesor por parte de un cliente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # Asegurar que las tablas necesarias existan
+        _ensure_sistema_config_table(config)
+        _ensure_asesor_id_column(config)
+        
+        # Obtener el asesor (esta función ahora verifica asignaciones existentes)
+        asesor = obtener_siguiente_asesor(numero, config)
+        
+        if not asesor:
+            respuesta = "⚠️ En este momento no hay asesores disponibles. Por favor, intenta más tarde."
+            guardar_conversacion(numero, mensaje, respuesta, config)
+            return respuesta
+        
+        # Construir mensaje de respuesta
+        nombre_asesor = asesor.get('nombre', 'Asesor')
+        telefono_asesor = asesor.get('telefono', '')
+        email_asesor = asesor.get('email', '')
+        
+        respuesta = f"👨‍💼 *{nombre_asesor}* es tu asesor asignado.\n\n"
+        
+        if telefono_asesor:
+            respuesta += f"📞 Teléfono: {telefono_asesor}\n"
+        
+        if email_asesor:
+            respuesta += f"📧 Email: {email_asesor}\n"
+        
+        respuesta += "\n¡Estará encantado de ayudarte! Puedes contactarlo directamente."
+        
+        # Guardar la conversación
+        guardar_conversacion(numero, mensaje, respuesta, config)
+        
+        # Notificar al asesor sobre la asignación
+        notificar_asesor_asignado(asesor, numero, config)
+        
+        return respuesta
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error manejando solicitud de asesor: {e}")
+        respuesta = "❌ Lo siento, hubo un error al asignar un asesor. Por favor, intenta más tarde."
+        guardar_conversacion(numero, mensaje, respuesta, config)
+        return respuesta
+
+def notificar_asesor_asignado(asesor, numero_cliente, config=None):
+    """Notifica al asesor que se le ha asignado un cliente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        telefono_asesor = asesor.get('telefono')
+        if not telefono_asesor:
+            return
+        
+        mensaje_notificacion = f"🔔 *NUEVA ASIGNACIÓN*\n\n"
+        mensaje_notificacion += f"Se te ha asignado un nuevo cliente:\n"
+        mensaje_notificacion += f"📞 Número: {numero_cliente}\n"
+        mensaje_notificacion += f"⏰ Hora: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        mensaje_notificacion += f"¡Por favor, contacta al cliente pronto!"
+        
+        enviar_mensaje(telefono_asesor, mensaje_notificacion, config)
+        app.logger.info(f"✅ Notificación enviada al asesor {asesor.get('nombre')}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error notificando al asesor: {e}") 
+
+def notificar_asesor_asignado(asesor, numero_cliente, config=None):
+    """Notifica al asesor que se le ha asignado un cliente"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        telefono_asesor = asesor.get('telefono')
+        if not telefono_asesor:
+            return
+        
+        mensaje_notificacion = f"🔔 *NUEVA ASIGNACIÓN*\n\n"
+        mensaje_notificacion += f"Se te ha asignado un nuevo cliente:\n"
+        mensaje_notificacion += f"📞 Número: {numero_cliente}\n"
+        mensaje_notificacion += f"⏰ Hora: {datetime.now().strftime('%d/%m/%Y %H:%M')}\n\n"
+        mensaje_notificacion += f"¡Por favor, contacta al cliente pronto!"
+        
+        enviar_mensaje(telefono_asesor, mensaje_notificacion, config)
+        app.logger.info(f"✅ Notificación enviada al asesor {asesor.get('nombre')}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error notificando al asesor: {e}") 
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
