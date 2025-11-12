@@ -7077,18 +7077,39 @@ def webhook():
             app.logger.info("⚠️ Webhook: no messages in payload")
             return 'OK', 200
 
-        # AGREGAR ESTO: Obtener configuración
         config = obtener_configuracion_por_host()
 
         # Procesar cada mensaje
         for mensaje_data in mensajes:
             numero = mensaje_data.get('from')
             
-            # ... aquí va tu código existente para procesar el mensaje ...
-            # (extraer texto, guardar en BD, etc.)
+            # Extraer texto del mensaje
+            mensaje_texto = None
+            if mensaje_data.get('type') == 'text':
+                mensaje_texto = mensaje_data.get('text', {}).get('body', '').strip()
+            elif mensaje_data.get('type') == 'button':
+                mensaje_texto = mensaje_data.get('button', {}).get('text', '').strip()
             
-            # DESPUÉS de guardar el mensaje del usuario, AGREGA ESTA LÍNEA:
-            actualizar_columna_chat(numero, config)
+            if not mensaje_texto:
+                app.logger.info("⚠️ Mensaje sin texto procesable")
+                continue
+
+            app.logger.info(f"💬 Mensaje de {numero}: {mensaje_texto}")
+
+            # Guardar mensaje del usuario
+            guardar_conversacion(numero, mensaje_texto, None, config)
+
+            # Procesar con IA
+            respuesta_ia = procesar_mensaje_con_ia(numero, mensaje_texto, config)
+            
+            if respuesta_ia:
+                # Enviar respuesta
+                enviar_mensaje(numero, respuesta_ia, config)
+                # Guardar respuesta
+                guardar_conversacion(numero, mensaje_texto, respuesta_ia, config)
+                app.logger.info(f"✅ Respuesta enviada a {numero}")
+            else:
+                app.logger.warning(f"⚠️ No se generó respuesta para {numero}")
 
         return 'OK', 200
 
@@ -10799,17 +10820,18 @@ def ver_kanban(config=None):
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
-        config = obtener_configuracion_por_host()
-        conn = get_db_connection(config)
-        data = request.get_json()
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute(
-          "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
-          (data['columna_id'], data['numero'])
-        )
-        conn.commit(); cursor.close(); conn.close()
-        return '', 204
+    config = obtener_configuracion_por_host()
+    data = request.get_json()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
+        (data['columna_id'], data['numero'])
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return '', 204 
     
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
