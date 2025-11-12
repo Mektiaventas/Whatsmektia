@@ -8486,6 +8486,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         app.logger.error(traceback.format_exc())
         return False
 
+
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
     """Guarda una entrada en conversaciones como respuesta del sistema (columna derecha)."""
     if config is None:
