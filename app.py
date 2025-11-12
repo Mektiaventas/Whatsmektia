@@ -9152,6 +9152,41 @@ def home():
         plan_info=plan_info
     )
 
+def _ensure_contactos_conversaciones_columns(config=None):
+    """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    try:
+        # Columna para el conteo de conversaciones: MODIFICAR para asegurar DEFAULT 0
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'conversaciones'")
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN conversaciones INT DEFAULT 0")
+        elif 'default_value' in row and row['default_value'] != '0':
+             # ALTERAR para asegurar el DEFAULT 0 (requerido para MySQL robusto)
+            try:
+                 cursor.execute("ALTER TABLE contactos MODIFY COLUMN conversaciones INT DEFAULT 0")
+            except Exception:
+                app.logger.warning("⚠️ No se pudo modificar contactos.conversaciones a DEFAULT 0")
+        
+        # Columna para la marca de tiempo de la última conversación contada
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'timestamp'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN timestamp DATETIME DEFAULT NULL")
+
+        conn.commit()
+        app.logger.info("🔧 Columnas 'conversaciones' y 'timestamp' aseguradas en tabla contactos")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de conteo en contactos: {e}")
+        try: conn.rollback()
+        except: pass
+    finally:
+        cursor.close()
+        conn.close()
+
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
@@ -11164,6 +11199,9 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
     """
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    # Asegurar que las columnas existan
+    _ensure_contactos_conversaciones_columns(config)
 
     conn = None
     cursor = None
@@ -11174,42 +11212,46 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
         # --- LÓGICA DE ACTUALIZACIÓN CONTEO DE CONVERSACIONES (24 HORAS) ---
 
         nombre_a_usar = nombre_telegram
-        # Si no se especifica plataforma, usa 'WhatsApp' por defecto
         plataforma_a_usar = plataforma or 'WhatsApp'
         
-        # Insertar o actualizar el contacto en una sola consulta
-        sql = """
-        INSERT INTO contactos 
-            (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
-        VALUES (%s, %s, %s, UTC_TIMESTAMP(), 1, UTC_TIMESTAMP())
-        ON DUPLICATE KEY UPDATE 
-            -- Actualiza campos de perfil
-            nombre = COALESCE(VALUES(nombre), nombre), 
-            plataforma = VALUES(plataforma),
-            fecha_actualizacion = UTC_TIMESTAMP(),
+        # Insertar o actualizar el contacto
+        # La lógica de conteo condicional se implementa en ON DUPLICATE KEY UPDATE
         
-            -- Lógica condicional para actualizar el contador de conversaciones
-            conversaciones = conversaciones + 
-                             CASE 
-                                 -- La misma condición para actualizar timestamp:
-                                 -- 1. Si timestamp es NULL (primera conversación contada).
-                                 WHEN timestamp IS NULL THEN 1
-                                 -- 2. Si han pasado más de 24 horas (86400 segundos).
-                                 WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
-                                 -- En cualquier otro caso (han pasado menos de 24h), no se suma.
-                                 ELSE 0
-                             END,
-                         
-            -- Lógica condicional para actualizar el timestamp
-            timestamp = CASE 
-                            -- 1. Si timestamp es NULL, se inicializa (actualización)
-                            WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                            -- 2. Si han pasado más de 24 horas, se actualiza el timestamp
-                            WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
-                            -- En cualquier otro caso, se mantiene el valor actual (NO actualización)
-                            ELSE timestamp
-                        END
-    """
+        sql = """
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
+            VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
+                    -- Al insertar por primera vez, el valor inicial es 1 y el timestamp es NOW().
+                    -- Si hay un duplicado, esta lógica se ignora en la fase INSERT.
+                    1, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE 
+                -- Actualiza campos de perfil
+                nombre = COALESCE(VALUES(nombre), nombre), 
+                plataforma = VALUES(plataforma),
+                fecha_actualizacion = UTC_TIMESTAMP(),
+                
+                -- Lógica condicional para actualizar el contador de conversaciones
+                -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
+                conversaciones = conversaciones + 
+                                 CASE 
+                                     -- 1. Si el timestamp es NULL (registro antiguo/primer uso de la columna)
+                                     WHEN timestamp IS NULL THEN 1
+                                     -- 2. Si la diferencia es > 24 horas (86400 segundos)
+                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
+                                     ELSE 0
+                                 END,
+                                 
+                -- Lógica condicional para actualizar el timestamp
+                -- SE ACTUALIZA con UTC_TIMESTAMP() si se cumple la misma condición de arriba
+                timestamp = CASE 
+                                -- 1. Si el timestamp es NULL
+                                WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
+                                -- 2. Si la diferencia es > 24 horas
+                                WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
+                                -- Si no, mantener el valor actual de timestamp
+                                ELSE timestamp
+                            END
+        """
         
         cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
         
