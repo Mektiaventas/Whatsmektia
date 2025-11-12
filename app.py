@@ -11179,35 +11179,37 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
         
         # Insertar o actualizar el contacto en una sola consulta
         sql = """
-            INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
-            VALUES (%s, %s, %s, UTC_TIMESTAMP(), 1, UTC_TIMESTAMP())
-            ON DUPLICATE KEY UPDATE 
-                -- Actualiza campos de perfil
-                nombre = COALESCE(VALUES(nombre), nombre), 
-                plataforma = VALUES(plataforma),
-                fecha_actualizacion = UTC_TIMESTAMP(),
-                
-                -- Lógica condicional para actualizar el contador de conversaciones
-                conversaciones = conversaciones + 
-                                 CASE 
-                                     -- Si el timestamp es NULL, es la primera vez que se inserta/actualiza (se cuenta como 1)
-                                     WHEN timestamp IS NULL THEN 1
-                                     -- Si la diferencia entre la fecha actual y el timestamp es > 24 horas (86400 segundos)
-                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
-                                     ELSE 0
-                                 END,
-                                 
-                -- Lógica condicional para actualizar el timestamp
-                timestamp = CASE 
-                                -- Si el timestamp es NULL, inicializar con NOW()
-                                WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                                -- Si la diferencia es > 24 horas, actualizar timestamp a NOW()
-                                WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
-                                -- Si no, mantener el valor actual de timestamp (NO actualizar)
-                                ELSE timestamp
-                            END
-        """
+        INSERT INTO contactos 
+            (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
+        VALUES (%s, %s, %s, UTC_TIMESTAMP(), 1, UTC_TIMESTAMP())
+        ON DUPLICATE KEY UPDATE 
+            -- Actualiza campos de perfil
+            nombre = COALESCE(VALUES(nombre), nombre), 
+            plataforma = VALUES(plataforma),
+            fecha_actualizacion = UTC_TIMESTAMP(),
+        
+            -- Lógica condicional para actualizar el contador de conversaciones
+            conversaciones = conversaciones + 
+                             CASE 
+                                 -- La misma condición para actualizar timestamp:
+                                 -- 1. Si timestamp es NULL (primera conversación contada).
+                                 WHEN timestamp IS NULL THEN 1
+                                 -- 2. Si han pasado más de 24 horas (86400 segundos).
+                                 WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
+                                 -- En cualquier otro caso (han pasado menos de 24h), no se suma.
+                                 ELSE 0
+                             END,
+                         
+            -- Lógica condicional para actualizar el timestamp
+            timestamp = CASE 
+                            -- 1. Si timestamp es NULL, se inicializa (actualización)
+                            WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
+                            -- 2. Si han pasado más de 24 horas, se actualiza el timestamp
+                            WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
+                            -- En cualquier otro caso, se mantiene el valor actual (NO actualización)
+                            ELSE timestamp
+                        END
+    """
         
         cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
         
