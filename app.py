@@ -96,22 +96,19 @@ def whatsapp_format(text):
     if not text:
         return ""
     
-    # SOLO ESTA LÍNEA CAMBIA - Eliminar espacios iniciales agresivamente
-    text = text.lstrip()  # Esto elimina TODOS los espacios/tabs al inicio
-    
-    # El resto se mantiene EXACTAMENTE igual
-    text = text.replace('\r\n', '\n').replace('\r', '\n')  # Normaliza saltos de línea
+    # ELIMINAR ESPACIOS INICIALES
+    text = text.lstrip()
     
     # Negritas: *texto* -> <strong>texto</strong>
     text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
     
     # Cursivas: _texto_ -> <em>texto</em>
     text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
-    
+     
     # Tachado: ~texto~ -> <del>texto</del>
     text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
     
-    return text  
+    return text 
 # ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
@@ -9005,80 +9002,135 @@ def diagnostico():
     except Exception as e:
         return jsonify({'error': str(e)})    
 
-# Importante: Asume la existencia de @app.route, @login_required, g, request, flash, redirect, url_for,
-# obtener_configuracion_por_host(), obtener_metrics(), get_db_connection(), y render_template()
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/home')
 @login_required
 def home():
-    if not g.host:
-        flash("Host no detectado o inválido.", "error")
-        return redirect(url_for('login'))
-
     config = obtener_configuracion_por_host()
-    conn = None
-    cursor = None
-    
-    period = request.args.get('period', 'day') 
-    
-    # Obtener el número de mensajes totales (asumiendo que obtener_metrics existe)
-    total_messages = obtener_metrics(config).get('total_messages', 0)
-    
-    # Variables de inicialización
-    recent_contacts = []
-    chart_labels = []
-    chart_values = []
-    chat_counts = 0 # Conteo total de conversaciones (será actualizado)
+    period = request.args.get('period', 'week')
+    now = datetime.now()
 
-    
-    try:
+    # Default behavior for week/month: keep existing logic (messages per chat)
+    if period != 'year':
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # ✅ CORRECCIÓN 1: CHAT_COUNTS AHORA USA NUEVAS_CONVERSACIONES EN EL PERIODO
+        cursor.execute(
+            "SELECT COUNT(id) FROM nuevas_conversaciones WHERE timestamp >= %s;",
+            (start,)
+        )
+        chat_counts = cursor.fetchone()[0]
+
+        # Contar los mensajes por chat en el periodo (para la gráfica original)
+        cursor.execute(""" 
+            SELECT 
+                conv.numero,
+                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+                COUNT(*) AS total
+            FROM conversaciones conv
+            LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+            WHERE conv.timestamp >= %s
+            GROUP BY conv.numero, nombre_mostrado
+            ORDER BY total DESC
+        """, (start,))
+        messages_per_chat = cursor.fetchall()
+
+        # total_responded mantiene el conteo de contactos (para que no disminuya al borrar)
+        cursor.execute(
+            "SELECT COUNT(numero_telefono) FROM contactos;"
+        )
+        total_responded = cursor.fetchone()[0]
+
+        cursor.close()
+        conn.close()
+
+        labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
+        values = [row[2] for row in messages_per_chat]  # total
+    else:
+        # period == 'year' : compute last 12 months (monthly), counting "conversaciones iniciadas"
+        # build list of last 12 month keys in chronological order
+        def month_key_from_offset(now_dt, offset):
+            total_months = now_dt.year * 12 + now_dt.month - 1
+            target = total_months - offset
+            y = target // 12
+            m = (target % 12) + 1
+            return y, m
+
+        months = []
+        for offset in range(11, -1, -1):  # 11..0 -> oldest .. current
+            y, m = month_key_from_offset(now, offset)
+            months.append((y, m))
+
+        # start = first day of oldest month
+        earliest_year, earliest_month = months[0]
+        start = datetime(earliest_year, earliest_month, 1)
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # 1. OBTENER EL TOTAL DE CONVERSACIONES CONTADAS (USANDO LA NUEVA COLUMNA)
-        # Se suma la columna 'conversaciones' de la tabla 'contactos'
-        cursor.execute(
-            "SELECT SUM(conversaciones) FROM contactos"
-        )
-        # El resultado es un solo número. Si es NULL (tabla vacía), se usa 0.
+        # ✅ CORRECCIÓN 2: GRAFICA ANUAL AHORA USA NUEVAS_CONVERSACIONES
+        sql = """
+            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
+            FROM nuevas_conversaciones c1 
+            WHERE c1.timestamp >= %s
+            GROUP BY y, m
+            ORDER BY y, m
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall()  # list of tuples (y, m, cnt)
+
+        # build map key 'YYYY-MM' -> count
+        counts_map = {}
+        for r in rows:
+            try:
+                y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
+            except Exception:
+                continue
+            key = f"{y}-{m:02d}"
+            counts_map[key] = cnt
+
+        # labels as 'Mon YYYY' (en-US style short month)
+        labels = []
+        values = []
+        for y, m in months:
+            key = f"{y}-{m:02d}"
+            labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+            values.append(counts_map.get(key, 0))
+
+        # ✅ CORRECCIÓN 3: CHAT_COUNTS (TOTAL) AHORA USA NUEVAS_CONVERSACIONES (SIN PERIODO)
+        # Esto cuenta todas las sesiones iniciadas históricamente.
+        cursor.execute("SELECT COUNT(id) FROM nuevas_conversaciones;")
         chat_counts_row = cursor.fetchone()
         chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
-        # 2. Otros datos del dashboard (ej. contactos recientes)
-        cursor.execute(
-            "SELECT nombre, numero_telefono, fecha_actualizacion FROM contactos ORDER BY fecha_actualizacion DESC LIMIT 5"
-        )
-        recent_contacts = cursor.fetchall()
+        # total_responded mantiene el conteo de contactos (para evitar decrementos).
+        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
+        total_responded_row = cursor.fetchone()
+        total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
 
-        # 3. Lógica para gráficas (mantener lógica existente, por ejemplo:
-        #    if period == 'day': ...
-        #    elif period == 'week': ...
-        #    else: ...
-        #    Esta parte se deja sin modificar en este ejemplo si el objetivo es solo el conteo total)
-        
+        cursor.close()
+        conn.close()
+
+    # Obtener plan info para el usuario autenticado (si aplica)
+    plan_info = None
+    try:
+        au = session.get('auth_user')
+        if au and au.get('user'):
+            plan_info = get_plan_status_for_user(au.get('user'), config=config)
     except Exception as e:
-        app.logger.error(f"Error en home() al obtener datos de contactos: {e}")
-        flash(f"Error al cargar datos del dashboard: {e}", "error")
-        # Si hay error, chat_counts se mantiene en 0
+        app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
+        plan_info = None
 
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
-        
-    # Variables de estado del bot (ejemplo, ajustar según tu código)
-    bot_status = "Online"
-    bot_number = g.host
-    
-    # Renderizar el template
-    return render_template(
-        'home.html', 
-        bot_number=bot_number, 
-        bot_status=bot_status, 
-        total_messages=total_messages,
-        chat_counts=chat_counts, # Conteo total de conversaciones iniciadas (ahora desde contactos)
-        recent_contacts=recent_contacts,
-        chart_labels=chart_labels,
-        chart_values=chart_values,
-        period=period
+    return render_template('dashboard.html',
+        chat_counts=chat_counts,
+        messages_per_chat=messages_per_chat if period != 'year' else None,
+        total_responded=total_responded,
+        period=period,
+        labels=labels,
+        values=values,
+        plan_info=plan_info
     )
 
 @app.route('/chats')
