@@ -4494,6 +4494,32 @@ def seleccionar_mejor_doc(docs, query):
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
 
+# app.py (Agregar nueva función de DB)
+
+def obtener_id_columna_por_nombre(nombre_columna, config=None):
+    """Busca el ID de una columna Kanban por su nombre (matching case-insensitive)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Buscar columna cuyo nombre coincida (case-insensitive)
+        cursor.execute(
+            "SELECT id FROM kanban_columnas WHERE LOWER(nombre) = LOWER(%s) LIMIT 1",
+            (nombre_columna,)
+        )
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo ID columna por nombre '{nombre_columna}': {e}")
+        return None
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
 def obtener_id_columna_asesores(config=None):
     """Busca el ID de la columna 'Asesores' (o similar) o devuelve None si no existe."""
     if config is None:
@@ -5874,10 +5900,9 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        # 1. ENVIAR MENSAJE AL CLIENTE (Confirma que se pasará a SU ASESOR ASIGNADO)
+        # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
         texto_cliente = f"👨‍💼 *{nombre}* es tu asesor asignado.\n\n📞 Teléfono: {telefono}\n\n¡Estará encantado de ayudarte! Puedes contactarlo directamente."
         
-        # --- LÓGICA DE ENVÍO MULTICANAL (Cliente) ---
         if numero_cliente.startswith('tg_'):
             telegram_token = config.get('telegram_token')
             if telegram_token:
@@ -5896,6 +5921,39 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
             app.logger.info(f"✅ Asesor {nombre} asignado persistentemente a {numero_cliente}")
         else:
             app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
+
+
+        # --- INICIO LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO ---
+        
+        # Valor de fallback si la columna no se encuentra
+        columna_destino_id = 3 # Columna estándar "Esperando Respuesta"
+        
+        try:
+            cfg_full = load_config(config)
+            asesores_list = cfg_full.get('asesores_list', [])
+            
+            # Identificamos el número del primer asesor (Asesor 1)
+            asesor1_telefono = asesores_list[0].get('telefono') if asesores_list and len(asesores_list) > 0 else None
+
+            # Si el asesor asignado actualmente es el "Asesor 1" (basado en el teléfono)
+            if asesor1_telefono and telefono == asesor1_telefono:
+                columna_buscada = "Asesor 1"
+                
+                # Buscar el ID de la columna por nombre
+                col_id = obtener_id_columna_por_nombre(columna_buscada, config)
+                
+                if col_id:
+                    columna_destino_id = col_id
+                    app.logger.info(f"📊 Asesor {nombre} detectado como '{columna_buscada}'. Moviendo cliente a columna {col_id}.")
+                else:
+                    app.logger.warning(f"⚠️ Columna '{columna_buscada}' no encontrada. Usando fallback ID 3.")
+
+        except Exception as e:
+            app.logger.error(f"🔴 Error en lógica de detección de Asesor 1 para Kanban: {e}")
+            # Mantener columna_destino_id = 3
+        
+        # --- FIN LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO ---
+
 
         # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR
         if notificar_asesor and telefono:
@@ -5992,16 +6050,20 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                 except Exception as e:
                     app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
 
-                # 4. Mover el chat del CLIENTE (numero_cliente) a columna 'Esperando Respuesta' (3).
-                actualizar_columna_chat(numero_cliente, 3, config)
-                app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a 'Esperando Respuesta' (3).")
+                # 4. Mover el chat del CLIENTE (numero_cliente) a la columna determinada (columna_destino_id).
+                # Esta parte fue movida fuera del bloque try/except y combinada con la lógica de detección específica.
+                
             except Exception as e:
                 app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}")
+        
+        # 5. Mover el chat del CLIENTE (numero_cliente)
+        actualizar_columna_chat(numero_cliente, columna_destino_id, config)
+        app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a columna {columna_destino_id}.")
 
         return enviado
     except Exception as e:
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}")
-        return False 
+        return False
 
 @app.route('/chats/data')
 def obtener_datos_chat():
