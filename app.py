@@ -10861,18 +10861,6 @@ def obtener_numeros_asesores_db(config=None):
         app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
         return tuple()
 
-@app.route('/kanban/mover', methods=['POST'])
-def kanban_mover():
-    config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    data = request.get_json()
-    cursor = conn.cursor()
-    cursor.execute(
-      "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
-      (data['columna_id'], data['numero'])
-    )
-    conn.commit(); cursor.close(); conn.close()
-    return '', 204 
     # ——— Páginas legales —
 
 @app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
