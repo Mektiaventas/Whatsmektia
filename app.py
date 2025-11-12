@@ -10813,19 +10813,66 @@ def kanban_mover():
     
 @app.route('/contactos/<numero>/alias', methods=['POST'])
 def guardar_alias_contacto(numero, config=None):
+    config = obtener_configuracion_por_host()
+    alias = request.form.get('alias','').strip()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
+        (alias if alias else None, numero)
+    )
+    conn.commit()
+    cursor.close()
+    conn.close()
+    return '', 204
+
+def obtener_id_columna_asesores(config=None):
+    """Busca el ID de la columna 'Asesores' (o similar) o devuelve None si no existe."""
+    if config is None:
         config = obtener_configuracion_por_host()
-        alias = request.form.get('alias','').strip()
+    conn = None
+    cursor = None
+    try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
+        # Buscar columna cuyo nombre contenga 'Asesor' o 'Agente'
         cursor.execute(
-            "UPDATE contactos SET alias=%s WHERE numero_telefono=%s",
-            (alias if alias else None, numero)
+            "SELECT id FROM kanban_columnas WHERE LOWER(nombre) LIKE '%%asesor%%' OR LOWER(nombre) LIKE '%%agente%%' LIMIT 1"
         )
-        conn.commit()
-        cursor.close()
-        conn.close()
-        return '', 204
+        row = cursor.fetchone()
+        return row[0] if row else None
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo ID columna Asesores: {e}")
+        return None
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 
+def obtener_numeros_asesores_db(config=None):
+    """Devuelve una tupla de todos los números de teléfono de los asesores configurados."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        cfg = load_config(config)
+        asesores_list = cfg.get('asesores_list', [])
+        numeros = tuple({(a.get('telefono') or '').strip() for a in asesores_list if a.get('telefono')})
+        return numeros
+    except Exception as e:
+        app.logger.error(f"❌ Error obteniendo números de asesores: {e}")
+        return tuple()
+
+@app.route('/kanban/mover', methods=['POST'])
+def kanban_mover():
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    data = request.get_json()
+    cursor = conn.cursor()
+    cursor.execute(
+      "UPDATE chat_meta SET columna_id=%s WHERE numero=%s;",
+      (data['columna_id'], data['numero'])
+    )
+    conn.commit(); cursor.close(); conn.close()
+    return '', 204 
     # ——— Páginas legales —
 
 @app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
