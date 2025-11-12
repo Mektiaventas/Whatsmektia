@@ -9002,6 +9002,8 @@ def diagnostico():
     except Exception as e:
         return jsonify({'error': str(e)})    
 
+@app.route('/home')
+@login_required
 def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
