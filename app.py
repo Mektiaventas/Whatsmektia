@@ -2313,17 +2313,6 @@ def inicializar_kanban_multitenant():
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
 
-
-@app.before_first_request
-def inicializar_sistema_asesores():
-    """Inicializa las tablas necesarias para el sistema de asesores"""
-    try:
-        config = obtener_configuracion_por_host()
-        _ensure_sistema_config_table(config)
-        _ensure_asesor_id_column(config)
-        app.logger.info("✅ Sistema de asesores persistentes inicializado")
-    except Exception as e:
-        app.logger.error(f"❌ Error inicializando sistema de asesores: {e}") 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
     if config is None:
@@ -11819,3 +11808,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     app.run(host='0.0.0.0', port=args.port)
+     
