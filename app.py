@@ -5586,50 +5586,52 @@ def guardar_respuesta_imagen(numero, imagen_url, config=None, nota='[Imagen envi
 
 def obtener_siguiente_asesor(numero_cliente=None, config=None):
     """
-    Obtiene el siguiente asesor disponible.
-    Si se proporciona un número de cliente, verifica si ya tiene un asesor asignado.
-    Si no tiene asignación, asigna el siguiente asesor disponible.
+    Obtiene el asesor asignado persistentemente al cliente. Si el cliente no tiene
+    asignación, asigna el siguiente asesor disponible por rotación.
     """
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        # Primero asegurar que existe la columna asesor_id
         _ensure_asesor_id_column(config)
         _ensure_sistema_config_table(config)
         
-        # Cargar configuración para obtener la lista de asesores
         cfg = load_config(config)
+        # Lista de todos los asesores configurados (JSON en DB)
         asesores_list = cfg.get('asesores_list', [])
         
         if not asesores_list:
             app.logger.warning("⚠️ No hay asesores configurados")
             return None
         
-        # Si se proporciona un número de cliente, verificar si ya tiene asesor asignado
+        # --- 1. BUSCAR ASIGNACIÓN PERSISTENTE EXISTENTE ---
+        
         if numero_cliente:
             conn = get_db_connection(config)
             cursor = conn.cursor(dictionary=True)
             
-            # Buscar si el cliente ya tiene un asesor asignado
+            # Leer el número de teléfono del asesor guardado en la columna 'asesor_id'
             cursor.execute("SELECT asesor_id FROM contactos WHERE numero_telefono = %s", (numero_cliente,))
             contacto = cursor.fetchone()
             
             if contacto and contacto.get('asesor_id'):
-                # El cliente ya tiene un asesor asignado, buscar sus datos
-                asesor_id_existente = contacto['asesor_id']
+                asesor_tel_existente = contacto['asesor_id'].strip()
+                
+                # Buscar en asesores_list el asesor cuyo 'telefono' coincida con el valor guardado
                 for asesor in asesores_list:
-                    asesor_identifier = f"{asesor.get('nombre', '').strip()}_{asesor.get('telefono', '').strip()}"
-                    if asesor_identifier == asesor_id_existente:
-                        app.logger.info(f"✅ Cliente {numero_cliente} ya tiene asesor asignado: {asesor.get('nombre')}")
+                    if (asesor.get('telefono') or '').strip() == asesor_tel_existente:
+                        app.logger.info(f"✅ Persistencia: Cliente {numero_cliente} reenviado a asesor {asesor.get('nombre')} (Tel: {asesor_tel_existente})")
                         cursor.close()
                         conn.close()
                         return asesor
-            
+                
+                app.logger.warning(f"⚠️ Asesor guardado ({asesor_tel_existente}) no encontrado en la lista activa. Forzando nueva asignación.")
+
             cursor.close()
             conn.close()
         
-        # Si no hay número de cliente o no tiene asesor asignado, proceder con la rotación normal
+        # --- 2. ASIGNACIÓN POR ROTACIÓN (SI NO HAY O FALLÓ LA PERSISTENCIA) ---
+        
         # Obtener el último asesor asignado para rotación
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
@@ -5640,15 +5642,16 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None):
         ultimo_indice = 0
         if resultado:
             try:
-                ultimo_indice = int(resultado['valor'])
-            except (ValueError, TypeError):
+                # Usamos el módulo (%) para garantizar que el índice esté dentro del rango de la lista.
+                ultimo_indice = int(resultado['valor']) % len(asesores_list)
+            except Exception:
                 ultimo_indice = 0
         
         # Calcular siguiente índice (rotación circular)
         siguiente_indice = (ultimo_indice + 1) % len(asesores_list)
         siguiente_asesor = asesores_list[siguiente_indice]
         
-        # Actualizar el último asesor asignado
+        # Actualizar el último asesor asignado para la próxima rotación
         cursor.execute("""
             INSERT INTO sistema_config (clave, valor) 
             VALUES ('ultimo_asesor_asignado', %s)
@@ -5659,9 +5662,9 @@ def obtener_siguiente_asesor(numero_cliente=None, config=None):
         cursor.close()
         conn.close()
         
-        app.logger.info(f"🔄 Asesor asignado: {siguiente_asesor.get('nombre')} (índice: {siguiente_indice})")
+        app.logger.info(f"🔄 Rotación: Asesor asignado: {siguiente_asesor.get('nombre')} (índice: {siguiente_indice})")
         
-        # Si se proporcionó un número de cliente, guardar la asignación
+        # Si se proporcionó un número de cliente, guardar la nueva asignación de forma persistente
         if numero_cliente:
             asignar_asesor_a_cliente(numero_cliente, siguiente_asesor, config)
         
@@ -5712,7 +5715,7 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
         
     except Exception as e:
         app.logger.error(f"🔴 Error asignando asesor a cliente: {e}")
-
+        
     def _infer_cliente_user_for_config(cfg):
         """Intenta encontrar el `user` en CLIENTES_DB asociado al tenant (heurístico)."""
         try:
