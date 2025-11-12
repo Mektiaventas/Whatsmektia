@@ -96,19 +96,22 @@ def whatsapp_format(text):
     if not text:
         return ""
     
-    # ELIMINAR ESPACIOS INICIALES
-    text = text.lstrip()
+    # SOLO ESTA LÍNEA CAMBIA - Eliminar espacios iniciales agresivamente
+    text = text.lstrip()  # Esto elimina TODOS los espacios/tabs al inicio
+    
+    # El resto se mantiene EXACTAMENTE igual
+    text = text.replace('\r\n', '\n').replace('\r', '\n')  # Normaliza saltos de línea
     
     # Negritas: *texto* -> <strong>texto</strong>
     text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
     
     # Cursivas: _texto_ -> <em>texto</em>
     text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
-     
+    
     # Tachado: ~texto~ -> <del>texto</del>
     text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
     
-    return text 
+    return text  
 # ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
