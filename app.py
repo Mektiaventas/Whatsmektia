@@ -11198,17 +11198,8 @@ def ver_kanban(config=None):
     col_asesores_id = obtener_id_columna_asesores(config)
     numeros_asesores = obtener_numeros_asesores_db(config)
 
-    # Lógica para mover chats de asesores a la columna "Asesores" si existe
-    if col_asesores_id and numeros_asesores:
-        placeholders = ', '.join(['%s'] * len(numeros_asesores))
-        # Mover a la columna de asesores si el número es de un asesor
-        cursor.execute(f"""
-            UPDATE chat_meta
-            SET columna_id = %s
-            WHERE numero IN ({placeholders}) AND columna_id != %s
-        """, (col_asesores_id, *numeros_asesores, col_asesores_id))
-        conn.commit()
-        app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+    columnas_totales = cursor.fetchall()
 
     # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
     # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
