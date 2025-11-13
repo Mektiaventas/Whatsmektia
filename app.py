@@ -2973,97 +2973,170 @@ def obtener_numeros_a_excluir(config=None):
 
 @app.route('/dashboard/platform-data')
 @login_required
-def dashboard_platform_data():
-    config = obtener_configuracion_por_host()
-    
+def dashboard_conversaciones_data():
+    """
+    Devuelve JSON con:
+    - plan_info (si el usuario está autenticado)
+    - active_count: número de chats con actividad en las últimas 24h
+    - labels/values: por día (conversaciones nuevas/iniciadas, usando conversaciones c/ filtro 24h).
+    """
     try:
-        # --- 1. Obtener números a excluir (Asesores y ALERT_NUMBER) ---
-        cfg_full = load_config(config) 
-        asesores_list = cfg_full.get('asesores_list', [])
-        
-        # Recopilar todos los números de teléfono de los asesores configurados
-        numeros_a_excluir = {
-            (a.get('telefono') or '').strip() 
-            for a in asesores_list 
-            if a.get('telefono')
-        }
-        
-        # Añadir números de alerta
-        if ALERT_NUMBER:
-            numeros_a_excluir.add(ALERT_NUMBER)
-        # Añadir tu número personal
-        numeros_a_excluir.add('5214493432744')
-        numeros_a_excluir.add('5214491182201')
-        
-        # Limpiar números vacíos
-        numeros_a_excluir.discard('')
+        config = obtener_configuracion_por_host()
+        period = request.args.get('period', 'week')
+        now = datetime.now()
 
-        # Convertir a una lista/tupla para usar en la cláusula SQL IN
-        exclusion_list = tuple(numeros_a_excluir)
-        
-        if exclusion_list:
-            app.logger.info(f"📊 Excluyendo números internos del dashboard: {exclusion_list}")
-        
         conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-
-        # 2. Conteo de Conversaciones por Plataforma (Clientes)
-        # Filtramos `conv.numero` para excluir los números internos
-        exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
+        cursor = conn.cursor()
         
-        # Consulta de Conversaciones
-        cursor.execute(f"""
-            SELECT 
-                COALESCE(c.plataforma, 
-                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
-                ) AS platform, 
-                COUNT(DISTINCT conv.numero) AS conversation_count
-            FROM conversaciones conv
-            LEFT JOIN contactos c ON conv.numero = c.numero_telefono
-            WHERE 1=1 {exclusion_clause}
-            GROUP BY platform
-            ORDER BY conversation_count DESC
-        """, exclusion_list)
-        conversations_raw = cursor.fetchall()
-
-        # 3. Conteo de Contactos Totales por Plataforma (Clientes)
-        # Filtramos `numero_telefono` para excluir los números internos
-        # Usamos la misma lista de exclusión
-        cursor.execute(f"""
-            SELECT 
-                COALESCE(plataforma, 'WhatsApp') AS platform, 
-                COUNT(*) AS contact_count
-            FROM contactos
-            WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
-            GROUP BY platform
-            ORDER BY contact_count DESC
-        """, exclusion_list)
-        contacts_raw = cursor.fetchall()
+        # 86400 segundos = 24 horas
         
+        # Caso especial: user asked previously '3months' (90 días)
+        if period == '3months':
+            # 1. Encontrar el último día con datos en 'conversaciones'
+            try:
+                cursor.execute("SELECT DATE(MAX(timestamp)) FROM conversaciones")
+                row = cursor.fetchone()
+                last_day = datetime.now().date() 
+                if row and row[0]:
+                    last_day = row[0].date() if hasattr(row[0], 'date') else datetime.strptime(str(row[0]), "%Y-%m-%d").date()
+            except Exception:
+                last_day = datetime.now().date()
+
+            # Window lower bound (maximum 90 days back)
+            window_start = last_day - timedelta(days=89)
+
+            # ✅ CONSULTA CORREGIDA: Usa conversaciones con NOT EXISTS para el conteo diario (3 meses)
+            sql = """
+                SELECT DATE(c1.timestamp) as dia, COUNT(DISTINCT c1.numero) as cnt
+                FROM conversaciones c1
+                WHERE DATE(c1.timestamp) BETWEEN %s AND %s
+                  AND NOT EXISTS (
+                    SELECT 1 FROM conversaciones c2
+                    WHERE c2.numero = c1.numero
+                      AND c2.timestamp < c1.timestamp
+                      AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+                  )
+                GROUP BY DATE(c1.timestamp)
+                ORDER BY DATE(c1.timestamp)
+            """
+            cursor.execute(sql, (window_start, last_day))
+            rows = cursor.fetchall()
+
+            # Mapear conteos por fecha
+            counts_map = {}
+            for r in rows:
+                try:
+                    dia = r[0]
+                    if hasattr(dia, 'strftime'):
+                        key = dia.strftime('%Y-%m-%d')
+                    else:
+                        key = str(dia)
+                    cnt = int(r[1] or 0)
+                    counts_map[key] = cnt
+                except Exception:
+                    continue
+
+            # If there are no days with data in the window, return an empty (or single-day) series
+            if not counts_map:
+                labels = []
+                values = []
+            else:
+                # Find earliest date within counts_map (first day that has data)
+                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
+                earliest_with_data = min(parsed_dates)
+
+                # Ensure earliest_with_data is not earlier than window_start
+                if earliest_with_data < window_start:
+                    earliest_with_data = window_start
+
+                # Build labels from earliest_with_data .. last_day (inclusive)
+                labels = []
+                values = []
+                days_range = (last_day - earliest_with_data).days + 1
+                for i in range(days_range):
+                    d = earliest_with_data + timedelta(days=i)
+                    key = d.strftime('%Y-%m-%d')
+                    labels.append(key)
+                    values.append(counts_map.get(key, 0))
+
+            # Chats activos: distinct numero with message in last 24h
+            cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+            active_count_row = cursor.fetchone()
+            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
+            cursor.close()
+            conn.close()
+
+            # Plan info if user authenticated
+            plan_info = None
+            try:
+                au = session.get('auth_user')
+                if au and au.get('user'):
+                    # Asumo que get_plan_status_for_user sigue usando el conteo total/filtrado
+                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
+            except Exception:
+                plan_info = None
+
+            return jsonify({
+                'labels': labels,
+                'values': values,
+                'active_count': active_count,
+                'plan_info': plan_info or {}
+            })
+
+        # --- fallback: previous daily behavior for week/month ---
+        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+
+        # ✅ CONSULTA CORREGIDA: Usa conversaciones con NOT EXISTS para el conteo diario (semana/mes)
+        cursor.execute("""
+            SELECT DATE(c1.timestamp) as dia, COUNT(DISTINCT c1.numero) as cnt
+            FROM conversaciones c1
+            WHERE c1.timestamp >= %s
+              AND NOT EXISTS (
+                SELECT 1 FROM conversaciones c2
+                WHERE c2.numero = c1.numero
+                  AND c2.timestamp < c1.timestamp
+                  AND TIMESTAMPDIFF(SECOND, c2.timestamp, c1.timestamp) < 86400
+              )
+            GROUP BY DATE(c1.timestamp)
+            ORDER BY DATE(c1.timestamp)
+        """, (start,))
+
+        rows = cursor.fetchall()
+        labels = []
+        values = []
+        for r in rows:
+            dia = r[0]
+            if hasattr(dia, 'strftime'):
+                labels.append(dia.strftime('%Y-%m-%d'))
+            else:
+                labels.append(str(dia))
+            values.append(int(r[1] or 0))
+
+        # Chats activos: distinct numero with message in last 24h
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        active_count_row = cursor.fetchone()
+        active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
+
         cursor.close()
         conn.close()
 
-        # Formatear para Chart.js (sin cambios)
-        conv_labels = [row['platform'] for row in conversations_raw]
-        conv_values = [row['conversation_count'] for row in conversations_raw]
-        
-        contact_labels = [row['platform'] for row in contacts_raw]
-        contact_values = [row['contact_count'] for row in contacts_raw]
+        plan_info = None
+        try:
+            au = session.get('auth_user')
+            if au and au.get('user'):
+                plan_info = get_plan_status_for_user(au.get('user'), config=config)
+        except Exception:
+            plan_info = None
 
-        return jsonify({
-            'conversations': {
-                'labels': conv_labels,
-                'values': conv_values
-            },
-            'contacts': {
-                'labels': contact_labels,
-                'values': contact_values
-            },
-            'timestamp': int(time.time() * 1000)
+        return jsonify({ 
+            'labels': labels,
+            'values': values,
+            'active_count': active_count,
+            'plan_info': plan_info or {}
         })
-
     except Exception as e:
-        app.logger.error(f"🔴 Error en /dashboard/platform-data: {e}")
+        app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
         return jsonify({'error': str(e)}), 500
 
 def extraer_info_cita_mejorado(mensaje, numero, historial=None, config=None):
