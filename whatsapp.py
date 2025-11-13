@@ -327,10 +327,13 @@ def texto_a_voz(texto, filename, config=None, voz=None):
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
         try:
+            # Asume que app.py define esta función
             from app import obtener_configuracion_por_host
             config = obtener_configuracion_por_host()
         except Exception:
             config = None
+            logger.error("🔴 enviar_mensaje: No se pudo cargar la configuración por host")
+            return False
     
     # --- INICIO LÓGICA MULTI-TENANT ---
 
@@ -367,7 +370,7 @@ def enviar_mensaje(numero, texto, config=None):
             logger.error(f"🔴 Exception (Messenger): {e}")
             return False
 
-    # 2. LÓGICA DE ENVÍO POR WHATSAPP (Fallback si no es 'fb_')
+    # 2. LÓGICA DE ENVÍO POR WHATSAPP (Lógica existente)
     
     # Validar texto
     if not texto or str(texto).strip() == '':
@@ -383,7 +386,7 @@ def enviar_mensaje(numero, texto, config=None):
         'Content-Type': 'application/json'
     }
     
-    # ✅ PAYLOAD CORRECTO
+    # PAYLOAD CORRECTO
     payload = {
         'messaging_product': 'whatsapp',
         'to': numero,
