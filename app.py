@@ -42,7 +42,7 @@ import threading
 from urllib.parse import urlparse 
 from os.path import basename, join 
 import os # Asegurar que 'os' también esté importado/disponible
-MESSENGER_VERIFY_TOKEN_GLOBAL = os.getenv("MESSENGER_VERIFY_TOKEN", VERIFY_TOKEN)
+
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
@@ -123,6 +123,7 @@ def whatsapp_format(text):
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+MESSENGER_VERIFY_TOKEN_GLOBAL = os.getenv("MESSENGER_VERIFY_TOKEN", VERIFY_TOKEN)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ALERT_NUMBER = os.getenv("ALERT_NUMBER")
