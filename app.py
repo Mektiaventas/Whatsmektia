@@ -9570,48 +9570,62 @@ def home():
     config = obtener_configuracion_por_host()
     period = request.args.get('period', 'week')
     now = datetime.now()
+    
+    # Inicializar variables para scope global
+    labels = []
+    values = []
+    messages_per_chat = None
+    chat_counts = 0
+    total_responded = 0
 
     # Default behavior for week/month: keep existing logic (messages per chat)
     if period != 'year':
+        # Calcula el inicio del periodo (7 días o 30 días)
         start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # ✅ CORRECCIÓN 1: CHAT_COUNTS AHORA USA NUEVAS_CONVERSACIONES EN EL PERIODO
-        cursor.execute(
-            "SELECT COUNT(conversaciones) FROM contactos WHERE timestamp >= %s;",
-            (start,)
-        )
-        chat_counts = cursor.fetchone()[0]
+        try:
+            # 1. OBTENER EL TOTAL DE CONVERSACIONES CONTADAS (USANDO LA NUEVA COLUMNA DE CONTACTOS)
+            # Se suma la columna 'conversaciones' de la tabla 'contactos'
+            cursor.execute(
+                "SELECT SUM(conversaciones) FROM contactos"
+            )
+            chat_counts_row = cursor.fetchone()
+            # Corregido: Usar 'chat_counts_row' en lugar de 'chat_counts' en la asignación
+            chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
+            
+            # Contar los mensajes por chat en el periodo (para la gráfica original)
+            cursor.execute(""" 
+                SELECT 
+                    conv.numero,
+                    COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
+                    COUNT(*) AS total
+                FROM conversaciones conv
+                LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
+                WHERE conv.timestamp >= %s
+                GROUP BY conv.numero, nombre_mostrado
+                ORDER BY total DESC
+            """, (start,))
+            messages_per_chat = cursor.fetchall()
 
-        # Contar los mensajes por chat en el periodo (para la gráfica original)
-        cursor.execute(""" 
-            SELECT 
-                conv.numero,
-                COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
-                COUNT(*) AS total
-            FROM conversaciones conv
-            LEFT JOIN contactos cont ON cont.numero_telefono = conv.numero
-            WHERE conv.timestamp >= %s
-            GROUP BY conv.numero, nombre_mostrado
-            ORDER BY total DESC
-        """, (start,))
-        messages_per_chat = cursor.fetchall()
+            # total_responded mantiene el conteo de contactos (para que no disminuya al borrar)
+            cursor.execute(
+                "SELECT COUNT(numero_telefono) FROM contactos;"
+            )
+            total_responded_row = cursor.fetchone()
+            total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
 
-        # total_responded mantiene el conteo de contactos (para que no disminuya al borrar)
-        cursor.execute(
-            "SELECT COUNT(numero_telefono) FROM contactos;"
-        )
-        total_responded = cursor.fetchone()[0]
-
-        cursor.close()
-        conn.close()
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
 
         labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
         values = [row[2] for row in messages_per_chat]  # total
+        
     else:
-        # period == 'year' : compute last 12 months (monthly), counting "conversaciones iniciadas"
+        # period == 'year' : compute last 12 months (monthly)
         # build list of last 12 month keys in chronological order
         def month_key_from_offset(now_dt, offset):
             total_months = now_dt.year * 12 + now_dt.month - 1
@@ -9632,54 +9646,59 @@ def home():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # ✅ CORRECCIÓN 2: GRAFICA ANUAL AHORA USA NUEVAS_CONVERSACIONES
-        sql = """
-            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(conversaciones) as cnt
-            FROM contactos c1 
-            WHERE c1.timestamp >= %s
-            GROUP BY y, m
-            ORDER BY y, m
-        """
-        cursor.execute(sql, (start,))
-        rows = cursor.fetchall()  # list of tuples (y, m, cnt)
+        try:
+            # LÓGICA GRÁFICA ANUAL: Mantiene la dependencia de 'nuevas_conversaciones'
+            sql = """
+                SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
+                FROM nuevas_conversaciones c1 
+                WHERE c1.timestamp >= %s
+                GROUP BY y, m
+                ORDER BY y, m
+            """
+            cursor.execute(sql, (start,))
+            rows = cursor.fetchall()  # list of tuples (y, m, cnt)
 
-        # build map key 'YYYY-MM' -> count
-        counts_map = {}
-        for r in rows:
-            try:
-                y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
-            except Exception:
-                continue
-            key = f"{y}-{m:02d}"
-            counts_map[key] = cnt
+            # build map key 'YYYY-MM' -> count
+            counts_map = {}
+            for r in rows:
+                try:
+                    y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
+                except Exception:
+                    continue
+                key = f"{y}-{m:02d}"
+                counts_map[key] = cnt
 
-        # labels as 'Mon YYYY' (en-US style short month)
-        labels = []
-        values = []
-        for y, m in months:
-            key = f"{y}-{m:02d}"
-            labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
-            values.append(counts_map.get(key, 0))
+            # labels as 'Mon YYYY'
+            labels = []
+            values = []
+            for y, m in months:
+                key = f"{y}-{m:02d}"
+                labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+                values.append(counts_map.get(key, 0))
 
-        # ✅ CORRECCIÓN 3: CHAT_COUNTS (TOTAL) AHORA USA NUEVAS_CONVERSACIONES (SIN PERIODO)
-        # Esto cuenta todas las sesiones iniciadas históricamente.
-        cursor.execute("SELECT COUNT(conversaciones) FROM contactos;")
-        chat_counts_row = cursor.fetchone()
-        chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
+            # 2. OBTENER EL TOTAL DE CONVERSACIONES CONTADAS (USANDO LA NUEVA COLUMNA DE CONTACTOS)
+            # Se suma la columna 'conversaciones' de la tabla 'contactos'
+            cursor.execute(
+                "SELECT SUM(conversaciones) FROM contactos"
+            )
+            chat_counts_row = cursor.fetchone()
+            chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
-        # total_responded mantiene el conteo de contactos (para evitar decrementos).
-        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
-        total_responded_row = cursor.fetchone()
-        total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
+            # total_responded mantiene el conteo de contactos
+            cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
+            total_responded_row = cursor.fetchone()
+            total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
 
-        cursor.close()
-        conn.close()
+        finally:
+            if cursor: cursor.close()
+            if conn: conn.close()
 
     # Obtener plan info para el usuario autenticado (si aplica)
     plan_info = None
     try:
         au = session.get('auth_user')
         if au and au.get('user'):
+            # Asume que get_plan_status_for_user existe
             plan_info = get_plan_status_for_user(au.get('user'), config=config)
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
