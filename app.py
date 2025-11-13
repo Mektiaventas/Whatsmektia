@@ -9580,7 +9580,7 @@ def home():
         
         # ✅ CORRECCIÓN 1: CHAT_COUNTS AHORA USA NUEVAS_CONVERSACIONES EN EL PERIODO
         cursor.execute(
-            "SELECT COUNT(id) FROM nuevas_conversaciones WHERE timestamp >= %s;",
+            "SELECT COUNT(conversaciones) FROM contactos WHERE timestamp >= %s;",
             (start,)
         )
         chat_counts = cursor.fetchone()[0]
@@ -9634,8 +9634,8 @@ def home():
 
         # ✅ CORRECCIÓN 2: GRAFICA ANUAL AHORA USA NUEVAS_CONVERSACIONES
         sql = """
-            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
-            FROM nuevas_conversaciones c1 
+            SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(conversaciones) as cnt
+            FROM contactos c1 
             WHERE c1.timestamp >= %s
             GROUP BY y, m
             ORDER BY y, m
@@ -9663,7 +9663,7 @@ def home():
 
         # ✅ CORRECCIÓN 3: CHAT_COUNTS (TOTAL) AHORA USA NUEVAS_CONVERSACIONES (SIN PERIODO)
         # Esto cuenta todas las sesiones iniciadas históricamente.
-        cursor.execute("SELECT COUNT(id) FROM nuevas_conversaciones;")
+        cursor.execute("SELECT COUNT(conversaciones) FROM contactos;")
         chat_counts_row = cursor.fetchone()
         chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
 
