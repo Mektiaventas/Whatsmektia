@@ -6136,6 +6136,41 @@ def contar_respuestas_ia(numero_cliente, config):
         conn.close()
     return count
 
+def mover_chat_si_es_primera_respuesta_ia(numero_cliente, config=None):
+    """
+    Mueve el chat a 'En Conversación' si el conteo de respuestas de la IA es exactamente 1.
+    Esto se llama DESPUÉS de que la respuesta actual de la IA ha sido guardada.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    # 1. Contar respuestas de la IA (incluyendo la respuesta que acaba de guardarse)
+    # Asume que 'contar_respuestas_ia' está disponible.
+    respuestas_count = contar_respuestas_ia(numero_cliente, config)
+
+    # 2. Verificar si es la PRIMERA respuesta (conteo == 1)
+    if respuestas_count == 1:
+        COLUMNA_BUSCADA = "En Conversación"
+        try:
+            # 3. Buscar el ID de la columna
+            # La columna 'En Conversación' debería ser el ID 2 por defecto, pero se busca por nombre para seguridad.
+            col_id = obtener_id_columna_por_nombre(COLUMNA_BUSCADA, config)
+            
+            if col_id:
+                # 4. Mover el chat
+                actualizar_columna_chat(numero_cliente, col_id, config)
+                app.logger.info(f"📊 Chat {numero_cliente} movido a '{COLUMNA_BUSCADA}' ({col_id}) por primera respuesta de IA.")
+                return True
+            else:
+                app.logger.warning(f"⚠️ Columna '{COLUMNA_BUSCADA}' no encontrada. No se pudo mover el chat {numero_cliente}.")
+                return False
+        except Exception as e:
+            app.logger.error(f"🔴 Error al mover chat por primera respuesta IA para {numero_cliente}: {e}")
+            return False
+    return False
+
+# Nota: La función 'contar_respuestas_ia' debe estar disponible para que esto funcione.
+
 def mover_chat_si_no_hay_respuesta_ia(numero_cliente, config=None):
     """
     Mueve el chat a 'Esperando Respuesta' si la IA no ha respondido nunca.
@@ -8445,7 +8480,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # 💥 INICIO CORRECCIÓN DE CONFIGURACIÓN Y TONO
         if config is None:
             config = obtener_configuracion_por_host()
-
+        # 🎯 PUNTO DE INTEGRACIÓN: Mover a 'En Conversación' si esta es la PRIMERA respuesta.
+        try:
+            mover_chat_si_es_primera_respuesta_ia(numero, config)
+        except Exception as e:
+            app.logger.error(f"🔴 Fallo al mover chat por primera respuesta IA: {e}")
         # Carga de configuración y tono (para OpenAI TTS)
         cfg_full = load_config(config) 
         tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
