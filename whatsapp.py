@@ -332,6 +332,43 @@ def enviar_mensaje(numero, texto, config=None):
         except Exception:
             config = None
     
+    # --- INICIO LÓGICA MULTI-TENANT ---
+
+    # 1. LÓGICA DE ENVÍO POR MESSENGER (fb_)
+    if numero.startswith('fb_'):
+        # 'config' debe contener 'page_access_token' inyectado por obtener_configuracion_por_page_id
+        PAGE_ACCESS_TOKEN = config.get('page_access_token') 
+        sender_id = numero.replace('fb_', '')
+        
+        if not PAGE_ACCESS_TOKEN:
+            logger.error(f"❌ MESSENGER: No se encontró Page Access Token para {config.get('dominio')}")
+            return False
+
+        # Usamos v19.0 como en el webhook de app.py
+        url = f"https://graph.facebook.com/v19.0/me/messages?access_token={PAGE_ACCESS_TOKEN}"
+        
+        payload = {
+            "messaging_type": "RESPONSE",
+            "recipient": { "id": sender_id },
+            "message": { "text": texto }
+        }
+        
+        try:
+            logger.info(f"📤 Enviando (Messenger): {texto[:50]}...")
+            r = requests.post(url, json=payload, timeout=10)
+            
+            if r.status_code == 200:
+                logger.info("✅ Mensaje (Messenger) enviado")
+                return True
+            else:
+                logger.error(f"🔴 Error (Messenger) {r.status_code}: {r.text}")
+                return False
+        except Exception as e:
+            logger.error(f"🔴 Exception (Messenger): {e}")
+            return False
+
+    # 2. LÓGICA DE ENVÍO POR WHATSAPP (Fallback si no es 'fb_')
+    
     # Validar texto
     if not texto or str(texto).strip() == '':
         logger.error("🔴 ERROR: Texto de mensaje vacío")
@@ -339,6 +376,7 @@ def enviar_mensaje(numero, texto, config=None):
     
     texto_limpio = str(texto).strip()
     
+    # Usamos v23.0 como en tu archivo original de whatsapp.py
     url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
     headers = {
         'Authorization': f'Bearer {config["whatsapp_token"]}',
@@ -356,18 +394,18 @@ def enviar_mensaje(numero, texto, config=None):
     }
 
     try:
-        logger.info(f"📤 Enviando: {texto_limpio[:50]}...")
+        logger.info(f"📤 Enviando (WhatsApp): {texto_limpio[:50]}...")
         r = requests.post(url, headers=headers, json=payload, timeout=10)
         
         if r.status_code == 200:
-            logger.info("✅ Mensaje enviado")
+            logger.info("✅ Mensaje (WhatsApp) enviado")
             return True
         else:
-            logger.error(f"🔴 Error {r.status_code}: {r.text}")
+            logger.error(f"🔴 Error (WhatsApp) {r.status_code}: {r.text}")
             return False
             
     except Exception as e:
-        logger.error(f"🔴 Exception: {e}")
+        logger.error(f"🔴 Exception (WhatsApp): {e}")
         return False
 
 def enviar_imagen(numero, image_url, config=None):
