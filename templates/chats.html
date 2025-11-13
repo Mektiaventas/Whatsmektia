@@ -1683,7 +1683,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-
 // Función mejorada para la búsqueda de chats
 function setupChatSearch() {
     const searchInput = document.getElementById('search-chats-input');
@@ -1696,6 +1695,8 @@ function setupChatSearch() {
     function performSearch() {
         const searchTerm = normalizeText(searchInput.value);
         const chatItems = document.querySelectorAll('.chat-item');
+
+        let foundAny = false;
 
         chatItems.forEach(chatItem => {
             const aliasElement = chatItem.querySelector('.alias-view');
@@ -1710,7 +1711,27 @@ function setupChatSearch() {
                                 (searchTerm === '');
 
             chatItem.style.display = matchesSearch ? 'block' : 'none';
+
+            if (matchesSearch && searchTerm !== '') {
+                foundAny = true;
+            }
         });
+
+        // Opcional: Mostrar mensaje si no se encontraron resultados
+        const noResultsMsg = document.getElementById('no-search-results');
+        if (searchTerm !== '' && !foundAny) {
+            if (!noResultsMsg) {
+                const msg = document.createElement('div');
+                msg.id = 'no-search-results';
+                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
+                msg.style.padding = '10px';
+                msg.style.textAlign = 'center';
+                msg.style.color = '#999';
+                document.querySelector('.chat-items').appendChild(msg);
+            }
+        } else if (noResultsMsg) {
+            noResultsMsg.remove();
+        }
     }
 
     searchInput.addEventListener('input', performSearch);
@@ -1728,7 +1749,18 @@ function setupChatSearch() {
         observer.observe(chatContainer, { childList: true, subtree: true });
     }
 
-    console.debug('Chat search functionality initialized');
+    console.debug('Chat search functionality initialized - insensible a tildes');
+}
+
+// Función normalizadora mejorada (insensible a tildes)
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s)
+        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
+        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
 }
 </script>
-{% endblock %}        
+{% endblock %} 
