@@ -6111,6 +6111,68 @@ Devuelve únicamente el resumen breve (1-3 líneas).
         app.logger.error(f"🔴 pasar_contacto_asesor error: {e}", exc_info=True)
         return False
 
+# --- FUNCIONES ADICIONALES PARA KANBAN ---
+
+def contar_respuestas_ia(numero_cliente, config):
+    """Cuenta cuántas respuestas no vacías ha dado la IA a un cliente."""
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    count = 0
+    try:
+        # La 'respuesta' es lo que envía el asistente (IA)
+        # Se verifica que el campo no sea NULL y no sea una cadena vacía
+        query = """
+            SELECT COUNT(*) FROM conversaciones 
+            WHERE numero = %s 
+            AND respuesta IS NOT NULL 
+            AND respuesta != ''
+        """
+        cursor.execute(query, (numero_cliente,))
+        count = cursor.fetchone()[0]
+    except Exception as e:
+        app.logger.error(f"🔴 Error al contar respuestas IA para {numero_cliente}: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+    return count
+
+def mover_chat_si_no_hay_respuesta_ia(numero_cliente, config=None):
+    """
+    Mueve el chat a 'Esperando Respuesta' si la IA no ha respondido nunca.
+    Debe ser llamado después de recibir un mensaje del cliente, idealmente
+    en la función principal de manejo de mensajes entrantes.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+        
+    try:
+        # 1. Contar respuestas de la IA
+        respuestas_count = contar_respuestas_ia(numero_cliente, config)
+        
+        if respuestas_count == 0:
+            # 2. Buscar el ID de la columna "Esperando Respuesta"
+            COLUMNA_BUSCADA = "Esperando Respuesta"
+            # Asumo que esta columna por defecto tiene ID 3, pero la buscamos por nombre para seguridad
+            col_id = obtener_id_columna_por_nombre(COLUMNA_BUSCADA, config)
+            
+            if col_id:
+                # 3. Mover el chat
+                # Nota: Si el chat ya está en una columna de Asesor, esta lógica lo moverá a "Esperando Respuesta".
+                # Para evitar esto, podrías añadir una comprobación de la columna actual aquí.
+                actualizar_columna_chat(numero_cliente, col_id, config)
+                app.logger.info(f"📊 Chat {numero_cliente} movido a '{COLUMNA_BUSCADA}' ({col_id}) porque la IA nunca ha respondido.")
+                return True
+            else:
+                app.logger.warning(f"⚠️ Columna '{COLUMNA_BUSCADA}' no encontrada. No se pudo mover el chat {numero_cliente}.")
+                return False
+        else:
+            # La IA ya ha respondido, no es necesario moverlo
+            return False
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error en mover_chat_si_no_hay_respuesta_ia para {numero_cliente}: {e}")
+        return False
+
 @app.route('/chats/data')
 def obtener_datos_chat():
     """Endpoint para obtener datos actualizados de la lista de chats"""
@@ -8376,6 +8438,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     (so callers can avoid double-saving). Default False for backward compatibility.
     """ 
     try:
+        try:
+            mover_chat_si_no_hay_respuesta_ia(numero, config)
+        except Exception as e:
+            app.logger.error(f"🔴 Fallo al mover chat si no hay respuesta IA para {numero}: {e}")
         # 💥 INICIO CORRECCIÓN DE CONFIGURACIÓN Y TONO
         if config is None:
             config = obtener_configuracion_por_host()
