@@ -5933,10 +5933,11 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
         nombre = asesor.get('nombre') or 'Asesor'
         telefono = asesor.get('telefono') or ''
 
-        # --- INICIO LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO ---
+        # --- INICIO LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO (Actualizado para Asesor 1 y Asesor 2) ---
         
-        # Valor de fallback inicial (se usa si la detección específica falla)
+        # Valor de fallback inicial
         columna_destino_id = 3 # Columna estándar "Esperando Respuesta"
+        columna_buscada = None
         
         try:
             cfg_full = load_config(config)
@@ -5945,26 +5946,28 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
             # El teléfono del asesor asignado (limpiado de espacios)
             telefono_actual = telefono.strip() 
             
-            # Identificamos el número del primer asesor (Asesor 1), limpiado de espacios
-            asesor1_telefono = (asesores_list[0].get('telefono') or '').strip() if asesores_list and len(asesores_list) > 0 else None
+            # Iterar sobre los primeros 2 asesores para verificar si se requiere columna específica
+            for i in range(min(2, len(asesores_list))): 
+                asesor_n = i + 1
+                asesor_n_telefono = (asesores_list[i].get('telefono') or '').strip()
 
-            # Si el asesor asignado actualmente es el "Asesor 1" (basado en el teléfono)
-            if asesor1_telefono and telefono_actual == asesor1_telefono:
-                columna_buscada = "Asesor 1"
-                
-                # Buscar el ID de la columna por nombre
-                col_id = obtener_id_columna_por_nombre(columna_buscada, config) 
-                
-                if col_id:
-                    columna_destino_id = col_id # ¡Asignación a la columna específica!
-                    app.logger.info(f"📊 Asesor {nombre} detectado como '{columna_buscada}'. Moviendo cliente a columna {col_id}.")
-                else:
-                    app.logger.warning(f"⚠️ Columna '{columna_buscada}' no encontrada en DB. Usando fallback ID 3.")
-
+                if telefono_actual == asesor_n_telefono:
+                    columna_buscada = f"Asesor {asesor_n}"
+                    
+                    # Buscar el ID de la columna por nombre
+                    col_id = obtener_id_columna_por_nombre(columna_buscada, config) 
+                    
+                    if col_id:
+                        columna_destino_id = col_id # ¡Asignación a la columna específica!
+                        app.logger.info(f"📊 Asesor {nombre} detectado como '{columna_buscada}'. Moviendo cliente a columna {col_id}.")
+                        break # Salir del bucle una vez que se encuentra y asigna
+                    else:
+                        app.logger.warning(f"⚠️ Columna '{columna_buscada}' no encontrada en DB. Usando fallback ID 3.")
+                    
         except IndexError:
-            app.logger.warning("⚠️ La lista de asesores está vacía o mal configurada, no se puede identificar al 'Asesor 1'.")
+            app.logger.warning("⚠️ La lista de asesores está vacía o mal configurada.")
         except Exception as e:
-            app.logger.error(f"🔴 Error en lógica de detección de Asesor 1 para Kanban: {e}", exc_info=True)
+            app.logger.error(f"🔴 Error en lógica de detección de Asesor para Kanban: {e}", exc_info=True)
         
         # --- FIN LÓGICA DE MOVIMIENTO DE KANBAN ESPECÍFICO ---
 
@@ -5991,7 +5994,7 @@ def pasar_contacto_asesor(numero_cliente, config=None, notificar_asesor=True):
             app.logger.warning(f"⚠️ No se pudo enviar el contacto del asesor a {numero_cliente}")
 
 
-        # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR (CÓDIGO SIN CAMBIOS)
+        # 2. NOTIFICAR Y REGISTRAR ALERTA PARA EL ASESOR
         if notificar_asesor and telefono:
             try:
                 # Obtener nombre mostrado del cliente
@@ -6076,29 +6079,23 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                 app.logger.info(f"💾 Alerta registrada en el chat del asesor {telefono}")
                 # --- FIN: REGISTRO DE ALERTA EN EL HILO DEL ASESOR ---
 
-                # 3. Mover el chat del ASESOR (telefono) a columna 'Asesores' si existe.
+                # 3. Mover el chat del ASESOR (telefono) a columna específica (si aplica) o 'Asesores' (fallback).
                 try:
-                    col_asesores_id = obtener_id_columna_asesores(config)
-                    if col_asesores_id:
-                        actualizar_columna_chat(telefono, col_asesores_id, config)
-                        app.logger.info(f"📊 Chat del asesor {telefono} movido a columna Asesores ({col_asesores_id}).")
+                    if columna_destino_id != 3:
+                        # Si se asignó una columna específica (Asesor 1, Asesor 2, etc.), usar esa.
+                        col_asesor_final_id = columna_destino_id
+                        log_msg = f"columna específica {columna_destino_id} ({columna_buscada})."
                     else:
-                        app.logger.warning("⚠️ Columna 'Asesores' no encontrada. No se movió el chat del asesor.")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
-                
-            except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}", exc_info=True)
-        
-        # 5. Mover el chat del CLIENTE (numero_cliente) a la columna determinada (columna_destino_id)
-        # ESTE MOVIMIENTO AHORA USA LA VARIABLE 'columna_destino_id' que contiene el ID de "Asesor 1" o el FALLBACK 3.
-        actualizar_columna_chat(numero_cliente, columna_destino_id, config)
-        app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a columna {columna_destino_id}.")
-
-        return enviado
-    except Exception as e:
-        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}", exc_info=True)
-        return False
+                        # Si se usó el fallback 3, buscar la columna genérica 'Asesores'.
+                        col_asesor_final_id = obtener_id_columna_asesores(config) # Asumo que esta función existe
+                        log_msg = f"columna genérica Asesores ({col_asesor_final_id})."
+                    
+                    if col_asesor_final_id:
+                        actualizar_columna_chat(telefono, col_asesor_final_id, config)
+                        app.logger.info(f"📊 Chat del asesor {telefono} movido a {log_msg}")
+                    else:
+                        app.logger.warning("⚠️ Columna 'Asesores' no encontrada y no se asignó columna específica. No se movió el chat del asesor.")
+                except
 
 @app.route('/chats/data')
 def obtener_datos_chat():
