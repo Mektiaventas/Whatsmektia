@@ -9720,28 +9720,32 @@ def obtener_configuracion_por_host():
         host = request.headers.get('Host', '').lower()
         
         if 'unilova' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: Unilova")
             return NUMEROS_CONFIG['123']
         
         # DETECCIÓN PORFIRIANNA
         if 'laporfirianna' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
             
-        # DETECCIÓN NUEVO SUBDOMINIO
+        # DETECCIÓN OFITODO
         if 'ofitodo' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524495486324']
 
         # DETECCIÓN MAINDSTEEL
         if 'maindsteel' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['1011']
+
+        # DETECCIÓN DRASGO
         if 'drasgo' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: Drasgo")
             return NUMEROS_CONFIG['1012']
+
+        # DETECCIÓN LACSE
         if 'lacse' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
+            app.logger.info("✅ Configuración detectada: Lacse")
             return NUMEROS_CONFIG['1013']
         
         # DEFAULT MEKTIA
