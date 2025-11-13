@@ -4388,7 +4388,7 @@ def get_plan_status_for_user(user_email, config=None):
 
         # ✅ NUEVA CONSULTA: Cuenta el TOTAL de registros en la tabla de sesiones
         # Esto es el total de conversaciones consumidas según la lógica de 23.59 horas
-        sql_sessions = "SELECT COUNT(id) FROM nuevas_conversaciones" 
+        sql_sessions = "SELECT SUM(conversaciones) FROM contactos" 
 
         try:
             cur_t.execute(sql_sessions)
