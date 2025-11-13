@@ -9713,7 +9713,40 @@ def home():
         values=values,
         plan_info=plan_info
     )
+def _ensure_contactos_conversaciones_columns(config=None):
+    """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    try:
+        # Columna para el conteo de conversaciones: MODIFICAR para asegurar DEFAULT 0
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'conversaciones'")
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN conversaciones INT DEFAULT 0")
+        elif 'default_value' in row and row['default_value'] != '0':
+             # ALTERAR para asegurar el DEFAULT 0 (requerido para MySQL robusto)
+            try:
+                 cursor.execute("ALTER TABLE contactos MODIFY COLUMN conversaciones INT DEFAULT 0")
+            except Exception:
+                app.logger.warning("⚠️ No se pudo modificar contactos.conversaciones a DEFAULT 0")
+        
+        # Columna para la marca de tiempo de la última conversación contada
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'timestamp'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN timestamp DATETIME DEFAULT NULL")
 
+        conn.commit()
+        app.logger.info("🔧 Columnas 'conversaciones' y 'timestamp' aseguradas en tabla contactos")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de conteo en contactos: {e}")
+        try: conn.rollback()
+        except: pass
+    finally:
+        cursor.close()
+        conn.close()
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
@@ -11556,97 +11589,78 @@ def actualizar_columna_chat(numero, columna_id, config=None):
 
 # --- Función actualizar_info_contacto ---
 def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
-    """Actualiza la información del contacto, priorizando los datos del webhook"""
+    """
+    Actualiza la información del contacto y gestiona el conteo de conversaciones
+    usando la columna 'timestamp' para la ventana de 24 horas.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # Asegurar que las columnas existan
+    _ensure_contactos_conversaciones_columns(config)
+
+    conn = None
+    cursor = None
     try:
-        # Primero verificar si ya tenemos información reciente
         conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
+        cursor = conn.cursor()
         
-        cursor.execute("""
-            SELECT nombre, imagen_url, fecha_actualizacion 
-            FROM contactos 
-            WHERE numero_telefono = %s
-        """, (numero,))
-        
-        contacto = cursor.fetchone()
-        
-        # Si el contacto ya tiene nombre y fue actualizado recientemente (últimas 24 horas), no hacer nada
-        # PERO si recibimos un nombre de Telegram explícito, forzamos la actualización
-        if contacto and contacto.get('nombre') and contacto.get('fecha_actualizacion') and not nombre_telegram:
-            fecha_actualizacion = contacto['fecha_actualizacion']
-            if isinstance(fecha_actualizacion, str):
-                fecha_actualizacion = datetime.fromisoformat(fecha_actualizacion.replace('Z', '+00:00'))
-            
-            if (datetime.now() - fecha_actualizacion).total_seconds() < 86400:  # 24 horas
-                app.logger.info(f"✅ Información de contacto {numero} ya está actualizada")
-                cursor.close()
-                conn.close()
-                return
-        
-        cursor.close()
-        conn.close()
-        
-        # --- 🛠️ INICIO: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
-        if nombre_telegram or plataforma:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            nombre_a_usar = nombre_telegram
-            plataforma_a_usar = plataforma or 'WhatsApp'
+        # --- LÓGICA DE ACTUALIZACIÓN CONTEO DE CONVERSACIONES (24 HORAS) ---
 
-            # Insertar o actualizar el contacto (COALESCE mantiene el nombre existente si el nuevo es NULL)
-            cursor.execute("""
-                INSERT INTO contactos 
-                    (numero_telefono, nombre, plataforma, fecha_actualizacion) 
-                VALUES (%s, %s, %s, NOW())
-                ON DUPLICATE KEY UPDATE 
-                    nombre = COALESCE(VALUES(nombre), nombre), 
-                    plataforma = VALUES(plataforma),
-                    fecha_actualizacion = NOW()
-            """, (numero, nombre_a_usar, plataforma_a_usar))
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            app.logger.info(f"✅ Información de contacto actualizada para {numero} (Plataforma: {plataforma_a_usar})")
-            return
-        # --- FIN: LÓGICA DE ACTUALIZACIÓN FORZADA (TELEGRAM) ---
-
-        # Si no tenemos información reciente, intentar con WhatsApp Web como fallback
-        try:
-            # ⚠️ Código antiguo que hace un intento de actualización de nombre/imagen via WhatsApp Web (si es que existe la librería 'client')
-            if client and client.is_logged_in:
-                nombre_whatsapp, imagen_whatsapp = client.get_contact_info(numero)
-                if nombre_whatsapp or imagen_whatsapp:
-                            app.logger.info(f"✅ Información obtenida via WhatsApp Web para {numero}")
-            
-                            conn = get_db_connection(config)
-                            cursor = conn.cursor()
-            
-                            # --- CORRECCIÓN: SOLO ACTUALIZAR COLUMNAS EXISTENTES ---
-                            cursor.execute("""
-                                UPDATE contactos 
-                                SET nombre = COALESCE(%s, nombre),
-                                    imagen_url = COALESCE(%s, imagen_url),
-                                    fecha_actualizacion = NOW() 
-                                    -- ^^^ Esta columna ya existe en tu esquema
-                                WHERE numero_telefono = %s
-                            """, (nombre_whatsapp, imagen_whatsapp, numero))
-            
-                            conn.commit()
-                            cursor.close()
-                            conn.close()
-                            return
-        except Exception as e:
-            app.logger.warning(f"⚠️ WhatsApp Web no disponible: {e}")
+        nombre_a_usar = nombre_telegram
+        plataforma_a_usar = plataforma or 'WhatsApp'
         
-        app.logger.info(f"ℹ️  Usando información del webhook para {numero}")
-            
+        # Insertar o actualizar el contacto
+        # La lógica de conteo condicional se implementa en ON DUPLICATE KEY UPDATE
+        
+        sql = """
+            INSERT INTO contactos 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
+            VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
+                    -- Al insertar por primera vez, el valor inicial es 1 y el timestamp es NOW().
+                    -- Si hay un duplicado, esta lógica se ignora en la fase INSERT.
+                    1, UTC_TIMESTAMP())
+            ON DUPLICATE KEY UPDATE 
+                -- Actualiza campos de perfil
+                nombre = COALESCE(VALUES(nombre), nombre), 
+                plataforma = VALUES(plataforma),
+                fecha_actualizacion = UTC_TIMESTAMP(),
+                
+                -- Lógica condicional para actualizar el contador de conversaciones
+                -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
+                conversaciones = conversaciones + 
+                                 CASE 
+                                     -- 1. Si el timestamp es NULL (registro antiguo/primer uso de la columna)
+                                     WHEN timestamp IS NULL THEN 1
+                                     -- 2. Si la diferencia es > 24 horas (86400 segundos)
+                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
+                                     ELSE 0
+                                 END,
+                                 
+                -- Lógica condicional para actualizar el timestamp
+                -- SE ACTUALIZA con UTC_TIMESTAMP() si se cumple la misma condición de arriba
+                timestamp = CASE 
+                                -- 1. Si el timestamp es NULL
+                                WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
+                                -- 2. Si la diferencia es > 24 horas
+                                WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
+                                -- Si no, mantener el valor actual de timestamp
+                                ELSE timestamp
+                            END
+        """
+        
+        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
+        
+        conn.commit()
+        app.logger.info(f"✅ Información de contacto y conteo de conversaciones actualizado para {numero}")
+        
     except Exception as e:
-        app.logger.error(f"Error actualizando contacto {numero}: {e}")
+        app.logger.error(f"🔴 Error actualizando contacto {numero}: {e}")
+        if conn: conn.rollback()
+
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
