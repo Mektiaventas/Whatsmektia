@@ -65,19 +65,6 @@ except Exception:
             raise ValueError(f"Invalid coordinate: {coord}")
         return m.group(1), int(m.group(2))
 processed_messages = {}
-FACEBOOK_PAGE_MAP = {
-    # EJEMPLO: Reemplaza 'ID_PAGINA_OFITODO' y 'TOKEN_PAGINA_OFITODO' con tus valores reales
-    os.getenv("OFITODO_MESSENGER_PAGE_ID"): { 
-        'tenant_number': '524495486324',  # El número de WhatsApp de Ofitodo
-        'page_access_token': os.getenv("OFITODO_PAGE_ACCESS_TOKEN")
-    },
-    # EJEMPLO: Si tuvieras La Porfirianna
-    os.getenv("UNILOVA_MESSENGER_PAGE_ID"): { 
-        'tenant_number': '123',  # El número de WhatsApp de La Porfirianna
-        'page_access_token': os.getenv("UNILOVA_PAGE_ACCESS_TOKEN")
-    }
-    # ... Agrega más páginas según sea necesario ...
-}
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
 load_dotenv()  # Cargar desde archivo específico
@@ -136,6 +123,7 @@ DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
 IA_ESTADOS = {}
 client = OpenAI(api_key=OPENAI_API_KEY)  # ✅ 
 # ——— Configuración Multi-Tenant ——— #
+# Reemplaza tu bloque NUMEROS_CONFIG (línea 92) con este:
 NUMEROS_CONFIG = {
     '524495486142': {  # Número de Mektia
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
@@ -144,7 +132,10 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("MEKTIA_DB_USER"),
         'db_password': os.getenv("MEKTIA_DB_PASSWORD"),
         'db_name': os.getenv("MEKTIA_DB_NAME"),
-        'dominio': 'smartwhats.mektia.com'
+        'dominio': 'smartwhats.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'MEKTIA_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'MEKTIA_PAGE_ACCESS_TOKEN'
     },
     '123': {  # Número de Unilova
         'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
@@ -154,7 +145,10 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("UNILOVA_DB_PASSWORD"),
         'db_name': os.getenv("UNILOVA_DB_NAME"),
         'dominio': 'unilova.mektia.com',
-        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_UNILOVA")
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_UNILOVA"),
+        # Claves de Messenger
+        'messenger_page_id_env': 'UNILOVA_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'UNILOVA_PAGE_ACCESS_TOKEN'
     },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
@@ -163,43 +157,58 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("PORFIRIANNA_DB_USER"),
         'db_password': os.getenv("PORFIRIANNA_DB_PASSWORD"),
         'db_name': os.getenv("PORFIRIANNA_DB_NAME"),
-        'dominio': 'laporfirianna.mektia.com'
+        'dominio': 'laporfirianna.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'LAPORFIRIANNA_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'LAPORFIRIANNA_PAGE_ACCESS_TOKEN'
     },
-    '524495486324': {  # Número de Ofitodo - CORREGIDO
+    '524495486324': {  # Número de Ofitodo
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("FITO_DB_HOST"),                  
         'db_user': os.getenv("FITO_DB_USER"),                  
         'db_password': os.getenv("FITO_DB_PASSWORD"),          
         'db_name': os.getenv("FITO_DB_NAME"),                  
-        'dominio': 'ofitodo.mektia.com'
+        'dominio': 'ofitodo.mektia.com',
+        # Claves de Messenger (usando el prefijo FITO_ o OFITODO_ según tu .env)
+        'messenger_page_id_env': 'OFITODO_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'OFITODO_PAGE_ACCESS_TOKEN'
     },
-    '1011': {  # Número de Maindsteel - CORREGIDO
+    '1011': {  # Número de Maindsteel
         'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("MAINDSTEEL_DB_HOST"),                  
         'db_user': os.getenv("MAINDSTEEL_DB_USER"),                  
         'db_password': os.getenv("MAINDSTEEL_DB_PASSWORD"),          
         'db_name': os.getenv("MAINDSTEEL_DB_NAME"),                  
-        'dominio': 'maindsteel.mektia.com'
+        'dominio': 'maindsteel.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'MAINDSTEEL_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'MAINDSTEEL_PAGE_ACCESS_TOKEN'
     },
-    '1012': {  # Número de Drasgo - CORREGIDO
+    '1012': {  # Número de Drasgo
         'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"), 
         'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),   
-        'db_host': os.getenv("DRASCO_DB_HOST"),                 
+        'db_host': os.getenv("DRASCO_DB_HOST"), # Nota: Tienes un typo aquí (DRASCO)                 
         'db_user': os.getenv("DRASGO_DB_USER"),                
         'db_password': os.getenv("DRASGO_DB_PASSWORD"),          
         'db_name': os.getenv("DRASGO_DB_NAME"),                  
-        'dominio': 'drasgo.mektia.com'
+        'dominio': 'drasgo.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
-    '1013': {  # Número de Lacse - CORREGIDO
+    '1013': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("LACSE_DB_HOST"),                  
         'db_user': os.getenv("LACSE_DB_USER"),                  
         'db_password': os.getenv("LACSE_DB_PASSWORD"),          
         'db_name': os.getenv("LACSE_DB_NAME"),                  
-        'dominio': 'lacse.mektia.com'
+        'dominio': 'lacse.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'LACSE_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'LACSE_PAGE_ACCESS_TOKEN'
     }
 }
 
@@ -212,6 +221,26 @@ servicios_clave = [
             'hosting', 'dominio', 'mantenimiento', 'soporte',
             'electronica', 'hardware', 'iot', 'internet de las cosas',
         ]    
+
+FACEBOOK_PAGE_MAP = {}
+for tenant_key, config_data in NUMEROS_CONFIG.items():
+    # Obtener los NOMBRES de las variables de entorno
+    page_id_env_key = config_data.get('messenger_page_id_env')
+    token_env_key = config_data.get('messenger_token_env')
+    
+    if page_id_env_key and token_env_key:
+        # Obtener los VALORES reales del .env
+        page_id = os.getenv(page_id_env_key)
+        token = os.getenv(token_env_key)
+        
+        # Si las variables existen en el .env, las agregamos al mapa
+        if page_id and token:
+            FACEBOOK_PAGE_MAP[page_id] = {
+                'tenant_number': tenant_key, # Este es el enlace dinámico (ej. '123')
+                'page_access_token': token
+            }
+
+app.logger.info(f"🗺️ FACEBOOK_PAGE_MAP cargado dinámicamente con {len(FACEBOOK_PAGE_MAP)} páginas.")
 
 DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
