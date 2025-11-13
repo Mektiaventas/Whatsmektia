@@ -4366,9 +4366,6 @@ def get_plan_for_domain(dominio):
 
 def get_plan_status_for_user(user_email, config=None):
     # --- Lógica de Inicialización de Variables del Plan ---
-    # NOTA: En tu código real, estas variables (plan_id, mensajes_incluidos, etc.)
-    # deben ser cargadas desde tu base de datos central o sistema de gestión de planes.
-    # Aquí solo se inicializan para el flujo de la función.
     plan_id = "DEFAULT_PLAN_ID"
     plan_name = "Plan Básico"
     # Límite de conversaciones del plan. Usamos un valor grande si no hay límite definido.
@@ -4386,18 +4383,22 @@ def get_plan_status_for_user(user_email, config=None):
         conn_t = get_db_connection(config)
         cur_t = conn_t.cursor()
 
-        # ✅ NUEVA CONSULTA: Cuenta el TOTAL de registros en la tabla de sesiones
-        # Esto es el total de conversaciones consumidas según la lógica de 23.59 horas
-        sql_sessions = "SELECT SUM(conversaciones) FROM contactos" 
+        # ✅ CONSULTA MODIFICADA: Suma de 'conversaciones' de 'contactos', filtrado por MONTH=11 y año actual (UTC_TIMESTAMP).
+        sql_sessions = """
+            SELECT SUM(conversaciones) 
+            FROM contactos 
+            WHERE MONTH(fecha_actualizacion) = 11 
+              AND YEAR(fecha_actualizacion) = YEAR(UTC_TIMESTAMP())
+        """ 
 
         try:
             cur_t.execute(sql_sessions)
             row = cur_t.fetchone()
             # Si hay resultado, úsalo; si es None, el consumo es 0
             conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
-            app.logger.info(f"🔎 Conversaciones Consumidas (nuevas_conversaciones) => {conversaciones_consumidas}")
+            app.logger.info(f"🔎 Conversaciones Consumidas (contactos.conversaciones, Nov) => {conversaciones_consumidas}")
         except Exception as sql_err:
-            app.logger.warning(f"⚠️ Conteo de nuevas_conversaciones falló: {sql_err}")
+            app.logger.warning(f"⚠️ Conteo de contactos.conversaciones (Nov) falló: {sql_err}")
             conversaciones_consumidas = 0
         finally:
             # Es crucial cerrar el cursor y la conexión de la base de datos del tenant
