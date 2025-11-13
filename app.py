@@ -3917,6 +3917,41 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
 
+def _ensure_contactos_conversaciones_columns(config=None):
+    """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    
+    try:
+        # Columna para el conteo de conversaciones: MODIFICAR para asegurar DEFAULT 0
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'conversaciones'")
+        row = cursor.fetchone()
+        if row is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN conversaciones INT DEFAULT 0")
+        elif 'default_value' in row and row['default_value'] != '0':
+             # ALTERAR para asegurar el DEFAULT 0 (requerido para MySQL robusto)
+            try:
+                 cursor.execute("ALTER TABLE contactos MODIFY COLUMN conversaciones INT DEFAULT 0")
+            except Exception:
+                app.logger.warning("⚠️ No se pudo modificar contactos.conversaciones a DEFAULT 0")
+        
+        # Columna para la marca de tiempo de la última conversación contada
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'timestamp'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN timestamp DATETIME DEFAULT NULL")
+
+        conn.commit()
+        app.logger.info("🔧 Columnas 'conversaciones' y 'timestamp' aseguradas en tabla contactos")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de conteo en contactos: {e}")
+        try: conn.rollback()
+        except: pass
+    finally:
+        cursor.close()
+        conn.close()
+
 def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
     """Envía alerta al administrador sobre nueva cita con más detalles del servicio"""
     if config is None:
