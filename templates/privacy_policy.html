@@ -1,65 +1,352 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Política de Privacidad</title>
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 2em; color: #333; }
-    h1, h2 { color: #2c3e50; }
-    a { color: #2980b9; }
-    .container { max-width: 800px; margin: auto; }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Política de Privacidad - Mektia</title>
+    <style>
+        :root {
+            --bg-primary: #1f2937;
+            --bg-card: #1f2937;
+            --text-light: #ffffff;
+            --text-secondary: #d1d5db;
+            --accent-color: #0b78d1;
+            --border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-light);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--text-light);
+            text-decoration: none;
+        }
+
+        .back-btn {
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+            transition: background-color 0.2s;
+        }
+
+            .back-btn:hover {
+                background: #0a6cbd;
+            }
+
+        .container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 0 2rem;
+        }
+
+        .privacy-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: var(--text-light);
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid var(--accent-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .last-updated {
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-bottom: 2rem;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+        }
+
+        h2 {
+            color: var(--text-light);
+            font-size: 1.3rem;
+            margin: 1.5rem 0 1rem 0;
+            padding-left: 0.5rem;
+            border-left: 4px solid var(--accent-color);
+        }
+
+        p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+        }
+
+        ul {
+            margin: 1rem 0;
+            padding-left: 1.5rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+        }
+
+        strong {
+            color: var(--text-light);
+        }
+
+        a {
+            color: var(--accent-color);
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+
+            a:hover {
+                color: #60a5fa;
+                text-decoration: underline;
+            }
+
+        .contact-info {
+            background: rgba(11, 120, 209, 0.1);
+            border: 1px solid var(--accent-color);
+            border-radius: 8px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        /* Estilos responsivos */
+        @media (max-width: 768px) {
+            .header {
+                padding: 1rem;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+
+            .container {
+                padding: 0 1rem;
+                margin: 1rem auto;
+            }
+
+            .privacy-card {
+                padding: 1.5rem;
+            }
+
+            h1 {
+                font-size: 1.5rem;
+            }
+
+            h2 {
+                font-size: 1.1rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .privacy-card {
+                padding: 1rem;
+            }
+
+            .container {
+                padding: 0 0.5rem;
+            }
+
+            h1 {
+                font-size: 1.3rem;
+            }
+        }
+
+        /* Animaciones suaves */
+        .privacy-card {
+            animation: fadeInUp 0.6s ease-out;
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Scroll personalizado */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--accent-color);
+            border-radius: 4px;
+        }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: #0a6cbd;
+            }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Política de Privacidad</h1>
-    <!--<p>Última actualización: 1 de Agosto de 2025</p>-->
-    <p>Última actualización: 10 de Octubre del 2025</p>
-    <h2>1. Quiénes somos</h2>
-    <p>Somos MEKTIA. Esta aplicación integra la API de WhatsApp Business y OpenAI para ofrecer atención automatizada a través de WhatsApp.</p>
+    <header class="header">
+        <div class="header-content">
+            <a href="/" class="logo">MEKTIA</a>
+            <a href="javascript:history.back()" class="back-btn">← Volver al Chat</a>
+        </div>
+    </header>
 
-    <h2>2. Datos que recopilamos</h2>
-    <ul>
-      <li><strong>Mensajes de usuario:</strong> texto, stickers, imágenes o archivos que envíes a nuestro bot.</li>
-      <li><strong>Metadatos de conversación:</strong> número de teléfono (hashed), timestamps de envío y recepción.</li>
-      <li><strong>Datos de contacto:</strong> tu nombre de perfil y número (sólo para responderte, no compartimos ni vendemos).</li>
-    </ul>
+    <div class="container">
+        <div class="privacy-card">
+            <h1>Política de Privacidad</h1>
+            <div class="last-updated">
+                <!--<p>Última actualización: 1 de Agosto de 2025</p>-->
+                <p>Última actualización: 10 de Octubre del 2025</p>
+            </div>
 
-    <h2>3. Finalidad del tratamiento</h2>
-    <p>Usamos estos datos para:</p>
-    <ul>
-      <li>Responder automáticamente tus consultas con IA.</li>
-      <li>Almacenar historial para mejorar la calidad del servicio.</li>
-      <li>Detectar cuándo escalar a atención humana.</li>
-    </ul>
+            <h2>1. Quiénes somos</h2>
+            <p>Somos MEKTIA. Esta aplicación integra la API de WhatsApp Business y OpenAI para ofrecer atención automatizada a través de WhatsApp.</p>
 
-    <h2>4. Legitimación</h2>
-    <p>El tratamiento se basa en tu consentimiento (al enviarnos un mensaje das tu consentimiento), y en el interés legítimo de ofrecerte un servicio de atención automatizada.</p>
+            <h2>2. Datos que recopilamos</h2>
+            <ul>
+                <li><strong>Mensajes de usuario:</strong> texto, stickers, imágenes o archivos que envíes a nuestro bot.</li>
+                <li><strong>Metadatos de conversación:</strong> número de teléfono (hashed), timestamps de envío y recepción.</li>
+                <li><strong>Datos de contacto:</strong> tu nombre de perfil y número (sólo para responderte, no compartimos ni vendemos).</li>
+            </ul>
 
-    <h2>5. Destinatarios</h2>
-    <p>No cedemos tus datos a terceros, salvo proveedores de infraestructura (WhatsApp, OpenAI) bajo sus propias políticas de privacidad.</p>
+            <h2>3. Finalidad del tratamiento</h2>
+            <p>Usamos estos datos para:</p>
+            <ul>
+                <li>Responder automáticamente tus consultas con IA.</li>
+                <li>Almacenar historial para mejorar la calidad del servicio.</li>
+                <li>Detectar cuándo escalar a atención humana.</li>
+            </ul>
 
-    <h2>6. Conservación</h2>
-    <p>Guardamos los datos durante 90 días en nuestra base MySQL, tras lo cual se eliminan completamente.</p>
+            <h2>4. Legitimación</h2>
+            <p>El tratamiento se basa en tu consentimiento (al enviarnos un mensaje das tu consentimiento), y en el interés legítimo de ofrecerte un servicio de atención automatizada.</p>
 
-    <h2>7. Derechos del usuario</h2>
-    <p>Puedes solicitar en cualquier momento:</p>
-    <ul>
-      <li>Acceso a tus datos.</li>
-      <li>Rectificación o supresión.</li>
-      <li>Limitación u oposición al tratamiento.</li>
-    </ul>
-    <p>Para ejercerlos, escríbenos a: <a href="mailto:mektia.ventas@gmail.com">mektia.ventas@gmail.com</a></p>
+            <h2>5. Destinatarios</h2>
+            <p>No cedemos tus datos a terceros, salvo proveedores de infraestructura (WhatsApp, OpenAI) bajo sus propias políticas de privacidad.</p>
 
-    <h2>8. Seguridad</h2>
-    <p>Implementamos medidas técnicas y organizativas para proteger tus datos contra accesos no autorizados.</p>
+            <h2>6. Conservación</h2>
+            <p>Guardamos los datos durante 90 días en nuestra base MySQL, tras lo cual se eliminan completamente.</p>
 
-    <h2>9. Cambios en esta política</h2>
-    <p>Podemos actualizarla periódicamente. La versión más reciente estará siempre en esta URL.</p>
+            <h2>7. Derechos del usuario</h2>
+            <p>Puedes solicitar en cualquier momento:</p>
+            <ul>
+                <li>Acceso a tus datos.</li>
+                <li>Rectificación o supresión.</li>
+                <li>Limitación u oposición al tratamiento.</li>
+            </ul>
+            <div class="contact-info">
+                <p>Para ejercerlos, escríbenos a: <a href="mailto:mektia.ventas@gmail.com">mektia.ventas@gmail.com</a></p>
+            </div>
 
-    <h2>10. Contacto</h2>
-    <p>Para cualquier duda sobre privacidad, contáctanos en <a href="mailto:mektia.ventas@gmail.com">mektia.ventas@gmail.com</a>.</p>
-  </div>
+            <h2>8. Seguridad</h2>
+            <p>Implementamos medidas técnicas y organizativas para proteger tus datos contra accesos no autorizados.</p>
+
+            <h2>9. Cambios en esta política</h2>
+            <p>Podemos actualizarla periódicamente. La versión más reciente estará siempre en esta URL.</p>
+
+            <h2>10. Contacto</h2>
+            <div class="contact-info">
+                <p>Para cualquier duda sobre privacidad, contáctanos en <a href="mailto:mektia.ventas@gmail.com">mektia.ventas@gmail.com</a>.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Script para mejorar la experiencia de usuario
+    document.addEventListener('DOMContentLoaded', function() {
+      // Smooth scroll para enlaces internos (si los hubiera)
+      document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+        anchor.addEventListener('click', function (e) {
+          e.preventDefault();
+          const target = document.querySelector(this.getAttribute('href'));
+          if (target) {
+            target.scrollIntoView({
+              behavior: 'smooth',
+              block: 'start'
+            });
+          }
+        });
+      });
+
+      // Mejorar el botón de volver
+      const backBtn = document.querySelector('.back-btn');
+      if (backBtn) {
+        backBtn.addEventListener('click', function(e) {
+          e.preventDefault();
+          // Intentar volver a la página anterior, si no existe ir al inicio
+          if (document.referrer && document.referrer.includes(window.location.host)) {
+            window.history.back();
+          } else {
+            window.location.href = '/';
+          }
+        });
+      }
+
+      // Efecto de aparición para las secciones
+      const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+      };
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+          }
+        });
+      }, observerOptions);
+
+      // Observar todas las secciones h2
+      document.querySelectorAll('h2').forEach(section => {
+        section.style.opacity = '0';
+        section.style.transform = 'translateY(20px)';
+        section.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(section);
+      });
+    });
+    </script>
 </body>
 </html>
