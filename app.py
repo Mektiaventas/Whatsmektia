@@ -6095,7 +6095,21 @@ Devuelve únicamente el resumen breve (1-3 líneas).
                         app.logger.info(f"📊 Chat del asesor {telefono} movido a {log_msg}")
                     else:
                         app.logger.warning("⚠️ Columna 'Asesores' no encontrada y no se asignó columna específica. No se movió el chat del asesor.")
-                except
+                except Exception as e:
+                    app.logger.warning(f"⚠️ No se pudo mover el chat del asesor a la columna: {e}")
+                
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo notificar/registrar al asesor {telefono}: {e}", exc_info=True)
+        
+        # 5. Mover el chat del CLIENTE (numero_cliente) a la columna determinada (columna_destino_id)
+        # Usa la columna específica si se detectó, o el fallback 3.
+        actualizar_columna_chat(numero_cliente, columna_destino_id, config)
+        app.logger.info(f"📊 Chat del cliente {numero_cliente} movido a columna {columna_destino_id}.")
+
+        return enviado
+    except Exception as e:
+        app.logger.error(f"🔴 pasar_contacto_asesor error: {e}", exc_info=True)
+        return False
 
 @app.route('/chats/data')
 def obtener_datos_chat():
