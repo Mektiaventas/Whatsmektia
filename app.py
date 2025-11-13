@@ -1,6 +1,4 @@
-#from tkinter import SE 
 import traceback
-#import telegram
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
