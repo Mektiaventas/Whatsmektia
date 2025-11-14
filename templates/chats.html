@@ -307,21 +307,20 @@ asi {% extends "base.html" %}
                        accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
                 <!-- textarea -->
-                <!-- textarea -->
-<textarea name="texto"
-          id="mensaje-texto"
-          placeholder="Escribe un mensaje manual..."
-          class="reply-textarea"
-          autocomplete="off"
-          rows="1"
-          onkeydown="handleMessageKeyDown(event)"
-          oninput="autoResizeTextarea(this)"
-          style="resize: none; overflow-y: auto;">
-</textarea>
+                <textarea name="texto"
+                          id="mensaje-texto"
+                          placeholder="Escribe un mensaje manual..."
+                          class="reply-textarea"
+                          autocomplete="off"
+                          rows="1"
+                          onkeydown="handleMessageKeyDown(event)"
+                          oninput="autoResizeTextarea(this)"
+                          style="resize: none; overflow-y: auto;"
+                          required></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
-            </div> 
-        </form>  
+            </div>
+        </form>
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -1519,6 +1518,7 @@ function pollSelectedMessages() {
         .catch(err => console.error('Error polling messages:', err));
 }
     /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
+
     function setupChatSearch() {
         const searchInput = document.getElementById('search-chats-input');
         const chatItems = document.querySelectorAll('.chat-item');
@@ -1528,62 +1528,25 @@ function pollSelectedMessages() {
             return;
         }
 
-        // Variable para saber si estamos en modo búsqueda
-        let isSearching = false;
-
         searchInput.addEventListener('input', function (e) {
             const searchTerm = normalizeText(e.target.value);
 
-            if (searchTerm === '') {
-                // Si la búsqueda está vacía, mostrar TODOS los chats
-                isSearching = false;
-                chatItems.forEach(chatItem => {
-                    chatItem.style.display = 'block';
-                });
-            } else {
-                // Si hay término de búsqueda, filtrar los chats
-                isSearching = true;
-                chatItems.forEach(chatItem => {
-                    const aliasElement = chatItem.querySelector('.alias-view');
+            chatItems.forEach(chatItem => {
+                const aliasElement = chatItem.querySelector('.alias-view');
+                const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
 
-                    if (!aliasElement) return;
+                if (!aliasElement) return;
 
-                    // CORREGIDO: Usar data-chat-num en lugar de dataset.chatNum
-                    const chatNumber = chatItem.getAttribute('data-chat-num') ?
-                        normalizeText(chatItem.getAttribute('data-chat-num')) : '';
+                const chatName = normalizeText(aliasElement.textContent);
+                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
 
-                    const chatName = normalizeText(aliasElement.textContent);
+                const matchesSearch = chatName.includes(searchTerm) ||
+                    chatNumber.includes(searchTerm) ||
+                    (searchTerm === ''); // Mostrar todos si está vacío
 
-                    const matchesSearch = chatName.includes(searchTerm) ||
-                        chatNumber.includes(searchTerm);
-
-                    chatItem.style.display = matchesSearch ? 'block' : 'none';
-                });
-            }
-        });
-         
-        // Cuando se hace clic en cualquier chat, mostrar TODOS los chats
-        chatItems.forEach(chatItem => {
-            chatItem.addEventListener('click', function () {
-                // Solo hacer esto si estamos en modo búsqueda
-                if (isSearching) {
-                    // Mostrar TODOS los chats
-                    chatItems.forEach(item => {
-                        item.style.display = 'block';
-                    });
-
-                    // Limpiar la búsqueda y salir del modo búsqueda
-                    if (searchInput) {
-                        searchInput.value = '';
-                        isSearching = false;
-                    }
-                }
-                // Si no estamos en modo búsqueda, no hacer nada (comportamiento normal)
+                chatItem.style.display = matchesSearch ? 'block' : 'none';
             });
         });
-
-        console.debug('Chat search functionality initialized - smart version');
-    } 
 
         // También buscar en chats cargados dinámicamente
         const observer = new MutationObserver(function (mutations) {
@@ -2090,6 +2053,7 @@ function normalizeText(s) {
 }
 
     /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
     function setupFileUpload() {
         const fileInput = document.getElementById('file-input');
         const fileAttachBtn = document.getElementById('file-attach-btn');
@@ -2101,6 +2065,9 @@ function normalizeText(s) {
         const messageForm = document.getElementById('messageForm');
         const textarea = document.getElementById('mensaje-texto');
 
+        // Variable para almacenar el archivo seleccionado
+        let selectedFile = null;
+
         // Abrir selector de archivos al hacer clic en el botón
         fileAttachBtn.addEventListener('click', function () {
             fileInput.click();
@@ -2110,6 +2077,7 @@ function normalizeText(s) {
         fileInput.addEventListener('change', function (e) {
             const file = e.target.files[0];
             if (file) {
+                selectedFile = file;
                 showFilePreview(file);
             }
         });
@@ -2128,8 +2096,9 @@ function normalizeText(s) {
             fileSize.textContent = formatFileSize(file.size);
             filePreview.style.display = 'block';
 
-            // Cambiar placeholder del textarea para indicar que el mensaje es opcional
+            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
             textarea.placeholder = "Añade un mensaje (opcional)...";
+            textarea.required = false; // Ya no es requerido porque hay archivo
 
             // Hacer scroll para mostrar la previsualización
             filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2137,19 +2106,19 @@ function normalizeText(s) {
 
         function clearFileSelection() {
             fileInput.value = '';
+            selectedFile = null;
             filePreview.style.display = 'none';
             fileName.textContent = '';
             fileSize.textContent = '';
             fileIcon.textContent = '';
             textarea.placeholder = "Escribe un mensaje manual...";
-            // Resetear altura del textarea
-            textarea.style.height = '44px';
+            textarea.required = true; // Vuelve a ser requerido
         }
 
-        // Validar antes de enviar - CON LIMPIEZA AUTOMÁTICA
+        // Validar antes de enviar
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
-            const hasFile = fileInput.files.length > 0;
+            const hasFile = selectedFile !== null;
 
             if (!hasText && !hasFile) {
                 e.preventDefault();
@@ -2157,85 +2126,20 @@ function normalizeText(s) {
                 return false;
             }
 
-            // MOSTRAR INDICADOR DE ENVÍO
+            // Mostrar indicador de envío
             const sendBtn = document.querySelector('.send-btn');
             const originalText = sendBtn.innerHTML;
             sendBtn.innerHTML = '⏳';
             sendBtn.disabled = true;
 
-            // LIMPIAR AUTOMÁTICAMENTE DESPUÉS DE ENVIAR
+            // Restaurar después de 3 segundos por si hay error
             setTimeout(() => {
-                clearFileSelection(); // ← ESTA LÍNEA LIMPIA LA PREVIEW AUTOMÁTICAMENTE
                 sendBtn.innerHTML = originalText;
                 sendBtn.disabled = false;
-            }, 2000); // Esperar 2 segundos para que se complete el envío
+            }, 3000);
         });
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
-
-    // Función para manejar teclas en el textarea
-    function handleMessageKeyDown(event) {
-        if (event.key === 'Enter') {
-            if (event.shiftKey) {
-                // Shift+Enter: Insertar nueva línea
-                event.preventDefault();
-                const textarea = event.target;
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                const value = textarea.value;
-
-                textarea.value = value.substring(0, start) + '\n' + value.substring(end);
-                textarea.selectionStart = textarea.selectionEnd = start + 1;
-
-                // Actualizar altura
-                autoResizeTextarea(textarea);
-            } else {
-                // Enter solo: Enviar mensaje inmediatamente (permite solo archivo)
-                event.preventDefault();
-                const form = document.getElementById('messageForm');
-                const textarea = document.getElementById('mensaje-texto');
-                const fileInput = document.getElementById('file-input');
-
-                // Validar que haya contenido para enviar - PERMITE SOLO ARCHIVO
-                const hasText = textarea.value.trim() !== '';
-                const hasFile = fileInput.files.length > 0;
-
-                if (!hasText && !hasFile) {
-                    // No hay nada que enviar
-                    alert('Por favor escribe un mensaje o selecciona un archivo');
-                    return;
-                }
-
-                // Enviar el formulario inmediatamente
-                form.submit();
-            }
-        }
-    }
-
-    // Función para auto-ajustar altura del textarea
-    function autoResizeTextarea(textarea) {
-        // Resetear altura para calcular la nueva
-        textarea.style.height = 'auto';
-
-        // Calcular nueva altura sin límites
-        const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
-
-        // Aplicar nueva altura
-        textarea.style.height = newHeight + 'px';
-
-        // Si el contenido se redujo mucho, mantener un tamaño mínimo
-        if (textarea.value === '' || textarea.value.trim() === '') {
-            textarea.style.height = '44px';
-        }
-    }
-
-    // Inicializar altura del textarea al cargar
-    document.addEventListener('DOMContentLoaded', function () {
-        const textarea = document.getElementById('mensaje-texto');
-        if (textarea) {
-            autoResizeTextarea(textarea);
-        }
-    }); 
 </script>
-{% endblock %} 
+{% endblock %}   
