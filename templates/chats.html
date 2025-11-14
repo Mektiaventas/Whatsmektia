@@ -324,7 +324,7 @@
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
                           style="resize: none; overflow-y: auto;"
-                          required></textarea>
+                   
 
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
@@ -468,23 +468,20 @@
                         // Enter solo: Enviar mensaje inmediatamente
                         event.preventDefault();
                         const form = document.getElementById('messageForm');
-                        const textarea = document.getElementById('mensaje-texto');
                         const fileInput = document.getElementById('file-input');
 
-                        // Validar que haya contenido para enviar
-                        const hasText = textarea.value.trim() !== '';
+                        // Validar que haya archivo O texto para enviar
+                        const hasText = form.texto.value.trim() !== '';
                         const hasFile = fileInput.files.length > 0;
 
-                        if (!hasText && !hasFile) {
-                            // No hay nada que enviar
-                            return;
+                        if (hasText || hasFile) {
+                            // Hay contenido para enviar, enviar formulario
+                            form.submit();
                         }
-
-                        // Enviar el formulario inmediatamente
-                        form.submit();
+                        // Si no hay nada, no hacer nada
                     }
                 }
-            }
+            } 
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -2243,11 +2240,8 @@ function normalizeText(s) {
             sendBtn.innerHTML = '⏳';
             sendBtn.disabled = true;
 
-            // Restaurar después de 3 segundos por si hay error
-            setTimeout(() => {
-                sendBtn.innerHTML = originalText;
-                sendBtn.disabled = false;
-            }, 3000);
+            // Permitir que el formulario se envíe normalmente
+            // No hacer preventDefault() si hay contenido
         }); 
 
         console.debug('File upload functionality initialized - WhatsApp style');

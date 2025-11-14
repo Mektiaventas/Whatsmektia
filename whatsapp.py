@@ -529,8 +529,8 @@ def enviar_imagen(numero, image_url, config=None):
         logger.error(f"Exception enviar_imagen: {e}")
         return False
 
-def enviar_documento(numero, file_url, filename, config=None):
-    """Enviar documento por link con logging diagnóstico."""
+def enviar_documento(numero, file_path_or_url, filename, config=None):
+    """Enviar documento - acepta tanto URLs como rutas locales de archivos."""
     if config is None:
         try:
             from app import obtener_configuracion_por_host
@@ -547,11 +547,31 @@ def enviar_documento(numero, file_url, filename, config=None):
             logger.error("🔴 enviar_documento: falta phone_number_id o whatsapp_token (config/ENV)")
             return False
 
+        # Determinar si es ruta local o URL
+        if os.path.exists(file_path_or_url):
+            # Es un archivo local, subirlo primero
+            file_url, uploaded_filename = subir_archivo_whatsapp(file_path_or_url, filename, config)
+            if not file_url:
+                logger.error("🔴 enviar_documento: no se pudo subir el archivo local")
+                return False
+        else:
+            # Ya es una URL
+            file_url = file_path_or_url
+            uploaded_filename = filename
+
         url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
         headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-        payload = {'messaging_product':'whatsapp','to':numero,'type':'document','document':{'link': file_url,'filename': filename}}
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'document',
+            'document': {
+                'link': file_url,
+                'filename': uploaded_filename
+            }
+        }
 
-        logger.info(f"📤 enviar_documento -> to={numero} phone_number_id={phone_id} file_url={file_url[:200]} filename={filename}")
+        logger.info(f"📤 enviar_documento -> to={numero} phone_number_id={phone_id} file_url={file_url[:200]} filename={uploaded_filename}")
         r = requests.post(url, headers=headers, json=payload, timeout=20)
 
         status = getattr(r, 'status_code', 'n/a')
@@ -568,7 +588,58 @@ def enviar_documento(numero, file_url, filename, config=None):
         return False
     except Exception as e:
         logger.error(f"Exception enviar_documento: {e}")
-        return False
+        return False 
+
+
+    def subir_archivo_whatsapp(file_path, filename, config=None):
+    """
+    Sube un archivo a un servidor y devuelve URL pública para WhatsApp
+    """
+    try:
+        if config is None:
+            try:
+                from app import obtener_configuracion_por_host
+                config = obtener_configuracion_por_host()
+            except Exception:
+                config = None
+        
+        # Obtener dominio para construir URL pública
+        dominio = config.get('dominio') if isinstance(config, dict) else os.getenv('MI_DOMINIO', 'http://localhost:5000')
+        
+        # Crear directorio de uploads si no existe
+        try:
+            from app import UPLOAD_FOLDER
+            uploads_dir = UPLOAD_FOLDER
+        except ImportError:
+            uploads_dir = os.path.join(os.path.dirname(__file__), '..', 'uploads')
+        
+        os.makedirs(uploads_dir, exist_ok=True)
+        
+        # Mover archivo a uploads con nombre seguro
+        safe_filename = secure_filename(f"{int(time.time())}_{filename}")
+        final_path = os.path.join(uploads_dir, safe_filename)
+        
+        # Copiar archivo temporal a uploads
+        shutil.copy2(file_path, final_path)
+        
+        # Construir URL pública
+        if dominio.startswith('http'):
+            base_url = dominio.rstrip('/')
+        else:
+            base_url = f"https://{dominio}"
+        
+        public_url = f"{base_url}/uploads/{safe_filename}"
+        
+        app.logger.info(f"📁 Archivo subido: {final_path}")
+        app.logger.info(f"🌐 URL pública: {public_url}")
+        
+        return public_url, safe_filename
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error subiendo archivo: {e}")
+        return None, None 
+
+
 
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Enviar audio (voice message) por link con validaciones y logging diagnóstico."""
