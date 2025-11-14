@@ -7353,7 +7353,6 @@ def messenger_webhook_verification():
     app.logger.error("🔴 Messenger Webhook: Token de verificación inválido")
     return 'Token inválido', 403
 
-
 @app.route('/messenger_webhook', methods=['POST'])
 def messenger_webhook():
     """Maneja la recepción de mensajes y eventos de Messenger (POST) con lógica Multi-Tenant."""
@@ -7400,10 +7399,21 @@ def messenger_webhook():
 
                 app.logger.info(f"📥 Messenger Incoming ({config.get('dominio')}) {numero}: '{texto[:200]}'")
 
-                # 3. Inicializar Contacto/Meta y Guardar Mensaje Entrante
+                # --- INICIO DE LA MODIFICACIÓN ---
+                
+                # 3. Obtener nombre y actualizar Contacto/Meta
+                nombre_messenger = None
+                try:
+                    # 📞 LLAMADA API PARA OBTENER EL NOMBRE
+                    nombre_messenger = obtener_nombre_perfil_messenger(sender_id, config)
+                except Exception as e_profile:
+                    app.logger.warning(f"⚠️ Error obteniendo perfil de Messenger: {e_profile}")
+
+                # 4. Inicializar Contacto/Meta y Guardar Mensaje Entrante
                 try:
                     inicializar_chat_meta(numero, config)
-                    actualizar_info_contacto(numero, config, nombre_telegram=None, plataforma='Facebook') 
+                    # 💾 PASAR EL NOMBRE OBTENIDO
+                    actualizar_info_contacto(numero, config, nombre_perfil=nombre_messenger, plataforma='Facebook') 
                     
                     guardar_mensaje_inmediato(
                         numero, texto, config, 
@@ -7415,7 +7425,8 @@ def messenger_webhook():
                 except Exception as e:
                     app.logger.warning(f"⚠️ Messenger pre-processing failed: {e}")
 
-                # 4. Llamar al flujo unificado
+                # 5. Llamar al flujo unificado
+                # (La línea original '4. Llamar al flujo unificado' se convierte en '5')
                 procesar_mensaje_unificado(
                     msg=messaging_event,
                     numero=numero,
@@ -7429,6 +7440,8 @@ def messenger_webhook():
                     transcripcion=None,
                     incoming_saved=True
                 )
+                
+                # --- FIN DE LA MODIFICACIÓN ---
                 
         return 'OK', 200
 
@@ -9717,6 +9730,49 @@ def test_contacto(numero = '5214493432744'):
         'config': config.get('dominio')
     })
 
+# app.py (Añadir esta nueva función cerca de la línea 4300)
+
+def obtener_nombre_perfil_messenger(sender_id, config):
+    """
+    Obtiene el first_name and last_name de un usuario de Messenger
+    usando su PSID (sender_id) y el token de la página.
+    """
+    try:
+        # El token de la página se carga en la config por obtener_configuracion_por_page_id
+        page_access_token = config.get('page_access_token') 
+        
+        if not page_access_token:
+            app.logger.warning(f"⚠️ MESSENGER: No hay page_access_token en config para obtener perfil de {sender_id}")
+            return None
+
+        url = f"https://graph.facebook.com/v18.0/{sender_id}"
+        params = {
+            'fields': 'first_name,last_name',
+            'access_token': page_access_token
+        }
+        
+        response = requests.get(url, params=params, timeout=5)
+        
+        if response.status_code == 200:
+            data = response.json()
+            first_name = data.get('first_name', '')
+            last_name = data.get('last_name', '')
+            nombre_completo = f"{first_name} {last_name}".strip()
+            
+            if nombre_completo:
+                app.logger.info(f"✅ MESSENGER: Perfil obtenido para {sender_id} -> {nombre_completo}")
+                return nombre_completo
+            else:
+                app.logger.info(f"ℹ️ MESSENGER: Perfil API OK pero sin nombre para {sender_id}")
+                return None
+        else:
+            app.logger.error(f"🔴 MESSENGER: Error {response.status_code} obteniendo perfil de {sender_id}. {response.text}")
+            return None
+
+    except Exception as e:
+        app.logger.error(f"🔴 MESSENGER: Excepción en obtener_nombre_perfil_messenger: {e}")
+        return None
+
 def obtener_nombre_perfil_whatsapp(numero, config=None):
     """Obtiene el nombre del contacto desde la base de datos"""
     if config is None:
@@ -11213,7 +11269,7 @@ def telegram_webhook_multitenant(token_bot):
         # --- 5. Inicializar Contacto/Meta y Guardar Mensaje Entrante ---
         try:
             inicializar_chat_meta(numero_telegram, config)
-            actualizar_info_contacto(numero_telegram, config, nombre_telegram=nombre_telegram, plataforma='Telegram') 
+            actualizar_info_contacto(numero_telegram, config, nombre_perfil=nombre_telegram, plataforma='Telegram') 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed for Telegram: {e}")
 
@@ -11832,8 +11888,8 @@ def actualizar_columna_chat(numero, columna_id, config=None):
             if conn: conn.close()
         except: pass
 
-# --- Función actualizar_info_contacto ---
-def actualizar_info_contacto(numero, config=None, nombre_telegram=None, plataforma=None):
+
+def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma=None):
     """
     Actualiza la información del contacto y gestiona el conteo de conversaciones
     usando la columna 'timestamp' para la ventana de 24 horas.
@@ -11852,7 +11908,7 @@ def actualizar_info_contacto(numero, config=None, nombre_telegram=None, platafor
         
         # --- LÓGICA DE ACTUALIZACIÓN CONTEO DE CONVERSACIONES (24 HORAS) ---
 
-        nombre_a_usar = nombre_telegram
+        nombre_a_usar = nombre_perfil  # <-- CAMBIO AQUÍ
         plataforma_a_usar = plataforma or 'WhatsApp'
         
         # Insertar o actualizar el contacto
