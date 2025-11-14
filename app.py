@@ -7184,12 +7184,15 @@ def webhook_verification():
         return request.args.get('hub.challenge')
     return 'Token inválido', 403
 
-# app.py (Agregar nueva función)
 def obtener_configuracion_por_page_id(page_id):
     """Obtiene la configuración específica del tenant basada en el ID de Página de Facebook."""
     if not page_id:
+        app.logger.warning("⚠️ MESSENGER (Debug): Page ID recibido es NULO. Usando config por defecto/host.")
         return obtener_configuracion_por_host() # Fallback a host
 
+    # DEBUG: Loguear qué IDs de página están cargados en el mapa
+    app.logger.info(f"ℹ️ MESSENGER (Debug): IDs de página en MAPA: {list(FACEBOOK_PAGE_MAP.keys())}")
+    
     page_info = FACEBOOK_PAGE_MAP.get(str(page_id))
     
     if page_info and page_info.get('tenant_number'):
@@ -7199,10 +7202,10 @@ def obtener_configuracion_por_page_id(page_id):
         if config:
             # Asegurar que el access token específico de la página esté disponible en la config
             config['page_access_token'] = page_info['page_access_token'] 
-            app.logger.info(f"✅ Configuración detectada por Page ID {page_id}: {config.get('dominio')}")
+            app.logger.info(f"✅ MESSENGER (Debug): Configuración detectada por Page ID {page_id}: {config.get('dominio')}")
             return config
             
-    app.logger.warning(f"⚠️ Page ID {page_id} no encontrado en mapeo. Usando config por defecto/host.")
+    app.logger.warning(f"⚠️ MESSENGER (Debug): Page ID {page_id} NO ENCONTRADO en FACEBOOK_PAGE_MAP. Usando config por defecto/host.")
     return obtener_configuracion_por_host()
 
 def obtener_configuracion_por_phone_number_id(phone_number_id):
@@ -7365,7 +7368,9 @@ def messenger_webhook():
         for entry in payload['entry']:
             # Extraer el ID de la página que recibió el mensaje
             page_id = str(entry['id'])
-            
+            # --- AÑADIR ESTE LOG ---
+            app.logger.info(f"📥 MESSENGER (Debug): Procesando entrada para Page ID: {page_id}")
+            # --- FIN DEL LOG ---
             # 🔑 PASO CRÍTICO 1: Obtener la configuración del tenant
             config = obtener_configuracion_por_page_id(page_id) 
             
