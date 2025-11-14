@@ -10998,7 +10998,7 @@ def configuracion_precios():
         is_admin=is_admin,
         master_columns=MASTER_COLUMNS
     )
-
+# app.py (Reemplazar en línea 4086)
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
