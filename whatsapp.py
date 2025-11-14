@@ -590,8 +590,7 @@ def enviar_documento(numero, file_path_or_url, filename, config=None):
         logger.error(f"Exception enviar_documento: {e}")
         return False 
 
-
-    def subir_archivo_whatsapp(file_path, filename, config=None):
+def subir_archivo_whatsapp(file_path, filename, config=None):
     """
     Sube un archivo a un servidor y devuelve URL pública para WhatsApp
     """
@@ -643,7 +642,7 @@ def enviar_documento(numero, file_path_or_url, filename, config=None):
         import logging
         logger = logging.getLogger(__name__)
         logger.error(f"🔴 Error subiendo archivo: {e}")
-        return None, None
+        return None, None 
 
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Enviar audio (voice message) por link con validaciones y logging diagnóstico."""
