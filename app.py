@@ -4048,10 +4048,9 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    return send_from_directory(UPLOAD_FOLDER, filename) 
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -10380,64 +10379,59 @@ def enviar_manual():
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
+                    # CONSTRUIR URL PÚBLICA CORRECTA
+                    dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    public_url = f"{dominio}/uploads/{filename}"
+                    
+                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
                     if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
                         # Es imagen - enviar como imagen
-                        public_url = f"{request.url_root}uploads/{filename}"
                         enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
                         archivo_info = f"📷 Imagen: {archivo.filename}"
                         
                     elif file_ext in ['.pdf']:
                         # Es PDF - enviar como documento
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📕 PDF: {archivo.filename}"
                         
                     elif file_ext in ['.doc', '.docx']:
                         # Es Word
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📘 Documento Word: {archivo.filename}"
                         
                     elif file_ext in ['.xls', '.xlsx', '.csv']:
                         # Es Excel
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
                         
                     elif file_ext in ['.ppt', '.pptx']:
                         # Es PowerPoint
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📙 Presentación: {archivo.filename}"
                         
                     elif file_ext in ['.zip', '.rar', '.7z']:
                         # Es archivo comprimido
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
                         
                     elif file_ext in ['.txt', '.rtf']:
                         # Es texto
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📄 Archivo de texto: {archivo.filename}"
                         
                     elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
                         # Es video
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"🎬 Video: {archivo.filename}"
                         
                     elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
                         # Es audio
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"🎵 Audio: {archivo.filename}"
                         
                     else:
                         # Otros tipos - intentar como documento
-                        public_url = f"{request.url_root}uploads/{filename}"
-                        enviar_documento(numero, public_url, filename, config)
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         archivo_info = f"📎 Archivo: {archivo.filename}"
                     
                     mensaje_enviado = True
@@ -10523,7 +10517,6 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
-        
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
