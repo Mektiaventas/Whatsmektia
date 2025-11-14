@@ -1391,9 +1391,10 @@ def asociar_imagenes_productos(servicios, imagenes):
 
 # app.py (Añadir cerca de la línea 4020)
 
-def obtener_precios_paginados(config, page=1, page_size=100):
+def obtener_precios_paginados(config, page=1, page_size=100, search_query=None):
     """
-    Obtiene una página específica de productos y el conteo total.
+    Obtiene una página específica de productos y el conteo total,
+    opcionalmente filtrada por un término de búsqueda.
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -1404,20 +1405,50 @@ def obtener_precios_paginados(config, page=1, page_size=100):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # 1. Contar el total de productos
-        cursor.execute("SELECT COUNT(*) as total FROM precios")
-        total_items = cursor.fetchone()['total']
-        total_pages = math.ceil(total_items / page_size)
+        # Parámetros y cláusula WHERE para la búsqueda
+        params = []
+        where_clause = ""
         
+        if search_query:
+            # Busca en múltiples columnas
+            search_like = f"%{search_query}%"
+            where_clause = """
+                WHERE (
+                    sku LIKE %s 
+                    OR categoria LIKE %s 
+                    OR subcategoria LIKE %s 
+                    OR linea LIKE %s 
+                    OR modelo LIKE %s 
+                    OR descripcion LIKE %s
+                )
+            """
+            # Añade el parámetro de búsqueda 6 veces (una por cada columna)
+            params.extend([search_like] * 6)
+
+        # 1. Contar el total de productos (con el filtro aplicado)
+        cursor.execute(f"SELECT COUNT(*) as total FROM precios {where_clause}", tuple(params))
+        total_items = cursor.fetchone()['total']
+        total_pages = math.ceil(total_items / page_size) if total_items > 0 else 1
+        
+        # Asegurar que la página actual no esté fuera de rango
+        if page > total_pages:
+            page = total_pages
+        if page < 1:
+            page = 1
+
         # 2. Calcular el offset
         offset = (page - 1) * page_size
         
-        # 3. Obtener solo la página actual
-        cursor.execute("""
-            SELECT * FROM precios
+        # 3. Obtener solo la página actual (con el filtro y paginación)
+        query_paginada = f"""
+            SELECT * FROM precios 
+            {where_clause}
             ORDER BY sku, categoria, modelo
             LIMIT %s OFFSET %s;
-        """, (page_size, offset))
+        """
+        params.extend([page_size, offset])
+        
+        cursor.execute(query_paginada, tuple(params))
         
         items = cursor.fetchall()
         
@@ -1426,12 +1457,13 @@ def obtener_precios_paginados(config, page=1, page_size=100):
             'total_items': total_items,
             'total_pages': total_pages,
             'current_page': page,
-            'page_size': page_size
+            'page_size': page_size,
+            'search_query': search_query # Devolver la búsqueda para los enlaces
         }
         
     except Exception as e:
         print(f"Error obteniendo precios paginados: {str(e)}")
-        return {'items': [], 'total_items': 0, 'total_pages': 1, 'current_page': 1}
+        return {'items': [], 'total_items': 0, 'total_pages': 1, 'current_page': 1, 'search_query': search_query}
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
@@ -10973,16 +11005,20 @@ def negocio_transfer_block(negocio):
         parts.append(f"• Banco: {banco}")
     return "\n".join(parts)
 
+# app.py (Reemplazar en línea 4057)
+
+# app.py (Reemplazar en línea 4057)
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
     
     # --- INICIO DE LA MODIFICACIÓN ---
     page = request.args.get('page', 1, type=int)
-    if page < 1:
-        page = 1
-        
-    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
+    search_query = request.args.get('search', None) # Obtener el término de búsqueda
+    
+    # Obtener los datos paginados y filtrados
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
     # --- FIN DE LA MODIFICACIÓN ---
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
@@ -10999,19 +11035,17 @@ def configuracion_precios():
         master_columns=MASTER_COLUMNS
     )
 
+# app.py (Reemplazar en línea 4086)
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
     
     # --- INICIO DE LA MODIFICACIÓN ---
-    # Mantenemos la lógica de paginación incluso al editar,
-    # para que la lista de fondo siga paginada.
     page = request.args.get('page', 1, type=int)
-    if page < 1:
-        page = 1
+    search_query = request.args.get('search', None)
     
-    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
     # --- FIN DE LA MODIFICACIÓN ---
     
     precio_edit = obtener_precio_por_id(pid, config)
