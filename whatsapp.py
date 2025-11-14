@@ -409,7 +409,7 @@ def enviar_mensaje(numero, texto, config=None):
             
     except Exception as e:
         logger.error(f"🔴 Exception (WhatsApp): {e}")
-        return False
+        return False 
 
 def enviar_imagen(numero, image_url, config=None):
     """Enviar imagen: si se pasa nombre de archivo simple, construir URL pública usando config['dominio']
