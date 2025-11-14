@@ -123,7 +123,7 @@
 </div>
 
 <div class="section" id="manual-upload" style="display:none;">
-
+    
     <div class="section-header">
 
         <h3 class="flex justify-between items-center">
@@ -376,19 +376,19 @@
             </form>
             <div class="pagination-controls" id="pagination-user">
                 {% if pagination.current_page > 1 %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">⬅️ Anteriores</a>
+                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
-                <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                    <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
-
+                
                 <span class="page-info">
                     Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
                 </span>
-
+                
                 {% if pagination.current_page < pagination.total_pages %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">Siguientes ➡️</a>
+                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
-                <span class="btn small secondary disabled">Siguientes ➡️</span>
+                    <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
             </div>
             {% if precios %}
@@ -511,19 +511,19 @@
             </form>
             <div class="pagination-controls" id="pagination-admin">
                 {% if pagination.current_page > 1 %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">⬅️ Anteriores</a>
+                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
-                <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                    <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
-
+                
                 <span class="page-info">
                     Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
                 </span>
-
+                
                 {% if pagination.current_page < pagination.total_pages %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">Siguientes ➡️</a>
+                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
-                <span class="btn small secondary disabled">Siguientes ➡️</span>
+                    <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
             </div>
             {% if precios %}
@@ -663,7 +663,6 @@
         align-items: center;
         gap: 10px;
     }
-
     .page-info {
         font-size: 0.9rem;
         color: #4a5568; /* text-gray-700 */
@@ -673,14 +672,13 @@
         opacity: 0.4;
         cursor: not-allowed;
         background-color: #e2e8f0;
-        padding: 5px 10px;
+        padding: 5px 10px; 
         border-radius: 5px;
         font-size: 0.875rem; /* Asegura que coincida con .btn.small */
         line-height: 1.5;
         color: #4a5568;
         border: 1px solid #cbd5e0;
     }
-
     .pagination-controls .btn.small.secondary {
         text-decoration: none; /* Quitar subrayado de enlaces */
     }
@@ -691,10 +689,9 @@
         gap: 10px;
         margin-bottom: 15px;
     }
-
-        .search-form .input {
-            flex-grow: 1; /* El input toma el espacio disponible */
-        }
+    .search-form .input {
+        flex-grow: 1; /* El input toma el espacio disponible */
+    }
 
     /* 3. CSS para el ancho de la Descripción */
     .table {
@@ -703,12 +700,11 @@
         /* table-layout: fixed; */ /* <-- ELIMINADO para que las columnas se autoajusten */
         font-size: 13px;
     }
-
-        .table th:nth-child(6), .table td:nth-child(6) {
-            /* max-width: 180px; */ /* <-- ELIMINADO */
-            width: 30%; /* <-- AÑADIDO: Darle prioridad de ancho */
-            min-width: 250px; /* <-- AÑADIDO: Ancho mínimo */
-        }
+    .table th:nth-child(6), .table td:nth-child(6) {
+        /* max-width: 180px; */ /* <-- ELIMINADO */
+        width: 30%; /* <-- AÑADIDO: Darle prioridad de ancho */
+        min-width: 250px; /* <-- AÑADIDO: Ancho mínimo */
+    }
 
     /* --- FIN DE CAMBIOS CSS --- */
 
@@ -728,7 +724,6 @@
             background: #d97706;
             transform: translateY(-1px);
         }
-
     .imagen_tabla {
         width: 100%;
         height: 100%;
@@ -901,28 +896,28 @@
     /* Table layout: allow shrinking and wrapping */
     /* .table (ya modificado arriba) */
 
-    .table td {
-        border: 1px solid black;
-        height: 8%;
-    }
+        .table td {
+            border: 1px solid black;
+            height: 8%;
+        }
 
-    .table th {
-        font-size: smaller;
-    }
+        .table th {
+            font-size: smaller;
+        }
 
-    .table th,
-    .table td {
-        padding: 6px 8px;
-        text-align: left;
-        white-space: normal; /* allow wrapping */
-        overflow-wrap: anywhere; /* break long words/numbers */
-        word-break: break-word;
-    }
+        .table th,
+        .table td {
+            padding: 6px 8px;
+            text-align: left;
+            white-space: normal; /* allow wrapping */
+            overflow-wrap: anywhere; /* break long words/numbers */
+            word-break: break-word;
+        }
 
-    .table th {
-        background-color: white;
-        color: black;
-    }
+        .table th {
+            background-color: white;
+            color: black;
+        }
 
     /* Scroll container for big tables: keeps page shorter while table scrolls internally.
        position: relative is required so position: sticky on thead th works inside this box. */
@@ -954,7 +949,7 @@
         background: linear-gradient(#ffffff, #f8fafc); /* matches header background */
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
-
+    
     /* (CSS para .disabled y .btn.small.secondary ya añadido arriba) */
 
     /* Optional: give the header cells a bit more weight */
@@ -980,7 +975,7 @@
     .desc-cell {
         font-size: xx-small;
     }
-
+    
     /* (CSS para nth-child(6) ya modificado arriba) */
 
     /* Descripción */
@@ -1050,7 +1045,7 @@
 </style>
 
 <script>
-
+    
     // --- LÓGICA DE PAGINACIÓN DE JAVASCRIPT ELIMINADA ---
     // (setupPagination, showPage, changePage YA NO SON NECESARIAS)
     // ---
@@ -1067,7 +1062,7 @@
         const downloadUrl = `{{ url_for('descargar_template') }}?cols=${encodeURIComponent(colsParam)}`;
         window.open(downloadUrl, '_blank');
     }
-
+    
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
         // ... (Esta función se mantiene igual) ...
@@ -1143,7 +1138,7 @@
             console.warn('Could not persist column visibility locally:', e);
         }
     }
-
+    
     function persistHiddenColumnsToServer(tableId, map) {
         // ... (Esta función se mantiene igual) ...
         try {
@@ -1230,7 +1225,7 @@
             console.warn('Error applying stored hidden columns:', e);
         }
     }
-
+    
     async function resetColumns() {
         // ... (Esta función se mantiene igual) ...
         if (!confirm('¿Restablecer visibilidad de columnas para esta vista? Esto mostrará todas las columnas hasta que vuelvas a ocultarlas.')) return;
@@ -1262,29 +1257,29 @@
         });
         alert('Columnas restablecidas.');
     }
-
+    
     // On document ready (MODIFICADO)
     document.addEventListener('DOMContentLoaded', function () {
-
+        
         // --- 1. Lógica de selección de sección (Se mantiene) ---
         let initialSection = 'user-list';
         {% if precio_edit %}
         initialSection = 'manual-upload';
         {% endif %}
-
+        
         const urlParams = new URLSearchParams(window.location.search);
-
+        
         // *** CAMBIO CLAVE: Leer 'section' de la URL para mantener la pestaña activa ***
-        const section = urlParams.get('section');
-
+        const section = urlParams.get('section'); 
+        
         if (section) {
             initialSection = section; // 'user-list' o 'admin-list' vendrán de la paginación/búsqueda
         } else if (urlParams.has('search')) {
             initialSection = 'user-list'; // Default a user-list si solo hay búsqueda
         }
-
+        
         showSection(initialSection);
-
+        
         const urlContainer = document.getElementById('imagen-url-container');
         if (urlContainer) urlContainer.style.display = 'none';
 
