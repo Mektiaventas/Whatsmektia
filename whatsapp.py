@@ -620,6 +620,7 @@ def enviar_documento(numero, file_path_or_url, filename, config=None):
         final_path = os.path.join(uploads_dir, safe_filename)
         
         # Copiar archivo temporal a uploads
+        import shutil
         shutil.copy2(file_path, final_path)
         
         # Construir URL pública
@@ -630,16 +631,19 @@ def enviar_documento(numero, file_path_or_url, filename, config=None):
         
         public_url = f"{base_url}/uploads/{safe_filename}"
         
-        app.logger.info(f"📁 Archivo subido: {final_path}")
-        app.logger.info(f"🌐 URL pública: {public_url}")
+        # Logging
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"📁 Archivo subido: {final_path}")
+        logger.info(f"🌐 URL pública: {public_url}")
         
         return public_url, safe_filename
         
     except Exception as e:
-        app.logger.error(f"🔴 Error subiendo archivo: {e}")
-        return None, None 
-
-
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"🔴 Error subiendo archivo: {e}")
+        return None, None
 
 def enviar_mensaje_voz(numero, audio_url, config=None):
     """Enviar audio (voice message) por link con validaciones y logging diagnóstico."""
