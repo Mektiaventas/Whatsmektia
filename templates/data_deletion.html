@@ -1,42 +1,678 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Eliminación de Datos</title>
-  <style>
-    body { font-family: Arial, sans-serif; line-height: 1.6; margin: 2em; color: #333; }
-    h1, h2 { color: #2c3e50; }
-    a { color: #2980b9; }
-    .container { max-width: 800px; margin: auto; }
-  </style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eliminación de Datos - Mektia</title>
+    <style>
+        :root {
+            --left-width: 340px;
+            --right-width: 320px;
+            --gap: 16px;
+            --bg-card: #1f2937;
+            --bg-primary: #111827;
+            --text-light: #ffffff;
+            --text-secondary: #d1d5db;
+            --accent-color: #0b78d1;
+            --accent-hover: #0a6cbd;
+            --border-color: rgba(255, 255, 255, 0.1);
+            --gradient-primary: linear-gradient(135deg, #1f2937 0%, #111827 100%);
+            --gradient-card: linear-gradient(145deg, #1f2937 0%, #374151 100%);
+            --gradient-accent: linear-gradient(135deg, #0b78d1 0%, #0a6cbd 100%);
+            --warning-color: #f59e0b;
+            --warning-gradient: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-light);
+            line-height: 1.6;
+            min-height: 100vh;
+            background: var(--gradient-primary);
+        }
+
+        /* Header estilo chats */
+        .chat-list-header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(10px);
+        }
+
+        .header-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--text-light);
+            text-decoration: none;
+            background: var(--gradient-accent);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .back-btn {
+            background: var(--gradient-accent);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(11, 120, 209, 0.3);
+        }
+
+            .back-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 18px rgba(11, 120, 209, 0.4);
+            }
+
+        /* Layout estilo chats */
+        .chat-layout-v2 {
+            display: flex;
+            gap: var(--gap);
+            align-items: stretch;
+            min-height: calc(100vh - 80px);
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* Tarjeta principal - estilo idéntico a chats */
+        .data-card {
+            flex: 1;
+            background: var(--gradient-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            position: relative;
+            overflow: hidden;
+            animation: cardEntrance 0.8s ease-out;
+        }
+
+            .data-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+                transition: left 0.6s ease;
+            }
+
+            .data-card:hover::before {
+                left: 100%;
+            }
+
+        /* Títulos con estilo idéntico a chats */
+        h1 {
+            color: var(--text-light);
+            font-size: 2.2rem;
+            margin-bottom: 1.5rem;
+            background: var(--warning-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            position: relative;
+            padding-bottom: 0.5rem;
+        }
+
+            h1::after {
+                content: '';
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                width: 60px;
+                height: 3px;
+                background: var(--warning-gradient);
+                border-radius: 2px;
+            }
+
+        .last-updated {
+            color: var(--text-secondary);
+            font-style: italic;
+            margin-bottom: 2rem;
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            border-left: 4px solid var(--warning-color);
+            animation: slideInLeft 0.6s ease-out;
+        }
+
+        /* Secciones con estilo de tarjetas de chat */
+        .section-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            transition: all 0.3s ease;
+            animation: fadeInUp 0.6s ease-out;
+            position: relative;
+            overflow: hidden;
+        }
+
+            .section-card::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 4px;
+                height: 100%;
+                background: var(--warning-gradient);
+            }
+
+            .section-card:hover {
+                transform: translateY(-5px);
+                box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+                border-color: rgba(245, 158, 11, 0.3);
+            }
+
+        h2 {
+            color: var(--text-light);
+            font-size: 1.4rem;
+            margin: 0 0 1rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+            h2::before {
+                content: '🗑️';
+                font-size: 1.2rem;
+            }
+
+        p {
+            margin-bottom: 1rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* Listas con estilo moderno */
+        ul {
+            margin: 1rem 0;
+            padding-left: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.75rem;
+            color: var(--text-secondary);
+            padding-left: 0.5rem;
+            position: relative;
+            transition: color 0.3s ease;
+        }
+
+            li::before {
+                content: '▸';
+                color: var(--warning-color);
+                position: absolute;
+                left: -1rem;
+                font-weight: bold;
+            }
+
+            li:hover {
+                color: var(--text-light);
+                transform: translateX(5px);
+            }
+
+        strong {
+            color: var(--text-light);
+            font-weight: 600;
+        }
+
+        /* Enlaces con estilo de la app */
+        a {
+            color: var(--warning-color);
+            text-decoration: none;
+            transition: all 0.3s ease;
+            position: relative;
+            font-weight: 500;
+        }
+
+            a::after {
+                content: '';
+                position: absolute;
+                bottom: -2px;
+                left: 0;
+                width: 0;
+                height: 2px;
+                background: var(--warning-gradient);
+                transition: width 0.3s ease;
+            }
+
+            a:hover {
+                color: #fbbf24;
+            }
+
+                a:hover::after {
+                    width: 100%;
+                }
+
+        /* Info de contacto con estilo especial */
+        .contact-info {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid var(--warning-color);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            position: relative;
+            overflow: hidden;
+            animation: pulseGlow 2s infinite;
+        }
+
+            .contact-info::before {
+                content: '';
+                position: absolute;
+                top: 0;
+                left: 0;
+                right: 0;
+                height: 2px;
+                background: var(--warning-gradient);
+            }
+
+        /* Alerta importante */
+        .warning-alert {
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid var(--warning-color);
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+            .warning-alert::before {
+                content: '⚠️';
+                position: absolute;
+                top: 1rem;
+                left: 1.5rem;
+                font-size: 1.5rem;
+            }
+
+            .warning-alert h3 {
+                color: var(--warning-color);
+                margin: 0 0 0.5rem 2.5rem;
+                font-size: 1.2rem;
+            }
+
+            .warning-alert p {
+                margin-left: 2.5rem;
+                margin-bottom: 0;
+            }
+
+        /* Botón de email destacado */
+        .email-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: var(--warning-gradient);
+            color: white;
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: all 0.3s ease;
+            margin: 1rem 0;
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+
+            .email-btn:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 6px 18px rgba(245, 158, 11, 0.4);
+                color: white;
+            }
+
+            .email-btn::after {
+                display: none;
+            }
+
+        /* Animaciones idénticas a chats */
+        @keyframes cardEntrance {
+            from {
+                opacity: 0;
+                transform: translateY(30px) scale(0.95);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes fadeInUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes slideInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-20px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes pulseGlow {
+            0%, 100% {
+                box-shadow: 0 0 20px rgba(245, 158, 11, 0.2);
+            }
+
+            50% {
+                box-shadow: 0 0 30px rgba(245, 158, 11, 0.4);
+            }
+        }
+
+        /* Efectos de partículas de fondo */
+        .particles {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: -1;
+        }
+
+        .particle {
+            position: absolute;
+            background: rgba(245, 158, 11, 0.1);
+            border-radius: 50%;
+            animation: float 6s infinite ease-in-out;
+        }
+
+        @keyframes float {
+            0%, 100% {
+                transform: translateY(0px) rotate(0deg);
+                opacity: 0.3;
+            }
+
+            50% {
+                transform: translateY(-20px) rotate(180deg);
+                opacity: 0.6;
+            }
+        }
+
+        /* Scrollbar personalizado idéntico a chats */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-primary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--warning-gradient);
+            border-radius: 4px;
+        }
+
+            ::-webkit-scrollbar-thumb:hover {
+                background: var(--warning-color);
+            }
+
+        /* Responsive idéntico a chats */
+        @media (max-width: 900px) {
+            .chat-layout-v2 {
+                gap: 12px;
+                padding: 12px;
+            }
+
+            .data-card {
+                padding: 1.5rem;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .chat-layout-v2 {
+                padding: 8px;
+            }
+
+            .data-card {
+                padding: 1rem;
+            }
+
+            h1 {
+                font-size: 1.8rem;
+            }
+
+            h2 {
+                font-size: 1.2rem;
+            }
+
+            .chat-list-header {
+                padding: 1rem;
+            }
+
+            .header-content {
+                flex-direction: column;
+                gap: 1rem;
+            }
+
+            .email-btn {
+                padding: 0.75rem 1rem;
+                font-size: 0.9rem;
+            }
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Instrucciones para Solicitar la Eliminación de Datos</h1>
-    <p>Última actualización: 1 de Agosto de 2025</p>
+    <!-- Partículas de fondo -->
+    <div class="particles" id="particles"></div>
 
-    <h2>¿Cómo solicitar la eliminación?</h2>
-    <p>Si deseas que eliminemos todos los datos que tenemos sobre ti de nuestra base de datos, por favor envía un correo a:</p>
-    <p><a href="mailto:director.diseno@ciea.mx">director.diseno@ciea.mx</a></p>
-    <p>En el asunto del correo indica “Solicitud de Eliminación de Datos” y en el cuerpo proporciona:</p>
-    <ul>
-      <li>Tu <strong>número de WhatsApp</strong> desde el cual envías los mensajes.</li>
-      <li>Cualquier otro dato que creas relevante (por ejemplo tu nombre de perfil).</li>
-    </ul>
+    <!-- Header idéntico a chats -->
+    <div class="chat-list-header">
+        <div class="header-content">
+            <a href="/" class="logo">MEKTIA</a>
+            <button onclick="goBack()" class="back-btn">
+                <span>←</span>
+                Volver al Chat
+            </button>
+        </div>
+    </div>
 
-    <h2>¿Qué datos eliminamos?</h2>
-    <ul>
-      <li>Historial de mensajes intercambiados con el bot.</li>
-      <li>Metadatos de conversación (timestamps, número de teléfono hasheado).</li>
-      <li>Cualquier perfil o información asociada a tu número.</li>
-    </ul>
+    <!-- Layout principal idéntico a chats -->
+    <div class="chat-layout-v2">
+        <div class="data-card">
+            <h1>Instrucciones para Solicitar la Eliminación de Datos</h1>
 
-    <h2>Plazo de eliminación</h2>
-    <p>Una vez recibida tu solicitud, procederemos a borrar tus datos en un plazo máximo de 5 días hábiles y te confirmaremos por correo cuando esté completo.</p>
+            <div class="last-updated">
+                <p>Última actualización: 1 de Agosto de 2025</p>
+            </div>
 
-    <h2>Contacto</h2>
-    <p>Para cualquier duda adicional, escríbenos a <a href="director.diseno@ciea.mx">director.diseno@ciea.mx</a>.</p>
-  </div>
+            <div class="warning-alert">
+                <h3>Importante</h3>
+                <p>La eliminación de datos es irreversible. Una vez completada, no podremos recuperar tu historial de conversaciones.</p>
+            </div>
+
+            <div class="section-card">
+                <h2>¿Cómo solicitar la eliminación?</h2>
+                <p>Si deseas que eliminemos todos los datos que tenemos sobre ti de nuestra base de datos, por favor envía un correo electrónico a:</p>
+
+                <a href="mailto:mektia.ventas@gmail.com" class="email-btn">
+                    <span>📧</span>
+                    mektia.ventas@gmail.com
+                </a>
+
+                <p>En el asunto del correo indica <strong>"Solicitud de Eliminación de Datos"</strong> y en el cuerpo proporciona la siguiente información:</p>
+                <ul>
+                    <li>Tu <strong>número de WhatsApp</strong> completo desde el cual envías los mensajes (incluyendo código de país).</li>
+                    <li>Tu <strong>nombre completo</strong> (opcional, pero recomendado para verificación).</li>
+                    <li>Cualquier otro dato que creas relevante para identificar tu cuenta (nombre de perfil, etc.).</li>
+                </ul>
+            </div>
+
+            <div class="section-card">
+                <h2>¿Qué datos eliminamos?</h2>
+                <p>Una vez procesada tu solicitud, eliminaremos completamente:</p>
+                <ul>
+                    <li><strong>Historial completo de mensajes:</strong> Todos los textos, imágenes y archivos intercambiados con el bot.</li>
+                    <li><strong>Metadatos de conversación:</strong> Timestamps, número de teléfono hasheado, y datos de actividad.</li>
+                    <li><strong>Información de perfil:</strong> Nombre, foto de perfil y cualquier dato asociado a tu número.</li>
+                    <li><strong>Datos de análisis:</strong> Estadísticas de uso y patrones de conversación.</li>
+                </ul>
+            </div>
+
+            <div class="section-card">
+                <h2>Proceso y Plazo de Eliminación</h2>
+                <p>Nuestro proceso de eliminación garantiza:</p>
+                <ul>
+                    <li><strong>Confirmación de recepción:</strong> Te enviaremos un acuse de recibo dentro de las 24 horas.</li>
+                    <li><strong>Verificación de identidad:</strong> Podremos solicitar información adicional para proteger tu privacidad.</li>
+                    <li><strong>Eliminación completa:</strong> Todos tus datos serán eliminados en un plazo máximo de <strong>5 días hábiles</strong>.</li>
+                    <li><strong>Confirmación final:</strong> Recibirás un correo de confirmación cuando el proceso esté completo.</li>
+                </ul>
+            </div>
+
+            <div class="section-card">
+                <h2>¿Qué sucede después de la eliminación?</h2>
+                <ul>
+                    <li>Tu número será removido completamente de nuestros sistemas.</li>
+                    <li>No conservaremos copias de seguridad de tus datos.</li>
+                    <li>Si vuelves a contactarnos, se creará un nuevo registro sin historial previo.</li>
+                    <li>Recibirás respuestas como si fuera tu primera interacción con el servicio.</li>
+                </ul>
+            </div>
+
+            <div class="contact-info">
+                <h2>Contacto y Soporte</h2>
+                <p>Para cualquier duda adicional sobre el proceso de eliminación de datos:</p>
+                <p><strong>Email:</strong> <a href="mailto:mektia.ventas@gmail.com">mektia.ventas@gmail.com</a></p>
+                <p><strong>Asunto recomendado:</strong> "Consulta Eliminación de Datos"</p>
+                <p><strong>Horario de atención:</strong> Lunes a Viernes de 9:00 AM a 6:00 PM</p>
+            </div>
+
+            <div class="last-updated">
+                <p><strong>Nota:</strong> Este proceso cumple con los requisitos del GDPR y leyes de protección de datos aplicables.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // Función para volver (idéntica a chats)
+    function goBack() {
+      if (document.referrer && document.referrer.includes(window.location.host)) {
+        window.history.back();
+      } else {
+        window.location.href = '/';
+      }
+    }
+
+    // Crear partículas de fondo
+    function createParticles() {
+      const particlesContainer = document.getElementById('particles');
+      const particleCount = 15;
+
+      for (let i = 0; i < particleCount; i++) {
+        const particle = document.createElement('div');
+        particle.className = 'particle';
+
+        // Tamaño y posición aleatorios
+        const size = Math.random() * 60 + 20;
+        const posX = Math.random() * 100;
+        const posY = Math.random() * 100;
+        const delay = Math.random() * 5;
+
+        particle.style.width = `${size}px`;
+        particle.style.height = `${size}px`;
+        particle.style.left = `${posX}vw`;
+        particle.style.top = `${posY}vh`;
+        particle.style.animationDelay = `${delay}s`;
+
+        particlesContainer.appendChild(particle);
+      }
+    }
+
+    // Efectos de scroll y animaciones
+    document.addEventListener('DOMContentLoaded', function() {
+      createParticles();
+
+      // Animación de entrada para las secciones
+      const sections = document.querySelectorAll('.section-card');
+      sections.forEach((section, index) => {
+        section.style.animationDelay = `${index * 0.1}s`;
+      });
+
+      // Efecto de aparición al hacer scroll
+      const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+      };
+
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            entry.target.style.opacity = '1';
+            entry.target.style.transform = 'translateY(0)';
+          }
+        });
+      }, observerOptions);
+
+      document.querySelectorAll('.section-card').forEach(section => {
+        section.style.opacity = '0';
+        section.style.transform = 'translateY(20px)';
+        section.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(section);
+      });
+    });
+
+    // Efecto de tecleo en el título
+    function typeWriter(element, text, speed = 50) {
+      let i = 0;
+      element.innerHTML = '';
+
+      function typing() {
+        if (i < text.length) {
+          element.innerHTML += text.charAt(i);
+          i++;
+          setTimeout(typing, speed);
+        }
+      }
+      typing();
+    }
+
+    // Iniciar efecto de tecleo cuando la página cargue
+    window.addEventListener('load', function() {
+      const title = document.querySelector('h1');
+      const originalText = title.textContent;
+      typeWriter(title, originalText, 80);
+    });
+    </script>
 </body>
-</html>
+</html>   
