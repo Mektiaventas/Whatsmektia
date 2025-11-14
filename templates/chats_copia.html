@@ -30,7 +30,7 @@
     <aside class="chat-list-v2">
         <div class="chat-list-tools">
             <button class="add-contact-btn">+ Agregar Contacto</button>
-            <input type="text" placeholder="Buscar chats..." class="search-input">
+            <input type="text" placeholder="Buscar chats..." class="search-input" id="search-chats-input">
         </div>
 
         <div class="chat-items">
@@ -204,7 +204,7 @@
             <div class="msg-box msg-manual">
                 <div class="message-content">
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
-                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
                         {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                 </div>
@@ -255,7 +255,7 @@
                         {% endif %}
                     </div>
                     {% else %}
-                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
                         {{ msg.respuesta | whatsapp_format | safe }}
                     </div>
                     {% endif %}
@@ -276,23 +276,163 @@
             {% endif %}
         </div>
 
+
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
-        <form method="POST" action="/send-manual" class="reply-form">
+        <form method="POST" action="/send-manual" class="reply-form" id="messageForm">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
 
-                <!-- botón de emoji: añadir clase coherente con CSS y mantener el id -->
-                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn">😊</button>
+                <!-- botón de emoji más grande -->
+                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
 
                 <!-- Emoji Picker Container (hidden by default) -->
                 <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
                     <!-- Los emojis se llenan por JS -->
                 </div>
-                <input type="text" name="texto" id="mensaje-texto" placeholder="Escribe un mensaje manual..." class="reply-input-line" autocomplete="off" required />
+
+                <!-- CAMBIO: textarea en lugar de input -->
+                <textarea name="texto"
+                          id="mensaje-texto"
+                          placeholder="Escribe un mensaje manual..."
+                          class="reply-textarea"
+                          autocomplete="off"
+                          rows="1"
+                          onkeydown="handleMessageKeyDown(event)"
+                          oninput="autoResizeTextarea(this)"
+                          style="resize: none; overflow-y: hidden;"
+                          required></textarea>
+
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form>
+
+        <style>
+            /* Estilos para el textarea mejorado */
+            .reply-textarea {
+                flex: 1;
+                border: 1px solid #ccc;
+                border-radius: 20px;
+                padding: 12px 16px;
+                font-size: 14px;
+                line-height: 1.4;
+                min-height: 44px;
+                max-height: 120px;
+                font-family: inherit;
+                background: white;
+                outline: none;
+                transition: border-color 0.2s;
+            }
+
+                .reply-textarea:focus {
+                    border-color: #007bff;
+                }
+
+            .input-group {
+                display: flex;
+                align-items: flex-end;
+                gap: 10px;
+                padding: 10px;
+                background: #f5f5f5;
+                border-top: 1px solid #ddd;
+            }
+
+            .send-btn {
+                background: #25D366;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                width: 44px;
+                height: 44px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.2s;
+                font-size: 16px;
+            }
+
+                .send-btn:hover {
+                    background: #128C7E;
+                }
+
+            .emoji-pick-btn {
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 8px;
+                border-radius: 50%;
+                transition: background 0.2s;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+                .emoji-pick-btn:hover {
+                    background: #e0e0e0;
+                }
+        </style>
+
+        <script>
+            // Funciones para manejar el textarea mejorado
+            function handleMessageKeyDown(event) {
+                if (event.key === 'Enter') {
+                    if (event.shiftKey) {
+                        // Shift+Enter: Insertar nueva línea
+                        event.preventDefault();
+                        const textarea = event.target;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const value = textarea.value;
+
+                        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
+                        textarea.selectionStart = textarea.selectionEnd = start + 1;
+
+                        // Actualizar altura
+                        autoResizeTextarea(textarea);
+                    } else {
+                        // Enter solo: Enviar mensaje inmediatamente
+                        event.preventDefault();
+                        const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
+
+                        // Validar que no esté vacío
+                        if (textarea.value.trim() !== '') {
+                            // Deshabilitar el botón temporalmente para evitar envíos dobles
+                            const sendBtn = form.querySelector('.send-btn');
+                            const originalText = sendBtn.innerHTML;
+                            sendBtn.innerHTML = '⏳';
+                            sendBtn.disabled = true;
+
+                            // Enviar el formulario inmediatamente
+                            form.submit();
+
+                            // Restaurar el botón después de un tiempo si no se recarga la página
+                            setTimeout(() => {
+                                sendBtn.innerHTML = originalText;
+                                sendBtn.disabled = false;
+                            }, 2000);
+                        }
+                    }
+                }
+            }
+
+            function autoResizeTextarea(textarea) {
+                textarea.style.height = 'auto';
+                textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+            }
+
+            // Inicializar altura del textarea al cargar
+            document.addEventListener('DOMContentLoaded', function () {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea) {
+                    autoResizeTextarea(textarea);
+                }
+            });
+        </script>
         {% else %}
         <div class="ia-active-message">
             <div class="ia-indicator">
@@ -521,11 +661,14 @@
     }
 
     .text-message {
-        line-height: 1.0; /* Reducir más si es necesario */
-        white-space: normal; /* Cambiar de pre-wrap a normal */
+        line-height: 1.3; /* Mejor legibilidad */
+        white-space: pre-wrap; /* Mantener formato pero eliminar espacios iniciales */
         font-size: 14px;
-        margin: 0;
-        padding: 0;
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        display: block;
+        overflow-wrap: break-word;
     }
 
     .msg-manual {
@@ -843,6 +986,53 @@
         .chat-title .edit-alias-btn {
             font-size: 12px;
             padding: 2px 4px;
+        }
+    /* ===== SOLUCIÓN DEFINITIVA PARA ELIMINAR ESPACIOS INICIALES ===== */
+
+    /* SOLUCIÓN RADICAL PARA ELIMINAR ESPACIOS INICIALES */
+    .msg-ai .text-message,
+    .msg-manual .text-message {
+        white-space: pre-wrap;
+        line-height: 1.3 !important; /* Forzar line-height consistente */
+        text-indent: 0 !important;
+        padding-left: 0 !important;
+        margin-left: 0 !important;
+        display: block;
+        overflow-wrap: break-word;
+        /* NUEVAS PROPIEDADES PARA EVITAR ESPACIADO */
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+    .msg-ai .message-content,
+    .msg-manual .message-content {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .msg-ai .text-message::first-line,
+    .msg-manual .text-message::first-line {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+
+    /* SOLUCIÓN NUCLEAR - si persiste el espacio */
+    .msg-ai .text-message {
+        transform: translateX(-2px) !important;
+    }
+    /* === AÑADE AQUÍ LA NUEVA CLASE === */
+    .text-message.no-initial-space {
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        line-height: 1.3 !important;
+    }
+
+        .text-message.no-initial-space::first-letter {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
         }
 </style>
 <script>
@@ -1180,101 +1370,165 @@ function pollSelectedMessages() {
         })
         .catch(err => console.error('Error polling messages:', err));
 }
+    /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
 
-function appendAIResponsesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
+    function setupChatSearch() {
+        const searchInput = document.getElementById('search-chats-input');
+        const chatItems = document.querySelectorAll('.chat-item');
 
-    for (const m of messages) {
-        const aiText = String(coalesce(m.respuesta, m['respuesta'], '')).trim();
-        if (!aiText) continue;
+        if (!searchInput) {
+            console.warn('Search input not found');
+            return;
+        }
 
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        let key;
-        if (id) {
-            key = 'ai:id:' + id;
-            if (seenMessageKeys.has(key)) continue;
-        } else {
-            let ts = Number(coalesce(m.ts_ms, 0));
+        searchInput.addEventListener('input', function (e) {
+            const searchTerm = normalizeText(e.target.value);
+
+            chatItems.forEach(chatItem => {
+                const aliasElement = chatItem.querySelector('.alias-view');
+                const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
+
+                if (!aliasElement) return;
+
+                const chatName = normalizeText(aliasElement.textContent);
+                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+                const matchesSearch = chatName.includes(searchTerm) ||
+                    chatNumber.includes(searchTerm) ||
+                    (searchTerm === ''); // Mostrar todos si está vacío
+
+                chatItem.style.display = matchesSearch ? 'block' : 'none';
+            });
+        });
+
+        // También buscar en chats cargados dinámicamente
+        const observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                if (mutation.addedNodes.length) {
+                    // Si se añaden nuevos chats, reaplicar el filtro actual
+                    const currentSearch = normalizeText(searchInput.value);
+                    if (currentSearch) {
+                        searchInput.dispatchEvent(new Event('input'));
+                    }
+                }
+            });
+        });
+
+        const chatContainer = document.querySelector('.chat-items');
+        if (chatContainer) {
+            observer.observe(chatContainer, { childList: true, subtree: true });
+        }
+
+        console.debug('Chat search functionality initialized');
+    }
+    function appendAIResponsesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
+
+        for (const m of messages) {
+            let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
+
+            // ELIMINACIÓN MÁS AGRESIVA DE ESPACIOS
+            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios iniciales
+            aiText = aiText.replace(/\n\s*\n/g, '\n\n'); // Normaliza saltos múltiples
+            aiText = aiText.trim(); // Trim general
+
+            if (!aiText) continue;
+
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let key;
+            if (id) {
+                key = 'ai:id:' + id;
+                if (seenMessageKeys.has(key)) continue;
+            } else {
+                let ts = Number(coalesce(m.ts_ms, 0));
+                if (!ts && m.timestamp) {
+                    const parsed = Date.parse(m.timestamp);
+                    ts = isNaN(parsed) ? Date.now() : parsed;
+                }
+                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+                if (seenMessageKeys.has(key)) continue;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-ai';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+            const fechaFormateada = formatClientTime(tsVal);
+
+            // Aplicar clase especial para evitar espacios
+            div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            container.appendChild(div);
+            appended = true;
+
+            seenMessageKeys.add(key);
+            if (id) seenMessageKeys.add('id:' + id);
+        }
+
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
+    function appendUserMessagesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
+
+        for (const m of messages) {
+            const key = buildMessageKeyFor(m);
+            if (!key) continue;
+            if (seenMessageKeys.has(key)) {
+                const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+                if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+                continue;
+            }
+
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
+            // SOLO eliminar espacios iniciales, mantener trim() para el resto
+            content = content.replace(/^\s+/, '').trim();
+            const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+
+            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
+            content = content.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
+            content = content.trimStart();
+            // === FIN DE LAS LÍNEAS NUEVAS ===
+
+            if (!content || (respuesta && respuesta.trim().length > 0)) {
+                if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+                seenMessageKeys.add(key);
+                continue;
+            }
+
+            let ts = coalesce(m.ts_ms, 0);
             if (!ts && m.timestamp) {
                 const parsed = Date.parse(m.timestamp);
                 ts = isNaN(parsed) ? Date.now() : parsed;
             }
-            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
-            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
-            if (seenMessageKeys.has(key)) continue;
-        }
+            ts = Number(ts) || Date.now();
 
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-ai';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-        const fechaFormateada = formatClientTime(tsVal);
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-user';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+            const fechaFormateada = formatClientTime(ts);
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
-        container.appendChild(div);
-        appended = true;
-
-        seenMessageKeys.add(key);
-        if (id) seenMessageKeys.add('id:' + id);
-    }
-
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
-
-function appendUserMessagesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
-
-    for (const m of messages) {
-        const key = buildMessageKeyFor(m);
-        if (!key) continue;
-        if (seenMessageKeys.has(key)) {
-            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
-            continue;
-        }
-
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
-        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
-        if (!content || (respuesta && respuesta.trim().length > 0)) {
+            container.appendChild(div);
+            appended = true;
             if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
             seenMessageKeys.add(key);
-            continue;
         }
 
-        let ts = coalesce(m.ts_ms, 0);
-        if (!ts && m.timestamp) {
-            const parsed = Date.parse(m.timestamp);
-            ts = isNaN(parsed) ? Date.now() : parsed;
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
         }
-        ts = Number(ts) || Date.now();
-
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-user';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-        const fechaFormateada = formatClientTime(ts);
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
-
-        container.appendChild(div);
-        appended = true;
-        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-        seenMessageKeys.add(key);
     }
-
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
-
 /* ===================== ALIAS EDITING & EMOJI ===================== */
 
     function enhanceAliasButtons() {
@@ -1466,9 +1720,7 @@ function appendUserMessagesToPanel(messages) {
 
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-}
-
-function toggleAudio(id, btn) {
+}function toggleAudio(id, btn) {
     const audio = document.getElementById(id);
     const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
     const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
@@ -1504,15 +1756,15 @@ function seekAudio(id, progressBar, evt) {
     }
 }
 
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM cargado - inicializando componentes');
-        enhanceAliasButtons();
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM cargado - inicializando componentes');
+    enhanceAliasButtons();
 
-        // INICIALIZACIÓN DIRECTA DE EMOJIS
-
-        setupEmojiPicker();
-        console.log('Emoji picker inicializado');
-
+    // INICIALIZACIÓN DIRECTA DE EMOJIS
+    setupEmojiPicker();
+    setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
+    console.log('Emoji picker inicializado');
+    console.log('Búsqueda de chats inicializada');
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
@@ -1571,5 +1823,84 @@ function seekAudio(id, progressBar, evt) {
         }
     });
 });
+// Función mejorada para la búsqueda de chats
+function setupChatSearch() {
+    const searchInput = document.getElementById('search-chats-input');
+
+    if (!searchInput) {
+        console.warn('Search input not found');
+        return;
+    }
+
+    function performSearch() {
+        const searchTerm = normalizeText(searchInput.value);
+        const chatItems = document.querySelectorAll('.chat-item');
+
+        let foundAny = false;
+
+        chatItems.forEach(chatItem => {
+            const aliasElement = chatItem.querySelector('.alias-view');
+
+            if (!aliasElement) return;
+
+            const chatName = normalizeText(aliasElement.textContent);
+            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+            const matchesSearch = chatName.includes(searchTerm) ||
+                                chatNumber.includes(searchTerm) ||
+                                (searchTerm === '');
+
+            chatItem.style.display = matchesSearch ? 'block' : 'none';
+
+            if (matchesSearch && searchTerm !== '') {
+                foundAny = true;
+            }
+        });
+
+        // Opcional: Mostrar mensaje si no se encontraron resultados
+        const noResultsMsg = document.getElementById('no-search-results');
+        if (searchTerm !== '' && !foundAny) {
+            if (!noResultsMsg) {
+                const msg = document.createElement('div');
+                msg.id = 'no-search-results';
+                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
+                msg.style.padding = '10px';
+                msg.style.textAlign = 'center';
+                msg.style.color = '#999';
+                document.querySelector('.chat-items').appendChild(msg);
+            }
+        } else if (noResultsMsg) {
+            noResultsMsg.remove();
+        }
+    }
+
+    searchInput.addEventListener('input', performSearch);
+
+    // También aplicar búsqueda cuando se actualicen los chats dinámicamente
+    const observer = new MutationObserver(function(mutations) {
+        const currentSearch = normalizeText(searchInput.value);
+        if (currentSearch) {
+            performSearch();
+        }
+    });
+
+    const chatContainer = document.querySelector('.chat-items');
+    if (chatContainer) {
+        observer.observe(chatContainer, { childList: true, subtree: true });
+    }
+
+    console.debug('Chat search functionality initialized - insensible a tildes');
+}
+
+// Función normalizadora mejorada (insensible a tildes)
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s)
+        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
+        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
 </script>
-{% endblock %}     
+{% endblock %}   
