@@ -1389,6 +1389,53 @@ def asociar_imagenes_productos(servicios, imagenes):
         app.logger.error(f"🔴 Error asociando imágenes: {e}")
         return servicios
 
+# app.py (Añadir cerca de la línea 4020)
+
+def obtener_precios_paginados(config, page=1, page_size=100):
+    """
+    Obtiene una página específica de productos y el conteo total.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # 1. Contar el total de productos
+        cursor.execute("SELECT COUNT(*) as total FROM precios")
+        total_items = cursor.fetchone()['total']
+        total_pages = math.ceil(total_items / page_size)
+        
+        # 2. Calcular el offset
+        offset = (page - 1) * page_size
+        
+        # 3. Obtener solo la página actual
+        cursor.execute("""
+            SELECT * FROM precios
+            ORDER BY sku, categoria, modelo
+            LIMIT %s OFFSET %s;
+        """, (page_size, offset))
+        
+        items = cursor.fetchall()
+        
+        return {
+            'items': items,
+            'total_items': total_items,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo precios paginados: {str(e)}")
+        return {'items': [], 'total_items': 0, 'total_pages': 1, 'current_page': 1}
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
 def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
     """Versión avanzada: Usa OpenAI para asociar imágenes a productos basado en contexto"""
     if not imagenes or not servicios or not servicios.get('servicios'):
@@ -10929,7 +10976,14 @@ def negocio_transfer_block(negocio):
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
-    precios = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    page = request.args.get('page', 1, type=int)
+    if page < 1:
+        page = 1
+        
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
     au = session.get('auth_user') or {}
@@ -10938,15 +10992,28 @@ def configuracion_precios():
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=None,
         is_admin=is_admin,
         master_columns=MASTER_COLUMNS
     )
+
+
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
-    precios     = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    # Mantenemos la lógica de paginación incluso al editar,
+    # para que la lista de fondo siga paginada.
+    page = request.args.get('page', 1, type=int)
+    if page < 1:
+        page = 1
+    
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     precio_edit = obtener_precio_por_id(pid, config)
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
@@ -10956,7 +11023,8 @@ def configuracion_precio_editar(pid):
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=precio_edit,
         is_admin=is_admin
     )

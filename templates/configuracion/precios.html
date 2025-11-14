@@ -423,9 +423,22 @@
         <div class="card-body">
 
             <div class="pagination-controls" id="pagination-user">
-                <button class="btn small secondary" onclick="changePage('user', -1)" disabled>⬅️ Anteriores</button>
-                <span class="page-info">Página <strong id="page-num-user">1</strong> de <strong id="page-total-user">1</strong></span>
-                <button class="btn small secondary" onclick="changePage('user', 1)" disabled>Siguientes ➡️</button>
+                {% if pagination.current_page > 1 %}
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
+                {% else %}
+                <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                {% endif %}
+
+                <span class="page-info">
+                    Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
+                    <em style="font-size: 0.8em; margin-left: 10px;">(Total: {{ pagination.total_items }} productos)</em>
+                </span>
+
+                {% if pagination.current_page < pagination.total_pages %}
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
+                {% else %}
+                <span class="btn small secondary disabled">Siguientes ➡️</span>
+                {% endif %}
             </div>
             {% if precios %}
             <div class="table-responsive">
@@ -536,9 +549,22 @@
         <div class="card-body">
 
             <div class="pagination-controls" id="pagination-admin">
-                <button class="btn small secondary" onclick="changePage('admin', -1)" disabled>⬅️ Anteriores</button>
-                <span class="page-info">Página <strong id="page-num-admin">1</strong> de <strong id="page-total-admin">1</strong></span>
-                <button class="btn small secondary" onclick="changePage('admin', 1)" disabled>Siguientes ➡️</button>
+                {% if pagination.current_page > 1 %}
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
+                {% else %}
+                <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                {% endif %}
+
+                <span class="page-info">
+                    Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
+                    <em style="font-size: 0.8em; margin-left: 10px;">(Total: {{ pagination.total_items }} productos)</em>
+                </span>
+
+                {% if pagination.current_page < pagination.total_pages %}
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
+                {% else %}
+                <span class="btn small secondary disabled">Siguientes ➡️</span>
+                {% endif %}
             </div>
             {% if precios %}
             <div class="table-responsive">
@@ -928,7 +954,18 @@
         background: linear-gradient(#ffffff, #f8fafc); /* matches header background */
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
+    /* Añadir al bloque <style> (Línea 882 aprox) */
+    .pagination-controls .disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        background-color: #e2e8f0;
+        padding: 5px 10px; /* Asegura que el span tenga el mismo padding que el <a> */
+        border-radius: 5px;
+    }
 
+    .pagination-controls .btn.small.secondary {
+        text-decoration: none;
+    }
     /* Optional: give the header cells a bit more weight */
     .table thead th {
         font-weight: 600;
