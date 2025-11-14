@@ -283,8 +283,8 @@
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
 
-                <!-- botón de emoji: añadir clase coherente con CSS y mantener el id -->
-                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn">😊</button>
+                <!-- botón de emoji más grande -->
+                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
 
                 <!-- Emoji Picker Container (hidden by default) -->
                 <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
@@ -294,7 +294,7 @@
                 <!-- CAMBIO: textarea en lugar de input -->
                 <textarea name="texto"
                           id="mensaje-texto"
-                          placeholder="Escribe un mensaje manual... (Shift+Enter para nueva línea)"
+                          placeholder="Escribe un mensaje manual..."
                           class="reply-textarea"
                           autocomplete="off"
                           rows="1"
@@ -349,6 +349,7 @@
                 align-items: center;
                 justify-content: center;
                 transition: background 0.2s;
+                font-size: 16px;
             }
 
                 .send-btn:hover {
@@ -358,11 +359,16 @@
             .emoji-pick-btn {
                 background: none;
                 border: none;
-                font-size: 18px;
+                font-size: 24px;
                 cursor: pointer;
                 padding: 8px;
                 border-radius: 50%;
                 transition: background 0.2s;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
 
                 .emoji-pick-btn:hover {
@@ -388,9 +394,28 @@
                         // Actualizar altura
                         autoResizeTextarea(textarea);
                     } else {
-                        // Enter solo: Enviar mensaje
+                        // Enter solo: Enviar mensaje inmediatamente
                         event.preventDefault();
-                        document.getElementById('messageForm').submit();
+                        const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
+
+                        // Validar que no esté vacío
+                        if (textarea.value.trim() !== '') {
+                            // Deshabilitar el botón temporalmente para evitar envíos dobles
+                            const sendBtn = form.querySelector('.send-btn');
+                            const originalText = sendBtn.innerHTML;
+                            sendBtn.innerHTML = '⏳';
+                            sendBtn.disabled = true;
+
+                            // Enviar el formulario inmediatamente
+                            form.submit();
+
+                            // Restaurar el botón después de un tiempo si no se recarga la página
+                            setTimeout(() => {
+                                sendBtn.innerHTML = originalText;
+                                sendBtn.disabled = false;
+                            }, 2000);
+                        }
                     }
                 }
             }
@@ -494,7 +519,7 @@
         transition: transform 240ms ease, box-shadow 200ms ease;
         position: relative;
         z-index: 30;
-    } 
+    }  
 
     .chat-panel-v2 {
         flex: 1 1 auto;
