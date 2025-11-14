@@ -279,9 +279,14 @@
 
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
-        <form method="POST" action="/send-manual" class="reply-form" id="messageForm">
+        <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data">
             <input type="hidden" name="numero" value="{{ selected }}">
             <div class="input-group">
+                <!-- Botón para adjuntar archivos -->
+                <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
+                    📎
+                </button>
+                <input type="file" id="file-input" name="archivo" style="display: none;" accept=".pdf,.xlsx,.xls,.docx,.txt,.jpg,.jpeg,.png,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg">
 
                 <!-- botón de emoji más grande -->
                 <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
@@ -304,6 +309,14 @@
                           required></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
+            </div>
+
+            <!-- Preview de archivo seleccionado -->
+            <div id="file-preview" class="file-preview" style="display: none; padding: 10px; background: #f8f9fa; border-radius: 8px; margin-bottom: 10px;">
+                <div class="file-preview-content">
+                    <span id="file-name" style="font-weight: bold;"></span>
+                    <button type="button" id="remove-file" style="margin-left: 10px; background: #dc3545; color: white; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer;">×</button>
+                </div>
             </div>
         </form>
 
@@ -1100,6 +1113,42 @@
             margin-left: 0 !important;
             padding-left: 0 !important;
         }
+    /* Estilos para adjuntar archivos */
+    .file-attach-btn {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 50%;
+        transition: background 0.2s;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+        .file-attach-btn:hover {
+            background: #e0e0e0;
+        }
+
+    .file-preview {
+        border: 1px solid #ddd;
+        background: #f8f9fa;
+    }
+
+    .file-preview-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .file-type-icon {
+        margin-right: 8px;
+        font-size: 20px;
+    } 
+
 </style>
 <script>
 /* Small helpers */
@@ -1829,8 +1878,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // INICIALIZACIÓN DIRECTA DE EMOJIS
     setupEmojiPicker();
     setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
+    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
     console.log('Emoji picker inicializado');
     console.log('Búsqueda de chats inicializada');
+    console.log('File upload inicializado');
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
@@ -1967,6 +2018,94 @@ function normalizeText(s) {
         .replace(/\s+/g, ' ')
         .trim()
         .toLowerCase();
+}
+
+/* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
+function setupFileUpload() {
+    const fileInput = document.getElementById('file-input');
+    const fileAttachBtn = document.getElementById('file-attach-btn');
+    const filePreview = document.getElementById('file-preview');
+    const fileName = document.getElementById('file-name');
+    const removeFileBtn = document.getElementById('remove-file');
+    const messageForm = document.getElementById('messageForm');
+
+    if (!fileInput || !fileAttachBtn) {
+        console.warn('File upload elements not found');
+        return;
+    }
+
+    // Abrir selector de archivos al hacer clic en el botón
+    fileAttachBtn.addEventListener('click', function () {
+        fileInput.click();
+    });
+
+    // Manejar selección de archivo
+    fileInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (file) {
+            showFilePreview(file);
+        }
+    });
+
+    // Eliminar archivo seleccionado
+    removeFileBtn.addEventListener('click', function () {
+        clearFileSelection();
+    });
+
+    function showFilePreview(file) {
+        const fileType = getFileType(file.name);
+        const fileIcon = getFileIcon(fileType);
+
+        fileName.innerHTML = `${fileIcon} ${file.name} (${formatFileSize(file.size)})`;
+        filePreview.style.display = 'block';
+    }
+
+    function clearFileSelection() {
+        fileInput.value = '';
+        filePreview.style.display = 'none';
+        fileName.textContent = '';
+    }
+
+    function getFileType(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
+        const videoTypes = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'];
+        const documentTypes = ['pdf', 'doc', 'docx'];
+        const spreadsheetTypes = ['xlsx', 'xls', 'csv'];
+
+        if (imageTypes.includes(ext)) return 'image';
+        if (videoTypes.includes(ext)) return 'video';
+        if (documentTypes.includes(ext)) return 'document';
+        if (spreadsheetTypes.includes(ext)) return 'spreadsheet';
+        return 'other';
+    }
+
+    function getFileIcon(fileType) {
+        const icons = {
+            'image': '🖼️',
+            'video': '🎬',
+            'document': '📄',
+            'spreadsheet': '📊',
+            'other': '📎'
+        };
+        return icons[fileType] || '📎';
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    // Limpiar archivo al enviar el formulario (opcional)
+    messageForm.addEventListener('submit', function () {
+        setTimeout(clearFileSelection, 1000);
+    });
+
+    console.debug('File upload functionality initialized');
 }
 </script>
 {% endblock %} 
