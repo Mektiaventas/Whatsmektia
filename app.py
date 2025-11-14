@@ -3412,16 +3412,11 @@ def sanitize_whatsapp_text(text):
     """
     Limpia artefactos típicos de extracción desde Excel (p.ej. excel_unzip_img_...),
     colapsa espacios y mantiene links intactos.
-    ELIMINA TODOS LOS ESPACIOS INICIALES de manera agresiva.
     """
     if not text:
         return text
 
     try:
-        # 🔥 NUEVO: ELIMINACIÓN AGRESIVA DE ESPACIOS INICIALES
-        # Esto elimina TODOS los espacios, tabs, saltos de línea al inicio del texto
-        text = re.sub(r'^[\s\n\r\t]+', '', text)
-
         # 1) Eliminar tokens generados por el unzip de .xlsx (con o sin extensión)
         text = re.sub(r'excel(?:_unzip)?_img_[\w\-\._]+(?:\.[a-zA-Z]{2,4})?', ' ', text, flags=re.IGNORECASE)
 
@@ -3442,8 +3437,7 @@ def sanitize_whatsapp_text(text):
         return text
     except Exception as e:
         app.logger.warning(f"⚠️ sanitize_whatsapp_text falló: {e}")
-        # Si falla el regex, al menos hacer un strip básico
-        return text.strip() if isinstance(text, str) else text xt
+        return text.strip() if isinstance(text, str) else text
 
 def eliminar_asesores_extras(config=None, allowed_count=2):
     """
