@@ -402,6 +402,15 @@
             margin-right: 10px;
             padding: 10px;
         }
+        /* Color para Telegram (Azul) */
+        .alias-view.is-telegram {
+            color: #00bfff; /* Azul Telegram/cielo */
+        }
+
+        /* Color para Messenger (Azul/Púrpura) */
+        .alias-view.is-messenger {
+            color: #0084ff; /* Azul Messenger */
+        }
     }
 </style>
 
@@ -430,12 +439,15 @@
                 <div class="card-content">
                     <div class="card-top-row">
                         <div class="card-avatar-section">
-                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
-                            {% endif %}
-                            {% if chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
+                            {% set platform_class = 'is-telegram' %}
+                            {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
                             {% set avatar_src = '/static/icons/messenger-icon.jpg' %}
+                            {% set platform_class = 'is-messenger' %}
+                            {% else %}
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% set platform_class = 'is-whatsapp' %}
                             {% endif %}
 
                             <img src="{{ avatar_src }}"
@@ -447,7 +459,6 @@
                             {% endif %}
                         </div>
                         <div class="card-name-section">
-                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' else 'is-whatsapp' %}
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
                         </div>
                     </div>
@@ -822,40 +833,63 @@
         } else if (unread) unread.remove();
     }
 
+    // kanban.html (Reemplazar en línea 467)
+
     function agregarNuevoChat(chat) {
         const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
         if (!columna) return;
+
+        // --- INICIO DE LA CORRECCIÓN JS ---
+        let avatarSrc = '/static/icons/whatsapp-icon.png';
+        let platformClass = 'is-whatsapp';
+
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            avatarSrc = '/static/icons/telegram-icon-dos.png';
+            platformClass = 'is-telegram';
+        } else if (chat.numero && (chat.numero.startsWith('fb_') || chat.canal === 'Facebook')) {
+            avatarSrc = '/static/icons/messenger-icon.jpg';
+            platformClass = 'is-messenger';
+        }
+        // --- FIN DE LA CORRECCIÓN JS ---
+
         const bandera = getCountryFlag(chat.numero);
+
+        // Formatear la fecha/hora (Añadido para consistencia con la actualización incremental)
+        let fechaFormateada = '';
+        if (chat.ultima_fecha) {
+            try {
+                const fechaObj = new Date(chat.ultima_fecha);
+                const dia = fechaObj.getDate();
+                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+                fechaFormateada = `${dia}-${mes}   ${hora}`;
+            } catch (e) { /* ignorar error de fecha */ }
+        }
+
         const html = `
     <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
         <div class="card-content">
-            <!-- Fila 1: Avatar, bandera, nombre y botón de editar -->
             <div class="card-top-row">
                 <div class="card-avatar-section">
-                    <img src="${chat.avatar || '/static/icons/default-avatar.png'}"
-                         class="card-avatar" alt="Avatar"
+                    <img src="${avatarSrc}" class="card-avatar" alt="Avatar"
                          onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                     ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
                 </div>
                 <div class="card-name-section">
-                    <span class="alias-view" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
+                                        <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
                     <span class="alias-edit" style="display:none;">
                         <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
                     </span>
                 </div>
-                <button type="button" class="edit-alias-btn" data-num="${chat.numero}" title="Editar nombre">✏️</button>
             </div>
 
-            <!-- Fila 2: Mensaje y fecha -->
             <div class="card-bottom-row">
                 <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
                 <div class="card-time">
-                    ${chat.ultima_fecha ? new Date(chat.ultima_fecha).toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false }) : ''}
-                </div>
+                    ${fechaFormateada} </div>
             </div>
         </div>
 
-        <!-- Indicador de mensajes no leídos -->
         ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
     </a>`;
         columna.insertAdjacentHTML('beforeend', html);
