@@ -208,7 +208,7 @@
             color: #00bfff; /* Azul Telegram/cielo */
         }
         .alias-view.is-messenger {
-            color: blue; /* Azul Telegram/cielo */
+            color: cyan; /* Azul Telegram/cielo */
         }
 
     .edit-alias-btn {
@@ -446,7 +446,7 @@
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% set platform_class = 'is-telegram' %}
                             {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
-                            {% set avatar_src = '/static/icons/messenger-icon-tres.jpeg' %}
+                            {% set avatar_src = '/static/icons/messenger-icon-dos.png' %}
                             {% set platform_class = 'is-messenger' %}
                             {% else %}
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
@@ -850,7 +850,7 @@
             avatarSrc = '/static/icons/telegram-icon-dos.png';
             platformClass = 'is-telegram';
         } else if (chat.numero && (chat.numero.startsWith('fb_') || chat.canal === 'Facebook')) {
-            avatarSrc = '/static/icons/messenger-icon-tres.jpeg';
+            avatarSrc = '/static/icons/messenger-icon-dos.png';
             platformClass = 'is-messenger';
         }
         // --- FIN DE LA CORRECCIÓN JS ---
