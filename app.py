@@ -41,8 +41,6 @@ from urllib.parse import urlparse
 import threading
 from urllib.parse import urlparse 
 from os.path import basename, join 
-import os
-from werkzeug.utils import secure_filename
 import os # Asegurar que 'os' también esté importado/disponible
 
 MASTER_COLUMNS = [
@@ -10434,113 +10432,59 @@ def toggle_ai(numero, config=None):
         app.logger.info(f"🔍 Updated IA_ESTADOS after toggle: {IA_ESTADOS.get(numero)}")
     except Exception as e:
         app.logger.error(f"Error al cambiar estado IA: {e}")
-
+         
     return redirect(url_for('ver_chat', numero=numero))
-@app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
-    try:
-        numero = request.form['numero']
-        texto = request.form.get('texto', '').strip()  # Cambiado a get() para que sea opcional
-        archivo = request.files.get('archivo')  # Nuevo: manejar archivo
-        
-        # Validar que haya al menos texto O archivo
-        if not texto and not archivo:
-            flash('❌ Debes escribir un mensaje o seleccionar un archivo', 'error')
-            return redirect(url_for('ver_chat', numero=numero))
-        
-        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50] if texto else 'ARCHIVO'}...")
-        
-        # 1. ENVIAR ARCHIVO SI EXISTE
-        if archivo and archivo.filename:
-            try:
-                # Guardar archivo temporalmente
-                filename = secure_filename(archivo.filename)
-                temp_dir = "temp_uploads"
-                os.makedirs(temp_dir, exist_ok=True)
-                file_path = os.path.join(temp_dir, filename)
-                archivo.save(file_path)
-                
-                app.logger.info(f"📎 Enviando archivo: {filename} a {numero}")
-                
-                # Enviar archivo usando la función existente
-                if enviar_documento(numero, file_path, filename, config):
-                    app.logger.info(f"✅ Archivo {filename} enviado exitosamente")
-                else:
-                    app.logger.error(f"🔴 Error al enviar archivo {filename}")
-                    flash('❌ Error al enviar el archivo', 'error')
-                    return redirect(url_for('ver_chat', numero=numero))
-                
-                # Limpiar archivo temporal después de enviar
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
-                    
-            except Exception as e:
-                app.logger.error(f"🔴 Error enviando archivo: {e}")
-                flash('❌ Error al enviar el archivo', 'error')
-                return redirect(url_for('ver_chat', numero=numero))
-        
-        # 2. ENVIAR TEXTO SI EXISTE
-        if texto:
-            try:
-                enviar_mensaje(numero, texto, config)
-                app.logger.info(f"💬 Texto enviado a {numero}")
-            except Exception as e:
-                app.logger.error(f"🔴 Error enviando texto: {e}")
-                flash('❌ Error al enviar el mensaje de texto', 'error')
-                return redirect(url_for('ver_chat', numero=numero))
-        
-        # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
-        cursor = conn.cursor()
-        
-        # Determinar qué guardar en la base de datos
-        if texto and archivo:
-            mensaje_db = f'[Mensaje manual + archivo: {archivo.filename}]'
-            respuesta_db = texto
-        elif archivo:
-            mensaje_db = f'[Archivo enviado: {archivo.filename}]'
-            respuesta_db = f'Archivo: {archivo.filename}'
-        else:
-            mensaje_db = '[Mensaje manual desde web]'
-            respuesta_db = texto
-
-        cursor.execute(
-            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-            (numero, mensaje_db, respuesta_db)
-        )
-        
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+        config = obtener_configuracion_por_host()
+        conn = get_db_connection(config)
         try:
-            actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-            app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-        except Exception as e:
-            app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+            numero = request.form['numero']
+            texto = request.form['texto'].strip()
         
-        # 5. MENSAJE DE CONFIRMACIÓN
-        if texto and archivo:
-            flash('✅ Mensaje y archivo enviados correctamente', 'success')
-        elif archivo:
-            flash('✅ Archivo enviado correctamente', 'success')
-        else:
-            flash('✅ Mensaje enviado correctamente', 'success')
+            # Validar que el mensaje no esté vacío
+            if not texto:
+                flash('❌ El mensaje no puede estar vacío', 'error')
+                return redirect(url_for('ver_chat', numero=numero))
+        
+            app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+        
+            # 1. ENVIAR MENSAJE POR WHATSAPP
+            enviar_mensaje(numero, texto)
+        
+            # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+        
+            # CORREGIDO: Usar UTC_TIMESTAMP() en MySQL para asegurar orden cronológico correcto.
+            cursor.execute(
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
+                (numero, '[Mensaje manual desde web]', texto) # Ya no pasamos timestamp_local
+            )
+        
+            conn.commit()
+            cursor.close()
+            conn.close()
             
-        app.logger.info(f"✅ Envío manual completado para {numero}")
+            # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            try:
+                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
+            except Exception as e:
+                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+            
+            # 4. MENSAJE DE CONFIRMACIÓN
+            flash('✅ Mensaje enviado correctamente', 'success')
+            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+            
+        except KeyError:
+            flash('❌ Error: Número de teléfono no proporcionado', 'error')
+            app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+        except Exception as e:
+            flash('❌ Error al enviar el mensaje', 'error')
+            app.logger.error(f"🔴 Error en enviar_manual: {e}")
         
-    except KeyError:
-        flash('❌ Error: Número de teléfono no proporcionado', 'error')
-        app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
-    except Exception as e:
-        flash('❌ Error al enviar el mensaje', 'error')
-        app.logger.error(f"🔴 Error en enviar_manual: {e}")
-    
-    return redirect(url_for('ver_chat', numero=numero)) 
+        return redirect(url_for('ver_chat', numero=numero)) 
+        
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
@@ -10564,9 +10508,6 @@ def eliminar_chat(numero):
     return redirect(url_for('ver_chats'))
 
     # ——— Configuración ———
-
-
-
 
 def limpiar_estados_antiguos():
     """Limpia estados de conversación con más de 2 horas"""
@@ -10698,39 +10639,8 @@ def verificar_pedido_completo(datos_obtenidos):
         if not datos_obtenidos.get('transferencia_numero') or not datos_obtenidos.get('transferencia_nombre'):
             return False
 
-
     return True
-def enviar_archivo(numero, file_path, filename):
-    """
-    Envía un archivo por WhatsApp
-    """
-    try:
-        # Dependiendo de tu implementación de WhatsApp, esto puede variar
-        # EJEMPLO para yowsup:
-        # whatsapp.send_file(numero, file_path, caption=filename)
-        
-        # EJEMPLO para twilio:
-        # from twilio.rest import Client
-        # client = Client(twilio_account_sid, twilio_auth_token)
-        # message = client.messages.create(
-        #     from_='whatsapp:+14155238886',
-        #     media_url=[file_url],
-        #     body=f"Archivo: {filename}",
-        #     to=f'whatsapp:{numero}'
-        # )
-        
-        # EJEMPLO para selenium/whatsapp-web:
-        # driver.find_element(By.CSS_SELECTOR, "span[data-icon='attach']").click()
-        # driver.find_element(By.CSS_SELECTOR, "input[type='file']").send_keys(file_path)
-        # time.sleep(2)
-        # driver.find_element(By.CSS_SELECTOR, "span[data-icon='send']").click()
-        
-        app.logger.info(f"📎 Archivo {filename} enviado a {numero}")
-        return True
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error en enviar_archivo: {e}")
-        raise e 
+
 def generar_pregunta_datos_faltantes(datos_obtenidos):
     """Genera preguntas inteligentes para datos faltantes, incluyendo forma de pago."""
     if not datos_obtenidos.get('platillos'):
