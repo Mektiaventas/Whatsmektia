@@ -303,7 +303,7 @@
                           style="resize: none; overflow-y: auto;"
                           required></textarea>
 
-                <button type="submit" class="send-btn" onclick="handleSendButtonClick(event)">Enviar</button>
+                <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form>
 
@@ -358,11 +358,6 @@
                     background: #128C7E;
                 }
 
-                .send-btn:disabled {
-                    background: #cccccc;
-                    cursor: not-allowed;
-                }
-
             .emoji-pick-btn {
                 background: none;
                 border: none;
@@ -384,34 +379,6 @@
         </style>
 
         <script>
-            // Variable para controlar el estado de envío
-            let isSending = false;
-
-            // Función para manejar el clic en el botón enviar
-            function handleSendButtonClick(event) {
-                if (isSending) {
-                    event.preventDefault();
-                    return;
-                }
-
-                const textarea = document.getElementById('mensaje-texto');
-                const sendBtn = event.target;
-
-                // Validar que no esté vacío
-                if (textarea.value.trim() === '') {
-                    event.preventDefault();
-                    return;
-                }
-
-                // Mostrar feedback visual inmediato
-                isSending = true;
-                sendBtn.innerHTML = '⏳';
-                sendBtn.disabled = true;
-
-                // Permitir que el formulario se envíe normalmente
-                // El estado se reseteará cuando la página se recargue
-            }
-
             // Funciones para manejar el textarea mejorado
             function handleMessageKeyDown(event) {
                 if (event.key === 'Enter') {
@@ -433,24 +400,13 @@
                         event.preventDefault();
                         const form = document.getElementById('messageForm');
                         const textarea = document.getElementById('mensaje-texto');
-                        const sendBtn = form.querySelector('.send-btn');
 
                         // Validar que no esté vacío
                         if (textarea.value.trim() === '') {
                             return;
                         }
 
-                        // Evitar envíos dobles
-                        if (isSending) {
-                            return;
-                        }
-
-                        // Mostrar feedback visual
-                        isSending = true;
-                        sendBtn.innerHTML = '⏳';
-                        sendBtn.disabled = true;
-
-                        // Enviar el formulario
+                        // Enviar el formulario inmediatamente
                         form.submit();
                     }
                 }
@@ -480,17 +436,6 @@
                 const textarea = document.getElementById('mensaje-texto');
                 if (textarea) {
                     autoResizeTextarea(textarea);
-
-                    // Guardar el estado inicial del textarea
-                    textarea.dataset.originalHeight = textarea.style.height;
-                }
-
-                // Resetear el estado de envío cuando la página se carga
-                isSending = false;
-                const sendBtn = document.querySelector('.send-btn');
-                if (sendBtn) {
-                    sendBtn.innerHTML = 'Enviar';
-                    sendBtn.disabled = false;
                 }
             });
 
@@ -512,11 +457,6 @@
                         }, 100);
                     }
                 }
-            });
-
-            // También resetear si hay un error de envío
-            window.addEventListener('beforeunload', function () {
-                isSending = false;
             });
         </script>
         {% else %}
