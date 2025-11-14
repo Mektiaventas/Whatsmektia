@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+﻿asi {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -279,19 +279,42 @@
 
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
-        <form method="POST" action="/send-manual" class="reply-form" id="messageForm">
+        <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
+
+            <!-- Preview de archivo seleccionado (ARRIBA como WhatsApp) -->
+            <div id="file-preview-container" style="width: 100%; order: -1;">
+                <div id="file-preview" class="file-preview" style="display: none; padding: 12px; background: #f0f0f0; border-radius: 8px; margin: 0 10px 10px 10px; border: 1px dashed #ccc;">
+                    <div class="file-preview-content" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span id="file-icon" style="font-size: 24px;"></span>
+                            <div>
+                                <div id="file-name" style="font-weight: bold; font-size: 14px;"></div>
+                                <div id="file-size" style="font-size: 12px; color: #666;"></div>
+                            </div>
+                        </div>
+                        <button type="button" id="remove-file" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">×</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="input-group">
+                <!-- Botón para adjuntar archivos -->
+                <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
+                    📎
+                </button>
+                <input type="file" id="file-input" name="archivo" style="display: none;"
+                       accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
                 <!-- botón de emoji más grande -->
                 <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
 
-                <!-- Emoji Picker Container (hidden by default) -->
+                <!-- Emoji Picker Container -->
                 <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
                     <!-- Los emojis se llenan por JS -->
                 </div>
 
-                <!-- CAMBIO: textarea en lugar de input -->
+                <!-- textarea -->
                 <textarea name="texto"
                           id="mensaje-texto"
                           placeholder="Escribe un mensaje manual..."
@@ -300,7 +323,7 @@
                           rows="1"
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
-                          style="resize: none; overflow-y: hidden;"
+                          style="resize: none; overflow-y: auto;"
                           required></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
@@ -317,11 +340,13 @@
                 font-size: 14px;
                 line-height: 1.4;
                 min-height: 44px;
-                max-height: 120px;
+                max-height: none; /* Sin límite de altura */
                 font-family: inherit;
                 background: white;
                 outline: none;
                 transition: border-color 0.2s;
+                white-space: pre-wrap; /* Mantener espacios y saltos de línea */
+                word-wrap: break-word;
             }
 
                 .reply-textarea:focus {
@@ -335,6 +360,12 @@
                 padding: 10px;
                 background: #f5f5f5;
                 border-top: 1px solid #ddd;
+            }
+
+            .reply-form {
+                display: flex;
+                flex-direction: column;
+                width: 100%;
             }
 
             .send-btn {
@@ -374,6 +405,46 @@
                 .emoji-pick-btn:hover {
                     background: #e0e0e0;
                 }
+
+            /* SOLUCIÓN DEFINITIVA PARA EL ESPACIO EN LA PRIMERA LÍNEA */
+            .msg-user .text-message,
+            .msg-ai .text-message,
+            .msg-manual .text-message {
+                white-space: pre-wrap;
+                line-height: 1.3 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                font-size: 14px;
+                word-wrap: break-word;
+                display: block;
+                /* ELIMINAR CUALQUIER ESPACIO EN LA PRIMERA LÍNEA */
+                text-indent: 0 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* ELIMINAR ESPACIO EN LA PRIMERA LÍNEA DE MANERA RADICAL */
+            .msg-user .message-content,
+            .msg-ai .message-content,
+            .msg-manual .message-content {
+                margin: 0 !important;
+                padding: 8px 12px !important; /* Solo padding interno, sin margen */
+                line-height: 1.3;
+            }
+
+            /* Asegurar que no haya espacio antes del primer carácter */
+            .text-message::first-line {
+                line-height: 1.3 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* Eliminar cualquier transformación que cause espacio */
+            .msg-ai .text-message,
+            .msg-user .text-message,
+            .msg-manual .text-message {
+                transform: none !important;
+            }
         </style>
 
         <script>
@@ -398,31 +469,40 @@
                         event.preventDefault();
                         const form = document.getElementById('messageForm');
                         const textarea = document.getElementById('mensaje-texto');
+                        const fileInput = document.getElementById('file-input');
 
-                        // Validar que no esté vacío
-                        if (textarea.value.trim() !== '') {
-                            // Deshabilitar el botón temporalmente para evitar envíos dobles
-                            const sendBtn = form.querySelector('.send-btn');
-                            const originalText = sendBtn.innerHTML;
-                            sendBtn.innerHTML = '⏳';
-                            sendBtn.disabled = true;
+                        // Validar que haya contenido para enviar
+                        const hasText = textarea.value.trim() !== '';
+                        const hasFile = fileInput.files.length > 0;
 
-                            // Enviar el formulario inmediatamente
-                            form.submit();
-
-                            // Restaurar el botón después de un tiempo si no se recarga la página
-                            setTimeout(() => {
-                                sendBtn.innerHTML = originalText;
-                                sendBtn.disabled = false;
-                            }, 2000);
+                        if (!hasText && !hasFile) {
+                            // No hay nada que enviar
+                            return;
                         }
+
+                        // Enviar el formulario inmediatamente
+                        form.submit();
                     }
                 }
             }
 
             function autoResizeTextarea(textarea) {
+                // Guardar la altura actual antes de resetear
+                const currentHeight = textarea.style.height;
+
+                // Resetear altura para calcular la nueva
                 textarea.style.height = 'auto';
-                textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+
+                // Calcular nueva altura sin límites
+                const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
+
+                // Aplicar nueva altura
+                textarea.style.height = newHeight + 'px';
+
+                // Si el contenido se redujo mucho, mantener un tamaño mínimo
+                if (textarea.value === '' || textarea.value.trim() === '') {
+                    textarea.style.height = '44px';
+                }
             }
 
             // Inicializar altura del textarea al cargar
@@ -430,6 +510,26 @@
                 const textarea = document.getElementById('mensaje-texto');
                 if (textarea) {
                     autoResizeTextarea(textarea);
+                }
+            });
+
+            // Función para resetear el textarea si está vacío
+            function resetTextareaIfEmpty() {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
+                    textarea.style.height = '44px';
+                }
+            }
+
+            // Observar cambios en el textarea para resetear cuando esté vacío
+            document.addEventListener('input', function (event) {
+                if (event.target.id === 'mensaje-texto') {
+                    // Si el usuario borra todo el contenido, resetear altura
+                    if (event.target.value === '') {
+                        setTimeout(() => {
+                            resetTextareaIfEmpty();
+                        }, 100);
+                    }
                 }
             });
         </script>
@@ -1034,6 +1134,61 @@
             margin-left: 0 !important;
             padding-left: 0 !important;
         }
+    /* Estilos mejorados para adjuntar archivos */
+    .file-attach-btn {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 50%;
+        transition: background 0.2s;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+        .file-attach-btn:hover {
+            background: #e0e0e0;
+        }
+
+    .file-preview {
+        background: #ffffff;
+        border: 2px dashed #25D366;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .file-preview-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .file-type-icon {
+        margin-right: 8px;
+        font-size: 20px;
+    }
+
+    /* Efecto de hover en el botón de eliminar */
+    #remove-file:hover {
+        background: #cc0000;
+        transform: scale(1.1);
+        transition: all 0.2s ease;
+    }
 </style>
 <script>
 /* Small helpers */
@@ -1763,8 +1918,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // INICIALIZACIÓN DIRECTA DE EMOJIS
     setupEmojiPicker();
     setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
+    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
     console.log('Emoji picker inicializado');
     console.log('Búsqueda de chats inicializada');
+    console.log('File upload inicializado');
 
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
@@ -1902,5 +2059,197 @@ function normalizeText(s) {
         .trim()
         .toLowerCase();
 }
+
+    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
+    function setupFileUpload() {
+        const fileInput = document.getElementById('file-input');
+        const fileAttachBtn = document.getElementById('file-attach-btn');
+        const filePreview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const fileIcon = document.getElementById('file-icon');
+        const removeFileBtn = document.getElementById('remove-file');
+        const messageForm = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
+
+        if (!fileInput || !fileAttachBtn) {
+            console.warn('File upload elements not found');
+            return;
+        }
+
+        // Abrir selector de archivos al hacer clic en el botón
+        fileAttachBtn.addEventListener('click', function () {
+            fileInput.click();
+        });
+
+        // Manejar selección de archivo
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                // Validar tamaño máximo (50MB)
+                const maxSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxSize) {
+                    alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
+                    clearFileSelection();
+                    return;
+                }
+
+                // Validar tipo de archivo
+                const allowedTypes = [
+                    'application/pdf',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'image/jpeg',
+                    'image/jpg',
+                    'image/png',
+                    'image/gif',
+                    'video/mp4',
+                    'video/quicktime',
+                    'video/webm',
+                    'video/x-msvideo',
+                    'video/x-matroska',
+                    'audio/mpeg',
+                    'audio/wav',
+                    'application/zip',
+                    'application/x-rar-compressed'
+                ];
+
+                if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                    alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
+                    clearFileSelection();
+                    return;
+                }
+
+                showFilePreview(file);
+            }
+        });
+
+        // Eliminar archivo seleccionado
+        removeFileBtn.addEventListener('click', function () {
+            clearFileSelection();
+        });
+
+        function showFilePreview(file) {
+            const fileType = getFileType(file.name);
+            const icon = getFileIcon(fileType);
+
+            fileIcon.textContent = icon;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            filePreview.style.display = 'block';
+
+            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
+            textarea.placeholder = "Añade un mensaje (opcional)...";
+
+            // Hacer scroll para mostrar la previsualización
+            filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function clearFileSelection() {
+            fileInput.value = '';
+            filePreview.style.display = 'none';
+            fileName.textContent = '';
+            fileSize.textContent = '';
+            fileIcon.textContent = '';
+            textarea.placeholder = "Escribe un mensaje manual...";
+        }
+
+        function getFileType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+
+            // Imágenes
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext))
+                return 'image';
+
+            // Videos
+            if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext))
+                return 'video';
+
+            // Audio
+            if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext))
+                return 'audio';
+
+            // Documentos
+            if (['pdf'].includes(ext))
+                return 'pdf';
+
+            // Word
+            if (['doc', 'docx'].includes(ext))
+                return 'word';
+
+            // Excel
+            if (['xls', 'xlsx', 'csv'].includes(ext))
+                return 'excel';
+
+            // PowerPoint
+            if (['ppt', 'pptx'].includes(ext))
+                return 'powerpoint';
+
+            // Archivos comprimidos
+            if (['zip', 'rar', '7z'].includes(ext))
+                return 'zip';
+
+            // Texto
+            if (['txt', 'rtf'].includes(ext))
+                return 'text';
+
+            return 'other';
+        }
+
+        function getFileIcon(fileType) {
+            const icons = {
+                'image': '🖼️',
+                'video': '🎬',
+                'audio': '🎵',
+                'pdf': '📕',
+                'word': '📘',
+                'excel': '📗',
+                'powerpoint': '📙',
+                'zip': '📦',
+                'text': '📄',
+                'other': '📎'
+            };
+            return icons[fileType] || '📎';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+
+        // Validar antes de enviar
+        messageForm.addEventListener('submit', function (e) {
+            const hasText = textarea.value.trim() !== '';
+            const hasFile = fileInput.files.length > 0;
+
+            if (!hasText && !hasFile) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje o selecciona un archivo');
+                return false;
+            }
+
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '⏳';
+            sendBtn.disabled = true;
+
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });
+
+        console.debug('File upload functionality initialized - WhatsApp style');
+    }
 </script>
-{% endblock %}   
+{% endblock %}  
