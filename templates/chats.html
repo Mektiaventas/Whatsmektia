@@ -553,7 +553,7 @@
     </aside>
 </div>
 
-<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button> 
 <style>
     :root {
         --left-width: 340px;
@@ -697,7 +697,7 @@
         padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 2px; /* REDUCIDO de 4px a 2px para menos espacio entre mensajes */
+        gap: 4px; /* Reducir de 8px si es necesario */
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
     }
@@ -710,7 +710,6 @@
         margin: 1px 0; /* Reducir de 2px a 1px */
         position: relative;
         word-wrap: break-word;
-        line-height: 1.2; /* AÑADIDO: line-height más compacto */
     }
 
     .msg-user {
@@ -718,8 +717,6 @@
         background: #005c4b;
         color: white;
         border-bottom-right-radius: 5px;
-        margin: 1px 0 !important; /* AÑADIDO para eliminar espacio extra */
-        padding: 0 !important; /* AÑADIDO para eliminar padding extra */
     }
 
     .msg-ai {
@@ -727,24 +724,29 @@
         background: #202c33;
         color: #e9edef;
         border-bottom-left-radius: 5px;
-        margin: 1px 0 !important; /* AÑADIDO para eliminar espacio extra */
-        padding: 0 !important; /* AÑADIDO para eliminar padding extra */
     }
 
-    /* ELIMINADO: .text-message duplicado - ya está definido arriba con las correcciones */
+    .text-message {
+        line-height: 1.3; /* Mejor legibilidad */
+        white-space: pre-wrap; /* Mantener formato pero eliminar espacios iniciales */
+        font-size: 14px;
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        display: block;
+        overflow-wrap: break-word;
+    }
 
     .msg-manual {
         align-self: end;
         background: #0ea5a4;
         color: white;
-        margin: 1px 0 !important; /* AÑADIDO para eliminar espacio extra */
-        padding: 0 !important; /* AÑADIDO para eliminar padding extra */
     }
 
     .msg-meta {
         font-size: 11px;
         color: #9ca3af;
-        margin-top: 4px; /* REDUCIDO de 6px a 4px */
+        margin-top: 6px;
     }
 
     /* Mobile toggle button */
@@ -762,7 +764,7 @@
         box-shadow: 0 6px 18px rgba(2,6,23,0.35);
         cursor: pointer;
         font-size: 18px;
-    } 
+    }
 
     /* New: mobile overlay behaviour for left panel */
     @media (max-width: 900px) {
