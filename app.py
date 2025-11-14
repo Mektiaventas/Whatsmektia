@@ -4050,6 +4050,7 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
+    """Sirve archivos subidos desde la carpeta UPLOAD_FOLDER"""
     return send_from_directory(UPLOAD_FOLDER, filename) 
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -10343,7 +10344,6 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
-
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
     """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
@@ -10366,93 +10366,81 @@ def enviar_manual():
         mensaje_enviado = False
         respuesta_texto = ""
         archivo_info = ""
+        filepath = None
         
         # 1. Manejar archivo si existe
         if archivo and archivo.filename:
+            app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
+            
             if allowed_file(archivo.filename):
                 # Guardar archivo temporalmente
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
                 archivo.save(filepath)
+                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
                 
-                # Determinar tipo de archivo y enviar según corresponda
+                # Determinar tipo de archivo
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # CONSTRUIR URL PÚBLICA CORRECTA
+                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
                     dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio}"
                     public_url = f"{dominio}/uploads/{filename}"
+                    
+                    app.logger.info(f"🌐 URL pública generada: {public_url}")
                     
                     # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
                     if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
                         # Es imagen - enviar como imagen
+                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
                         enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
                         archivo_info = f"📷 Imagen: {archivo.filename}"
                         
-                    elif file_ext in ['.pdf']:
-                        # Es PDF - enviar como documento
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📕 PDF: {archivo.filename}"
-                        
-                    elif file_ext in ['.doc', '.docx']:
-                        # Es Word
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📘 Documento Word: {archivo.filename}"
-                        
-                    elif file_ext in ['.xls', '.xlsx', '.csv']:
-                        # Es Excel
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
-                        
-                    elif file_ext in ['.ppt', '.pptx']:
-                        # Es PowerPoint
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📙 Presentación: {archivo.filename}"
-                        
-                    elif file_ext in ['.zip', '.rar', '.7z']:
-                        # Es archivo comprimido
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
-                        
-                    elif file_ext in ['.txt', '.rtf']:
-                        # Es texto
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📄 Archivo de texto: {archivo.filename}"
-                        
-                    elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
-                        # Es video
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"🎬 Video: {archivo.filename}"
-                        
-                    elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
-                        # Es audio
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"🎵 Audio: {archivo.filename}"
-                        
                     else:
-                        # Otros tipos - intentar como documento
+                        # Para todos los demás tipos, enviar como documento
+                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
                         enviar_documento(numero, public_url, archivo.filename, config)
-                        archivo_info = f"📎 Archivo: {archivo.filename}"
+                        
+                        # Determinar el tipo para el mensaje informativo
+                        if file_ext == '.pdf':
+                            archivo_info = f"📕 PDF: {archivo.filename}"
+                        elif file_ext in ['.doc', '.docx']:
+                            archivo_info = f"📘 Documento Word: {archivo.filename}"
+                        elif file_ext in ['.xls', '.xlsx', '.csv']:
+                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
+                        elif file_ext in ['.ppt', '.pptx']:
+                            archivo_info = f"📙 Presentación: {archivo.filename}"
+                        elif file_ext in ['.zip', '.rar', '.7z']:
+                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
+                        elif file_ext in ['.txt', '.rtf']:
+                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
+                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
+                            archivo_info = f"🎬 Video: {archivo.filename}"
+                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
+                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                        else:
+                            archivo_info = f"📎 Archivo: {archivo.filename}"
                     
                     mensaje_enviado = True
-                    app.logger.info(f"📤 Archivo enviado a {numero}: {archivo.filename}")
+                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
                     
                 except Exception as file_error:
                     app.logger.error(f"🔴 Error enviando archivo: {file_error}")
+                    app.logger.error(traceback.format_exc())
                     flash('❌ Error al enviar el archivo', 'error')
                     # Limpiar archivo temporal en caso de error
                     try:
-                        os.remove(filepath)
+                        if filepath and os.path.exists(filepath):
+                            os.remove(filepath)
                     except:
                         pass
                     return redirect(url_for('ver_chat', numero=numero))
                 
-                # Limpiar archivo temporal después de enviar
-                try:
-                    os.remove(filepath)
-                except:
-                    pass
-                    
+                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
+                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
+                
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
@@ -10460,12 +10448,13 @@ def enviar_manual():
         # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
         if texto:
             try:
+                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
                 enviar_mensaje(numero, texto, config)
                 respuesta_texto = texto
                 if archivo_info:
                     respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
                 mensaje_enviado = True
-                app.logger.info(f"📤 Mensaje de texto enviado a {numero}: {texto[:50]}...")
+                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
             except Exception as text_error:
                 app.logger.error(f"🔴 Error enviando texto: {text_error}")
                 if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
@@ -10481,7 +10470,6 @@ def enviar_manual():
             mensaje_historial = "[Mensaje manual desde web]"
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
-            # CORREGIDO: Usar UTC_TIMESTAMP() en MySQL para asegurar orden cronológico correcto.
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
                 (numero, mensaje_historial, respuesta_historial)
@@ -10517,6 +10505,7 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
+
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
