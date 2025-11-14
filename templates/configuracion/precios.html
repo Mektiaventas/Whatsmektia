@@ -21,6 +21,59 @@
     {% endfor %}
 </ul>
 
+<div class="tab-navigation mb-6">
+    <div class="tab-buttons">
+
+        <button class="btn btn-primary mt-3" id="btn-user-list" onclick="showSection('user-list')">
+            <div class="tab-icon">👥</div>
+            <div>
+                <span class="tab-title">Precios vista cliente</span>
+            </div>
+        </button>
+
+        {% if is_admin %}
+        <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
+            <div class="tab-icon">🔒</div>
+            <div>
+                <span class="tab-title">Precios vista Admin</span>
+            </div>
+        </button>
+        {% endif %}
+        <div class="spacer" aria-hidden="true"></div>
+        <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
+            <div class="tab-icon">📊</div>
+            <div>
+                <span class="tab-title">Carga Template</span>
+            </div>
+        </button>
+        <button class="btn btn-primary mt-3" id="btn-manual-upload" onclick="showSection('manual-upload')">
+            <div class="tab-icon">✏️</div>
+            <div>
+                <span class="tab-title">Carga manual</span>
+
+            </div>
+        </button>
+
+        <button class="btn btn-primary mt-3" id="btn-pdf-upload" onclick="showSection('pdf-upload')">
+            <div class="tab-icon">📄</div>
+            <div>
+                <span class="tab-title">Carga con IA</span>
+            </div>
+        </button>
+        <br /><br />
+        <button class="btn btn-primary mt-3" id="btn-column-template" onclick="showSection('column-template')">
+            <div class="tab-icon">📝</div>
+            <div>
+                <span class="tab-title">Template Columnas</span>
+            </div>
+        </button>
+        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+            🔁 Restablecer columnas
+        </button>
+    </div>
+</div>
+<br />
+<br />
 <div class="section" id="pdf-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
@@ -123,7 +176,7 @@
 </div>
 
 <div class="section" id="manual-upload" style="display:none;">
-    
+
     <div class="section-header">
 
         <h3 class="flex justify-between items-center">
@@ -365,30 +418,26 @@
 <div class="section" id="user-list" style="display:none;">
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
-            <h3>📋 Productos (Vista Cliente) ({{ pagination.total_items }} registros)</h3>
+            <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
         </div>
         <div class="card-body">
 
-            <form method="GET" action="{{ url_for('configuracion_precios') }}" class="search-form">
-                <input type="hidden" name="section" value="user-list">
-                <input type="text" name="search" class="input" placeholder="Buscar en {{ pagination.total_items }} productos..." value="{{ pagination.search_query or '' }}">
-                <button type="submit" class="btn primary">Buscar</button>
-            </form>
             <div class="pagination-controls" id="pagination-user">
                 {% if pagination.current_page > 1 %}
-                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">⬅️ Anteriores</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
-                    <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
-                
+
                 <span class="page-info">
                     Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
+                    <em style="font-size: 0.8em; margin-left: 10px;">(Total: {{ pagination.total_items }} productos)</em>
                 </span>
-                
+
                 {% if pagination.current_page < pagination.total_pages %}
-                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">Siguientes ➡️</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
-                    <span class="btn small secondary disabled">Siguientes ➡️</span>
+                <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
             </div>
             {% if precios %}
@@ -484,13 +533,8 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                {% if pagination.search_query %}
-                <div class="text-gray-500 text-lg mb-2">🔍 No se encontraron productos</div>
-                <p class="text-sm text-gray-400">Tu búsqueda de "{{ pagination.search_query }}" no arrojó resultados.</p>
-                {% else %}
                 <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
                 <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
-                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -500,30 +544,26 @@
 <div class="section" id="admin-list" style="display:none;">
     <div class="card">
         <div class="card-header bg-blue-100">
-            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ pagination.total_items }} registros)</h3>
+            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
         </div>
         <div class="card-body">
 
-            <form method="GET" action="{{ url_for('configuracion_precios') }}" class="search-form">
-                <input type="hidden" name="section" value="admin-list">
-                <input type="text" name="search" class="input" placeholder="Buscar en {{ pagination.total_items }} productos..." value="{{ pagination.search_query or '' }}">
-                <button type="submit" class="btn primary">Buscar</button>
-            </form>
             <div class="pagination-controls" id="pagination-admin">
                 {% if pagination.current_page > 1 %}
-                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">⬅️ Anteriores</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
-                    <span class="btn small secondary disabled">⬅️ Anteriores</span>
+                <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
-                
+
                 <span class="page-info">
                     Página <strong>{{ pagination.current_page }}</strong> de <strong>{{ pagination.total_pages }}</strong>
+                    <em style="font-size: 0.8em; margin-left: 10px;">(Total: {{ pagination.total_items }} productos)</em>
                 </span>
-                
+
                 {% if pagination.current_page < pagination.total_pages %}
-                    <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">Siguientes ➡️</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
-                    <span class="btn small secondary disabled">Siguientes ➡️</span>
+                <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
             </div>
             {% if precios %}
@@ -594,19 +634,13 @@
             </div>
             {% else %}
             <div class="text-center py-8">
-                {% if pagination.search_query %}
-                <div class="text-gray-500 text-lg mb-2">🔍 No se encontraron productos</div>
-                <p class="text-sm text-gray-400">Tu búsqueda de "{{ pagination.search_query }}" no arrojó resultados.</p>
-                {% else %}
                 <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
                 <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
-                {% endif %}
             </div>
             {% endif %}
         </div>
     </div>
 </div>
-
 <div class="section" id="column-template" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
@@ -654,60 +688,25 @@
 </div>
 
 <style>
-    /* --- INICIO DE CAMBIOS CSS --- */
-
-    /* 1. CSS para Paginación */
+    /* INICIO: CSS para Paginación */
     .pagination-controls {
         margin-bottom: 15px;
         display: flex;
         align-items: center;
         gap: 10px;
     }
+
     .page-info {
         font-size: 0.9rem;
         color: #4a5568; /* text-gray-700 */
     }
-    /* Estilo para botones/spans desactivados */
-    .pagination-controls .disabled {
+
+    .pagination-controls button:disabled {
         opacity: 0.4;
         cursor: not-allowed;
-        background-color: #e2e8f0;
-        padding: 5px 10px; 
-        border-radius: 5px;
-        font-size: 0.875rem; /* Asegura que coincida con .btn.small */
-        line-height: 1.5;
-        color: #4a5568;
-        border: 1px solid #cbd5e0;
+        background-color: #e2e8f0; /* bg-gray-200 */
     }
-    .pagination-controls .btn.small.secondary {
-        text-decoration: none; /* Quitar subrayado de enlaces */
-    }
-
-    /* 2. CSS para el formulario de búsqueda */
-    .search-form {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 15px;
-    }
-    .search-form .input {
-        flex-grow: 1; /* El input toma el espacio disponible */
-    }
-
-    /* 3. CSS para el ancho de la Descripción */
-    .table {
-        width: 100%;
-        border-collapse: collapse;
-        /* table-layout: fixed; */ /* <-- ELIMINADO para que las columnas se autoajusten */
-        font-size: 13px;
-    }
-    .table th:nth-child(6), .table td:nth-child(6) {
-        /* max-width: 180px; */ /* <-- ELIMINADO */
-        width: 30%; /* <-- AÑADIDO: Darle prioridad de ancho */
-        min-width: 250px; /* <-- AÑADIDO: Ancho mínimo */
-    }
-
-    /* --- FIN DE CAMBIOS CSS --- */
-
+    /* FIN: CSS para Paginación */
 
     /* ADD to the existing <style> block (near other .btn styles) */
     .btn-reset {
@@ -724,6 +723,7 @@
             background: #d97706;
             transform: translateY(-1px);
         }
+
     .imagen_tabla {
         width: 100%;
         height: 100%;
@@ -894,7 +894,12 @@
     }
 
     /* Table layout: allow shrinking and wrapping */
-    /* .table (ya modificado arriba) */
+    .table {
+        width: 100%;
+        border-collapse: collapse;
+        /* table-layout: fixed; */ /* <-- Eliminamos esto para que el ancho sea automático */
+        font-size: 13px;
+    }
 
         .table td {
             border: 1px solid black;
@@ -949,9 +954,18 @@
         background: linear-gradient(#ffffff, #f8fafc); /* matches header background */
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
-    
-    /* (CSS para .disabled y .btn.small.secondary ya añadido arriba) */
+    /* Añadir al bloque <style> (Línea 882 aprox) */
+    .pagination-controls .disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        background-color: #e2e8f0;
+        padding: 5px 10px; /* Asegura que el span tenga el mismo padding que el <a> */
+        border-radius: 5px;
+    }
 
+    .pagination-controls .btn.small.secondary {
+        text-decoration: none;
+    }
     /* Optional: give the header cells a bit more weight */
     .table thead th {
         font-weight: 600;
@@ -975,9 +989,10 @@
     .desc-cell {
         font-size: xx-small;
     }
-    
-    /* (CSS para nth-child(6) ya modificado arriba) */
-
+    /* prioritize wrapping for long columns (Descripción, Categoría, etc.) */
+    .table th:nth-child(6), .table td:nth-child(6) {
+        max-width: 180px;
+    }
     /* Descripción */
     .table th:nth-child(2), .table td:nth-child(2),
     .table th:nth-child(3), .table td:nth-child(3),
@@ -1043,29 +1058,87 @@
         height: 50%;
     }
 </style>
-
 <script>
-    
-    // --- LÓGICA DE PAGINACIÓN DE JAVASCRIPT ELIMINADA ---
-    // (setupPagination, showPage, changePage YA NO SON NECESARIAS)
-    // ---
+
+    // --- INICIO: Lógica de Paginación ---
+    const PAGE_SIZE = 100;
+    const paginationConfig = {
+        user: { currentPage: 1, totalPages: 1, rows: [] },
+        admin: { currentPage: 1, totalPages: 1, rows: [] }
+    };
+
+    function setupPagination(tableId) {
+        const table = document.querySelector(`table[data-table="${tableId}"]`);
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const config = paginationConfig[tableId];
+        config.rows = rows;
+        config.totalPages = Math.ceil(rows.length / PAGE_SIZE) || 1; // Asegurar al menos 1 página
+
+        const totalEl = document.getElementById(`page-total-${tableId}`);
+        if (totalEl) totalEl.textContent = config.totalPages;
+
+        // Mostrar la primera página
+        showPage(tableId, 1);
+    }
+
+    function showPage(tableId, page) {
+        const config = paginationConfig[tableId];
+        if (!config || page < 1 || page > config.totalPages) return;
+
+        config.currentPage = page;
+        const start = (page - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+
+        // Ocultar todas las filas y luego mostrar solo las de la página
+        config.rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+
+        const numEl = document.getElementById(`page-num-${tableId}`);
+        if (numEl) numEl.textContent = page;
+
+        const controls = document.getElementById(`pagination-${tableId}`);
+        if (controls) {
+            controls.querySelector('button[onclick*="-1"]').disabled = (page === 1);
+            controls.querySelector('button[onclick*="1"]').disabled = (page === config.totalPages);
+        }
+    }
+
+    function changePage(tableId, direction) {
+        const config = paginationConfig[tableId];
+        const newPage = config.currentPage + direction;
+        showPage(tableId, newPage);
+    }
+    // --- FIN: Lógica de Paginación ---
 
     function downloadTemplateWithSelection() {
-        // ... (Esta función se mantiene igual) ...
+        // Obtener todos los checkboxes seleccionados con el nombre 'selected_columns'
         const checkboxes = document.querySelectorAll('input[name="selected_columns"]:checked');
+
+        // Extraer el 'value' (nombre de la columna) de cada checkbox
         const selectedColumns = Array.from(checkboxes).map(cb => cb.value);
+
         if (selectedColumns.length === 0) {
             alert("🚨 Por favor, selecciona al menos una columna para descargar.");
             return;
         }
+
+        // Codificar la lista como una cadena separada por comas para el parámetro 'cols'
         const colsParam = selectedColumns.join(',');
+
+        // Construir la URL de descarga con el parámetro
+        // NOTA: 'descargar_template' debe ser el nombre de la función en app.py que tiene el @app.route
         const downloadUrl = `{{ url_for('descargar_template') }}?cols=${encodeURIComponent(colsParam)}`;
+
+        // Disparar la descarga abriendo la URL en una nueva pestaña
         window.open(downloadUrl, '_blank');
     }
-    
     // Function to show a specific section and highlight its button
     function showSection(sectionId) {
-        // ... (Esta función se mantiene igual) ...
         const sections = document.querySelectorAll('.section');
         sections.forEach(section => section.style.display = 'none');
         const buttons = document.querySelectorAll('.btn, .btn-primario, .btn-primary');
@@ -1084,7 +1157,6 @@
 
     // Image input toggle function
     function toggleImagenInput() {
-        // ... (Esta función se mantiene igual) ...
         const tipo = document.getElementById('imagen-tipo').value;
         const archivoContainer = document.getElementById('imagen-archivo-container');
         const urlContainer = document.getElementById('imagen-url-container');
@@ -1098,23 +1170,23 @@
             const f = document.getElementById('imagen'); if (f) f.value = '';
         }
     }
-
-    // --- LÓGICA DE OCULTAR/MOSTRAR COLUMNAS (Se mantiene igual) ---
+    // Toggle a column based on the header button clicked
     function toggleColumnBtn(btn) {
-        // ... (Esta función se mantiene igual) ...
         const th = btn.closest('th');
         if (!th) return;
         const table = th.closest('table');
         if (!table) return;
         const headerCells = th.parentNode.children;
-        let index = Array.prototype.indexOf.call(headerCells, th);
+        let index = Array.prototype.indexOf.call(headerCells, th); // 0-based
+        // Toggle visibility for this column index across rows in the same table
         toggleColumn(table, index);
+        // update button pressed state
         const pressed = btn.getAttribute('aria-pressed') === 'true';
         btn.setAttribute('aria-pressed', (!pressed).toString());
     }
 
+    // Toggle column by table element and column index
     function toggleColumn(table, colIndex) {
-        // ... (Esta función se mantiene igual) ...
         const firstRow = table.querySelector('tbody tr');
         if (!firstRow) return;
         const cell = firstRow.children[colIndex];
@@ -1126,6 +1198,7 @@
             if (c) c.style.display = newDisplay;
         });
         const tableId = table.getAttribute('data-table') || 'table';
+        // Update localStorage map + persist to server
         try {
             const key = `precios_hidden_cols_${tableId}`;
             const raw = localStorage.getItem(key);
@@ -1133,14 +1206,13 @@
             if (!isHidden) map[colIndex] = true;
             else delete map[colIndex];
             localStorage.setItem(key, JSON.stringify(map));
+            // Send to server (best-effort)
             persistHiddenColumnsToServer(tableId, map);
         } catch (e) {
             console.warn('Could not persist column visibility locally:', e);
         }
     }
-    
     function persistHiddenColumnsToServer(tableId, map) {
-        // ... (Esta función se mantiene igual) ...
         try {
             fetch('/configuracion/precios/columnas', {
                 method: 'POST',
@@ -1148,19 +1220,20 @@
                 body: JSON.stringify({ table: tableId, hidden: map }),
                 credentials: 'same-origin'
             }).catch(err => {
+                // best-effort: if network fails, leave localStorage as fallback
                 console.warn('Warning: could not persist hidden columns to server:', err);
             });
         } catch (e) {
             console.warn('Error in persistHiddenColumnsToServer:', e);
         }
     }
-
+    // Persist hidden columns set for a table in localStorage
     function persistHiddenColumn(tableId, colIndex, hidden) {
-        // ... (Esta función se mantiene igual) ...
         try {
             const key = `precios_hidden_cols_${tableId}`;
             const raw = localStorage.getItem(key);
             let map = raw ? JSON.parse(raw) : {};
+            // store as object of indices->true
             if (hidden) {
                 map[colIndex] = true;
             } else {
@@ -1172,12 +1245,13 @@
         }
     }
 
+    // Apply stored hidden columns to all tables on load
     async function applyStoredHiddenColumns() {
-        // ... (Esta función se mantiene igual) ...
         try {
             const tables = document.querySelectorAll('table[data-table]');
             for (const table of tables) {
                 const tableId = table.getAttribute('data-table') || 'table';
+                // Try server
                 try {
                     const res = await fetch(`/configuracion/precios/columnas?table=${encodeURIComponent(tableId)}`, { credentials: 'same-origin' });
                     if (res.ok) {
@@ -1197,12 +1271,14 @@
                                 if (btn) btn.setAttribute('aria-pressed', 'true');
                             }
                         });
+                        // Also persist to localStorage for offline UX
                         localStorage.setItem(`precios_hidden_cols_${tableId}`, JSON.stringify(map));
                         continue;
                     }
                 } catch (e) {
                     // server failed, fall back to localStorage below
                 }
+                // fallback: localStorage
                 const key = `precios_hidden_cols_${tableId}`;
                 const raw = localStorage.getItem(key);
                 const map = raw ? JSON.parse(raw) : {};
@@ -1225,10 +1301,9 @@
             console.warn('Error applying stored hidden columns:', e);
         }
     }
-    
     async function resetColumns() {
-        // ... (Esta función se mantiene igual) ...
         if (!confirm('¿Restablecer visibilidad de columnas para esta vista? Esto mostrará todas las columnas hasta que vuelvas a ocultarlas.')) return;
+        // Clear server-side for all tables for this tenant
         try {
             await fetch('/configuracion/precios/columnas/restablecer', {
                 method: 'POST',
@@ -1238,6 +1313,7 @@
         } catch (e) {
             console.warn('Could not clear server-side column settings:', e);
         }
+        // Clear UI and localStorage
         document.querySelectorAll('table[data-table]').forEach(table => {
             const rows = table.querySelectorAll('thead tr, tbody tr');
             const colsCount = table.querySelector('thead tr').children.length;
@@ -1249,7 +1325,7 @@
                 const headerCell = table.querySelector('thead tr').children[cidx];
                 if (headerCell) {
                     const btn = headerCell.querySelector('.col-toggle');
-                    if (btn) btn.setAttribute('aria-pressed', 'true');
+                    if (btn) btn.setAttribute('aria-pressed', 'false');
                 }
             }
             const tableId = table.getAttribute('data-table') || 'table';
@@ -1257,37 +1333,29 @@
         });
         alert('Columnas restablecidas.');
     }
-    
-    // On document ready (MODIFICADO)
+    // On document ready
+    // precios.html (Línea 1342 aprox) - VERSIÓN CORREGIDA c
+
+    // On document ready
     document.addEventListener('DOMContentLoaded', function () {
-        
-        // --- 1. Lógica de selección de sección (Se mantiene) ---
+        // Default to the user-list (client prices) section
         let initialSection = 'user-list';
         {% if precio_edit %}
         initialSection = 'manual-upload';
         {% endif %}
-        
         const urlParams = new URLSearchParams(window.location.search);
-        
-        // *** CAMBIO CLAVE: Leer 'section' de la URL para mantener la pestaña activa ***
-        const section = urlParams.get('section'); 
-        
-        if (section) {
-            initialSection = section; // 'user-list' o 'admin-list' vendrán de la paginación/búsqueda
-        } else if (urlParams.has('search')) {
-            initialSection = 'user-list'; // Default a user-list si solo hay búsqueda
-        }
-        
+        const section = urlParams.get('section');
+        if (section) initialSection = section;
         showSection(initialSection);
-        
         const urlContainer = document.getElementById('imagen-url-container');
         if (urlContainer) urlContainer.style.display = 'none';
 
-        // --- 2. Lógica de Paginación JS (ELIMINADA) ---
+        // --- PAGINACIÓN BORRADA ---
         // (Las llamadas a setupPagination() se eliminaron)
+        // --- FIN PAGINACIÓN ---
 
-        // --- 3. Lógica de Ocultar Columnas (Se mantiene) ---
-        applyStoredHiddenColumns();
+        // Apply stored column visibility
+        applyStoredHiddenColumns(); // <-- Esta línea ahora SÍ se ejecutará
     });
 </script>
 {% endblock %}
