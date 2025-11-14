@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+asi {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -312,7 +312,7 @@
                 <!-- Emoji Picker Container -->
                 <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
                     <!-- Los emojis se llenan por JS -->
-                </div>  
+                </div>
 
                 <!-- textarea -->
                 <textarea name="texto"
@@ -324,7 +324,8 @@
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
                           style="resize: none; overflow-y: auto;"
-                          required></textarea> 
+                          required></textarea>
+
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form> 
@@ -467,20 +468,23 @@
                         // Enter solo: Enviar mensaje inmediatamente
                         event.preventDefault();
                         const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
                         const fileInput = document.getElementById('file-input');
 
-                        // Validar que haya archivo O texto para enviar
-                        const hasText = form.texto.value.trim() !== '';
+                        // Validar que haya contenido para enviar
+                        const hasText = textarea.value.trim() !== '';
                         const hasFile = fileInput.files.length > 0;
 
-                        if (hasText || hasFile) {
-                            // Hay contenido para enviar, enviar formulario
-                            form.submit();
+                        if (!hasText && !hasFile) {
+                            // No hay nada que enviar
+                            return;
                         }
-                        // Si no hay nada, no hacer nada
+
+                        // Enviar el formulario inmediatamente
+                        form.submit();
                     }
                 }
-            } 
+            }
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -583,7 +587,7 @@
     </aside>
 </div>
 
-<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button> 
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 <style>
     :root {
         --left-width: 340px;
@@ -1146,9 +1150,9 @@
         justify-content: center;
     }
 
-    .file-attach-btn:hover {
-        background: #e0e0e0;
-    }
+        .file-attach-btn:hover {
+            background: #e0e0e0;
+        }
 
     .file-preview {
         background: #ffffff;
@@ -1184,8 +1188,7 @@
         background: #cc0000;
         transform: scale(1.1);
         transition: all 0.2s ease;
-    } 
-
+    }
 </style>
 <script>
 /* Small helpers */
@@ -2221,7 +2224,7 @@ function normalizeText(s) {
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-       
+
         // Validar antes de enviar
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
@@ -2239,11 +2242,14 @@ function normalizeText(s) {
             sendBtn.innerHTML = '⏳';
             sendBtn.disabled = true;
 
-            // Permitir que el formulario se envíe normalmente
-            // No hacer preventDefault() si hay contenido
-        }); 
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });
 
         console.debug('File upload functionality initialized - WhatsApp style');
-    } 
+    }
 </script>
 {% endblock %} 
