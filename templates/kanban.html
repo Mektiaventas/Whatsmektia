@@ -208,7 +208,7 @@
             color: #00bfff; /* Azul Telegram/cielo */
         }
         .alias-view.is-messenger {
-            color: cyan; /* Azul Telegram/cielo */
+            color: #c000ff; /* Azul Telegram/cielo */
         }
 
     .edit-alias-btn {
@@ -464,7 +464,6 @@
                             {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
                             <img src="/static/icons/maxi.png" class="card-flag" alt="País" title="País">
                             {% endif %}
-
                         </div>
                         <div class="card-name-section">
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>

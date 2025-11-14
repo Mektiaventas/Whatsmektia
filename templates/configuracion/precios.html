@@ -9,7 +9,6 @@
     {% endif %}
 </div>
 
-<!-- Navegación de subpestañas -->
 <ul class="tabs">
     {% for tab in tabs %}
     <li class="{% if tab == active %}active{% endif %}">
@@ -22,7 +21,6 @@
     {% endfor %}
 </ul>
 
-<!-- NUEVO: Menú de navegación persistente -->
 <div class="tab-navigation mb-6">
     <div class="tab-buttons">
 
@@ -76,7 +74,6 @@
 </div>
 <br />
 <br />
-<!-- Sección: Carga desde PDF -->
 <div class="section" id="pdf-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
@@ -127,7 +124,6 @@
     </div>
 </div>
 
-<!-- Sección: Carga Batch -->
 <div class="section" id="batch-upload" style="display:none;">
     <div class="section-header">
         <h3 class="flex justify-between items-center">
@@ -179,9 +175,8 @@
     </div>
 </div>
 
-<!-- Sección: Carga Manual -->
 <div class="section" id="manual-upload" style="display:none;">
-    
+
     <div class="section-header">
 
         <h3 class="flex justify-between items-center">
@@ -420,13 +415,18 @@
     </div>
 </div>
 
-<!-- Sección: Lista Usuario -->
 <div class="section" id="user-list" style="display:none;">
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
             <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
         </div>
         <div class="card-body">
+
+            <div class="pagination-controls" id="pagination-user">
+                <button class="btn small secondary" onclick="changePage('user', -1)" disabled>⬅️ Anteriores</button>
+                <span class="page-info">Página <strong id="page-num-user">1</strong> de <strong id="page-total-user">1</strong></span>
+                <button class="btn small secondary" onclick="changePage('user', 1)" disabled>Siguientes ➡️</button>
+            </div>
             {% if precios %}
             <div class="table-responsive">
                 <div class="table-scroll table-scroll-client">
@@ -459,7 +459,6 @@
                                     <span>Descripción</span>
                                     <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
                                 </th>
-                                <!--<th>Medidas</th>-->
                                 <th>
                                     <span>Imagen</span>
                                     <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
@@ -476,9 +475,6 @@
                                     <span>Mensualidad</span>
                                     <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
                                 </th>
-                                <!--<th>Mayoreo</th>-->
-                                <!--<th>Status</th>
-                                <th>Catálogo</th>-->
                                 <th>
                                     <span>Acciones</span>
                                     <button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button>
@@ -496,7 +492,6 @@
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
                                     {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
-                                <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
@@ -511,9 +506,6 @@
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                                 <td>{{precio.inscripcion}}</td>
                                 <td>{{precio.mensualidad}}</td>
-                                <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
-                                <!--<td>{{ precio.status_ws or '-' }}</td>
-                                <td>{{ precio.catalogo or '-' }}</td>-->
                                 <td>
                                     {% if es_admin %}
                                     <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
@@ -536,13 +528,18 @@
     </div>
 </div>
 
-<!-- Sección: Lista Admin -->
 <div class="section" id="admin-list" style="display:none;">
     <div class="card">
         <div class="card-header bg-blue-100">
             <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
         </div>
         <div class="card-body">
+
+            <div class="pagination-controls" id="pagination-admin">
+                <button class="btn small secondary" onclick="changePage('admin', -1)" disabled>⬅️ Anteriores</button>
+                <span class="page-info">Página <strong id="page-num-admin">1</strong> de <strong id="page-total-admin">1</strong></span>
+                <button class="btn small secondary" onclick="changePage('admin', 1)" disabled>Siguientes ➡️</button>
+            </div>
             {% if precios %}
             <div class="table-responsive">
                 <div class="table-scroll table-scroll-admin">
@@ -555,18 +552,11 @@
                                 <th><span>Línea</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <th><span>Modelo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <th><span>Descripción</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
-                                <!--<th>Medidas</th>-->
                                 <th><span>Costo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <th><span>Menudeo</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <th><span>Inscripcion</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                                 <th><span>Mensualidad</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
-                                <!--<th>Mayoreo</th>-->
                                 <th><span>Imagen</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
-                                <!--<th>Status</th>
-                                <th>Catálogo</th>
-                                <th>Catálogo 2</th>
-                                <th>Catálogo 3</th>
-                                <th>Proveedor</th>-->
                                 <th><span>Acciones</span><button type="button" class="col-toggle" title="Ocultar/Mostrar columna" onclick="toggleColumnBtn(this)">❎</button></th>
                             </tr>
                         </thead>
@@ -581,12 +571,10 @@
                                 <td class="desc-cell" data-desc="{{ precio.descripcion|default('')|e }}">
                                     {{ precio.descripcion|default('-')|truncate(300) }}
                                 </td>
-                                <!--<td>{{ precio.medidas or '-' }}</td>-->
                                 <td class="text-right text-red-600">${{ "{:,.2f}".format(precio.costo) if precio.costo else '-' }}</td>
                                 <td class="text-right text-blue-600">${{ "{:,.2f}".format(precio.precio_menudeo) if precio.precio_menudeo else '-' }}</td>
                                 <td>{{precio.inscripcion}}</td>
                                 <td>{{precio.mensualidad}}</td>
-                                <!--<td class="text-right text-green-600">${{ "{:,.2f}".format(precio.precio_mayoreo) if precio.precio_mayoreo else '-' }}</td>-->
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
@@ -598,11 +586,6 @@
                                     -
                                     {% endif %}
                                 </td>
-                                <!--<td>{{ precio.status_ws or '-' }}</td>
-                                <td>{{ precio.catalogo or '-' }}</td>
-                                <td>{{ precio.catalogo2 or '-' }}</td>
-                                <td>{{ precio.catalogo3 or '-' }}</td>
-                                <td>{{ precio.proveedor or '-' }}</td>-->
                                 <td>
                                     <div class="flex space-x-2">
                                         <a href="{{ url_for('configuracion_precio_editar', pid=precio.id) }}"
@@ -666,7 +649,6 @@
         </div>
     </div>
 </div>
-<!-- Mensajes Flash -->
 <div class="mt-4">
     {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -680,6 +662,26 @@
 </div>
 
 <style>
+    /* INICIO: CSS para Paginación */
+    .pagination-controls {
+        margin-bottom: 15px;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+
+    .page-info {
+        font-size: 0.9rem;
+        color: #4a5568; /* text-gray-700 */
+    }
+
+    .pagination-controls button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+        background-color: #e2e8f0; /* bg-gray-200 */
+    }
+    /* FIN: CSS para Paginación */
+
     /* ADD to the existing <style> block (near other .btn styles) */
     .btn-reset {
         background: #f59e0b;
@@ -695,6 +697,7 @@
             background: #d97706;
             transform: translateY(-1px);
         }
+
     .imagen_tabla {
         width: 100%;
         height: 100%;
@@ -1019,6 +1022,62 @@
     }
 </style>
 <script>
+
+    // --- INICIO: Lógica de Paginación ---
+    const PAGE_SIZE = 100;
+    const paginationConfig = {
+        user: { currentPage: 1, totalPages: 1, rows: [] },
+        admin: { currentPage: 1, totalPages: 1, rows: [] }
+    };
+
+    function setupPagination(tableId) {
+        const table = document.querySelector(`table[data-table="${tableId}"]`);
+        if (!table) return;
+        const tbody = table.querySelector('tbody');
+        if (!tbody) return;
+
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const config = paginationConfig[tableId];
+        config.rows = rows;
+        config.totalPages = Math.ceil(rows.length / PAGE_SIZE) || 1; // Asegurar al menos 1 página
+
+        const totalEl = document.getElementById(`page-total-${tableId}`);
+        if (totalEl) totalEl.textContent = config.totalPages;
+
+        // Mostrar la primera página
+        showPage(tableId, 1);
+    }
+
+    function showPage(tableId, page) {
+        const config = paginationConfig[tableId];
+        if (!config || page < 1 || page > config.totalPages) return;
+
+        config.currentPage = page;
+        const start = (page - 1) * PAGE_SIZE;
+        const end = start + PAGE_SIZE;
+
+        // Ocultar todas las filas y luego mostrar solo las de la página
+        config.rows.forEach((row, index) => {
+            row.style.display = (index >= start && index < end) ? '' : 'none';
+        });
+
+        const numEl = document.getElementById(`page-num-${tableId}`);
+        if (numEl) numEl.textContent = page;
+
+        const controls = document.getElementById(`pagination-${tableId}`);
+        if (controls) {
+            controls.querySelector('button[onclick*="-1"]').disabled = (page === 1);
+            controls.querySelector('button[onclick*="1"]').disabled = (page === config.totalPages);
+        }
+    }
+
+    function changePage(tableId, direction) {
+        const config = paginationConfig[tableId];
+        const newPage = config.currentPage + direction;
+        showPage(tableId, newPage);
+    }
+    // --- FIN: Lógica de Paginación ---
+
     function downloadTemplateWithSelection() {
         // Obtener todos los checkboxes seleccionados con el nombre 'selected_columns'
         const checkboxes = document.querySelectorAll('input[name="selected_columns"]:checked');
@@ -1250,6 +1309,13 @@
         showSection(initialSection);
         const urlContainer = document.getElementById('imagen-url-container');
         if (urlContainer) urlContainer.style.display = 'none';
+
+        // --- INICIO: Inicializar Paginación ---
+        setupPagination('user');
+        {% if is_admin %}
+        setupPagination('admin');
+        {% endif %}
+        // --- FIN: Inicializar Paginación ---
 
         // Apply stored column visibility
         applyStoredHiddenColumns();
