@@ -897,7 +897,7 @@
     .table {
         width: 100%;
         border-collapse: collapse;
-        /* table-layout: fixed; */ /* <-- Eliminamos esto para que el ancho sea automático */
+        table-layout: fixed; /* columns share available width */
         font-size: 13px;
     }
 
@@ -1334,7 +1334,7 @@
         alert('Columnas restablecidas.');
     }
     // On document ready
-    // precios.html (Línea 1342 aprox) - VERSIÓN CORREGIDA c
+    // precios.html (Línea 1342 aprox) - VERSIÓN CORREGIDA
 
     // On document ready
     document.addEventListener('DOMContentLoaded', function () {
