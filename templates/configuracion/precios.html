@@ -418,13 +418,18 @@
 <div class="section" id="user-list" style="display:none;">
     <div class="card mb-4">
         <div class="card-header bg-gray-100">
-            <h3>📋 Productos (Vista Cliente) ({{ precios|length }} registros)</h3>
+            <h3>📋 Productos (Vista Cliente) ({{ pagination.total_items }} registros)</h3>
         </div>
         <div class="card-body">
 
+            <form method="GET" action="{{ url_for('configuracion_precios') }}" class="search-form">
+                <input type="hidden" name="section" value="user-list">
+                <input type="text" name="search" class="input" placeholder="Buscar en {{ pagination.total_items }} productos..." value="{{ pagination.search_query or '' }}">
+                <button type="submit" class="btn primary">Buscar</button>
+            </form>
             <div class="pagination-controls" id="pagination-user">
                 {% if pagination.current_page > 1 %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
                 <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
@@ -435,7 +440,7 @@
                 </span>
 
                 {% if pagination.current_page < pagination.total_pages %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='user-list') }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
                 <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
@@ -533,8 +538,13 @@
             </div>
             {% else %}
             <div class="text-center py-8">
+                {% if pagination.search_query %}
+                <div class="text-gray-500 text-lg mb-2">🔍 No se encontraron productos</div>
+                <p class="text-sm text-gray-400">Tu búsqueda de "{{ pagination.search_query }}" no arrojó resultados.</p>
+                {% else %}
                 <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
                 <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -544,13 +554,18 @@
 <div class="section" id="admin-list" style="display:none;">
     <div class="card">
         <div class="card-header bg-blue-100">
-            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ precios|length}} registros)</h3>
+            <h3>🔒 Productos y Precios (Vista Completa Admin) ({{ pagination.total_items }} registros)</h3>
         </div>
         <div class="card-body">
 
+            <form method="GET" action="{{ url_for('configuracion_precios') }}" class="search-form">
+                <input type="hidden" name="section" value="admin-list">
+                <input type="text" name="search" class="input" placeholder="Buscar en {{ pagination.total_items }} productos..." value="{{ pagination.search_query or '' }}">
+                <button type="submit" class="btn primary">Buscar</button>
+            </form>
             <div class="pagination-controls" id="pagination-admin">
                 {% if pagination.current_page > 1 %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1) }}" class="btn small secondary">⬅️ Anteriores</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page - 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">⬅️ Anteriores</a>
                 {% else %}
                 <span class="btn small secondary disabled">⬅️ Anteriores</span>
                 {% endif %}
@@ -561,7 +576,7 @@
                 </span>
 
                 {% if pagination.current_page < pagination.total_pages %}
-                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1) }}" class="btn small secondary">Siguientes ➡️</a>
+                <a href="{{ url_for('configuracion_precios', page=pagination.current_page + 1, search=pagination.search_query or '', section='admin-list') }}" class="btn small secondary">Siguientes ➡️</a>
                 {% else %}
                 <span class="btn small secondary disabled">Siguientes ➡️</span>
                 {% endif %}
@@ -634,8 +649,13 @@
             </div>
             {% else %}
             <div class="text-center py-8">
+                {% if pagination.search_query %}
+                <div class="text-gray-500 text-lg mb-2">🔍 No se encontraron productos</div>
+                <p class="text-sm text-gray-400">Tu búsqueda de "{{ pagination.search_query }}" no arrojó resultados.</p>
+                {% else %}
                 <div class="text-gray-500 text-lg mb-2">📝 No hay productos registrados</div>
                 <p class="text-sm text-gray-400">Usa el formulario de arriba para agregar productos manualmente.</p>
+                {% endif %}
             </div>
             {% endif %}
         </div>
@@ -936,7 +956,15 @@
         padding-right: 6px; /* avoid cutting last column behind scrollbar */
         background: transparent;
     }
+    .search-form {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 15px;
+    }
 
+        .search-form .input {
+            flex-grow: 1; /* El input toma el espacio disponible */
+        }
     /* Slightly different heights for client vs admin views */
     .table-scroll-client {
         max-height: 600px;
@@ -1336,7 +1364,7 @@
     // On document ready
     // precios.html (Línea 1342 aprox) - VERSIÓN CORREGIDA
 
-    // On document ready
+// On document ready
     document.addEventListener('DOMContentLoaded', function () {
         // Default to the user-list (client prices) section
         let initialSection = 'user-list';

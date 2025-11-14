@@ -4892,7 +4892,52 @@ def load_config(config=None):
         'asesores': asesores_map if 'asesores_map' in locals() else {},
         'asesores_list': asesores_list if 'asesores_list' in locals() else []
     }
+# app.py (Añadir en la línea 4776)
 
+@app.route('/configuracion/precios/columnas', methods=['POST'])
+@login_required
+def save_columnas_precios():
+    """Guarda las columnas ocultas para el tenant y la tabla actual."""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table_name = data.get('table')
+    hidden_map = data.get('hidden', {})
+
+    if not table_name:
+        return jsonify({'error': 'table name required'}), 400
+
+    # Convertir el mapa (dict) a un string JSON para guardarlo
+    hidden_json = json.dumps(hidden_map) if hidden_map else None
+    tenant = config.get('dominio')
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        # Asegurarse de que la tabla exista (esta función ya la tienes)
+        _ensure_columnas_precios_table(conn) 
+        cursor = conn.cursor()
+
+        # Usar INSERT ... ON DUPLICATE KEY UPDATE para guardar o actualizar
+        cursor.execute("""
+            INSERT INTO columnas_precios (tenant, table_name, hidden_json)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                hidden_json = VALUES(hidden_json),
+                updated_at = CURRENT_TIMESTAMP
+        """, (tenant, table_name, hidden_json))
+        
+        conn.commit()
+        app.logger.info(f"💾 Columnas ocultas guardadas para {tenant} / {table_name}")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        app.logger.error(f"🔴 save_columnas_precios error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5140,6 +5185,85 @@ def obtener_producto_por_sku_o_nombre(query, config=None):
     except Exception as e:
         app.logger.error(f"🔴 obtener_producto_por_sku_o_nombre error: {e}")
         return None
+
+# app.py (Reemplazar la función en la línea 1297)
+
+def obtener_precios_paginados(config, page=1, page_size=100, search_query=None):
+    """
+    Obtiene una página específica de productos y el conteo total,
+    opcionalmente filtrada por un término de búsqueda.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Parámetros y cláusula WHERE para la búsqueda
+        params = []
+        where_clause = ""
+        
+        if search_query:
+            # Busca en múltiples columnas
+            search_like = f"%{search_query}%"
+            where_clause = """
+                WHERE (
+                    sku LIKE %s 
+                    OR categoria LIKE %s 
+                    OR subcategoria LIKE %s 
+                    OR linea LIKE %s 
+                    OR modelo LIKE %s 
+                    OR descripcion LIKE %s
+                )
+            """
+            # Añade el parámetro de búsqueda 6 veces (una por cada columna)
+            params.extend([search_like] * 6)
+
+        # 1. Contar el total de productos (con el filtro aplicado)
+        cursor.execute(f"SELECT COUNT(*) as total FROM precios {where_clause}", tuple(params))
+        total_items = cursor.fetchone()['total']
+        total_pages = math.ceil(total_items / page_size) if total_items > 0 else 1
+        
+        # Asegurar que la página actual no esté fuera de rango
+        if page > total_pages:
+            page = total_pages
+        if page < 1:
+            page = 1
+
+        # 2. Calcular el offset
+        offset = (page - 1) * page_size
+        
+        # 3. Obtener solo la página actual (con el filtro y paginación)
+        query_paginada = f"""
+            SELECT * FROM precios 
+            {where_clause}
+            ORDER BY sku, categoria, modelo
+            LIMIT %s OFFSET %s;
+        """
+        params.extend([page_size, offset])
+        
+        cursor.execute(query_paginada, tuple(params))
+        
+        items = cursor.fetchall()
+        
+        return {
+            'items': items,
+            'total_items': total_items,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'search_query': search_query # Devolver la búsqueda para los enlaces
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo precios paginados: {str(e)}")
+        return {'items': [], 'total_items': 0, 'total_pages': 1, 'current_page': 1, 'search_query': search_query}
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 
 def obtener_precio_por_id(pid, config=None):
     if config is None:
@@ -11038,10 +11162,19 @@ def negocio_transfer_block(negocio):
         parts.append(f"• Banco: {banco}")
     return "\n".join(parts)
 
+# app.py (Reemplazar en línea 4057)
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
-    precios = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    page = request.args.get('page', 1, type=int)
+    search_query = request.args.get('search', None) # Obtener el término de búsqueda
+    
+    # Obtener los datos paginados y filtrados
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
     au = session.get('auth_user') or {}
@@ -11050,15 +11183,25 @@ def configuracion_precios():
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=None,
         is_admin=is_admin,
         master_columns=MASTER_COLUMNS
     )
+# app.py (Reemplazar en línea 4086)
+
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
-    precios     = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    page = request.args.get('page', 1, type=int)
+    search_query = request.args.get('search', None)
+    
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     precio_edit = obtener_precio_por_id(pid, config)
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
@@ -11068,9 +11211,11 @@ def configuracion_precio_editar(pid):
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=precio_edit,
-        is_admin=is_admin
+        is_admin=is_admin,
+        master_columns=MASTER_COLUMNS  # <-- ESTA LÍNEA FALTABA
     )
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
