@@ -433,6 +433,7 @@
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                            {% endif %}
                             {% if chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
                             {% set avatar_src = '/static/icons/messenger-icon.png' %}
                             {% endif %}
