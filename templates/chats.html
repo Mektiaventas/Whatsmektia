@@ -376,6 +376,46 @@
                 .emoji-pick-btn:hover {
                     background: #e0e0e0;
                 }
+
+            /* SOLUCIÓN DEFINITIVA PARA EL ESPACIO EN LA PRIMERA LÍNEA */
+            .msg-user .text-message,
+            .msg-ai .text-message,
+            .msg-manual .text-message {
+                white-space: pre-wrap;
+                line-height: 1.3 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                font-size: 14px;
+                word-wrap: break-word;
+                display: block;
+                /* ELIMINAR CUALQUIER ESPACIO EN LA PRIMERA LÍNEA */
+                text-indent: 0 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* ELIMINAR ESPACIO EN LA PRIMERA LÍNEA DE MANERA RADICAL */
+            .msg-user .message-content,
+            .msg-ai .message-content,
+            .msg-manual .message-content {
+                margin: 0 !important;
+                padding: 8px 12px !important; /* Solo padding interno, sin margen */
+                line-height: 1.3;
+            }
+
+            /* Asegurar que no haya espacio antes del primer carácter */
+            .text-message::first-line {
+                line-height: 1.3 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* Eliminar cualquier transformación que cause espacio */
+            .msg-ai .text-message,
+            .msg-user .text-message,
+            .msg-manual .text-message {
+                transform: none !important;
+            }
         </style>
 
         <script>
@@ -513,7 +553,7 @@
     </aside>
 </div>
 
-<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button> 
 <style>
     :root {
         --left-width: 340px;
@@ -545,7 +585,7 @@
         transition: transform 240ms ease, box-shadow 200ms ease;
         position: relative;
         z-index: 30;
-    } 
+    }
 
     .chat-panel-v2 {
         flex: 1 1 auto;
