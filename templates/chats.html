@@ -291,7 +291,7 @@
                     <!-- Los emojis se llenan por JS -->
                 </div>
 
-                <!-- CAMBIO: textarea en lugar de input -->
+                <!-- CAMBIO: textarea sin límites -->
                 <textarea name="texto"
                           id="mensaje-texto"
                           placeholder="Escribe un mensaje manual..."
@@ -300,7 +300,7 @@
                           rows="1"
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
-                          style="resize: none; overflow-y: hidden;"
+                          style="resize: none; overflow-y: auto;"
                           required></textarea>
 
                 <button type="submit" class="send-btn" onclick="handleSendButtonClick(event)">Enviar</button>
@@ -317,11 +317,13 @@
                 font-size: 14px;
                 line-height: 1.4;
                 min-height: 44px;
-                max-height: 120px;
+                max-height: none; /* Sin límite de altura */
                 font-family: inherit;
                 background: white;
                 outline: none;
                 transition: border-color 0.2s;
+                white-space: pre-wrap; /* Mantener espacios y saltos de línea */
+                word-wrap: break-word;
             }
 
                 .reply-textarea:focus {
@@ -455,8 +457,22 @@
             }
 
             function autoResizeTextarea(textarea) {
+                // Guardar la altura actual antes de resetear
+                const currentHeight = textarea.style.height;
+
+                // Resetear altura para calcular la nueva
                 textarea.style.height = 'auto';
-                textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+
+                // Calcular nueva altura sin límites
+                const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
+
+                // Aplicar nueva altura
+                textarea.style.height = newHeight + 'px';
+
+                // Si el contenido se redujo mucho, mantener un tamaño mínimo
+                if (textarea.value === '' || textarea.value.trim() === '') {
+                    textarea.style.height = '44px';
+                }
             }
 
             // Inicializar altura del textarea al cargar
@@ -464,6 +480,9 @@
                 const textarea = document.getElementById('mensaje-texto');
                 if (textarea) {
                     autoResizeTextarea(textarea);
+
+                    // Guardar el estado inicial del textarea
+                    textarea.dataset.originalHeight = textarea.style.height;
                 }
 
                 // Resetear el estado de envío cuando la página se carga
@@ -472,6 +491,26 @@
                 if (sendBtn) {
                     sendBtn.innerHTML = 'Enviar';
                     sendBtn.disabled = false;
+                }
+            });
+
+            // Función para resetear el textarea si está vacío
+            function resetTextareaIfEmpty() {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
+                    textarea.style.height = '44px';
+                }
+            }
+
+            // Observar cambios en el textarea para resetear cuando esté vacío
+            document.addEventListener('input', function (event) {
+                if (event.target.id === 'mensaje-texto') {
+                    // Si el usuario borra todo el contenido, resetear altura
+                    if (event.target.value === '') {
+                        setTimeout(() => {
+                            resetTextareaIfEmpty();
+                        }, 100);
+                    }
                 }
             });
 
@@ -566,7 +605,7 @@
         transition: transform 240ms ease, box-shadow 200ms ease;
         position: relative;
         z-index: 30;
-    }  
+    } 
 
     .chat-panel-v2 {
         flex: 1 1 auto;
