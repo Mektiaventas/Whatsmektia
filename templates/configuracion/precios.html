@@ -1334,6 +1334,9 @@
         alert('Columnas restablecidas.');
     }
     // On document ready
+    // precios.html (Línea 1342 aprox) - VERSIÓN CORREGIDA
+
+    // On document ready
     document.addEventListener('DOMContentLoaded', function () {
         // Default to the user-list (client prices) section
         let initialSection = 'user-list';
@@ -1347,15 +1350,12 @@
         const urlContainer = document.getElementById('imagen-url-container');
         if (urlContainer) urlContainer.style.display = 'none';
 
-        // --- INICIO: Inicializar Paginación ---
-        setupPagination('user');
-        {% if is_admin %}
-        setupPagination('admin');
-        {% endif %}
-        // --- FIN: Inicializar Paginación ---
+        // --- PAGINACIÓN BORRADA ---
+        // (Las llamadas a setupPagination() se eliminaron)
+        // --- FIN PAGINACIÓN ---
 
         // Apply stored column visibility
-        applyStoredHiddenColumns();
+        applyStoredHiddenColumns(); // <-- Esta línea ahora SÍ se ejecutará
     });
 </script>
 {% endblock %}
