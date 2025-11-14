@@ -11032,30 +11032,7 @@ def configuracion_precios():
         is_admin=is_admin,
         master_columns=MASTER_COLUMNS
     )@app.route('/configuracion/precios', methods=['GET'])
-def configuracion_precios():
-    config = obtener_configuracion_por_host()
-    
-    # --- INICIO DE LA MODIFICACIÓN ---
-    page = request.args.get('page', 1, type=int)
-    if page < 1:
-        page = 1
-        
-    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
-    # --- FIN DE LA MODIFICACIÓN ---
 
-    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
-    au = session.get('auth_user') or {}
-    is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
-
-    return render_template('configuracion/precios.html',
-        tabs=SUBTABS, active='precios',
-        guardado=False,
-        precios=pagination_data['items'], # <-- Usar 'items'
-        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
-        precio_edit=None,
-        is_admin=is_admin,
-        master_columns=MASTER_COLUMNS
-    )
 
 
 # app.py (Reemplazar en línea 4086)
