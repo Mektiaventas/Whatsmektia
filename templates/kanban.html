@@ -446,7 +446,7 @@
                             {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
                             {% set platform_class = 'is-telegram' %}
                             {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
-                            {% set avatar_src = '/static/icons/messenger-icon-dos.png' %}
+                            {% set avatar_src = '/static/icons/messenger-icon.jpg' %}
                             {% set platform_class = 'is-messenger' %}
                             {% else %}
                             {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
@@ -455,7 +455,7 @@
 
                             <img src="{{ avatar_src }}"
                                  class="card-avatar" alt="Avatar"
-                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                                 onerror="this.onerror=null;this.src='messenger-icon.jpg';">
                             {% set bandera = chat.numero | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
