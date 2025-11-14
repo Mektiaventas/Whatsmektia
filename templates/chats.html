@@ -281,22 +281,38 @@
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data">
             <input type="hidden" name="numero" value="{{ selected }}">
+
+            <!-- Preview de archivo seleccionado (AHORA ARRIBA como WhatsApp) -->
+            <div id="file-preview" class="file-preview" style="display: none; padding: 12px; background: #f0f0f0; border-radius: 8px; margin: 10px; border: 1px dashed #ccc;">
+                <div class="file-preview-content" style="display: flex; align-items: center; justify-content: space-between;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span id="file-icon" style="font-size: 24px;"></span>
+                        <div>
+                            <div id="file-name" style="font-weight: bold; font-size: 14px;"></div>
+                            <div id="file-size" style="font-size: 12px; color: #666;"></div>
+                        </div>
+                    </div>
+                    <button type="button" id="remove-file" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">×</button>
+                </div>
+            </div>
+
             <div class="input-group">
                 <!-- Botón para adjuntar archivos -->
                 <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
                     📎
                 </button>
-                <input type="file" id="file-input" name="archivo" style="display: none;" accept=".pdf,.xlsx,.xls,.docx,.txt,.jpg,.jpeg,.png,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg">
+                <input type="file" id="file-input" name="archivo" style="display: none;"
+                       accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
                 <!-- botón de emoji más grande -->
                 <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
 
-                <!-- Emoji Picker Container (hidden by default) -->
+                <!-- Emoji Picker Container -->
                 <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
                     <!-- Los emojis se llenan por JS -->
                 </div>
 
-                <!-- CAMBIO: textarea sin límites -->
+                <!-- textarea -->
                 <textarea name="texto"
                           id="mensaje-texto"
                           placeholder="Escribe un mensaje manual..."
@@ -310,15 +326,7 @@
 
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
-
-            <!-- Preview de archivo seleccionado -->
-            <div id="file-preview" class="file-preview" style="display: none; padding: 10px; background: #f8f9fa; border-radius: 8px; margin-bottom: 10px;">
-                <div class="file-preview-content">
-                    <span id="file-name" style="font-weight: bold;"></span>
-                    <button type="button" id="remove-file" style="margin-left: 10px; background: #dc3545; color: white; border: none; border-radius: 4px; padding: 2px 6px; cursor: pointer;">×</button>
-                </div>
-            </div>
-        </form>
+        </form> 
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -1113,7 +1121,7 @@
             margin-left: 0 !important;
             padding-left: 0 !important;
         }
-    /* Estilos para adjuntar archivos */
+    /* Estilos mejorados para adjuntar archivos */
     .file-attach-btn {
         background: none;
         border: none;
@@ -1129,13 +1137,26 @@
         justify-content: center;
     }
 
-        .file-attach-btn:hover {
-            background: #e0e0e0;
-        }
+    .file-attach-btn:hover {
+        background: #e0e0e0;
+    }
 
     .file-preview {
-        border: 1px solid #ddd;
-        background: #f8f9fa;
+        background: #ffffff;
+        border: 2px dashed #25D366;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
     }
 
     .file-preview-content {
@@ -1147,6 +1168,13 @@
     .file-type-icon {
         margin-right: 8px;
         font-size: 20px;
+    }
+
+    /* Efecto de hover en el botón de eliminar */
+    #remove-file:hover {
+        background: #cc0000;
+        transform: scale(1.1);
+        transition: all 0.2s ease;
     } 
 
 </style>
@@ -2020,92 +2048,192 @@ function normalizeText(s) {
         .toLowerCase();
 }
 
-/* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
 
-function setupFileUpload() {
-    const fileInput = document.getElementById('file-input');
-    const fileAttachBtn = document.getElementById('file-attach-btn');
-    const filePreview = document.getElementById('file-preview');
-    const fileName = document.getElementById('file-name');
-    const removeFileBtn = document.getElementById('remove-file');
-    const messageForm = document.getElementById('messageForm');
+    function setupFileUpload() {
+        const fileInput = document.getElementById('file-input');
+        const fileAttachBtn = document.getElementById('file-attach-btn');
+        const filePreview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const fileIcon = document.getElementById('file-icon');
+        const removeFileBtn = document.getElementById('remove-file');
+        const messageForm = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
 
-    if (!fileInput || !fileAttachBtn) {
-        console.warn('File upload elements not found');
-        return;
-    }
-
-    // Abrir selector de archivos al hacer clic en el botón
-    fileAttachBtn.addEventListener('click', function () {
-        fileInput.click();
-    });
-
-    // Manejar selección de archivo
-    fileInput.addEventListener('change', function (e) {
-        const file = e.target.files[0];
-        if (file) {
-            showFilePreview(file);
+        if (!fileInput || !fileAttachBtn) {
+            console.warn('File upload elements not found');
+            return;
         }
-    });
 
-    // Eliminar archivo seleccionado
-    removeFileBtn.addEventListener('click', function () {
-        clearFileSelection();
-    });
+        // Abrir selector de archivos al hacer clic en el botón
+        fileAttachBtn.addEventListener('click', function () {
+            fileInput.click();
+        });
 
-    function showFilePreview(file) {
-        const fileType = getFileType(file.name);
-        const fileIcon = getFileIcon(fileType);
+        // Manejar selección de archivo
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                // Validar tamaño máximo (50MB)
+                const maxSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxSize) {
+                    alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
+                    clearFileSelection();
+                    return;
+                }
 
-        fileName.innerHTML = `${fileIcon} ${file.name} (${formatFileSize(file.size)})`;
-        filePreview.style.display = 'block';
-    }
+                // Validar tipo de archivo
+                const allowedTypes = [
+                    'application/pdf',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'image/jpeg',
+                    'image/jpg',
+                    'image/png',
+                    'image/gif',
+                    'video/mp4',
+                    'video/quicktime',
+                    'video/webm',
+                    'video/x-msvideo',
+                    'video/x-matroska',
+                    'audio/mpeg',
+                    'audio/wav',
+                    'application/zip',
+                    'application/x-rar-compressed'
+                ];
 
-    function clearFileSelection() {
-        fileInput.value = '';
-        filePreview.style.display = 'none';
-        fileName.textContent = '';
-    }
+                if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                    alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
+                    clearFileSelection();
+                    return;
+                }
 
-    function getFileType(filename) {
-        const ext = filename.split('.').pop().toLowerCase();
-        const imageTypes = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg'];
-        const videoTypes = ['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg'];
-        const documentTypes = ['pdf', 'doc', 'docx'];
-        const spreadsheetTypes = ['xlsx', 'xls', 'csv'];
+                showFilePreview(file);
+            }
+        });
 
-        if (imageTypes.includes(ext)) return 'image';
-        if (videoTypes.includes(ext)) return 'video';
-        if (documentTypes.includes(ext)) return 'document';
-        if (spreadsheetTypes.includes(ext)) return 'spreadsheet';
-        return 'other';
-    }
+        // Eliminar archivo seleccionado
+        removeFileBtn.addEventListener('click', function () {
+            clearFileSelection();
+        });
 
-    function getFileIcon(fileType) {
-        const icons = {
-            'image': '🖼️',
-            'video': '🎬',
-            'document': '📄',
-            'spreadsheet': '📊',
-            'other': '📎'
-        };
-        return icons[fileType] || '📎';
-    }
+        function showFilePreview(file) {
+            const fileType = getFileType(file.name);
+            const icon = getFileIcon(fileType);
 
-    function formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
+            fileIcon.textContent = icon;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            filePreview.style.display = 'block';
 
-    // Limpiar archivo al enviar el formulario (opcional)
-    messageForm.addEventListener('submit', function () {
-        setTimeout(clearFileSelection, 1000);
-    });
+            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
+            textarea.placeholder = "Añade un mensaje (opcional)...";
 
-    console.debug('File upload functionality initialized');
-}
+            // Hacer scroll para mostrar la previsualización
+            filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function clearFileSelection() {
+            fileInput.value = '';
+            filePreview.style.display = 'none';
+            fileName.textContent = '';
+            fileSize.textContent = '';
+            fileIcon.textContent = '';
+            textarea.placeholder = "Escribe un mensaje manual...";
+        }
+
+        function getFileType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+
+            // Imágenes
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext))
+                return 'image';
+
+            // Videos
+            if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext))
+                return 'video';
+
+            // Audio
+            if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext))
+                return 'audio';
+
+            // Documentos
+            if (['pdf'].includes(ext))
+                return 'pdf';
+
+            // Word
+            if (['doc', 'docx'].includes(ext))
+                return 'word';
+
+            // Excel
+            if (['xls', 'xlsx', 'csv'].includes(ext))
+                return 'excel';
+
+            // PowerPoint
+            if (['ppt', 'pptx'].includes(ext))
+                return 'powerpoint';
+
+            // Archivos comprimidos
+            if (['zip', 'rar', '7z'].includes(ext))
+                return 'zip';
+
+            // Texto
+            if (['txt', 'rtf'].includes(ext))
+                return 'text';
+
+            return 'other';
+        }
+
+        function getFileIcon(fileType) {
+            const icons = {
+                'image': '🖼️',
+                'video': '🎬',
+                'audio': '🎵',
+                'pdf': '📕',
+                'word': '📘',
+                'excel': '📗',
+                'powerpoint': '📙',
+                'zip': '📦',
+                'text': '📄',
+                'other': '📎'
+            };
+            return icons[fileType] || '📎';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Validar antes de enviar
+        messageForm.addEventListener('submit', function (e) {
+            if (fileInput.files.length === 0 && textarea.value.trim() === '') {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje o selecciona un archivo');
+                return false;
+            }
+
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '⏳';
+            sendBtn.disabled = true;
+
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });
+
+        console.debug('File upload functionality initialized - WhatsApp style');
+    } 
 </script>
 {% endblock %} 
