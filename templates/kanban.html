@@ -412,7 +412,7 @@
 
         /* Color para Messenger (Azul/Púrpura) */
         .alias-view.is-messenger {
-            color: #0084ff; /* Azul Messenger */
+            color: #0084ff; 
         }
     }
 </style>
@@ -459,7 +459,12 @@
                             {% set bandera = chat.numero | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% elif chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            <img src="/static/icons/telegram-icon-dos.png" class="card-flag" alt="País" title="País">
+                            {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
+                            <img src="/static/icons/maxi.png" class="card-flag" alt="País" title="País">
                             {% endif %}
+
                         </div>
                         <div class="card-name-section">
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
