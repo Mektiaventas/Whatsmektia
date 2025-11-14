@@ -11619,49 +11619,43 @@ def obtener_chat_meta(numero, config=None):
         conn.close()
         return meta
 
+# app.py (Reemplazar en línea 5057)
+
 def inicializar_chat_meta(numero, config=None):
-    """Inicializa el chat meta usando información existente del contacto"""
+    """
+    Asegura que el chat exista en la tabla chat_meta para el Kanban.
+    (La creación/actualización del contacto se maneja en actualizar_info_contacto)
+    """
     if config is None:
         config = obtener_configuracion_por_host()
     
     # Asegurar que las tablas Kanban existen
     crear_tablas_kanban(config)
     
-    conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
-    
+    conn = None
+    cursor = None
     try:
-        # 1. Verificar si el contacto ya existe
-        cursor.execute("SELECT * FROM contactos WHERE numero_telefono = %s", (numero,))
-        contacto_existente = cursor.fetchone()
-        
-        # 2. Si no existe, crear el contacto básico
-        cursor.execute("""
-                INSERT INTO contactos 
-                    (numero_telefono, plataforma, created_at) 
-                VALUES (%s, 'Telegram', UTC_TIMESTAMP()) 
-                -- ^^^ USAR created_at en lugar de fecha_creacion
-                -- y usar UTC_TIMESTAMP para forzar la creación inmediata del registro
-            """, (numero,))
-        app.logger.info(f"✅ Contacto básico creado: {numero}")
-        
-        # 3. Insertar/actualizar en chat_meta
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # Insertar/actualizar SOLAMENTE en chat_meta
+        # (La tabla 'contactos' se maneja por separado)
         cursor.execute("""
             INSERT INTO chat_meta (numero, columna_id) 
             VALUES (%s, 1)
-            ON DUPLICATE KEY UPDATE columna_id = VALUES(columna_id)
+            ON DUPLICATE KEY UPDATE columna_id = COALESCE(columna_id, 1)
         """, (numero,))
         
         conn.commit()
-        app.logger.info(f"✅ Chat meta inicializado: {numero}")
+        app.logger.info(f"✅ Chat meta inicializado/verificado: {numero}")
         
     except Exception as e:
         app.logger.error(f"❌ Error inicializando chat meta para {numero}: {e}")
-        conn.rollback()
+        if conn: conn.rollback()
     
     finally:
-        cursor.close()
-        conn.close()
+        if cursor: cursor.close()
+        if conn: conn.close()
 
 @app.route('/reparar-kanban-porfirianna')
 def reparar_kanban_porfirianna():
