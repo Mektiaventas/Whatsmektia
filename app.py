@@ -11005,20 +11005,16 @@ def negocio_transfer_block(negocio):
         parts.append(f"• Banco: {banco}")
     return "\n".join(parts)
 
-# app.py (Reemplazar en línea 4057)
-
-# app.py (Reemplazar en línea 4057)
-
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
     
     # --- INICIO DE LA MODIFICACIÓN ---
     page = request.args.get('page', 1, type=int)
-    search_query = request.args.get('search', None) # Obtener el término de búsqueda
-    
-    # Obtener los datos paginados y filtrados
-    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    if page < 1:
+        page = 1
+        
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
     # --- FIN DE LA MODIFICACIÓN ---
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
@@ -11035,17 +11031,19 @@ def configuracion_precios():
         master_columns=MASTER_COLUMNS
     )
 
-# app.py (Reemplazar en línea 4086)
 
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
     
     # --- INICIO DE LA MODIFICACIÓN ---
+    # Mantenemos la lógica de paginación incluso al editar,
+    # para que la lista de fondo siga paginada.
     page = request.args.get('page', 1, type=int)
-    search_query = request.args.get('search', None)
+    if page < 1:
+        page = 1
     
-    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100)
     # --- FIN DE LA MODIFICACIÓN ---
     
     precio_edit = obtener_precio_por_id(pid, config)
