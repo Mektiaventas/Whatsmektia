@@ -8380,6 +8380,7 @@ def dashboard_conversaciones_data():
             SELECT DATE(timestamp) as dia, COUNT(*) as cnt
             FROM conversaciones
             WHERE timestamp >= %s
+            AND mensaje != "[Mensaje manual desde web]"
             GROUP BY DATE(timestamp)
             ORDER BY DATE(timestamp)
         """
