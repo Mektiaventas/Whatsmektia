@@ -8423,7 +8423,7 @@ def dashboard_conversaciones_data():
 
             # Chats activos: distinct numero with message in last 24h
             # Se sigue usando la tabla 'conversaciones' para esta métrica, ya que requiere el historial de mensajes.
-            cursor.execute("SELECT COUNT(conversaciones) FROM contactos WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+            cursor.execute("SELECT SUM(conversaciones) FROM contactos WHERE timestamp >= NOW() - INTERVAL 1 DAY")
             active_count_row = cursor.fetchone()
             active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
 
@@ -8451,7 +8451,7 @@ def dashboard_conversaciones_data():
 
         # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (semana/mes)
         cursor.execute("""
-            SELECT DATE(timestamp) as dia, count(conversaciones) as cnt
+            SELECT DATE(timestamp) as dia, SUM(conversaciones) as cnt
             FROM contactos
             WHERE timestamp IS NOT NULL AND timestamp >= %s
             GROUP BY DATE(timestamp)
