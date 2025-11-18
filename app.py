@@ -8451,7 +8451,7 @@ def dashboard_conversaciones_data():
 
         # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (semana/mes)
         cursor.execute("""
-            SELECT DATE(timestamp) as dia, SUM(conversaciones) as cnt
+            SELECT DATE(timestamp) as dia, count(conversaciones) as cnt
             FROM contactos
             WHERE timestamp IS NOT NULL AND timestamp >= %s
             GROUP BY DATE(timestamp)
