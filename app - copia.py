@@ -262,9 +262,9 @@ from whatsapp import (
     texto_a_voz,
     enviar_mensaje,
     enviar_imagen,
-    enviar_documento,
+    enviar_documento,  # ← Asegúrate de que esta esté incluida
     enviar_mensaje_voz
-)
+) 
 from files import (extraer_texto_pdf,
 extraer_texto_e_imagenes_pdf, extraer_texto_excel,
 extraer_texto_csv,
@@ -277,10 +277,14 @@ get_productos_dir_for_config,
 determinar_extension
 )
 ALLOWED_EXTENSIONS = {
-    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',  # Documentos e imágenes
-    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',     # Videos
-    'xlsx', 'xls', 'csv', 'docx'                          # Office y documentos
-}
+    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',
+    'xlsx', 'xls', 'csv', 'docx', 'doc', 
+    'ppt', 'pptx',  # PowerPoint
+    'mp3', 'wav', 'ogg', 'm4a',  # Audio
+    'zip', 'rar', '7z',  # Comprimidos
+    'rtf'  # Texto enriquecido
+} 
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
@@ -587,8 +591,7 @@ def logout():
     return redirect(url_for('login'))
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
 def _get_or_create_session_id():
     sid = session.get('sid')
     if not sid:
@@ -4045,10 +4048,10 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    """Sirve archivos subidos desde la carpeta UPLOAD_FOLDER"""
+    return send_from_directory(UPLOAD_FOLDER, filename) 
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -10341,59 +10344,168 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
-
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-        config = obtener_configuracion_por_host()
-        conn = get_db_connection(config)
-        try:
-            numero = request.form['numero']
-            texto = request.form['texto'].strip()
+    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        numero = request.form.get('numero', '').strip()
+        texto = request.form.get('texto', '').strip()
+        archivo = request.files.get('archivo')
         
-            # Validar que el mensaje no esté vacío
-            if not texto:
-                flash('❌ El mensaje no puede estar vacío', 'error')
+        if not numero:
+            flash('❌ Número de destino requerido', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+        
+        # Validar que hay al menos texto O archivo
+        if not texto and not archivo:
+            flash('❌ Escribe un mensaje o selecciona un archivo', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+        
+        mensaje_enviado = False
+        respuesta_texto = ""
+        archivo_info = ""
+        filepath = None
+        
+        # 1. Manejar archivo si existe
+        if archivo and archivo.filename:
+            app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
+            
+            if allowed_file(archivo.filename):
+                # Guardar archivo temporalmente
+                filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                archivo.save(filepath)
+                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
+                
+                # Determinar tipo de archivo
+                file_ext = os.path.splitext(filename)[1].lower()
+                
+                try:
+                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
+                    dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio}"
+                    public_url = f"{dominio}/uploads/{filename}"
+                    
+                    app.logger.info(f"🌐 URL pública generada: {public_url}")
+                    
+                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
+                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                        # Es imagen - enviar como imagen
+                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
+                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                        archivo_info = f"📷 Imagen: {archivo.filename}"
+                        
+                    else:
+                        # Para todos los demás tipos, enviar como documento
+                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
+                        enviar_documento(numero, public_url, archivo.filename, config)
+                        
+                        # Determinar el tipo para el mensaje informativo
+                        if file_ext == '.pdf':
+                            archivo_info = f"📕 PDF: {archivo.filename}"
+                        elif file_ext in ['.doc', '.docx']:
+                            archivo_info = f"📘 Documento Word: {archivo.filename}"
+                        elif file_ext in ['.xls', '.xlsx', '.csv']:
+                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
+                        elif file_ext in ['.ppt', '.pptx']:
+                            archivo_info = f"📙 Presentación: {archivo.filename}"
+                        elif file_ext in ['.zip', '.rar', '.7z']:
+                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
+                        elif file_ext in ['.txt', '.rtf']:
+                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
+                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
+                            archivo_info = f"🎬 Video: {archivo.filename}"
+                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
+                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                        else:
+                            archivo_info = f"📎 Archivo: {archivo.filename}"
+                    
+                    mensaje_enviado = True
+                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
+                    
+                except Exception as file_error:
+                    app.logger.error(f"🔴 Error enviando archivo: {file_error}")
+                    app.logger.error(traceback.format_exc())
+                    flash('❌ Error al enviar el archivo', 'error')
+                    # Limpiar archivo temporal en caso de error
+                    try:
+                        if filepath and os.path.exists(filepath):
+                            os.remove(filepath)
+                    except:
+                        pass
+                    return redirect(url_for('ver_chat', numero=numero))
+                
+                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
+                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
+                
+            else:
+                flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-            app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
+        if texto:
+            try:
+                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
+                enviar_mensaje(numero, texto, config)
+                respuesta_texto = texto
+                if archivo_info:
+                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                mensaje_enviado = True
+                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
+            except Exception as text_error:
+                app.logger.error(f"🔴 Error enviando texto: {text_error}")
+                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
+                    flash('❌ Error al enviar el mensaje', 'error')
+                    return redirect(url_for('ver_chat', numero=numero))
         
-            # 1. ENVIAR MENSAJE POR WHATSAPP
-            enviar_mensaje(numero, texto)
-        
-            # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        if mensaje_enviado:
             conn = get_db_connection(config)
             cursor = conn.cursor()
-        
-            # CORREGIDO: Usar UTC_TIMESTAMP() en MySQL para asegurar orden cronológico correcto.
+            
+            # Preparar el texto para el historial
+            mensaje_historial = "[Mensaje manual desde web]"
+            respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
+            
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-                (numero, '[Mensaje manual desde web]', texto) # Ya no pasamos timestamp_local
+                (numero, mensaje_historial, respuesta_historial)
             )
-        
+            
             conn.commit()
             cursor.close()
             conn.close()
             
-            # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
             try:
                 actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
                 app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
             except Exception as e:
                 app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
             
-            # 4. MENSAJE DE CONFIRMACIÓN
-            flash('✅ Mensaje enviado correctamente', 'success')
+            # 5. MENSAJE DE CONFIRMACIÓN
+            if archivo and texto:
+                flash('✅ Archivo y mensaje enviados correctamente', 'success')
+            elif archivo:
+                flash('✅ Archivo enviado correctamente', 'success')
+            else:
+                flash('✅ Mensaje enviado correctamente', 'success')
+                
             app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
             
-        except KeyError:
-            flash('❌ Error: Número de teléfono no proporcionado', 'error')
-            app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
-        except Exception as e:
-            flash('❌ Error al enviar el mensaje', 'error')
-            app.logger.error(f"🔴 Error en enviar_manual: {e}")
-        
-        return redirect(url_for('ver_chat', numero=numero))
-        
+        else:
+            flash('❌ No se pudo enviar el mensaje', 'error')
+            
+    except Exception as e:
+        flash('❌ Error al enviar el mensaje', 'error')
+        app.logger.error(f"🔴 Error en enviar_manual: {e}")
+        app.logger.error(traceback.format_exc())
+    
+    return redirect(url_for('ver_chat', numero=numero)) 
+
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
@@ -10491,7 +10603,7 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
             if clabe_match and not datos_obtenidos.get('transferencia_numero'):
                 datos_obtenidos['transferencia_numero'] = clabe_match.group(1)
                 app.logger.info(f"🔢 CLABE/numero detectado para {numero}: {datos_obtenidos['transferencia_numero']}")
-
+                 
             # Extraer banco por palabras clave comunes
             bancos = ['bbva', 'banorte', 'banamex', 'santander', 'scotiabank', 'hsbc', 'inbursa', 'bajio', 'afirme']
             for b in bancos:
