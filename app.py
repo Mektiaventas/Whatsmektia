@@ -10372,8 +10372,7 @@ def enviar_manual():
                     app.logger.error(f"❌ Falló envío manual a Telegram {numero}")
             else:
                 app.logger.error(f"❌ No hay token de Telegram configurado para envío manual a {numero}")
-        elif numero.startswith('fb_'):
-            # Lógica para Messenger
+
         else:
             # Lógica para WhatsApp (Por defecto)
             # Asegúrate de pasar 'config' si tu función enviar_mensaje lo requiere
