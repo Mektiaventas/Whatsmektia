@@ -8377,12 +8377,11 @@ def dashboard_conversaciones_data():
         # Query to count NEW MESSAGES (rows) per day from CONVERSACIONES table
         # ESTA CONSULTA CUENTA LOS MENSAJES NUEVOS POR DÍA
         sql = """
-            SELECT DATE(timestamp) as dia, COUNT(*) as cnt
-            FROM conversaciones
-            WHERE timestamp >= %s
-            AND mensaje != "[Mensaje manual desde web]"
-            GROUP BY DATE(timestamp)
-            ORDER BY DATE(timestamp)
+            SELECT DATE(fecha_creacion) as dia, COUNT(*) as cnt
+            FROM contactos
+            WHERE fecha_creacion >= %s
+            GROUP BY DATE(fecha_creacion)
+            ORDER BY DATE(fecha_creacion)
         """
         cursor.execute(sql, (start,))
 
