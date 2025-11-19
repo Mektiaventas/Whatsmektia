@@ -5763,78 +5763,121 @@ def procesar_codigo():
         return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
 
 def procesar_followups_automaticos(config):
-    """Busca chats con interés MEDIO (5-24h inactivos) y envía seguimiento si no se ha enviado ya."""
+    """
+    Busca chats que necesiten seguimiento según su antigüedad (30m, 5h, 20h).
+    Se ejecuta cada 30 minutos por el scheduler.
+    """
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # LOGICA:
-        # 1. Último mensaje fue hace > 5 horas y < 24 horas.
-        # 2. NO se ha enviado un followup posterior al último mensaje real.
-        
+        # 1. Buscar chats con su última interacción
+        # Usamos 'ultima_interaccion_usuario' si existe, sino 'timestamp' general
         query = """
             SELECT 
-                c.numero, 
-                MAX(c.timestamp) as ultima_interaccion,
+                c.numero_telefono as numero,
+                COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
                 cm.ultimo_followup
-            FROM conversaciones c
-            LEFT JOIN chat_meta cm ON c.numero = cm.numero
-            GROUP BY c.numero, cm.ultimo_followup
-            HAVING 
-                ultima_interaccion < NOW() - INTERVAL 5 HOUR 
-                AND ultima_interaccion > NOW() - INTERVAL 24 HOUR
+            FROM contactos c
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero
+            WHERE c.ultima_interaccion_usuario IS NOT NULL 
+               OR c.timestamp IS NOT NULL
         """
         cursor.execute(query)
         candidatos = cursor.fetchall()
         cursor.close()
-        conn.close() # Cerrar aquí para no bloquear mientras procesamos con IA
+        conn.close()
 
         if not candidatos:
             return
 
-        app.logger.info(f"🕵️‍♂️ Scheduler Followup: {len(candidatos)} candidatos encontrados en {config.get('dominio')}")
+        ahora = datetime.now(tz_mx) # Usar misma zona horaria
 
         for chat in candidatos:
             numero = chat['numero']
-            last_msg = chat['ultima_interaccion']
+            last_msg = chat['ultima_msg']
             last_followup = chat['ultimo_followup']
-
-            # Verificar si ya enviamos seguimiento DESPUÉS del último mensaje
-            # Si last_followup > last_msg, significa que el último mensaje FUE nuestro seguimiento. No enviar otro.
-            if last_followup and last_followup >= last_msg:
-                continue
-                
-            # Generar mensaje con IA
-            app.logger.info(f"💡 Generando seguimiento para {numero}...")
-            texto_followup = generar_mensaje_seguimiento_ia(numero, config)
             
-            if texto_followup:
-                # Enviar mensaje (WhatsApp/Telegram/Messenger)
-                enviado = False
-                if numero.startswith('tg_'):
-                    token = config.get('telegram_token')
-                    if token:
-                        enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+            # Normalizar zona horaria de last_msg
+            if last_msg:
+                if last_msg.tzinfo is None:
+                    # Si la DB devuelve naive, asumimos que es hora servidor (UTC o local configurada)
+                    # Para comparar con 'ahora' (tz_mx), lo mejor es convertir ambos a offset-naive o ambos a aware.
+                    # Asumimos timestamps DB están en UTC y convertimos a MX para calcular
+                    last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
                 else:
-                    enviado = enviar_mensaje(numero, texto_followup, config)
+                    last_msg = last_msg.astimezone(tz_mx)
+            else:
+                continue
+
+            # Si ya enviamos un seguimiento DESPUÉS del último mensaje del usuario, 
+            # NO enviamos otro (para no ser spam). Esperamos a que él conteste.
+            if last_followup:
+                if last_followup.tzinfo is None:
+                    last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
+                else:
+                    last_followup = last_followup.astimezone(tz_mx)
                 
-                if enviado:
-                    # Registrar en conversaciones (esto reseteará el interés a Alto temporalmente, lo cual es correcto porque reactivamos)
-                    # Usamos tipo 'sistema' o 'texto' pero lo importante es actualizar chat_meta
-                    guardar_conversacion(numero, None, texto_followup, config) # Guardar como respuesta bot
+                if last_followup >= last_msg:
+                    continue
+
+            # Calcular tiempo pasado
+            diferencia = ahora - last_msg
+            minutos = diferencia.total_seconds() / 60
+            horas = minutos / 60
+            
+            tipo_interes = None
+            
+            # --- REGLAS DE TIEMPO PARA ENVÍO ---
+            # Solo enviamos si supera el umbral y NO hemos enviado nada aún.
+            
+            if horas >= 20:
+                # DORMIDO (> 20 horas)
+                # Solo enviar si acabamos de cruzar el umbral de 20h recientemente 
+                # (o si la política es enviar 1 mensaje por silencio, este será el mensaje)
+                tipo_interes = 'dormido'
+            
+            elif horas >= 5:
+                # FRÍO (5 a 20 horas)
+                tipo_interes = 'frio'
+                
+            elif minutos >= 30:
+                # TIBIO (30 min a 5 horas)
+                tipo_interes = 'tibio'
+            
+            # Si cumple alguna condición, enviamos
+            if tipo_interes:
+                app.logger.info(f"💡 Generando seguimiento ({tipo_interes}) para {numero}...")
+                
+                # Esta función ya prioriza el mensaje configurado por ti en la pestaña Leads
+                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes)
+                
+                if texto_followup:
+                    # Enviar
+                    enviado = False
+                    if numero.startswith('tg_'):
+                        token = config.get('telegram_token')
+                        if token:
+                            enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                    else:
+                        enviado = enviar_mensaje(numero, texto_followup, config)
                     
-                    # Actualizar fecha de último followup en chat_meta para no repetir
-                    conn2 = get_db_connection(config)
-                    cur2 = conn2.cursor()
-                    cur2.execute("""
-                        INSERT INTO chat_meta (numero, ultimo_followup) VALUES (%s, NOW())
-                        ON DUPLICATE KEY UPDATE ultimo_followup = NOW()
-                    """, (numero,))
-                    conn2.commit()
-                    cur2.close()
-                    conn2.close()
-                    
-                    app.logger.info(f"✅ Seguimiento enviado a {numero}: {texto_followup}")
+                    if enviado:
+                        # Guardar como respuesta del sistema
+                        guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
+                        
+                        # Actualizar fecha de último followup para no repetir
+                        conn2 = get_db_connection(config)
+                        cur2 = conn2.cursor()
+                        cur2.execute("""
+                            INSERT INTO chat_meta (numero, ultimo_followup) VALUES (%s, NOW())
+                            ON DUPLICATE KEY UPDATE ultimo_followup = NOW()
+                        """, (numero,))
+                        conn2.commit()
+                        cur2.close()
+                        conn2.close()
+                        
+                        app.logger.info(f"✅ Seguimiento ({tipo_interes}) enviado a {numero}")
 
     except Exception as e:
         app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
