@@ -3021,73 +3021,75 @@ def dashboard_platform_data():
     config = obtener_configuracion_por_host()
     
     try:
-        # --- 1. Obtener números a excluir (Asesores y ALERT_NUMBER) ---
+        # --- 1. Obtener números a excluir (Asesores y administradores) ---
         cfg_full = load_config(config) 
         asesores_list = cfg_full.get('asesores_list', [])
         
-        # Recopilar todos los números de teléfono de los asesores configurados
         numeros_a_excluir = {
             (a.get('telefono') or '').strip() 
             for a in asesores_list 
             if a.get('telefono')
         }
         
-        # Añadir números de alerta
         if ALERT_NUMBER:
             numeros_a_excluir.add(ALERT_NUMBER)
-        # Añadir tu número personal
         numeros_a_excluir.add('5214493432744')
         numeros_a_excluir.add('5214491182201')
-        
-        # Limpiar números vacíos
         numeros_a_excluir.discard('')
 
-        # Convertir a una lista/tupla para usar en la cláusula SQL IN
+        # Convertir a tupla para SQL
         exclusion_list = tuple(numeros_a_excluir)
-        
-        if exclusion_list:
-            app.logger.info(f"📊 Excluyendo números internos del dashboard: {exclusion_list}")
         
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # 2. Conteo de Conversaciones por Plataforma (Clientes)
-        # Filtramos `conv.numero` para excluir los números internos
+        # Preparar cláusula de exclusión
         exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
         
-        # Consulta de Conversaciones
-        cursor.execute(f"""
+        # --- 2. Consulta INTELIGENTE de Conversaciones ---
+        # Detecta 'fb_' como Messenger y 'tg_' como Telegram automáticamente
+        sql_conversations = f"""
             SELECT 
-                COALESCE(c.plataforma, 
-                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
-                ) AS platform, 
+                CASE 
+                    WHEN conv.numero LIKE 'fb_%%' THEN 'Messenger'
+                    WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram'
+                    WHEN c.plataforma = 'Facebook' THEN 'Messenger'
+                    WHEN c.plataforma = 'Telegram' THEN 'Telegram'
+                    ELSE 'WhatsApp'
+                END AS platform, 
                 COUNT(DISTINCT conv.numero) AS conversation_count
             FROM conversaciones conv
             LEFT JOIN contactos c ON conv.numero = c.numero_telefono
             WHERE 1=1 {exclusion_clause}
             GROUP BY platform
             ORDER BY conversation_count DESC
-        """, exclusion_list)
+        """
+        cursor.execute(sql_conversations, exclusion_list)
         conversations_raw = cursor.fetchall()
 
-        # 3. Conteo de Contactos Totales por Plataforma (Clientes)
-        # Filtramos `numero_telefono` para excluir los números internos
-        # Usamos la misma lista de exclusión
-        cursor.execute(f"""
+        # --- 3. Consulta INTELIGENTE de Contactos ---
+        sql_contacts = f"""
             SELECT 
-                COALESCE(plataforma, 'WhatsApp') AS platform, 
+                CASE 
+                    WHEN numero_telefono LIKE 'fb_%%' THEN 'Messenger'
+                    WHEN numero_telefono LIKE 'tg_%%' THEN 'Telegram'
+                    WHEN plataforma = 'Facebook' THEN 'Messenger'
+                    WHEN plataforma = 'Telegram' THEN 'Telegram'
+                    ELSE 'WhatsApp'
+                END AS platform, 
                 COUNT(*) AS contact_count
             FROM contactos
             WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
             GROUP BY platform
             ORDER BY contact_count DESC
-        """, exclusion_list)
+        """
+        cursor.execute(sql_contacts, exclusion_list)
         contacts_raw = cursor.fetchall()
         
         cursor.close()
         conn.close()
 
-        # Formatear para Chart.js (sin cambios)
+        # Formatear datos para el frontend
         conv_labels = [row['platform'] for row in conversations_raw]
         conv_values = [row['conversation_count'] for row in conversations_raw]
         
@@ -10370,6 +10372,8 @@ def enviar_manual():
                     app.logger.error(f"❌ Falló envío manual a Telegram {numero}")
             else:
                 app.logger.error(f"❌ No hay token de Telegram configurado para envío manual a {numero}")
+        elif numero.startswith('fb_'):
+            # Lógica para Messenger
         else:
             # Lógica para WhatsApp (Por defecto)
             # Asegúrate de pasar 'config' si tu función enviar_mensaje lo requiere
