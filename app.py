@@ -6757,7 +6757,10 @@ def registrar_nueva_conversacion(numero, mensaje, config=None):
         # 4. Guardar si es necesario
         if debe_guardar:
             # Insertar un nuevo registro con el timestamp actual (UTC_TIMESTAMP() en la DB)
-            guardar_conversacion(numero, mensaje, None, config)
+            cursor.execute("""
+                INSERT INTO conversaciones (numero, mensaje, timestamp)
+                VALUES (%s, %s, UTC_TIMESTAMP())
+            """, (numero, mensaje))
             conn.commit()
             app.logger.info(f"✅ Conversación registrada en nuevas_conversaciones para {numero}.")
             
