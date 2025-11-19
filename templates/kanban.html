@@ -57,6 +57,7 @@
         color: #616161;
         border: 1px solid #e0e0e0;
     }
+
     @keyframes highlightPulse {
         0% {
             background-color: rgba(255,255,255,0.1);
@@ -247,6 +248,7 @@
         .alias-view.is-telegram {
             color: #00bfff; /* Azul Telegram/cielo */
         }
+
         .alias-view.is-messenger {
             color: #c000ff; /* Azul Telegram/cielo */
         }
@@ -452,7 +454,7 @@
 
         /* Color para Messenger (Azul/Púrpura) */
         .alias-view.is-messenger {
-            color: #0084ff; 
+            color: #0084ff;
         }
     }
 </style>
@@ -480,6 +482,25 @@
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                        {% set interes = chat.interes|default('Frío') %}
+                        {% set n = interes|lower %}
+                        {% set clase_int = 'interes-frio' %}
+                        {% set icono_int = '❄' %}
+
+                        {% if n == 'caliente' %}
+                        {% set clase_int = 'interes-caliente' %}
+                        {% set icono_int = '🔥' %}
+                        {% elif n == 'tibio' %}
+                        {% set clase_int = 'interes-tibio' %}
+                        {% set icono_int = '🌡' %}
+                        {% elif n == 'dormido' %}
+                        {% set clase_int = 'interes-dormido' %}
+                        {% set icono_int = '😴' %}
+                        {% endif %}
+
+                        <span class="badge-interes {{ clase_int }}">{{ icono_int }} {{ interes|capitalize }}</span>
+                    </div>
                     <div class="card-top-row">
                         <div class="card-avatar-section">
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
@@ -536,7 +557,7 @@
     let editingColId = null;
     let editingColText = null;
     let kanbanAutoRefresh = true;
-    let refreshInterval = 500;
+    let refreshInterval = 2000; // Actualización cada 2 segundos
     const renameTimers = new Map(); // debounce timers por columna
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -548,8 +569,44 @@
         bindMarkReadOnClick();
         startAutoRefresh();
         inicializarSortable();
+
+        // Configurar edición de alias
+        setupAliasEditing();
+
         document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
     });
+
+    // --- LÓGICA DE INTERÉS (BADGES) ---
+    function generarBadgeInteres(nivel) {
+        if (!nivel) return '';
+
+        const n = String(nivel).toLowerCase();
+        let clase = 'interes-tibio';
+        let icono = '🌡';
+        let texto = nivel;
+
+        if (n === 'caliente') {
+            clase = 'interes-caliente';
+            icono = '🔥';
+            texto = 'Caliente';
+        } else if (n === 'tibio') {
+            clase = 'interes-tibio';
+            icono = '🌡';
+            texto = 'Tibio';
+        } else if (n === 'frio' || n === 'frío') {
+            clase = 'interes-frio';
+            icono = '❄';
+            texto = 'Frío';
+        } else if (n === 'dormido') {
+            clase = 'interes-dormido';
+            icono = '😴';
+            texto = 'Dormido';
+        }
+
+        return `<span class="badge-interes ${clase}">${icono} ${texto}</span>`;
+    }
+
+    // --- EVENTOS Y UTILIDADES ---
 
     function bindMarkReadOnClick() {
         document.addEventListener('click', (e) => {
@@ -579,12 +636,31 @@
         }, { passive: true });
     }
 
+    function setupAliasEditing() {
+        try {
+            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                if (btn.dataset.boundAlias === '1') return;
+                btn.dataset.boundAlias = '1';
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault(); e.stopPropagation();
+                    // Encontrar contenedor correcto dentro de la tarjeta
+                    const parent = this.closest('.card-top-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
+                    if (!parent) return;
+                    activarEdicionAlias(parent);
+                });
+            });
+        } catch (err) {
+            console.error('Error binding edit-alias-btn handlers:', err);
+        }
+    }
+
     function bindAddColumnButtons() {
         document.querySelectorAll('.add-chat-btn').forEach(btn => {
             btn.removeEventListener('click', addColumnClickHandler);
             btn.addEventListener('click', addColumnClickHandler);
         });
     }
+
     function addColumnClickHandler(e) {
         e.preventDefault();
         e.stopPropagation();
@@ -601,38 +677,12 @@
                 if (!data.success) { alert(data.error || 'Error al crear columna'); return; }
                 const nuevaCol = crearColumnaDOM(data);
                 insertarColumnaDespues(baseCol, nuevaCol);
+                // Re-bind all events for dynamic elements
                 bindAddColumnButtons(); bindDeleteButtons(); initRenameHandlers(); bindIconPicker(); inicializarSortable();
             })
             .catch(err => console.error('Error creando columna:', err));
     }
-    function generarBadgeInteres(nivel) {
-        if (!nivel) return '';
 
-        const n = nivel.toLowerCase();
-        let clase = 'interes-tibio';
-        let icono = '🌡';
-        let texto = nivel;
-
-        if (n === 'caliente') {
-            clase = 'interes-caliente';
-            icono = '🔥';
-            texto = 'Caliente';
-        } else if (n === 'tibio') {
-            clase = 'interes-tibio';
-            icono = '🌡';
-            texto = 'Tibio';
-        } else if (n === 'frio' || n === 'frío') {
-            clase = 'interes-frio';
-            icono = '❄';
-            texto = 'Frío';
-        } else if (n === 'dormido') {
-            clase = 'interes-dormido';
-            icono = '😴';
-            texto = 'Dormido';
-        }
-
-        return `<span class="badge-interes ${clase}">${icono} ${texto}</span>`;
-    }
     function crearColumnaDOM(data) {
         const div = document.createElement('div');
         div.className = 'kanban-column';
@@ -652,14 +702,17 @@
         <div class="column-list" data-col-id="${data.id}"></div>`;
         return div;
     }
+
     function insertarColumnaDespues(baseCol, nuevaCol) {
         if (baseCol.nextElementSibling) baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
         else baseCol.parentNode.appendChild(nuevaCol);
     }
 
-    /* Icon picker */
+    /* --- ICON PICKER --- */
     function bindIconPicker() {
         const picker = document.getElementById('iconPicker');
+        if (!picker) return;
+
         const emojis = ['🆕', '💬', '⏳', '✅', '📞', '🛠️', '📦', '🚀', '📝', '📅', '⭐', '📍', '🏷️', '🎯'];
         picker.innerHTML = emojis.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
 
@@ -693,6 +746,7 @@
             if (!picker.contains(e.target)) hideIconPicker(picker);
         });
     }
+
     function showIconPickerAt(anchorEl, picker) {
         const r = anchorEl.getBoundingClientRect();
         picker.style.left = `${r.left + window.scrollX}px`;
@@ -712,7 +766,7 @@
         return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
     }
 
-    /* Eliminar columna */
+    /* --- ELIMINAR COLUMNA --- */
     function bindDeleteButtons() {
         document.querySelectorAll('.delete-col-btn').forEach(btn => {
             if (btn.dataset.bound === '1') return; btn.dataset.bound = '1';
@@ -721,6 +775,8 @@
                 const colId = btn.dataset.colId;
                 const totalCols = document.querySelectorAll('.kanban-column').length;
                 if (totalCols <= 1) { alert('No se puede eliminar la última columna'); return; }
+
+                if (!confirm('¿Estás seguro de eliminar esta columna? Los chats se moverán a otra columna.')) return;
 
                 fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
                     .then(res => res.json())
@@ -734,7 +790,7 @@
         });
     }
 
-    /* Renombrar columna: pausa refresh + guardado con debounce */
+    /* --- RENOMBRAR COLUMNA --- */
     function initRenameHandlers() {
         document.querySelectorAll('.col-name[contenteditable="true"]').forEach(header => {
             if (header.dataset.bound === '1') return; header.dataset.bound = '1';
@@ -783,14 +839,17 @@
         }).catch(err => console.error('Error guardando nombre:', err));
     }
 
-    /* Auto-refresh incremental (no toca título si está en edición) */
+    /* --- AUTO REFRESH --- */
     function startAutoRefresh() {
         setInterval(actualizarKanban, refreshInterval);
-        setTimeout(actualizarKanban, 1000);
     }
+
     function actualizarKanban() {
         if (!kanbanAutoRefresh) return;
-        const scrollPosition = window.scrollY;
+
+        // Guardamos el scroll actual solo si no estamos arrastrando
+        // (SortableJS maneja el drag, refrescar puede interferir, pero usually ok con diffing)
+
         fetch('/kanban/data')
             .then(r => r.json())
             .then(data => {
@@ -799,14 +858,17 @@
                     const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
                     if (colHeader && editingColText) {
                         colHeader.focus();
-                        colHeader.textContent = editingColText;
+                        colHeader.textContent = editingColText; // Restaurar texto en edición si se sobrescribió
                     }
                 }
-                setTimeout(() => window.scrollTo(0, scrollPosition), 10);
+                // Reinicializar edición de alias para nuevos elementos
+                setupAliasEditing();
             })
             .catch(err => console.error('❌ Error actualizando Kanban:', err));
     }
+
     function actualizarIncremental(data) {
+        // 1. Actualizar columnas (nombres/iconos)
         data.columnas.forEach(col => {
             const nameEl = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
             // no sobreescribir si es el elemento activo o está en edición
@@ -820,6 +882,7 @@
             }
         });
 
+        // 2. Mapear estado actual del DOM
         const chatsActuales = new Map();
         document.querySelectorAll('.kanban-card').forEach(card => {
             chatsActuales.set(card.dataset.chatNum, {
@@ -828,52 +891,151 @@
             });
         });
 
+        // 3. Procesar datos del servidor
         data.chats.forEach(chat => {
             const existente = chatsActuales.get(chat.numero);
+
             if (existente) {
+                // Si existe, actualizamos contenido
                 actualizarChatExistente(existente.element, chat);
+
+                // Si cambió de columna, lo movemos
                 if (existente.columnaId !== chat.columna_id.toString()) {
                     moverChatAColumna(chat.numero, chat.columna_id);
                 }
+
+                // Lo quitamos del mapa para no borrarlo después
                 chatsActuales.delete(chat.numero);
             } else {
+                // Si no existe, lo creamos
                 agregarNuevoChat(chat);
             }
         });
 
+        // 4. Eliminar chats que ya no están en el servidor
         chatsActuales.forEach((info, numero) => eliminarChat(numero));
     }
 
-    function actualizarChatExistente(elemento, chat) {
-        const aliasView = elemento.querySelector('.alias-view');
-        // 1. Actualizar el nombre mostrado si ha cambiado
-        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+    /* --- AGREGAR CHAT (CON BADGE Y PLATAFORMA) --- */
+    function agregarNuevoChat(chat) {
+        const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
+        if (!columna) return;
 
-        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
+        // Lógica de Iconos de Plataforma
+        let avatarSrc = '/static/icons/whatsapp-icon.png';
+        let platformClass = 'is-whatsapp';
+
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            avatarSrc = '/static/icons/telegram-icon-dos.png';
+            platformClass = 'is-telegram';
+        } else if (chat.numero && (chat.numero.startsWith('fb_') || chat.canal === 'Facebook')) {
+            avatarSrc = '/static/icons/messenger-icon-dos.png';
+            platformClass = 'is-messenger';
+        }
+
+        const bandera = getCountryFlag(chat.numero);
+
+        // Formatear fecha
+        let fechaFormateada = '';
+        if (chat.ultima_fecha) {
+            try {
+                const fechaObj = new Date(chat.ultima_fecha);
+                const dia = fechaObj.getDate();
+                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+                fechaFormateada = `${dia}-${mes}   ${hora}`;
+            } catch (e) { /* ignorar error */ }
+        }
+
+        // Generar Badge de Interés
+        const interesBadge = generarBadgeInteres(chat.interes || 'Frío');
+
+        const html = `
+    <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;">
+                ${interesBadge}
+            </div>
+
+            <div class="card-top-row">
+                <div class="card-avatar-section">
+                    <img src="${avatarSrc}" class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
+                </div>
+                <div class="card-name-section">
+                    <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
+                    <span class="alias-edit" style="display:none;">
+                        <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
+                    </span>
+                </div>
+            </div>
+
+            <div class="card-bottom-row">
+                <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
+                <div class="card-time">
+                    ${fechaFormateada}
+                </div>
+            </div>
+        </div>
+
+        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
+    </a>`;
+
+        columna.insertAdjacentHTML('beforeend', html);
+
+        setTimeout(() => {
+            const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
+            if (el) el.classList.remove('new-message');
+        }, 2500);
+    }
+
+    /* --- ACTUALIZAR CHAT (CON BADGE DINÁMICO) --- */
+    function actualizarChatExistente(elemento, chat) {
+        // 1. Actualizar Alias/Nombre
+        const aliasView = elemento.querySelector('.alias-view');
+        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
+            aliasView.textContent = chat.nombre_mostrado;
+        }
+
+        // 2. Actualizar Badge de Interés
+        const cardContent = elemento.querySelector('.card-content');
+        if (cardContent) {
+            const nuevoBadgeHTML = generarBadgeInteres(chat.interes || 'Frío');
+            const primerHijo = cardContent.firstElementChild;
+
+            // Detectar si el primer hijo es el contenedor del badge (div flex)
+            if (primerHijo && primerHijo.tagName === 'DIV' && primerHijo.style.display === 'flex') {
+                // Solo actualizar si el contenido cambió (evita parpadeo)
+                if (primerHijo.innerHTML.trim() !== nuevoBadgeHTML.trim()) {
+                    primerHijo.innerHTML = nuevoBadgeHTML;
+                }
+            } else {
+                // Si no existe (tarjeta antigua), crearlo
+                const div = document.createElement('div');
+                div.style.cssText = "display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;";
+                div.innerHTML = nuevoBadgeHTML;
+                cardContent.insertBefore(div, cardContent.firstChild);
+            }
+        }
+
+        // 3. Actualizar Tiempo
         let fechaFormateada = '';
         const timeElement = elemento.querySelector('.card-bottom-row .card-time');
-
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
-
-            // Replicar el formato de Jinja (%-d-%b   ) (%H:%M)
             const dia = fechaObj.getDate();
             const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
             const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-            // Construir el formato final exacto: d-mes hh:mm
             fechaFormateada = `${dia}-${mes}   ${hora}`;
 
-            // Compara y actualiza el SPAN del tiempo si es necesario
             if (timeElement.textContent.trim() !== fechaFormateada) {
                 timeElement.textContent = fechaFormateada;
             }
-        } else if (timeElement) {
-            timeElement.textContent = ''; // Limpiar el tiempo si no hay fecha
         }
-        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
 
-        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
+        // 4. Actualizar Mensaje y Animación
         const msgElement = elemento.querySelector('.card-bottom-row .card-msg');
         const nuevoMensaje = chat.ultimo_mensaje || '';
         let mensajeActualizado = false;
@@ -885,21 +1047,18 @@
             }
         }
 
-        // Aplicar la animación si el mensaje fue actualizado y no está vacío
         if (mensajeActualizado) {
             if (nuevoMensaje.trim()) {
                 elemento.classList.add('new-message');
                 setTimeout(() => elemento.classList.remove('new-message'), 2500);
             }
         }
-        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
 
-        // 3. Actualizar el contador de mensajes no leídos
+        // 5. Actualizar No Leídos
         const unread = elemento.querySelector('.card-unread');
         if (chat.sin_leer > 0) {
             if (unread) unread.textContent = chat.sin_leer;
             else {
-                // Si no existe, lo creamos y lo añadimos
                 const span = document.createElement('span');
                 span.className = 'card-unread';
                 span.textContent = chat.sin_leer;
@@ -908,81 +1067,17 @@
         } else if (unread) unread.remove();
     }
 
-    // kanban.html (Reemplazar en línea 467)
-
-    function agregarNuevoChat(chat) {
-        const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
-        if (!columna) return;
-
-        // --- INICIO DE LA CORRECCIÓN JS ---
-        let avatarSrc = '/static/icons/whatsapp-icon.png';
-        let platformClass = 'is-whatsapp';
-
-        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
-            avatarSrc = '/static/icons/telegram-icon-dos.png';
-            platformClass = 'is-telegram';
-        } else if (chat.numero && (chat.numero.startsWith('fb_') || chat.canal === 'Facebook')) {
-            avatarSrc = '/static/icons/messenger-icon-dos.png';
-            platformClass = 'is-messenger';
-        }
-        // --- FIN DE LA CORRECCIÓN JS ---
-
-        const bandera = getCountryFlag(chat.numero);
-
-        // Formatear la fecha/hora (Añadido para consistencia con la actualización incremental)
-        let fechaFormateada = '';
-        if (chat.ultima_fecha) {
-            try {
-                const fechaObj = new Date(chat.ultima_fecha);
-                const dia = fechaObj.getDate();
-                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
-                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-                fechaFormateada = `${dia}-${mes}   ${hora}`;
-            } catch (e) { /* ignorar error de fecha */ }
-        }
-
-        const html = `
-    <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
-        <div class="card-content">
-            <div class="card-top-row">
-                <div class="card-avatar-section">
-                    <img src="${avatarSrc}" class="card-avatar" alt="Avatar"
-                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                    ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
-                </div>
-                <div class="card-name-section">
-                                        <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
-                    <span class="alias-edit" style="display:none;">
-                        <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
-                    </span>
-                </div>
-            </div>
-
-            <div class="card-bottom-row">
-                <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
-                <div class="card-time">
-                    ${fechaFormateada} </div>
-            </div>
-        </div>
-
-        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
-    </a>`;
-        columna.insertAdjacentHTML('beforeend', html);
-        setTimeout(() => {
-            const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
-            if (el) el.classList.remove('new-message');
-        }, 2500);
-    }
-
     function moverChatAColumna(numero, nuevaColumnaId) {
         const chatEl = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
         const destino = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
         if (chatEl && destino) destino.appendChild(chatEl);
     }
+
     function eliminarChat(numero) {
         const el = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
         if (el) el.remove();
     }
+
     function getCountryFlag(numero) {
         if (!numero) return null;
         const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
@@ -1014,8 +1109,9 @@
         });
     }
 
-    function bindColumnHeaderEvents() { /* reservado para futuros eventos */ }
-    // === Edit alias helper (improved) ===
+    function bindColumnHeaderEvents() { /* reservado */ }
+
+    /* --- EDITAR ALIAS (Click en lápiz) --- */
     function activarEdicionAlias(parent) {
         if (!parent) return;
         const card = parent.closest('.kanban-card, .kanban-chat-link, .card-content') || parent;
@@ -1023,7 +1119,6 @@
         const editElement = card.querySelector('.alias-edit');
         if (!viewElement || !editElement) return;
 
-        // prefer structured data if available
         const displayed = (viewElement.textContent || '').trim();
         const fullname = (viewElement.dataset && viewElement.dataset.nombre) ? (viewElement.dataset.nombre || '').trim() : '';
         const original = fullname || displayed;
@@ -1036,14 +1131,11 @@
             if (numFromView) input.dataset.num = numFromView;
         }
 
-        // choose initial input value: alias -> nombre -> numero
         const aliasFromDataset = (input.dataset && input.dataset.alias) ? (input.dataset.alias || '').trim() : '';
         const candidate = aliasFromDataset || (input.value || '').trim() || fullname || input.dataset.num || '';
         input.value = candidate;
 
-        // mark editing so auto-refresh won't overwrite
         card.classList.add('alias-editing');
-
         viewElement.style.display = 'none';
         editElement.style.display = 'flex';
         input.focus();
@@ -1055,14 +1147,11 @@
             try { card.classList.remove('alias-editing'); } catch (e) { }
             editElement.style.display = 'none';
 
-            // If valueToShow is empty or equals phone, but we have a fullname, prefer fullname
             let show = valueToShow;
             if ((!show || String(show).trim() === '') && fullname) show = fullname;
-            // final fallback: the displayed original
             if (!show) show = original;
 
             viewElement.textContent = show;
-            // update dataset.alias to keep consistency (if value equals fullname, clear alias dataset)
             try {
                 if (input && input.dataset) {
                     if (String(show).trim() === (fullname || '').trim()) input.dataset.alias = '';
@@ -1074,13 +1163,10 @@
 
         function terminar() {
             const nuevo = (input.value || '').trim();
-
-            // If nothing changed or empty, restore original (prefer fullname)
             if (nuevo === '' || nuevo === original) {
                 finishAndRestore(original);
                 return;
             }
-
             submitted = true;
             fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
                 method: 'POST',
@@ -1101,9 +1187,7 @@
         }
 
         input.onblur = () => {
-            setTimeout(() => {
-                if (!submitted) terminar();
-            }, 0);
+            setTimeout(() => { if (!submitted) terminar(); }, 0);
         };
 
         input.onkeydown = e => {
@@ -1115,24 +1199,5 @@
             }
         };
     }
-
-    // Attach handlers to edit buttons that are already in DOM on load
-    document.addEventListener('DOMContentLoaded', () => {
-        try {
-            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
-                if (btn.dataset.boundAlias === '1') return;
-                btn.dataset.boundAlias = '1';
-                btn.addEventListener('click', function (e) {
-                    e.preventDefault(); e.stopPropagation();
-                    // Encontrar contenedor correcto dentro de la tarjeta
-                    const parent = this.closest('.card-top-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
-                    if (!parent) return;
-                    activarEdicionAlias(parent);
-                });
-            });
-        } catch (err) {
-            console.error('Error binding edit-alias-btn handlers:', err);
-        }
-    });
 </script>
 {% endblock %}
