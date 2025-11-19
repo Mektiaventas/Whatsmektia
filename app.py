@@ -3401,11 +3401,12 @@ def kanban_data(config=None):
         config = obtener_configuracion_por_host()
     try:
         _ensure_interes_column(config)
+        _ensure_columna_interaccion_usuario(config) # Asegurar columna
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # --- 1. Lógica de Asesores ---
+        # ... (Lógica de asesores igual) ...
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         if col_asesores_id and numeros_asesores:
@@ -3413,16 +3414,16 @@ def kanban_data(config=None):
              cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", (col_asesores_id, *numeros_asesores, col_asesores_id))
              conn.commit()
 
-        # --- 2. Obtener Columnas ---
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- 3. Obtener Chats ---
+        # AGREGAMOS cont.ultima_interaccion_usuario A LA CONSULTA
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha,
+                MAX(c.timestamp) AS ultima_fecha, -- Para ORDENAR visualmente (User o IA)
+                MAX(cont.ultima_interaccion_usuario) AS fecha_usuario, -- Para CALCULAR INTERÉS (Solo User)
                 (SELECT mensaje FROM conversaciones 
                  WHERE numero = cm.numero
                  AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
@@ -3440,71 +3441,60 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # --- 4. CÁLCULO DE ESTADOS (REGLAS DE TIEMPO) ---
         ahora = datetime.now(tz_mx)
         
         for chat in chats:
-            # Valor base de la DB (Tibio o General)
             interes_base = chat.get('interes_db') or 'General'
             
-            if chat.get('ultima_fecha'):
+            # Usamos fecha_usuario para el cálculo. Si es NULL, usamos ultima_fecha como fallback
+            fecha_calculo = chat.get('fecha_usuario') or chat.get('ultima_fecha')
+
+            if fecha_calculo:
                 try:
-                    # Normalizar zona horaria
-                    fecha_msg = chat['ultima_fecha']
-                    if fecha_msg.tzinfo is None:
-                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
+                    if fecha_calculo.tzinfo is None:
+                        fecha_calculo = pytz.utc.localize(fecha_calculo).astimezone(tz_mx)
                     else:
-                        fecha_msg = fecha_msg.astimezone(tz_mx)
+                        fecha_calculo = fecha_calculo.astimezone(tz_mx)
                     
-                    # Calcular diferencia en minutos y horas
-                    diferencia = ahora - fecha_msg
+                    # Calcular tiempo real desde que EL USUARIO habló
+                    diferencia = ahora - fecha_calculo
                     minutos_pasados = diferencia.total_seconds() / 60
                     horas_pasadas = minutos_pasados / 60
                     
-                    # --- APLICACIÓN DE REGLAS ---
+                    # --- REGLAS ---
                     if horas_pasadas >= 20:
-                        # > 20 horas: DORMIDO 😴
                         chat['interes'] = 'Dormido'
-                    
                     elif horas_pasadas >= 5:
-                        # > 5 horas (y < 20): FRÍO ❄
                         chat['interes'] = 'Frío'
-                    
                     elif minutos_pasados <= 30:
-                        # < 30 minutos: CALIENTE 🔥
                         chat['interes'] = 'Caliente'
-                    
                     else:
-                        # Rango intermedio (30 min a 5 horas):
-                        # Aquí respetamos si la DB dice "Tibio" (mostró interés).
-                        # Si no, por defecto en este rango es "Frío" o "General" (usamos Frío visualmente).
+                        # Zona intermedia (30m - 5h): Respetar lógica de contenido
                         if interes_base == 'Tibio':
                             chat['interes'] = 'Tibio'
                         else:
                             chat['interes'] = 'Frío'
 
-                    # Formato ISO para frontend
-                    chat['ultima_fecha'] = fecha_msg.isoformat()
-                    
                 except Exception as e:
                     app.logger.error(f"Error fecha {chat['numero']}: {e}")
                     chat['interes'] = 'Frío'
-                    chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
-                # Sin fecha = Dormido
                 chat['interes'] = 'Dormido'
-                chat['ultima_fecha'] = None
+
+            # Formatear fecha visual (esta sigue siendo la última actividad general)
+            if chat.get('ultima_fecha'):
+                # ... (tu lógica de formateo visual existente para ultima_fecha)
+                pass
 
         cursor.close()
         conn.close()
-
+        # ... (return json igual)
         return jsonify({
             'columnas': columnas,
             'chats': chats,
             'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
-
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
@@ -4033,6 +4023,23 @@ def guardar_cita(info_cita, config=None):
         app.logger.error(traceback.format_exc())
         return None
     
+def _ensure_columna_interaccion_usuario(config=None):
+    """Crea una columna dedicada a guardar SOLO la fecha del último mensaje del USUARIO."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'ultima_interaccion_usuario'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN ultima_interaccion_usuario DATETIME DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'ultima_interaccion_usuario' creada.")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error columna interaccion usuario: {e}")
+
 def _ensure_interes_column(config=None):
     """Asegura que la tabla contactos tenga la columna interes"""
     if config is None:
@@ -4050,6 +4057,41 @@ def _ensure_interes_column(config=None):
         conn.close()
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
+
+@app.route('/migrar-fechas-usuarios')
+def migrar_fechas_usuarios():
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Asegurar columna
+        _ensure_columna_interaccion_usuario(config)
+
+        # Actualizar la fecha del usuario buscando su último mensaje real en 'conversaciones'
+        # (Ignoramos mensajes donde 'respuesta' no es NULL, asumiendo que esos son del bot o sistema,
+        #  o buscamos donde 'mensaje' no sea NULL)
+        # La lógica exacta: El timestamp del último mensaje donde el usuario escribió algo.
+        sql = """
+        UPDATE contactos c
+        SET ultima_interaccion_usuario = (
+            SELECT MAX(timestamp) 
+            FROM conversaciones conv 
+            WHERE conv.numero = c.numero_telefono 
+            AND conv.mensaje IS NOT NULL 
+            AND conv.mensaje != ''
+            AND conv.mensaje != '[Mensaje manual desde web]'
+        )
+        WHERE ultima_interaccion_usuario IS NULL;
+        """
+        cursor.execute(sql)
+        conn.commit()
+        
+        cursor.close()
+        conn.close()
+        return "✅ Migración de fechas de usuario completada."
+    except Exception as e:
+        return f"❌ Error: {e}"
 
 @app.route('/migrar-interes-legacy')
 def migrar_interes_legacy():
@@ -12243,15 +12285,12 @@ def actualizar_columna_chat(numero, columna_id, config=None):
 
 
 def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma=None):
-    """
-    Actualiza la información del contacto y gestiona el conteo de conversaciones
-    usando la columna 'timestamp' para la ventana de 24 horas.
-    """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Asegurar que las columnas existan
     _ensure_contactos_conversaciones_columns(config)
+    _ensure_interes_column(config)
+    _ensure_columna_interaccion_usuario(config) # <--- AGREGAR ESTO
 
     conn = None
     cursor = None
@@ -12259,24 +12298,20 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # --- LÓGICA DE ACTUALIZACIÓN CONTEO DE CONVERSACIONES (24 HORAS) ---
-
-        nombre_a_usar = nombre_perfil  # <-- CAMBIO AQUÍ
+        nombre_a_usar = nombre_perfil
         plataforma_a_usar = plataforma or 'WhatsApp'
         
-        # Insertar o actualizar el contacto
-        # La lógica de conteo condicional se implementa en ON DUPLICATE KEY UPDATE
-        
+        # Lógica: Al llegar un mensaje del USUARIO (webhook), actualizamos 'ultima_interaccion_usuario'
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario) 
             VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
-                    1, UTC_TIMESTAMP(), 'Frío') 
+                    1, UTC_TIMESTAMP(), 'Frío', UTC_TIMESTAMP()) 
             ON DUPLICATE KEY UPDATE 
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = UTC_TIMESTAMP(),
-                -- NO actualizamos interes aquí para no sobrescribir la lógica inteligente
+                ultima_interaccion_usuario = UTC_TIMESTAMP(), -- 👈 AQUÍ GUARDAMOS LA HORA REAL DEL USUARIO
                 
                 conversaciones = conversaciones + 
                                  CASE 
@@ -12292,7 +12327,6 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         """
         
         cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
-        
         conn.commit()
         app.logger.info(f"✅ Información de contacto y conteo de conversaciones actualizado para {numero}")
         
