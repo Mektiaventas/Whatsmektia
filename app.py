@@ -8219,10 +8219,9 @@ def get_columnas_precios():
 @login_required
 def dashboard_conversaciones_data():
     """
-    Devuelve JSON con:
-    - plan_info (si el usuario está autenticado)
-    - active_count: número de chats con actividad en las últimas 24h
-    - labels/values: por día (conversaciones contadas ese día, usando contactos.timestamp).
+    Devuelve JSON para el gráfico.
+    Métrica principal: COUNT(*) de la tabla 'contactos' agrupado por fecha (created_at).
+    Esto representa 'Nuevos Chats' iniciados por día.
     """
     try:
         config = obtener_configuracion_por_host()
@@ -8232,126 +8231,7 @@ def dashboard_conversaciones_data():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Caso especial: user asked previously '3months' -> now return up to last 90 days,
-        # but start the series at the first day that actually has data within that window.
-        if period == '3months':
-            # Find last day with data in contactos.timestamp
-            try:
-                cursor.execute("SELECT DATE(MAX(timestamp)) FROM contactos")
-                row = cursor.fetchone()
-                last_day = datetime.now().date() 
-                if row and row[0]:
-                    last_day = row[0].date() if hasattr(row[0], 'date') else datetime.strptime(str(row[0]), "%Y-%m-%d").date()
-            except Exception:
-                last_day = datetime.now().date()
-
-            # Window lower bound (maximum 90 days back)
-            window_start = last_day - timedelta(days=89)
-
-            # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (3 meses)
-            sql = """
-                SELECT DATE(timestamp) as dia, SUM(conversaciones) as cnt
-                FROM contactos
-                WHERE timestamp IS NOT NULL AND DATE(timestamp) BETWEEN %s AND %s
-                GROUP BY DATE(timestamp)
-                ORDER BY DATE(timestamp)
-            """
-            cursor.execute(sql, (window_start, last_day))
-            rows = cursor.fetchall()
-
-            # Map counts by date string 'YYYY-MM-DD'
-            counts_map = {}
-            for r in rows:
-                try:
-                    dia = r[0]
-                    if hasattr(dia, 'strftime'):
-                        key = dia.strftime('%Y-%m-%d')
-                    else:
-                        key = str(dia)
-                    cnt = int(r[1] or 0)
-                    counts_map[key] = cnt
-                except Exception:
-                    continue
-
-            # If there are no days with data in the window, return an empty (or single-day) series
-            if not counts_map:
-                labels = []
-                values = []
-            else:
-                # Find earliest date within counts_map (first day that has data)
-                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
-                earliest_with_data = min(parsed_dates)
-
-                # Ensure earliest_with_data is not earlier than window_start
-                if earliest_with_data < window_start:
-                    earliest_with_data = window_start
-
-                # Build labels from earliest_with_data .. last_day (inclusive)
-                labels = []
-                values = []
-                days_range = (last_day - earliest_with_data).days + 1
-                for i in range(days_range):
-                    d = earliest_with_data + timedelta(days=i)
-                    key = d.strftime('%Y-%m-%d')
-                    labels.append(key)
-                    values.append(counts_map.get(key, 0))
-
-            # Chats activos: distinct numero with message in last 24h
-            # Se sigue usando la tabla 'conversaciones' para esta métrica, ya que requiere el historial de mensajes.
-            cursor.execute("SELECT COUNT(conversaciones) FROM contactos WHERE timestamp >= NOW() - INTERVAL 1 DAY")
-            active_count_row = cursor.fetchone()
-            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
-
-            cursor.close()
-            conn.close()
-
-            # Plan info if user authenticated
-            plan_info = None
-            try:
-                au = session.get('auth_user')
-                if au and au.get('user'):
-                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
-            except Exception:
-                plan_info = None
-
-            return jsonify({
-                'labels': labels,
-                'values': values,
-                'active_count': active_count,
-                'plan_info': plan_info or {}
-            })
-
-        # --- fallback: previous daily behavior for week/month ---
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
-
-        # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (semana/mes)
-        cursor.execute("""
-            SELECT DATE(created_at) as dia, COUNT(*) as cnt
-            FROM contactos
-            WHERE timestamp IS NOT NULL AND timestamp >= %s
-            GROUP BY DATE(created_at)
-            ORDER BY DATE(created_at)
-        """, (start,))
-
-        rows = cursor.fetchall()
-        labels = []
-        values = []
-        for r in rows:
-            dia = r[0]
-            if hasattr(dia, 'strftime'):
-                labels.append(dia.strftime('%Y-%m-%d'))
-            else:
-                labels.append(str(dia))
-            values.append(int(r[1] or 0))
-
-        # Chats activos: distinct numero with message in last 24h (mantiene lógica de historial)
-        cursor.execute("SELECT SUM(conversaciones) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
-        active_count_row = cursor.fetchone()
-        active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
-
-        cursor.close()
-        conn.close()
-
+        # 1. Plan info (si aplica)
         plan_info = None
         try:
             au = session.get('auth_user')
@@ -8360,15 +8240,89 @@ def dashboard_conversaciones_data():
         except Exception:
             plan_info = None
 
-        return jsonify({ 
+        # 2. Definir ventana de tiempo
+        if period == 'year':
+            # Últimos 12 meses (365 días)
+            start = now - timedelta(days=365)
+        elif period == '3months':
+            # Últimos 90 días
+            start = now - timedelta(days=90)
+        elif period == 'month':
+            # Últimos 30 días
+            start = now - timedelta(days=30)
+        else: 
+            # Default: Última semana (7 días)
+            start = now - timedelta(days=7)
+
+        # 3. CONSULTA SQL: Contar nuevos contactos por día
+        # Usamos DATE(created_at) para ignorar la hora y agrupar solo por día/mes/año
+        sql = """
+            SELECT DATE(created_at) as dia, COUNT(*) as total
+            FROM contactos
+            WHERE created_at >= %s
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall() # Lista de tuplas (dia, total)
+
+        # 4. Procesar datos para rellenar días vacíos con 0
+        counts_map = {}
+        for r in rows:
+            try:
+                # r[0] es la fecha (date object o string), r[1] es el count
+                fecha_str = str(r[0])
+                count = int(r[1])
+                counts_map[fecha_str] = count
+            except Exception:
+                continue
+
+        labels = []
+        values = []
+        
+        # Iterar día por día desde 'start' hasta 'now' para llenar huecos
+        current_date = start.date() if isinstance(start, datetime) else start
+        end_date = now.date()
+        
+        while current_date <= end_date:
+            key = current_date.strftime('%Y-%m-%d')
+            
+            # Formato de etiqueta visual
+            if period == 'year':
+                # Si es anual, mostrar Mes Año (ej: Nov 2024)
+                label_visual = current_date.strftime('%b %Y')
+                # Agrupar visualmente por mes si es necesario, o dejar diario si prefieres detalle
+                # Para simplificar en gráfico anual diario:
+                label_visual = current_date.strftime('%d %b') 
+            elif period == '3months':
+                label_visual = current_date.strftime('%d %b')
+            else:
+                label_visual = current_date.strftime('%d/%m')
+
+            labels.append(label_visual)
+            values.append(counts_map.get(key, 0)) # 0 si no hubo chats ese día
+            
+            current_date += timedelta(days=1)
+
+        # 5. Métrica 'Chats Activos' (Conversaciones distintas en las últimas 24h)
+        # Esto consulta la tabla de mensajes para ver actividad reciente
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        row_active = cursor.fetchone()
+        active_count = int(row_active[0]) if row_active and row_active[0] is not None else 0
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
             'labels': labels,
             'values': values,
             'active_count': active_count,
             'plan_info': plan_info or {}
         })
+
     except Exception as e:
         app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
 def reset_columnas_precios():
