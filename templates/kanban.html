@@ -18,20 +18,16 @@
     }
     /* Nuevos Estilos para etiquetas de Interés (Leads) */
     .badge-interes {
-        font-size: 0.6rem; /* Un poco más pequeño */
-        padding: 1px 6px; /* Menos padding */
-        border-radius: 8px;
+        font-size: 0.65rem;
+        padding: 2px 8px;
+        border-radius: 12px;
         font-weight: 700;
         text-transform: uppercase;
         display: inline-flex;
         align-items: center;
-        gap: 2px;
-        margin-bottom: 0; /* Quitar margen inferior */
-        margin-left: auto; /* 🔥 ESTO LO EMPUJA A LA DERECHA 🔥 */
-        white-space: nowrap; /* Evitar que se rompa el texto */
-        flex-shrink: 0; /* Evitar que se aplaste */
-        height: fit-content;
-        z-index: 1; /* Para que no quede debajo de cosas raras */
+        gap: 4px;
+        margin-bottom: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
 
     /* 🔥 Caliente: Preguntas específicas/intención de compra */
@@ -195,7 +191,6 @@
         gap: 6px;
         min-width: 0;
         flex: 0 0 auto;
-        width: 100%; /* Asegurar ancho completo */
     }
 
     .card-avatar-section {
@@ -228,7 +223,6 @@
         min-width: 0;
         display: flex;
         flex-direction: column;
-        overflow: hidden; /* Contener el texto */
     }
 
     .alias-view {
@@ -488,7 +482,25 @@
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                        {% set interes = chat.interes|default('Frío') %}
+                        {% set n = interes|lower %}
+                        {% set clase_int = 'interes-frio' %}
+                        {% set icono_int = '❄' %}
 
+                        {% if n == 'caliente' %}
+                        {% set clase_int = 'interes-caliente' %}
+                        {% set icono_int = '🔥' %}
+                        {% elif n == 'tibio' %}
+                        {% set clase_int = 'interes-tibio' %}
+                        {% set icono_int = '🌡' %}
+                        {% elif n == 'dormido' %}
+                        {% set clase_int = 'interes-dormido' %}
+                        {% set icono_int = '😴' %}
+                        {% endif %}
+
+                        <span class="badge-interes {{ clase_int }}">{{ icono_int }} {{ interes|capitalize }}</span>
+                    </div>
                     <div class="card-top-row">
                         <div class="card-avatar-section">
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
@@ -502,7 +514,9 @@
                             {% set platform_class = 'is-whatsapp' %}
                             {% endif %}
 
-                            <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            <img src="{{ avatar_src }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
                             {% set bandera = chat.numero | bandera %}
                             {% if bandera %}
                             <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
@@ -512,26 +526,9 @@
                             <img src="/static/icons/maxi.png" class="card-flag" alt="País" title="País">
                             {% endif %}
                         </div>
-
                         <div class="card-name-section">
                             <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
                         </div>
-
-                        {% set interes = chat.interes|default('Frío') %}
-                        {% set n = interes|lower %}
-                        {% set clase_int = 'interes-frio' %}
-                        {% set icono_int = '❄' %}
-                        {% if n == 'caliente' %}
-                        {% set clase_int = 'interes-caliente' %}
-                        {% set icono_int = '🔥' %}
-                        {% elif n == 'tibio' %}
-                        {% set clase_int = 'interes-tibio' %}
-                        {% set icono_int = '🌡' %}
-                        {% elif n == 'dormido' %}
-                        {% set clase_int = 'interes-dormido' %}
-                        {% set icono_int = '😴' %}
-                        {% endif %}
-                        <span class="badge-interes {{ clase_int }}">{{ icono_int }} {{ interes|capitalize }}</span>
                     </div>
 
                     <div class="card-bottom-row">
