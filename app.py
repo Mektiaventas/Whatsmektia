@@ -1,4 +1,3 @@
-import traceback
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
@@ -11,6 +10,7 @@ from mysql.connector import pooling
 from flask import render_template_string
 import pytz
 import os
+import traceback
 import logging
 import json  
 import base64 
