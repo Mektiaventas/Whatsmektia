@@ -372,37 +372,35 @@
 
 
   // --- Load data and render conversations charts ---
+    // --- Cargar datos y renderizar gráficos ---
     async function loadConversacionesData() {
         try {
-            // Para el dailyChart ahora queremos los últimos 3 meses agregados por mes:
-            const period = '3months';
+            const period = '3months'; // Periodo para el gráfico de líneas
 
-            // 1. Llama a la API de Plataformas (Nueva lógica)
+            // 1. Obtener datos de Plataformas (Endpoint corregido)
             const platformRes = await fetch(`/dashboard/platform-data`);
             const platformJson = await platformRes.json();
 
-            // 2. Llama a la API de Conversaciones (Lógica existente)
+            // 2. Obtener datos generales de conversaciones
             const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
             const json = await res.json();
 
             if (json.error) {
-                console.error('Error fetching conversaciones data', json.error);
+                console.error('Error fetching data', json.error);
                 return;
             }
 
-            // --- Lógica de Métricas del Plan ---
+            // --- Métricas del Plan ---
             const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
             const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
             const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
 
-            // Actualizar métricas en el DOM
-            const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
             const elDisponibles = document.getElementById('planDisponibles');
             const elConsumidos = document.getElementById('planConsumidos');
-            if (elDisponibles) elDisponibles.innerText = disponibles;
+            if (elDisponibles) elDisponibles.innerText = (included !== null) ? available : (json.plan_info?.mensajes_disponibles || 'N/A');
             if (elConsumidos) elConsumidos.innerText = consumed;
 
-            // --- Chart 1: Remaining / Consumed (Doughnut) ---
+            // --- Gráfico 1: Plan (Dona pequeña) ---
             const remCtx = document.getElementById('remainingChart').getContext('2d');
             const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
             const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
@@ -428,24 +426,20 @@
                 plugins: [ChartDataLabels]
             });
 
-            // --- Chart 2: Monthly conversations (Line) ---
+            // --- Gráfico 2: Actividad Diaria (Línea) ---
             const dailyCtx = document.getElementById('dailyChart').getContext('2d');
-            const dailyLabels = json.labels || [];
-            const dailyValues = json.values || [];
-
             if (dailyChart) dailyChart.destroy();
             dailyChart = new Chart(dailyCtx, {
                 type: 'line',
                 data: {
-                    labels: dailyLabels,
+                    labels: json.labels || [],
                     datasets: [{
                         label: 'Conversaciones Nuevas',
-                        data: dailyValues,
+                        data: json.values || [],
                         backgroundColor: '#1f4e79',
                         borderColor: '#1f4e79',
                         pointBackgroundColor: 'white',
                         pointBorderColor: '#1f4e79',
-                        pointRadius: 3,
                         borderWidth: 2,
                         tension: 0.3
                     }]
@@ -461,35 +455,34 @@
                             align: 'end',
                             anchor: 'end',
                             offset: 4,
-                            formatter: (value) => value > 0 ? value : null,
+                            formatter: (val) => val > 0 ? val : null,
                             font: { weight: 'bold', size: 10 }
                         }
                     },
                     scales: {
-                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.08)' } },
-                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
+                        y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } },
+                        x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     }
                 },
                 plugins: [ChartDataLabels]
             });
 
-            // --- Chart 3: Platform Distribution (Doughnut - MEJORADO) ---
+            // --- Gráfico 3: Plataformas (Dona Grande - FINAL) ---
             const platformCtx = document.getElementById('platformChart').getContext('2d');
             const platformData = platformJson.conversations;
 
-            // Mapa de colores de marca
+            // Colores oficiales de las marcas
             const brandColors = {
-                'WhatsApp': '#25D366',  // Verde oficial
-                'Messenger': '#0084FF', // Azul oficial
-                'Telegram': '#0088cc',  // Celeste oficial
-                'Instagram': '#E1306C', // Rosa
-                'Web': '#ff9f43'        // Naranja
+                'WhatsApp': '#25D366',  // Verde
+                'Messenger': '#0084FF', // Azul Fuerte
+                'Telegram': '#0088cc',  // Azul Claro
+                'Instagram': '#E1306C'  // Rosa (por si acaso)
             };
 
-            // Asignar colores dinámicamente según el label
+            // Asignar colores dinámicamente
             const dynamicColors = platformData.labels.map(label => {
                 const key = Object.keys(brandColors).find(k => label.includes(k));
-                return key ? brandColors[key] : '#1f4e79'; // Azul oscuro por defecto
+                return key ? brandColors[key] : '#1f4e79'; // Default azul oscuro
             });
 
             if (platformChart) platformChart.destroy();
@@ -498,7 +491,7 @@
                 data: {
                     labels: platformData.labels,
                     datasets: [{
-                        label: 'Contactos por Plataforma',
+                        label: 'Conversaciones',
                         data: platformData.values,
                         backgroundColor: dynamicColors,
                         borderColor: '#ffffff',
@@ -511,25 +504,7 @@
                     plugins: {
                         legend: {
                             position: 'bottom',
-                            labels: {
-                                color: 'white',
-                                padding: 20,
-                                font: { size: 12 }
-                            }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function (context) {
-                                    let label = context.label || '';
-                                    if (label) {
-                                        label += ': ';
-                                    }
-                                    let value = context.raw;
-                                    let total = context.chart._metasets[context.datasetIndex].total;
-                                    let percentage = Math.round((value / total) * 100) + '%';
-                                    return label + value + ' (' + percentage + ')';
-                                }
-                            }
+                            labels: { color: 'white', padding: 20, font: { size: 12 } }
                         },
                         datalabels: {
                             color: 'white',
@@ -537,7 +512,7 @@
                             formatter: (value, context) => {
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
                                 const percentage = Math.round((value / total) * 100);
-                                // Solo mostrar porcentaje si es relevante (>5%) para no encimar
+                                // Mostrar porcentaje solo si es > 5%
                                 return percentage > 5 ? percentage + '%' : '';
                             }
                         },
@@ -545,19 +520,16 @@
                             display: true,
                             text: 'Conversaciones por Plataforma',
                             color: 'white',
-                            font: { size: 16, weight: 'normal' },
+                            font: { size: 16 },
                             padding: { bottom: 10 }
                         }
-                    },
-                    layout: {
-                        padding: { top: 0, bottom: 10 }
                     }
                 },
                 plugins: [ChartDataLabels]
             });
 
         } catch (err) {
-            console.error('Failed to load conversaciones data', err);
+            console.error('Error cargando datos de dashboard', err);
         }
     }
 
