@@ -12048,4 +12048,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     app.run(host='0.0.0.0', port=args.port)
-      
+       
