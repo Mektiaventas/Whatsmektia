@@ -634,47 +634,43 @@ def _ensure_sesiones_table(conn):
 
 def recalcular_interes_lead(numero, mensaje_actual, intent_ia, config):
     """
-    Define si un lead es Caliente, Tibio o Frío basado en reglas de negocio.
-    - Frío: Solo 1 mensaje del usuario en el historial.
-    - Caliente: Palabras clave de venta (precio, costo, fechas) o Intención IA alta.
-    - Tibio: Resto de casos.
+    Define el interés BASE en la base de datos según el contenido.
+    - Tibio: Si muestra interés (keywords/intent) y tiene > 1 mensaje.
+    - General: Si no cumple lo anterior.
+    (Los estados Caliente, Frío y Dormido se calculan dinámicamente por tiempo en el Kanban).
     """
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # 1. Contar mensajes del usuario (Para detectar 'Frío')
+        # 1. Contar mensajes del usuario
         cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL", (numero,))
         count_msgs = cursor.fetchone()[0]
         
-        nuevo_interes = 'Tibio' # Default
+        texto = (mensaje_actual or "").lower()
+        keywords_interes = ['precio', 'costo', 'info', 'información', 'catálogo', 'catalogo', 'curso', 'carrera', 'inscripción', 'dinero', 'pago']
         
-        # REGLA 1: LEADS FRÍOS (Solo una interacción)
-        if count_msgs <= 1:
-            nuevo_interes = 'Frío'
+        muestra_interes = any(k in texto for k in keywords_interes) or \
+                          intent_ia in ['COMPRAR_PRODUCTO', 'COTIZAR', 'SOLICITAR_DATOS', 'INFORMACION_SERVICIOS_O_PRODUCTOS']
+        
+        # LÓGICA TIBIO: Muestra interés y ya hay conversación fluida (>1 mensaje)
+        if muestra_interes and count_msgs > 1:
+            nuevo_interes_db = 'Tibio'
         else:
-            # REGLA 2: LEADS CALIENTES (Intención de compra o palabras clave)
-            texto = (mensaje_actual or "").lower()
-            keywords_hot = ['precio', 'costo', 'cuanto cuesta', 'inscripción', 'inscribirme', 'fecha', 'inicio', 'comprar', 'pago', 'dinero']
-            
-            es_hot_keywords = any(k in texto for k in keywords_hot)
-            es_hot_intent = intent_ia in ['COMPRAR_PRODUCTO', 'COTIZAR', 'GUARDAR_CITA', 'SOLICITAR_DATOS']
-            
-            if es_hot_keywords or es_hot_intent:
-                nuevo_interes = 'Caliente'
-            else:
-                nuevo_interes = 'Tibio'
+            # Si no es explícitamente Tibio, lo dejamos como 'General' en DB
+            # (El Kanban decidirá si es Caliente/Frio/Dormido por tiempo)
+            nuevo_interes_db = 'General'
         
         # Actualizar en DB
-        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes, numero))
+        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
         conn.commit()
         cursor.close()
         conn.close()
         
-        return nuevo_interes
+        return nuevo_interes_db
     except Exception as e:
         app.logger.error(f"Error recalculando interés: {e}")
-        return 'Tibio'
+        return 'General'
 
 def registrar_sesion_activa(username):
     try:
@@ -3404,17 +3400,15 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar que la columna interes exista antes de consultar
         _ensure_interes_column(config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # --- 1. Lógica de Asesores (Mover chats de asesores a su columna) ---
+        # --- 1. Lógica de Asesores ---
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         if col_asesores_id and numeros_asesores:
-             # Si es un asesor y no está en la columna de asesores, moverlo
              placeholders = ', '.join(['%s'] * len(numeros_asesores))
              cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", (col_asesores_id, *numeros_asesores, col_asesores_id))
              conn.commit()
@@ -3423,8 +3417,7 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- 3. Obtener Chats con Estado de Interés ---
-        # Se agrega MAX(cont.interes) as interes_db para leer el valor calculado por la IA
+        # --- 3. Obtener Chats ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3436,13 +3429,8 @@ def kanban_data(config=None):
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 MAX(cont.imagen_url) AS avatar,
                 MAX(cont.plataforma) AS canal,
-                COALESCE(
-                    MAX(cont.alias), 
-                    MAX(cont.nombre), 
-                    cm.numero
-                ) AS nombre_mostrado,
-                (SELECT COUNT(*) FROM conversaciones 
-                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                (SELECT COUNT(*) FROM conversaciones WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
                 MAX(cont.interes) as interes_db 
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
@@ -3452,39 +3440,58 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # --- 4. Procesamiento de Fechas y Estado 'Dormido' ---
+        # --- 4. CÁLCULO DE ESTADOS (REGLAS DE TIEMPO) ---
         ahora = datetime.now(tz_mx)
         
         for chat in chats:
-            # Recuperar el interés base calculado por contenido (Caliente/Tibio/Frío)
-            # Si es nulo, por defecto 'Tibio'
-            interes_base = chat.get('interes_db') or 'Tibio'
+            # Valor base de la DB (Tibio o General)
+            interes_base = chat.get('interes_db') or 'General'
             
             if chat.get('ultima_fecha'):
                 try:
                     # Normalizar zona horaria
-                    if chat['ultima_fecha'].tzinfo is None:
-                        chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                    fecha_msg = chat['ultima_fecha']
+                    if fecha_msg.tzinfo is None:
+                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
                     else:
-                        chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                        fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # --- LÓGICA DE LEADS DORMIDOS (> 7 DÍAS) ---
-                    dias_pasados = (ahora - chat['ultima_fecha']).days
+                    # Calcular diferencia en minutos y horas
+                    diferencia = ahora - fecha_msg
+                    minutos_pasados = diferencia.total_seconds() / 60
+                    horas_pasadas = minutos_pasados / 60
                     
-                    if dias_pasados >= 7:
-                        chat['interes'] = 'Dormido' # Sobrescribe por inactividad prolongada
+                    # --- APLICACIÓN DE REGLAS ---
+                    if horas_pasadas >= 20:
+                        # > 20 horas: DORMIDO 😴
+                        chat['interes'] = 'Dormido'
+                    
+                    elif horas_pasadas >= 5:
+                        # > 5 horas (y < 20): FRÍO ❄
+                        chat['interes'] = 'Frío'
+                    
+                    elif minutos_pasados <= 30:
+                        # < 30 minutos: CALIENTE 🔥
+                        chat['interes'] = 'Caliente'
+                    
                     else:
-                        chat['interes'] = interes_base # Mantiene la clasificación por contenido
-                    
-                    # Convertir a ISO string para el frontend
-                    chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+                        # Rango intermedio (30 min a 5 horas):
+                        # Aquí respetamos si la DB dice "Tibio" (mostró interés).
+                        # Si no, por defecto en este rango es "Frío" o "General" (usamos Frío visualmente).
+                        if interes_base == 'Tibio':
+                            chat['interes'] = 'Tibio'
+                        else:
+                            chat['interes'] = 'Frío'
+
+                    # Formato ISO para frontend
+                    chat['ultima_fecha'] = fecha_msg.isoformat()
                     
                 except Exception as e:
-                    app.logger.error(f"Error procesando fecha/interés para {chat['numero']}: {e}")
-                    chat['interes'] = interes_base
+                    app.logger.error(f"Error fecha {chat['numero']}: {e}")
+                    chat['interes'] = 'Frío'
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
-                # Sin fecha de actividad = Dormido
+                # Sin fecha = Dormido
                 chat['interes'] = 'Dormido'
                 chat['ultima_fecha'] = None
 
@@ -4956,6 +4963,7 @@ def load_config(config=None):
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     
+    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     row = cursor.fetchone()
     cursor.close()
