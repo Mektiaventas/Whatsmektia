@@ -8883,13 +8883,12 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
 
-def generar_mensaje_seguimiento_ia(numero, config=None):
-    """Genera un mensaje amable para retomar la conversación basado en el historial."""
+def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
+    """Genera un mensaje de seguimiento. Prioriza mensaje configurado, sino usa IA."""
     if config is None:
         config = obtener_configuracion_por_host()
     
     try:
-        try:
         # 1. Cargar configuración para ver si hay mensaje personalizado
         cfg = load_config(config)
         leads_cfg = cfg.get('leads', {})
@@ -8914,17 +8913,15 @@ def generar_mensaje_seguimiento_ia(numero, config=None):
             
         contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
 
-        # 2. Prompt para la IA
+        # Prompt para la IA
         prompt = f"""
         Eres un asistente de ventas amable y profesional.
-        El usuario dejó de responder hace 5 horas. Tu objetivo es reactivar la conversación SIN ser molesto.
+        El usuario dejó de responder (Estado: {tipo_interes}). Tu objetivo es reactivar la conversación SIN ser molesto.
         
         HISTORIAL RECIENTE:
         {contexto}
         
-        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado, si tiene dudas o si desea continuar.
-        Ejemplos: "¿Sigues ahí? 👀", "¿Te quedó alguna duda sobre la información?", "¿Te gustaría agendar una llamada rápida?"
-        
+        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado.
         Responde SOLO con el texto del mensaje.
         """
         
