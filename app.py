@@ -9670,14 +9670,14 @@ def enviar_datos_transferencia(numero, config=None):
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
-    """Guarda el mensaje del usuario inmediatamente."""
+    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
+    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
+    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # 1. Asegurar que la tabla tiene las columnas (FIX PARA MENSAJES NO GUARDADOS)
-        _ensure_conversaciones_columns(config)
-
         # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
@@ -9687,23 +9687,25 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, Tipo: {tipo_mensaje}")
+        # Add detailed logging before saving the message
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
 
+        # --- MODIFICADO ---
         # Determinar el tipo de mensaje correcto
         if es_imagen:
             tipo_mensaje = 'imagen'
-        elif tipo_mensaje == 'audio': 
+        elif tipo_mensaje == 'audio': # Si ya se marcó como audio
             pass
         else:
-            tipo_mensaje = 'texto' 
+            tipo_mensaje = 'texto' # Default 
 
-        # Insert robusto
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
             VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
+        # --- FIN MODIFICADO ---
 
-        # Obtener ID
+        # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -9712,18 +9714,18 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado correctamente para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
 
+        # Ensure Kanban reflects the new incoming message immediately.
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
-            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló: {e}")
+            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló tras guardar mensaje: {e}")
 
         return True
 
     except Exception as e:
-        app.logger.error(f"❌ Error CRÍTICO al guardar mensaje inmediato: {e}")
-        app.logger.error(traceback.format_exc())
+        app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
         return False
  
 def extraer_nombre_desde_webhook(payload):
@@ -12331,12 +12333,10 @@ with app.app_context():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
-    _ensure_conversaciones_columns(config) # <--- AGREGA ESTO
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    
     app.run(host='0.0.0.0', port=args.port)
      
