@@ -11875,15 +11875,12 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
+    
     # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
     col_asesores_id = obtener_id_columna_asesores(config)
     numeros_asesores = obtener_numeros_asesores_db(config)
 
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-    columnas_totales = cursor.fetchall()
-
-    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
+    # 2) CONSULTA DEFINITIVA
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -11895,14 +11892,14 @@ def ver_kanban(config=None):
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre de perfil > número
             COALESCE(
                 MAX(cont.alias), 
                 MAX(cont.nombre), 
                 cm.numero
             ) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
-             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+            MAX(cont.interes) as interes_db 
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -11910,25 +11907,61 @@ def ver_kanban(config=None):
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
-
-    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
-    for chat in chats:
-        if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-
+    
     cursor.close()
     conn.close()
-    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+
+    # --- 3. CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
+    # Esto asegura que el HTML inicial ya tenga el estado correcto
+    ahora = datetime.now(tz_mx)
+    
+    for chat in chats:
+        # Interés base de la DB
+        interes_final = chat.get('interes_db') or 'Frío'
+        
+        if chat.get('ultima_fecha'):
+            try:
+                # Normalizar zona horaria
+                if chat['ultima_fecha'].tzinfo is not None:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                else:
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                
+                fecha_msg = chat['ultima_fecha']
+                
+                # Calcular diferencia
+                diferencia = ahora - fecha_msg
+                minutos_pasados = diferencia.total_seconds() / 60
+                horas_pasadas = minutos_pasados / 60
+                
+                # --- APLICACIÓN DE REGLAS (Idéntico a kanban_data) ---
+                if horas_pasadas >= 20:
+                    interes_final = 'Dormido'
+                elif horas_pasadas >= 5:
+                    interes_final = 'Frío'
+                elif minutos_pasados <= 30:
+                    interes_final = 'Caliente'
+                else:
+                    # Zona intermedia: Respetar lo que diga la DB (Tibio o Frío)
+                    # Si la DB dice 'Caliente' pero ya pasaron 30 mins, baja a Tibio/Frio
+                    if interes_final == 'Caliente': 
+                        interes_final = 'Tibio' 
+                    # Si la DB dice Tibio, se mantiene. Si dice Frío, se mantiene.
+
+            except Exception as e:
+                app.logger.error(f"Error procesando fecha en ver_kanban: {e}")
+        else:
+            interes_final = 'Dormido'
+            
+        # INYECTAR EL DATO CALCULADO EN EL OBJETO CHAT
+        chat['interes'] = interes_final
+
+
+    # Determinar si el usuario autenticado tiene servicio == 'admin'
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
-
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
