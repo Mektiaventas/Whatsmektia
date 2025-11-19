@@ -3974,6 +3974,24 @@ def guardar_cita(info_cita, config=None):
         app.logger.error(traceback.format_exc())
         return None
     
+def _ensure_interes_column(config=None):
+    """Asegura que la tabla contactos tenga la columna interes"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'interes'")
+        if cursor.fetchone() is None:
+            # Por defecto 'Alto' para que los nuevos aparezcan con interés alto
+            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Alto'")
+            conn.commit()
+            app.logger.info("🔧 Columna 'interes' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
+
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
     if config is None:
