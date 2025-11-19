@@ -6758,7 +6758,7 @@ def registrar_nueva_conversacion(numero, mensaje, config=None):
         if debe_guardar:
             # Insertar un nuevo registro con el timestamp actual (UTC_TIMESTAMP() en la DB)
             cursor.execute("""
-                INSERT INTO conversaciones (numero, mensaje, timestamp)
+                INSERT INTO nuevas_conversaciones (numero, mensaje, timestamp)
                 VALUES (%s, %s, UTC_TIMESTAMP())
             """, (numero, mensaje))
             conn.commit()
@@ -12048,4 +12048,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     app.run(host='0.0.0.0', port=args.port)
-       
+      
