@@ -236,9 +236,9 @@
         </p>
 
         <div style="margin-bottom: 20px; padding: 15px; background: #fff3e0; border-radius: 8px; border: 1px solid #ffe0b2;">
-            <label style="color: #e65100; font-weight: bold;">🌡 Leads Tibios (Seguimiento)</label>
+            <label style="color: #e65100; font-weight: bold;">🌡 Leads Tibios (Seguimiento Corto)</label>
             <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
-                Se envía cuando el usuario ha pedido información pero dejó de contestar hace <strong>5 a 24 horas</strong>.
+                Se usa para usuarios que mostraron interés pero han dejado de contestar entre <strong>30 minutos y 5 horas</strong>.
             </p>
             <textarea name="mensaje_tibio" rows="3" class="longitud_desc"
                       placeholder="Ej: Hola, ¿tuviste oportunidad de revisar la información? Quedo pendiente de tus dudas.">{{ datos.mensaje_tibio or '' }}</textarea>
@@ -247,7 +247,7 @@
         <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border: 1px solid #bbdefb;">
             <label style="color: #1565c0; font-weight: bold;">❄ Leads Fríos (Re-contacto)</label>
             <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
-                Para usuarios que mostraron poco interés o solo mandaron un mensaje y no volvieron a interactuar.
+                Se usa cuando han pasado entre <strong>5 y 20 horas</strong> sin respuesta, o si el usuario interactuó muy poco (solo un mensaje).
             </p>
             <textarea name="mensaje_frio" rows="3" class="longitud_desc"
                       placeholder="Ej: Hola, vi que te interesaste en nuestros servicios. ¿Te gustaría que te comparta nuestras promociones vigentes?">{{ datos.mensaje_frio or '' }}</textarea>
@@ -256,7 +256,7 @@
         <div style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #e0e0e0;">
             <label style="color: #616161; font-weight: bold;">😴 Leads Dormidos (Recuperación)</label>
             <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
-                Se envía cuando han pasado <strong>más de 7 días</strong> sin actividad para intentar recuperar al cliente.
+                Se envía cuando han pasado <strong>más de 20 horas</strong> sin actividad. Es el último intento para recuperar la conversación.
             </p>
             <textarea name="mensaje_dormido" rows="3" class="longitud_desc"
                       placeholder="Ej: ¡Hola! Hace tiempo que no platicamos. ¿Sigues interesado en continuar con tu proyecto?">{{ datos.mensaje_dormido or '' }}</textarea>
