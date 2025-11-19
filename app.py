@@ -3982,6 +3982,39 @@ def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     except Exception as e:
         app.logger.error(f"Error enviando confirmación de {tipo_solicitud}: {e}")
 
+def _ensure_conversaciones_columns(config=None):
+    """Asegura que la tabla conversaciones tenga las columnas necesarias para multimedia."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
+    try:
+        # Lista de columnas a verificar
+        cols_to_check = [
+            ("imagen_url", "VARCHAR(500) DEFAULT NULL"),
+            ("es_imagen", "BOOLEAN DEFAULT FALSE"),
+            ("tipo_mensaje", "VARCHAR(50) DEFAULT 'texto'"),
+            ("contenido_extra", "TEXT DEFAULT NULL"),
+            ("respuesta_tipo_mensaje", "VARCHAR(50) DEFAULT 'texto'"),
+            ("respuesta_contenido_extra", "TEXT DEFAULT NULL")
+        ]
+
+        cursor.execute("SHOW COLUMNS FROM conversaciones")
+        existing_cols = [row[0] for row in cursor.fetchall()]
+
+        for col_name, col_def in cols_to_check:
+            if col_name not in existing_cols:
+                app.logger.info(f"🔧 Creando columna faltante: {col_name}")
+                cursor.execute(f"ALTER TABLE conversaciones ADD COLUMN {col_name} {col_def}")
+        
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"⚠️ Error asegurando columnas conversaciones: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
 def _ensure_contactos_conversaciones_columns(config=None):
     """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
     if config is None:
@@ -8759,6 +8792,33 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     Flujo unificado para procesar un mensaje entrante.
     """ 
     try:
+        # 1. Revisar memoria (caché rápido)
+        estado_memoria = IA_ESTADOS.get(numero, {})
+        ia_activa = estado_memoria.get('activa')
+
+        # 2. Si no está en memoria, consultar DB (fuente de verdad)
+        if ia_activa is None:
+            try:
+                conn = get_db_connection(config)
+                cur = conn.cursor()
+                cur.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+                row = cur.fetchone()
+                cur.close()
+                conn.close()
+                # Si es NULL o 1 -> True. Si es 0 -> False.
+                ia_activa = bool(row[0]) if row and row[0] is not None else True
+                # Actualizar memoria
+                IA_ESTADOS[numero] = {'activa': ia_activa}
+            except Exception as e:
+                app.logger.error(f"Error consultando estado IA: {e}")
+                ia_activa = True # Por defecto activada si falla DB
+
+        # 3. Si está DESACTIVADA, salir inmediatamente.
+        if not ia_activa:
+            app.logger.info(f"🔕 IA DESACTIVADA para {numero}. Mensaje guardado pero no procesado por IA.")
+            return True # Retornamos True porque el mensaje ya se guardó en 'guardar_mensaje_inmediato'
+
+        # --- FIN VERIFICACIÓN IA ---
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
         try:
             mover_chat_si_no_hay_respuesta_ia(numero, config)
@@ -9610,14 +9670,14 @@ def enviar_datos_transferencia(numero, config=None):
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
-    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
-    """
+    """Guarda el mensaje del usuario inmediatamente."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
+        # 1. Asegurar que la tabla tiene las columnas (FIX PARA MENSAJES NO GUARDADOS)
+        _ensure_conversaciones_columns(config)
+
         # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
@@ -9627,25 +9687,23 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Add detailed logging before saving the message
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, Tipo: {tipo_mensaje}")
 
-        # --- MODIFICADO ---
         # Determinar el tipo de mensaje correcto
         if es_imagen:
             tipo_mensaje = 'imagen'
-        elif tipo_mensaje == 'audio': # Si ya se marcó como audio
+        elif tipo_mensaje == 'audio': 
             pass
         else:
-            tipo_mensaje = 'texto' # Default 
+            tipo_mensaje = 'texto' 
 
+        # Insert robusto
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
             VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
-        # --- FIN MODIFICADO ---
 
-        # Get the ID of the inserted message for tracking
+        # Obtener ID
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -9654,18 +9712,18 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado correctamente para {numero}")
 
-        # Ensure Kanban reflects the new incoming message immediately.
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
-            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló tras guardar mensaje: {e}")
+            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló: {e}")
 
         return True
 
     except Exception as e:
-        app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
+        app.logger.error(f"❌ Error CRÍTICO al guardar mensaje inmediato: {e}")
+        app.logger.error(traceback.format_exc())
         return False
  
 def extraer_nombre_desde_webhook(payload):
@@ -12273,10 +12331,12 @@ with app.app_context():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
+    _ensure_conversaciones_columns(config) # <--- AGREGA ESTO
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
+    
     app.run(host='0.0.0.0', port=args.port)
      
