@@ -226,6 +226,45 @@
     <div class="text-muted">No hay catálogos publicados.</div>
     {% endif %}
 </div>
+{% elif active == 'leads' %}
+<form class="config-form" method="POST">
+    <div class="form-card">
+        <h3>Mensajes de Seguimiento Automático</h3>
+        <p class="text-muted" style="margin-bottom: 15px; color: #666;">
+            Configura qué mensaje enviará la IA automáticamente cuando detecte que un chat ha cambiado de estado.
+            Si dejas el campo vacío, la IA generará un mensaje creativo basado en el contexto de la charla.
+        </p>
+
+        <div style="margin-bottom: 20px; padding: 15px; background: #fff3e0; border-radius: 8px; border: 1px solid #ffe0b2;">
+            <label style="color: #e65100; font-weight: bold;">🌡 Leads Tibios (Seguimiento)</label>
+            <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
+                Se envía cuando el usuario ha pedido información pero dejó de contestar hace <strong>5 a 24 horas</strong>.
+            </p>
+            <textarea name="mensaje_tibio" rows="3" class="longitud_desc"
+                      placeholder="Ej: Hola, ¿tuviste oportunidad de revisar la información? Quedo pendiente de tus dudas.">{{ datos.mensaje_tibio or '' }}</textarea>
+        </div>
+
+        <div style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border: 1px solid #bbdefb;">
+            <label style="color: #1565c0; font-weight: bold;">❄ Leads Fríos (Re-contacto)</label>
+            <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
+                Para usuarios que mostraron poco interés o solo mandaron un mensaje y no volvieron a interactuar.
+            </p>
+            <textarea name="mensaje_frio" rows="3" class="longitud_desc"
+                      placeholder="Ej: Hola, vi que te interesaste en nuestros servicios. ¿Te gustaría que te comparta nuestras promociones vigentes?">{{ datos.mensaje_frio or '' }}</textarea>
+        </div>
+
+        <div style="margin-bottom: 20px; padding: 15px; background: #f5f5f5; border-radius: 8px; border: 1px solid #e0e0e0;">
+            <label style="color: #616161; font-weight: bold;">😴 Leads Dormidos (Recuperación)</label>
+            <p style="font-size: 0.85rem; margin-bottom: 8px; color: #555;">
+                Se envía cuando han pasado <strong>más de 7 días</strong> sin actividad para intentar recuperar al cliente.
+            </p>
+            <textarea name="mensaje_dormido" rows="3" class="longitud_desc"
+                      placeholder="Ej: ¡Hola! Hace tiempo que no platicamos. ¿Sigues interesado en continuar con tu proyecto?">{{ datos.mensaje_dormido or '' }}</textarea>
+        </div>
+    </div>
+
+    <button type="submit" class="btn-primary">Guardar Mensajes de Leads</button>
+</form>
 {% elif active == 'personalizacion' %}
 <form class="config-form" method="POST">
     <div class="form-card">

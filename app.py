@@ -3395,7 +3395,8 @@ def get_country_flag(numero):
     # Si no se detectó prefijo de país conocido ni era Telegram
     return url_for('static', filename='icons/whatsapp-icon.png')
 
-SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
+# Agrega 'leads' a la lista
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
 app.add_template_filter(get_country_flag, 'bandera')
 
 @app.route('/kanban/data')
@@ -4947,9 +4948,11 @@ def load_config(config=None):
             asesor1_email VARCHAR(150),
             asesor2_nombre VARCHAR(100),
             asesor2_telefono VARCHAR(50),
-            asesor2_email VARCHAR(150),
-            -- Nueva columna JSON que puede contener lista arbitraria de asesores
-            asesores_json TEXT
+            asesor2_email VARCHAR(150),s
+            asesores_json TEXT,
+            mensaje_tibio TEXT,
+            mensaje_frio TEXT,
+            mensaje_dormido TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
@@ -4993,6 +4996,11 @@ def load_config(config=None):
     # Manejo de asesores: preferir columna JSON si existe, si no usar columnas antiguas
     asesores_list = []
     asesores_map = {}
+    leads = {
+        'mensaje_tibio': row.get('mensaje_tibio', ''),
+        'mensaje_frio': row.get('mensaje_frio', ''),
+        'mensaje_dormido': row.get('mensaje_dormido', '')
+    }
     try:
         asesores_json = row.get('asesores_json')
         if asesores_json:
@@ -5041,7 +5049,8 @@ def load_config(config=None):
         'personalizacion': personalizacion,
         'restricciones': restricciones,
         'asesores': asesores_map if 'asesores_map' in locals() else {},
-        'asesores_list': asesores_list if 'asesores_list' in locals() else []
+        'asesores_list': asesores_list if 'asesores_list' in locals() else [],
+        'leads': leads  # <-- AGREGAR ESTO AL RETURN
     }
 
 def save_config(cfg_all, config=None):
@@ -5052,7 +5061,7 @@ def save_config(cfg_all, config=None):
     res = cfg_all.get('restricciones', {})
     ases = cfg_all.get('asesores', {})  # map for backward compat
     ases_json = cfg_all.get('asesores_json', None)  # optional JSON string / structure
-
+    leads = cfg_all.get('leads', {})
     conn = get_db_connection(config)
     cursor = conn.cursor()
 
@@ -5065,6 +5074,12 @@ def save_config(cfg_all, config=None):
         existing_cols = set()
 
     alter_statements = []
+    if 'mensaje_tibio' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_tibio TEXT DEFAULT NULL")
+    if 'mensaje_frio' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_frio TEXT DEFAULT NULL")
+    if 'mensaje_dormido' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_dormido TEXT DEFAULT NULL")
     if 'logo_url' not in existing_cols:
         alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
     if 'calendar_email' not in existing_cols:
@@ -5135,7 +5150,10 @@ def save_config(cfg_all, config=None):
             'asesor2_nombre': ases.get('asesor2_nombre', None),
             'asesor2_telefono': ases.get('asesor2_telefono', None),
             'asesor2_email': ases.get('asesor2_email', None),
-            'asesores_json': None
+            'asesores_json': None,
+            'mensaje_tibio': leads.get('mensaje_tibio'),
+            'mensaje_frio': leads.get('mensaje_frio'),
+            'mensaje_dormido': leads.get('mensaje_dormido')
         }
 
         # if caller supplied structured advisors (list or json), normalize to JSON string
@@ -8871,10 +8889,28 @@ def generar_mensaje_seguimiento_ia(numero, config=None):
         config = obtener_configuracion_por_host()
     
     try:
-        # 1. Obtener historial reciente para contexto
+        try:
+        # 1. Cargar configuración para ver si hay mensaje personalizado
+        cfg = load_config(config)
+        leads_cfg = cfg.get('leads', {})
+        
+        mensaje_personalizado = ""
+        if tipo_interes == 'tibio':
+            mensaje_personalizado = leads_cfg.get('mensaje_tibio')
+        elif tipo_interes == 'frio':
+            mensaje_personalizado = leads_cfg.get('mensaje_frio')
+        elif tipo_interes == 'dormido':
+            mensaje_personalizado = leads_cfg.get('mensaje_dormido')
+            
+        # Si existe un mensaje configurado por el usuario, USARLO DIRECTAMENTE
+        if mensaje_personalizado and mensaje_personalizado.strip():
+            app.logger.info(f"✅ Usando mensaje personalizado de Leads ({tipo_interes}) para {numero}")
+            return mensaje_personalizado.strip()
+
+        # 2. Si no hay mensaje configurado, usar IA (Lógica existente)
         historial = obtener_historial(numero, limite=6, config=config)
         if not historial:
-            return None # No enviar nada si no hay historial
+            return None 
             
         contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
 
@@ -11099,6 +11135,12 @@ def configuracion_tab(tab):
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
                 'lenguaje': request.form.get('lenguaje')
+            }
+        elif tab == 'leads':
+            cfg['leads'] = {
+                'mensaje_tibio': request.form.get('mensaje_tibio', ''),
+                'mensaje_frio': request.form.get('mensaje_frio', ''),
+                'mensaje_dormido': request.form.get('mensaje_dormido', '')
             }
         elif tab == 'restricciones':
             cfg['restricciones'] = {
