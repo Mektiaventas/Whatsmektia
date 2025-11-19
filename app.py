@@ -4034,14 +4034,54 @@ def _ensure_interes_column(config=None):
         cursor = conn.cursor()
         cursor.execute("SHOW COLUMNS FROM contactos LIKE 'interes'")
         if cursor.fetchone() is None:
-            # Por defecto 'Alto' para que los nuevos aparezcan con interés alto
-            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Alto'")
+            # CAMBIO: Por defecto 'Frío' en lugar de 'Alto'
+            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Frío'")
             conn.commit()
             app.logger.info("🔧 Columna 'interes' creada en tabla 'contactos'")
         cursor.close()
         conn.close()
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
+
+@app.route('/migrar-interes-legacy')
+def migrar_interes_legacy():
+    """
+    Ruta de mantenimiento para convertir etiquetas viejas a nuevas.
+    Alto -> Tibio (o Caliente si prefieres)
+    Medio -> Tibio
+    Bajo -> Frío
+    """
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Convertir 'Alto' a 'Tibio' (O 'Caliente' si prefieres ser optimista)
+        cursor.execute("UPDATE contactos SET interes = 'Tibio' WHERE interes = 'Alto'")
+        
+        # 2. Convertir 'Medio' a 'Tibio'
+        cursor.execute("UPDATE contactos SET interes = 'Tibio' WHERE interes = 'Medio'")
+        
+        # 3. Convertir 'Bajo' a 'Frío'
+        cursor.execute("UPDATE contactos SET interes = 'Frío' WHERE interes = 'Bajo'")
+        
+        # 4. Actualizar 'Dormidos' por fecha (más de 7 días sin actividad)
+        # Esto asegura que la BD refleje la realidad de fechas antiguas
+        cursor.execute("""
+            UPDATE contactos 
+            SET interes = 'Dormido' 
+            WHERE fecha_actualizacion < NOW() - INTERVAL 7 DAY
+        """)
+
+        conn.commit()
+        affected = cursor.rowcount
+        cursor.close()
+        conn.close()
+        
+        return f"✅ Migración completada. Base de datos actualizada al nuevo sistema de leads."
+        
+    except Exception as e:
+        return f"❌ Error en migración: {e}"
 
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
