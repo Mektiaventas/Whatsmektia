@@ -164,6 +164,13 @@
         <label>¿Qué quieres que haga tu IA?</label>
         <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
     </div>
+    <div class="form-card">
+        <label>Leads, temas a los que avisar a un asesor</label>
+        <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
+        <small class="form-text text-muted">
+            Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
+        </small>
+    </div>
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">

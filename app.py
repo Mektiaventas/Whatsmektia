@@ -4780,6 +4780,7 @@ def load_config(config=None):
             que_hace TEXT,
             tono VARCHAR(50),
             lenguaje VARCHAR(50),
+            contexto_adicional TEXT,
             restricciones TEXT,
             palabras_prohibidas TEXT,
             max_mensajes INT DEFAULT 10,
@@ -4817,6 +4818,7 @@ def load_config(config=None):
         'url': row.get('url'),
         'direccion': row.get('direccion'),
         'telefono': row.get('telefono'),
+        'contexto_adicional': row.get('contexto_adicional', ''),
         'correo': row.get('correo'),
         'que_hace': row.get('que_hace'),
         'logo_url': row.get('logo_url', ''),
@@ -4929,6 +4931,8 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
     if 'asesor1_email' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_email VARCHAR(150) DEFAULT NULL")
+    if 'contexto_adicional' not in existing_cols:
+        alter_statements.append("ADD COLUMN contexto_adicional TEXT DEFAULT NULL")
     if 'asesor2_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
@@ -4959,6 +4963,7 @@ def save_config(cfg_all, config=None):
             'telefono': neg.get('telefono'),
             'correo': neg.get('correo'),
             'que_hace': neg.get('que_hace'),
+            'contexto_adicional': neg.get('contexto_adicional'),
             'tono': per.get('tono'),
             'lenguaje': per.get('lenguaje'),
             'restricciones': res.get('restricciones'),
@@ -8786,6 +8791,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             negocio_cfg = (cfg_full.get('negocio') or {})
             negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
             negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
+            contexto_adicional = (negocio_cfg.get('contexto_adicional') or '').strip()
             MAX_CFG_CHARS = 5000
             negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
             negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
@@ -8823,7 +8829,7 @@ que el servidor debe ejecutar. Dispones de:
 - Descripción del negocio: {negocio_descripcion_short}
 - Cual es tu rol?: {negocio_que_hace_short}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-
+- Estos son temas que si llegan a aparecer en el mensaje, debes de pasar a un asesor {contexto_adicional}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
@@ -10779,6 +10785,7 @@ def configuracion_tab(tab):
                 'telefono':       request.form.get('telefono'),
                 'correo':         request.form.get('correo'),
                 'que_hace':       request.form.get('que_hace'),
+                'contexto_adicional': request.form.get('contexto_adicional'),
                 'calendar_email': request.form.get('calendar_email'),
                 'transferencia_numero': request.form.get('transferencia_numero'),
                 'transferencia_nombre': request.form.get('transferencia_nombre'),
