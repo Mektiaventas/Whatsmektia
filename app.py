@@ -596,6 +596,24 @@ def _get_or_create_session_id():
         session['sid'] = sid
     return sid
 
+def _ensure_chat_meta_followup_columns(config=None):
+    """Asegura columnas en chat_meta para controlar los seguimientos automáticos."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        # Columna para saber cuándo se envió el último follow-up automático
+        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'ultimo_followup'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE chat_meta ADD COLUMN ultimo_followup DATETIME DEFAULT NULL")
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("🔧 Columnas de seguimiento aseguradas en chat_meta")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error asegurando columnas followup: {e}")
+
 def _ensure_sesiones_table(conn):
     cur = conn.cursor()
     cur.execute("""
@@ -5560,6 +5578,109 @@ def procesar_codigo():
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
 
+def procesar_followups_automaticos(config):
+    """Busca chats con interés MEDIO (5-24h inactivos) y envía seguimiento si no se ha enviado ya."""
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # LOGICA:
+        # 1. Último mensaje fue hace > 5 horas y < 24 horas.
+        # 2. NO se ha enviado un followup posterior al último mensaje real.
+        
+        query = """
+            SELECT 
+                c.numero, 
+                MAX(c.timestamp) as ultima_interaccion,
+                cm.ultimo_followup
+            FROM conversaciones c
+            LEFT JOIN chat_meta cm ON c.numero = cm.numero
+            GROUP BY c.numero, cm.ultimo_followup
+            HAVING 
+                ultima_interaccion < NOW() - INTERVAL 5 HOUR 
+                AND ultima_interaccion > NOW() - INTERVAL 24 HOUR
+        """
+        cursor.execute(query)
+        candidatos = cursor.fetchall()
+        cursor.close()
+        conn.close() # Cerrar aquí para no bloquear mientras procesamos con IA
+
+        if not candidatos:
+            return
+
+        app.logger.info(f"🕵️‍♂️ Scheduler Followup: {len(candidatos)} candidatos encontrados en {config.get('dominio')}")
+
+        for chat in candidatos:
+            numero = chat['numero']
+            last_msg = chat['ultima_interaccion']
+            last_followup = chat['ultimo_followup']
+
+            # Verificar si ya enviamos seguimiento DESPUÉS del último mensaje
+            # Si last_followup > last_msg, significa que el último mensaje FUE nuestro seguimiento. No enviar otro.
+            if last_followup and last_followup >= last_msg:
+                continue
+                
+            # Generar mensaje con IA
+            app.logger.info(f"💡 Generando seguimiento para {numero}...")
+            texto_followup = generar_mensaje_seguimiento_ia(numero, config)
+            
+            if texto_followup:
+                # Enviar mensaje (WhatsApp/Telegram/Messenger)
+                enviado = False
+                if numero.startswith('tg_'):
+                    token = config.get('telegram_token')
+                    if token:
+                        enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                else:
+                    enviado = enviar_mensaje(numero, texto_followup, config)
+                
+                if enviado:
+                    # Registrar en conversaciones (esto reseteará el interés a Alto temporalmente, lo cual es correcto porque reactivamos)
+                    # Usamos tipo 'sistema' o 'texto' pero lo importante es actualizar chat_meta
+                    guardar_conversacion(numero, None, texto_followup, config) # Guardar como respuesta bot
+                    
+                    # Actualizar fecha de último followup en chat_meta para no repetir
+                    conn2 = get_db_connection(config)
+                    cur2 = conn2.cursor()
+                    cur2.execute("""
+                        INSERT INTO chat_meta (numero, ultimo_followup) VALUES (%s, NOW())
+                        ON DUPLICATE KEY UPDATE ultimo_followup = NOW()
+                    """, (numero,))
+                    conn2.commit()
+                    cur2.close()
+                    conn2.close()
+                    
+                    app.logger.info(f"✅ Seguimiento enviado a {numero}: {texto_followup}")
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
+
+def start_followup_scheduler():
+    """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
+    def _worker():
+        app.logger.info("⏰ Scheduler de Seguimiento (Interés Medio) INICIADO.")
+        while True:
+            try:
+                time.sleep(60) # Esperar un poco al inicio
+                
+                # Iterar por todos los tenants
+                for tenant_key, config in NUMEROS_CONFIG.items():
+                    try:
+                        _ensure_chat_meta_followup_columns(config) # Asegurar DB
+                        procesar_followups_automaticos(config)
+                    except Exception as e:
+                        app.logger.error(f"Error en scheduler tenant {tenant_key}: {e}")
+                
+                app.logger.info("💤 Scheduler durmiendo 30 minutos...")
+                time.sleep(1800) # 1800 segundos = 30 minutos
+                
+            except Exception as e:
+                app.logger.error(f"🔴 Error fatal en hilo scheduler: {e}")
+                time.sleep(60) # Esperar 1 min antes de reintentar si falla
+
+    t = threading.Thread(target=_worker, daemon=True, name="followup_scheduler")
+    t.start()
+
 def procesar_fecha_relativa(fecha_str):
     """
     Función simple de procesamiento de fechas relativas
@@ -8634,6 +8755,51 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
         
     except Exception as e:
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
+
+def generar_mensaje_seguimiento_ia(numero, config=None):
+    """Genera un mensaje amable para retomar la conversación basado en el historial."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Obtener historial reciente para contexto
+        historial = obtener_historial(numero, limite=6, config=config)
+        if not historial:
+            return None # No enviar nada si no hay historial
+            
+        contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
+
+        # 2. Prompt para la IA
+        prompt = f"""
+        Eres un asistente de ventas amable y profesional.
+        El usuario dejó de responder hace 5 horas. Tu objetivo es reactivar la conversación SIN ser molesto.
+        
+        HISTORIAL RECIENTE:
+        {contexto}
+        
+        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado, si tiene dudas o si desea continuar.
+        Ejemplos: "¿Sigues ahí? 👀", "¿Te quedó alguna duda sobre la información?", "¿Te gustaría agendar una llamada rápida?"
+        
+        Responde SOLO con el texto del mensaje.
+        """
+        
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.4,
+            "max_tokens": 100
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        mensaje_seguimiento = response.json()['choices'][0]['message']['content'].strip().replace('"', '')
+        
+        return mensaje_seguimiento
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
+        return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
 
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
@@ -12047,6 +12213,7 @@ with app.app_context():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
+    start_followup_scheduler()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
