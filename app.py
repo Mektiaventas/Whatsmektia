@@ -3341,27 +3341,24 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
+        # Asegurar columna antes de consultar
+        _ensure_interes_column(config)
+
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # ... (lógica de asesores existente se mantiene igual) ...
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
-        
-        # Lógica para mover chats de asesores a la columna "Asesores" si existe
         if col_asesores_id and numeros_asesores:
-            placeholders = ', '.join(['%s'] * len(numeros_asesores))
-            # Mover a la columna de asesores si el número es de un asesor
-            cursor.execute(f"""
-                UPDATE chat_meta
-                SET columna_id = %s
-                WHERE numero IN ({placeholders}) AND columna_id != %s
-            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
-            conn.commit()
-            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
-        # Obtener columnas
+             placeholders = ', '.join(['%s'] * len(numeros_asesores))
+             cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", (col_asesores_id, *numeros_asesores, col_asesores_id))
+             conn.commit()
+
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Obtener chats con nombres de contactos
+        # Agregamos 'cont.interes' a la consulta
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3373,7 +3370,8 @@ def kanban_data(config=None):
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                MAX(cont.interes) as interes_db  -- Obtenemos el valor guardado
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -3382,20 +3380,43 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps a ISO strings en zona tz_mx para JSON
+        # Calcular Interés Dinámico basado en Tiempo
+        ahora = datetime.now(tz_mx)
+        
         for chat in chats:
+            # Procesar fecha
             if chat.get('ultima_fecha'):
                 try:
                     if chat['ultima_fecha'].tzinfo is None:
-                        chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx).isoformat()
+                        chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
                     else:
-                        chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
-                except Exception:
-                    # Fallback: intentar str() si algo raro ocurre
-                    try:
-                        chat['ultima_fecha'] = str(chat['ultima_fecha'])
-                    except:
-                        chat['ultima_fecha'] = None
+                        chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                    
+                    # --- LÓGICA DE INTERÉS ---
+                    # Calculamos horas desde el último mensaje
+                    horas_pasadas = (ahora - chat['ultima_fecha']).total_seconds() / 3600
+                    
+                    nuevo_interes = 'Alto'
+                    if horas_pasadas < 5:
+                        nuevo_interes = 'Alto'
+                    elif horas_pasadas < 10:
+                        nuevo_interes = 'Medio'
+                    else:
+                        nuevo_interes = 'Bajo'
+                    
+                    # Asignamos al objeto chat para que el frontend lo vea
+                    chat['interes'] = nuevo_interes
+                    
+                    # Opcional: formatear la fecha a string ISO al final
+                    chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
+                    
+                except Exception as e:
+                    app.logger.error(f"Error calculando interés fecha: {e}")
+                    chat['interes'] = chat.get('interes_db', 'Alto') # Fallback
+                    chat['ultima_fecha'] = str(chat['ultima_fecha'])
+            else:
+                chat['interes'] = 'Bajo' # Sin mensajes = Bajo
+                chat['ultima_fecha'] = None
 
         cursor.close()
         conn.close()
@@ -3403,7 +3424,6 @@ def kanban_data(config=None):
         return jsonify({
             'columnas': columnas,
             'chats': chats,
-            # Use milliseconds epoch so clients that compare with Date.now() work reliably
             'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
@@ -11906,17 +11926,17 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes) 
             VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
                     -- Al insertar por primera vez, el valor inicial es 1 y el timestamp es NOW().
                     -- Si hay un duplicado, esta lógica se ignora en la fase INSERT.
-                    1, UTC_TIMESTAMP())
+                    1, UTC_TIMESTAMP(),"Alto")
             ON DUPLICATE KEY UPDATE 
                 -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = UTC_TIMESTAMP(),
-                
+                interes = 'Alto',
                 -- Lógica condicional para actualizar el contador de conversaciones
                 -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
                 conversaciones = conversaciones + 
