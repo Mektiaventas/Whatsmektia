@@ -377,10 +377,11 @@
             // Para el dailyChart ahora queremos los últimos 3 meses agregados por mes:
             const period = '3months';
 
-            // 🎯 Llama a la API de Plataformas (el endpoint ya existe en app.py)
+            // 1. Llama a la API de Plataformas (Nueva lógica)
             const platformRes = await fetch(`/dashboard/platform-data`);
             const platformJson = await platformRes.json();
 
+            // 2. Llama a la API de Conversaciones (Lógica existente)
             const res = await fetch(`/dashboard/conversaciones-data?period=${period}`);
             const json = await res.json();
 
@@ -389,19 +390,19 @@
                 return;
             }
 
-            // compute plan-related metrics
+            // --- Lógica de Métricas del Plan ---
             const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
             const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
             const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
 
-            // actualizar métricas superiores (only disponibles y consumidos)
+            // Actualizar métricas en el DOM
             const disponibles = (included !== null) ? available : (json.plan_info && json.plan_info.mensajes_disponibles !== undefined ? json.plan_info.mensajes_disponibles : 'N/A');
             const elDisponibles = document.getElementById('planDisponibles');
             const elConsumidos = document.getElementById('planConsumidos');
             if (elDisponibles) elDisponibles.innerText = disponibles;
             if (elConsumidos) elConsumidos.innerText = consumed;
 
-            // Chart: Remaining / Consumed (pie-like)
+            // --- Chart 1: Remaining / Consumed (Doughnut) ---
             const remCtx = document.getElementById('remainingChart').getContext('2d');
             const pieLabels = included !== null ? ['Consumidos', 'Disponibles'] : ['Conversaciones activas', 'Resto'];
             const pieData = included !== null ? [consumed, Math.max(0, included - consumed)] : [json.active_count || 0, 0];
@@ -427,7 +428,7 @@
                 plugins: [ChartDataLabels]
             });
 
-            // Chart: Monthly conversations (last 3 months)
+            // --- Chart 2: Monthly conversations (Line) ---
             const dailyCtx = document.getElementById('dailyChart').getContext('2d');
             const dailyLabels = json.labels || [];
             const dailyValues = json.values || [];
@@ -444,7 +445,7 @@
                         borderColor: '#1f4e79',
                         pointBackgroundColor: 'white',
                         pointBorderColor: '#1f4e79',
-                        pointRadius: 3, // Puntos pequeños
+                        pointRadius: 3,
                         borderWidth: 2,
                         tension: 0.3
                     }]
@@ -454,17 +455,14 @@
                     maintainAspectRatio: false,
                     plugins: {
                         legend: { display: false },
-                        datalabels: { // HABILITAR DATALABELS
+                        datalabels: {
                             display: true,
                             color: 'white',
-                            align: 'end', // Posición encima del punto/línea
-                            anchor: 'end', // Anclaje al final (arriba)
-                            offset: 4,     // Separación del punto
-                            formatter: (value) => value > 0 ? value : null, // Mostrar solo si el valor es > 0
-                            font: {
-                                weight: 'bold',
-                                size: 10 // Tamaño de fuente pequeño para no saturar
-                            }
+                            align: 'end',
+                            anchor: 'end',
+                            offset: 4,
+                            formatter: (value) => value > 0 ? value : null,
+                            font: { weight: 'bold', size: 10 }
                         }
                     },
                     scales: {
@@ -472,12 +470,27 @@
                         x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.06)' } }
                     }
                 },
-                plugins: [ChartDataLabels] // ASEGURAR QUE EL PLUGIN SE CARGUE
+                plugins: [ChartDataLabels]
             });
 
-            // 🆕 Chart: Platform Distribution (Doughnut)
+            // --- Chart 3: Platform Distribution (Doughnut - MEJORADO) ---
             const platformCtx = document.getElementById('platformChart').getContext('2d');
-            const platformData = platformJson.conversations; // Usar el campo 'conversations' del JSON
+            const platformData = platformJson.conversations;
+
+            // Mapa de colores de marca
+            const brandColors = {
+                'WhatsApp': '#25D366',  // Verde oficial
+                'Messenger': '#0084FF', // Azul oficial
+                'Telegram': '#0088cc',  // Celeste oficial
+                'Instagram': '#E1306C', // Rosa
+                'Web': '#ff9f43'        // Naranja
+            };
+
+            // Asignar colores dinámicamente según el label
+            const dynamicColors = platformData.labels.map(label => {
+                const key = Object.keys(brandColors).find(k => label.includes(k));
+                return key ? brandColors[key] : '#1f4e79'; // Azul oscuro por defecto
+            });
 
             if (platformChart) platformChart.destroy();
             platformChart = new Chart(platformCtx, {
@@ -487,35 +500,61 @@
                     datasets: [{
                         label: 'Contactos por Plataforma',
                         data: platformData.values,
-                        // Colores de ejemplo
-                        backgroundColor: ['green','#1f4e79','#60a3cc','#81c6e3','#a2e9fa'],
+                        backgroundColor: dynamicColors,
+                        borderColor: '#ffffff',
+                        borderWidth: 2
                     }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: { position: 'bottom', labels: { color: 'white' } },
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                color: 'white',
+                                padding: 20,
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    let label = context.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    let value = context.raw;
+                                    let total = context.chart._metasets[context.datasetIndex].total;
+                                    let percentage = Math.round((value / total) * 100) + '%';
+                                    return label + value + ' (' + percentage + ')';
+                                }
+                            }
+                        },
                         datalabels: {
                             color: 'white',
+                            font: { weight: 'bold', size: 14 },
                             formatter: (value, context) => {
-                                // Muestra porcentaje junto con el valor
                                 const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                const percentage = Math.round((value / total) * 100) + '%';
-                                return percentage;
+                                const percentage = Math.round((value / total) * 100);
+                                // Solo mostrar porcentaje si es relevante (>5%) para no encimar
+                                return percentage > 5 ? percentage + '%' : '';
                             }
                         },
                         title: {
                             display: true,
-                            text: 'Contactos por Plataforma (Clientes Distintos)',
+                            text: 'Conversaciones por Plataforma',
                             color: 'white',
-                            font: { size: 16 }
+                            font: { size: 16, weight: 'normal' },
+                            padding: { bottom: 10 }
                         }
+                    },
+                    layout: {
+                        padding: { top: 0, bottom: 10 }
                     }
                 },
                 plugins: [ChartDataLabels]
             });
-
 
         } catch (err) {
             console.error('Failed to load conversaciones data', err);

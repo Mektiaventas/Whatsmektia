@@ -3058,39 +3058,51 @@ def dashboard_platform_data():
         # Filtramos `conv.numero` para excluir los números internos
         exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
         
-        # Consulta de Conversaciones
-        cursor.execute(f"""
+        # Lógica SQL mejorada para detectar Messenger (fb_), Telegram (tg_) y WhatsApp
+        # Prioridad: 1. Plataforma explícita en Contactos, 2. Prefijo del número, 3. WhatsApp por defecto
+        sql_conversations = f"""
             SELECT 
-                COALESCE(c.plataforma, 
-                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
-                ) AS platform, 
+                CASE 
+                    WHEN c.plataforma = 'Facebook' THEN 'Messenger'
+                    WHEN c.plataforma = 'Telegram' THEN 'Telegram'
+                    WHEN c.plataforma = 'WhatsApp' THEN 'WhatsApp'
+                    WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram'
+                    WHEN conv.numero LIKE 'fb_%%' THEN 'Messenger'
+                    ELSE 'WhatsApp'
+                END AS platform, 
                 COUNT(DISTINCT conv.numero) AS conversation_count
             FROM conversaciones conv
             LEFT JOIN contactos c ON conv.numero = c.numero_telefono
             WHERE 1=1 {exclusion_clause}
             GROUP BY platform
             ORDER BY conversation_count DESC
-        """, exclusion_list)
+        """
+        cursor.execute(sql_conversations, exclusion_list)
         conversations_raw = cursor.fetchall()
 
         # 3. Conteo de Contactos Totales por Plataforma (Clientes)
-        # Filtramos `numero_telefono` para excluir los números internos
-        # Usamos la misma lista de exclusión
-        cursor.execute(f"""
+        # Misma lógica de normalización para la tabla de contactos
+        sql_contacts = f"""
             SELECT 
-                COALESCE(plataforma, 'WhatsApp') AS platform, 
+                CASE 
+                    WHEN plataforma = 'Facebook' THEN 'Messenger'
+                    WHEN numero_telefono LIKE 'tg_%%' THEN 'Telegram'
+                    WHEN numero_telefono LIKE 'fb_%%' THEN 'Messenger'
+                    ELSE COALESCE(plataforma, 'WhatsApp')
+                END AS platform, 
                 COUNT(*) AS contact_count
             FROM contactos
             WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
             GROUP BY platform
             ORDER BY contact_count DESC
-        """, exclusion_list)
+        """
+        cursor.execute(sql_contacts, exclusion_list)
         contacts_raw = cursor.fetchall()
         
         cursor.close()
         conn.close()
 
-        # Formatear para Chart.js (sin cambios)
+        # Formatear para Chart.js
         conv_labels = [row['platform'] for row in conversations_raw]
         conv_values = [row['conversation_count'] for row in conversations_raw]
         
