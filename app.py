@@ -786,7 +786,8 @@ def guardar_configuracion_negocio():
         'calendar_email': request.form.get('calendar_email'),  # Nuevo campo para correo de notificaciones
         'transferencia_numero': request.form.get('transferencia_numero'),
         'transferencia_nombre': request.form.get('transferencia_nombre'),
-        'transferencia_banco': request.form.get('transferencia_banco')
+        'transferencia_banco': request.form.get('transferencia_banco'),
+        'contexto_adicional': request.form.get('contexto_adicional')
     }
     
     # Manejar la subida del logo
@@ -817,7 +818,8 @@ def guardar_configuracion_negocio():
             'calendar_email': "ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)",
             'transferencia_numero': "ALTER TABLE configuracion ADD COLUMN transferencia_numero VARCHAR(100)",
             'transferencia_nombre': "ALTER TABLE configuracion ADD COLUMN transferencia_nombre VARCHAR(200)",
-            'transferencia_banco': "ALTER TABLE configuracion ADD COLUMN transferencia_banco VARCHAR(100)"
+            'transferencia_banco': "ALTER TABLE configuracion ADD COLUMN transferencia_banco VARCHAR(100)",
+            'contexto_adicional': "ALTER TABLE configuracion ADD COLUMN contexto_adicional TEXT DEFAULT NULL"
         }
         for col, alter_sql in required_cols.items():
             try:
@@ -4827,7 +4829,8 @@ def load_config(config=None):
         'calendar_email': row.get('calendar_email', ''),
         'transferencia_numero': row.get('transferencia_numero', ''),
         'transferencia_nombre': row.get('transferencia_nombre', ''),
-        'transferencia_banco': row.get('transferencia_banco', '')
+        'transferencia_banco': row.get('transferencia_banco', ''),
+        'contexto_adicional': row.get('contexto_adicional', '')
     }
     personalizacion = {
         'tono': row.get('tono'),
