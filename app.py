@@ -7636,7 +7636,7 @@ def messenger_webhook():
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
-        # Basic validation
+        # --- 1. Validaciones Básicas ---
         if not request.is_json:
             app.logger.error("🔴 Webhook: no JSON payload")
             return 'Invalid content type', 400
@@ -7647,7 +7647,7 @@ def webhook():
 
         app.logger.info(f"📥 Webhook payload: {json.dumps(payload)[:800]}")
 
-        # Basic structure checks
+        # --- 2. Verificación de Estructura ---
         if 'entry' not in payload or not payload['entry']:
             app.logger.error("🔴 Webhook: missing entry")
             return 'Invalid payload structure', 400
@@ -7662,131 +7662,146 @@ def webhook():
             app.logger.info("⚠️ Webhook: no messages in payload")
             return 'OK', 200
 
-        # Try to persist contact info if provided (contacts structure)
+        # --- 3. Intentar guardar información del contacto (Nombre) ---
         try:
             if ('contacts' in entry['changes'][0]['value']):
                 contact = entry['changes'][0]['value']['contacts'][0]
                 wa_id = contact.get('wa_id')
                 name = (contact.get('profile') or {}).get('name')
-                if wa_id:
-                    cfg_tmp = obtener_configuracion_por_host()
-                    conn = get_db_connection(cfg_tmp)
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO contactos (numero_telefono, nombre, plataforma)
-                        VALUES (%s, %s, 'WhatsApp')
-                        ON DUPLICATE KEY UPDATE
-                            nombre = COALESCE(%s, nombre),
-                            fecha_actualizacion = CURRENT_TIMESTAMP
-                    """, (wa_id, name, name))
-                    conn.commit(); cur.close(); conn.close()
-                    app.logger.info(f"✅ Contact saved from webhook: {wa_id} - {name}")
+                # Nota: Usamos config temporal solo para guardar el contacto si no tenemos la config final aun
+                if wa_id and name:
+                    # Detectar configuración temporalmente para guardar el nombre
+                    phone_number_id_temp = change.get('metadata', {}).get('phone_number_id')
+                    config_temp = obtener_configuracion_por_phone_number_id(phone_number_id_temp) if phone_number_id_temp else obtener_configuracion_por_host()
+                    actualizar_info_contacto_desde_webhook(wa_id, name, config_temp)
         except Exception as e:
-            app.logger.warning(f"⚠️ Could not save contact from webhook: {e}")
+            app.logger.warning(f"⚠️ No se pudo guardar info de contacto del webhook: {e}")
 
-        # Main message
+        # --- 4. Procesar el Mensaje Principal ---
         msg = mensajes[0]
         numero = msg.get('from')
         if not numero:
             app.logger.error("🔴 Webhook: message without 'from'")
             return 'OK', 200
 
-        # Determine tenant config from phone_number_id if available
+        # --- 5. Obtener Configuración del Tenant ---
         phone_number_id = change.get('metadata', {}).get('phone_number_id')
         config = obtener_configuracion_por_phone_number_id(phone_number_id) if phone_number_id else obtener_configuracion_por_host()
         if not config:
             config = obtener_configuracion_por_host()
 
-        # Ensure kanban/chat meta/contact are present (quick pre-check)
+        # --- 6. Inicializar Metadatos (Kanban y Contacto) ---
         try:
             inicializar_chat_meta(numero, config)
             actualizar_info_contacto(numero, config)
         except Exception as e:
-            app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
+            app.logger.warning(f"⚠️ Pre-processing kanban/contact failed: {e}")
 
-        # Deduplication by message id
+        # --- 7. Deduplicación de Mensajes ---
         message_id = msg.get('id')
         if not message_id:
             app.logger.error("🔴 Webhook: message without id, cannot dedupe reliably")
             return 'OK', 200
+        
         message_hash = hashlib.md5(f"{numero}_{message_id}".encode()).hexdigest()
-        # quick duplicate check
+        
         if message_hash in processed_messages:
             app.logger.info(f"⚠️ Duplicate webhook delivery ignored: {message_hash}")
             return 'OK', 200
+            
         processed_messages[message_hash] = time.time()
-        # cleanup old keys
+        
+        # Limpieza de claves antiguas en memoria
         now_ts = time.time()
         for h, ts in list(processed_messages.items()):
             if now_ts - ts > 3600:
                 del processed_messages[h]
 
-        # Parse incoming content (text / image / audio / document)
+        # --- 8. Parseo de Contenido (Texto, Imagen, Audio, Documento) ---
         texto = ''
-        es_imagen = es_audio = es_archivo = False
+        es_imagen = False
+        es_audio = False
+        es_archivo = False
         imagen_base64 = None
         public_url = None
         transcripcion = None
+        tipo_mensaje = 'texto' # Valor por defecto
 
         if 'text' in msg and 'body' in msg['text']:
             texto = (msg['text']['body'] or '').strip()
+            tipo_mensaje = 'texto'
+            
         elif 'image' in msg:
             es_imagen = True
+            tipo_mensaje = 'imagen'
             image_id = msg['image'].get('id')
             try:
                 imagen_base64, public_url = obtener_imagen_whatsapp(image_id, config)
             except Exception as e:
                 app.logger.warning(f"⚠️ obtener_imagen_whatsapp failed: {e}")
             texto = (msg.get('image', {}).get('caption') or "El usuario envió una imagen").strip()
+            
         elif 'audio' in msg:
             es_audio = True
+            tipo_mensaje = 'audio'
             audio_id = msg['audio'].get('id')
             try:
                 audio_path, audio_url = obtener_audio_whatsapp(audio_id, config)
+                public_url = audio_url # Usamos public_url para almacenar la url del audio también
                 if audio_path:
                     transcripcion = transcribir_audio_con_openai(audio_path)
-                    texto = transcripcion or "No se pudo transcribir el audio"
+                    texto = transcripcion or "Nota de voz sin transcripción"
                 else:
                     texto = "Error al procesar el audio"
             except Exception as e:
                 app.logger.warning(f"⚠️ audio processing failed: {e}")
                 texto = "Error al procesar el audio"
+                
         elif 'document' in msg:
             es_archivo = True
+            tipo_mensaje = 'documento'
             texto = (msg.get('document', {}).get('caption') or f"Archivo: {msg.get('document', {}).get('filename','sin nombre')}").strip()
+        
         else:
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
+            tipo_mensaje = 'texto'
 
-        app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
-        # --- AÑADIR LÓGICA DE NUEVA CONVERSACIÓN AQUÍ ---
+        app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (Tipo: {tipo_mensaje})")
+
+        # --- 9. GUARDAR MENSAJE (Directo a tabla conversaciones) ---
+        # Eliminado: registrar_nueva_conversacion
+        
         try:
-            # Llama a la función con el número, el texto y la configuración detectada
-            registrar_nueva_conversacion(numero, texto, config=config)
-        except Exception as e:
-            app.logger.error(f"❌ Error al registrar nueva conversación desde webhook: {e}")
-        # --- FIN LÓGICA AÑADIDA ---
-        # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
-        try:
-            # --- MODIFICADO ---
+            # Determinar contenido extra según el tipo
+            contenido_extra_db = None
+            
             if es_audio:
-                guardar_mensaje_inmediato(
-                    numero, texto, config, 
-                    imagen_url=None, es_imagen=False, 
-                    tipo_mensaje='audio', contenido_extra=audio_url
-                )
-            else:
-                guardar_mensaje_inmediato(
-                    numero, texto, config, 
-                    imagen_url=public_url, es_imagen=es_imagen,
-                    tipo_mensaje='imagen' if es_imagen else 'texto', contenido_extra=None
-                )
-            # --- FIN MODIFICADO ---
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
-            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
+                contenido_extra_db = public_url # URL del audio
+            elif es_archivo:
+                contenido_extra_db = None # O podrías guardar URL si tienes lógica para bajar documentos
+            elif es_imagen:
+                # Para imagen, guardamos en la columna imagen_url, no en contenido_extra
+                contenido_extra_db = None
+            
+            # Llamada a guardar_mensaje_inmediato sin verificaciones de esquema
+            guardado_ok = guardar_mensaje_inmediato(
+                numero, 
+                texto, 
+                config, 
+                imagen_url=public_url if es_imagen else None, 
+                es_imagen=es_imagen,
+                tipo_mensaje=tipo_mensaje,
+                contenido_extra=contenido_extra_db
+            )
+            
+            if not guardado_ok:
+                app.logger.error("❌ Falló el guardado del mensaje en la base de datos.")
 
-        # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
-        # Indicar a la función que el mensaje ya fue guardado (incoming_saved=True)
+        except Exception as e:
+            app.logger.error(f"❌ Excepción crítica guardando mensaje: {e}")
+
+        # --- 10. Procesar Lógica de Negocio (IA, Respuestas) ---
+        # incoming_saved=True evita que procesar_mensaje_unificado intente insertar de nuevo el mensaje del usuario
         processed_ok = procesar_mensaje_unificado(
             msg=msg,
             numero=numero,
@@ -7797,15 +7812,15 @@ def webhook():
             imagen_base64=imagen_base64,
             public_url=public_url,
             transcripcion=transcripcion,
-            incoming_saved=True
+            incoming_saved=True, # Importante: ya lo guardamos arriba
+            es_archivo=es_archivo
         )
 
         if processed_ok:
             app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
             return 'OK', 200
 
-        # If processing failed, we already saved the incoming message earlier; nothing more to do.
-        app.logger.info(f"⚠️ procesar_mensaje_unificado returned False for {message_id}; message already persisted.")
+        app.logger.info(f"⚠️ procesar_mensaje_unificado returned False for {message_id}")
         return 'OK', 200
 
     except Exception as e:
@@ -9670,42 +9685,35 @@ def enviar_datos_transferencia(numero, config=None):
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
-    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
-    """
+    """Guarda el mensaje del usuario inmediatamente en la tabla conversaciones."""
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # Sanitize incoming text
+        # 1. Sanitizar texto
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
-        # Asegurar que el contacto existe
+        # 2. Asegurar contacto (para que exista en tabla contactos, pero sin crear columnas extra)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Add detailed logging before saving the message
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, Tipo: {tipo_mensaje}")
 
-        # --- MODIFICADO ---
         # Determinar el tipo de mensaje correcto
         if es_imagen:
             tipo_mensaje = 'imagen'
-        elif tipo_mensaje == 'audio': # Si ya se marcó como audio
-            pass
-        else:
-            tipo_mensaje = 'texto' # Default 
+        elif not tipo_mensaje: 
+            tipo_mensaje = 'texto' 
 
+        # 3. INSERT DIRECTO EN CONVERSACIONES
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
             VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
-        # --- FIN MODIFICADO ---
 
-        # Get the ID of the inserted message for tracking
+        # Obtener ID
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -9714,18 +9722,19 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado correctamente en conversaciones para {numero}")
 
-        # Ensure Kanban reflects the new incoming message immediately.
+        # Actualizar visualización en Kanban
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
-            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló tras guardar mensaje: {e}")
+            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló: {e}")
 
         return True
 
     except Exception as e:
-        app.logger.error(f"❌ Error al guardar mensaje inmediato: {e}")
+        app.logger.error(f"❌ Error CRÍTICO al guardar mensaje inmediato: {e}")
+        app.logger.error(traceback.format_exc())
         return False
  
 def extraer_nombre_desde_webhook(payload):
@@ -10053,32 +10062,28 @@ def home():
     period = request.args.get('period', 'week')
     now = datetime.now()
     
-    # Inicializar variables para scope global
     labels = []
     values = []
     messages_per_chat = None
     chat_counts = 0
     total_responded = 0
 
-    # Default behavior for week/month: keep existing logic (messages per chat)
-    if period != 'year':
-        # Calcula el inicio del periodo (7 días o 30 días)
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
+    conn = get_db_connection(config)
+    cursor = conn.cursor()
 
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
+    try:
+        # Obtener totales generales
+        cursor.execute("SELECT SUM(conversaciones) FROM contactos")
+        row = cursor.fetchone()
+        chat_counts = int(row[0]) if row and row[0] else 0
         
-        try:
-            # 1. OBTENER EL TOTAL DE CONVERSACIONES CONTADAS (USANDO LA NUEVA COLUMNA DE CONTACTOS)
-            # Se suma la columna 'conversaciones' de la tabla 'contactos'
-            cursor.execute(
-                "SELECT SUM(conversaciones) FROM contactos"
-            )
-            chat_counts_row = cursor.fetchone()
-            # Corregido: Usar 'chat_counts_row' en lugar de 'chat_counts' en la asignación
-            chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
-            
-            # Contar los mensajes por chat en el periodo (para la gráfica original)
+        cursor.execute("SELECT COUNT(numero_telefono) FROM contactos")
+        row = cursor.fetchone()
+        total_responded = int(row[0]) if row and row[0] else 0
+
+        if period != 'year':
+            # Lógica Semanal/Mensual (Ya usaba 'conversaciones', se mantiene)
+            start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
             cursor.execute(""" 
                 SELECT 
                     conv.numero,
@@ -10091,104 +10096,49 @@ def home():
                 ORDER BY total DESC
             """, (start,))
             messages_per_chat = cursor.fetchall()
-
-            # total_responded mantiene el conteo de contactos (para que no disminuya al borrar)
-            cursor.execute(
-                "SELECT COUNT(numero_telefono) FROM contactos;"
-            )
-            total_responded_row = cursor.fetchone()
-            total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
-
-        finally:
-            if cursor: cursor.close()
-            if conn: conn.close()
-
-        labels = [row[1] for row in messages_per_chat]  # nombre_mostrado
-        values = [row[2] for row in messages_per_chat]  # total
-        
-    else:
-        # period == 'year' : compute last 12 months (monthly)
-        # build list of last 12 month keys in chronological order
-        def month_key_from_offset(now_dt, offset):
-            total_months = now_dt.year * 12 + now_dt.month - 1
-            target = total_months - offset
-            y = target // 12
-            m = (target % 12) + 1
-            return y, m
-
-        months = []
-        for offset in range(11, -1, -1):  # 11..0 -> oldest .. current
-            y, m = month_key_from_offset(now, offset)
-            months.append((y, m))
-
-        # start = first day of oldest month
-        earliest_year, earliest_month = months[0]
-        start = datetime(earliest_year, earliest_month, 1)
-
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-
-        try:
-            # LÓGICA GRÁFICA ANUAL: Mantiene la dependencia de 'nuevas_conversaciones'
+            labels = [row[1] for row in messages_per_chat]
+            values = [row[2] for row in messages_per_chat]
+            
+        else:
+            # Lógica Anual: CAMBIADO DE nuevas_conversaciones A conversaciones
+            # Contamos mensajes donde 'respuesta' es NULL (mensajes entrantes) para no duplicar
+            start = datetime(now.year - 1, now.month, 1) # Últimos 12 meses aprox
+            
             sql = """
-                SELECT YEAR(c1.timestamp) as y, MONTH(c1.timestamp) as m, COUNT(*) as cnt
-                FROM nuevas_conversaciones c1 
-                WHERE c1.timestamp >= %s
+                SELECT YEAR(timestamp) as y, MONTH(timestamp) as m, COUNT(*) as cnt
+                FROM conversaciones 
+                WHERE timestamp >= %s AND respuesta IS NULL
                 GROUP BY y, m
                 ORDER BY y, m
             """
             cursor.execute(sql, (start,))
-            rows = cursor.fetchall()  # list of tuples (y, m, cnt)
+            rows = cursor.fetchall()
 
-            # build map key 'YYYY-MM' -> count
-            counts_map = {}
-            for r in rows:
-                try:
-                    y = int(r[0]); m = int(r[1]); cnt = int(r[2] or 0)
-                except Exception:
-                    continue
-                key = f"{y}-{m:02d}"
-                counts_map[key] = cnt
+            counts_map = {f"{int(r[0])}-{int(r[1]):02d}": int(r[2]) for r in rows}
 
-            # labels as 'Mon YYYY'
-            labels = []
-            values = []
-            for y, m in months:
-                key = f"{y}-{m:02d}"
-                labels.append(datetime(y, m, 1).strftime('%b %Y'))  # e.g. "Oct 2025"
+            # Generar etiquetas de los últimos 12 meses
+            for i in range(11, -1, -1):
+                d = now - timedelta(days=i*30) # Aproximación
+                key = f"{d.year}-{d.month:02d}"
+                labels.append(d.strftime('%b %Y'))
                 values.append(counts_map.get(key, 0))
 
-            # 2. OBTENER EL TOTAL DE CONVERSACIONES CONTADAS (USANDO LA NUEVA COLUMNA DE CONTACTOS)
-            # Se suma la columna 'conversaciones' de la tabla 'contactos'
-            cursor.execute(
-                "SELECT SUM(conversaciones) FROM contactos"
-            )
-            chat_counts_row = cursor.fetchone()
-            chat_counts = int(chat_counts_row[0]) if chat_counts_row and chat_counts_row[0] is not None else 0
+    except Exception as e:
+        app.logger.error(f"Error en dashboard home: {e}")
+    finally:
+        cursor.close()
+        conn.close()
 
-            # total_responded mantiene el conteo de contactos
-            cursor.execute("SELECT COUNT(numero_telefono) FROM contactos;")
-            total_responded_row = cursor.fetchone()
-            total_responded = int(total_responded_row[0]) if total_responded_row and total_responded_row[0] is not None else 0
-
-        finally:
-            if cursor: cursor.close()
-            if conn: conn.close()
-
-    # Obtener plan info para el usuario autenticado (si aplica)
     plan_info = None
     try:
         au = session.get('auth_user')
         if au and au.get('user'):
-            # Asume que get_plan_status_for_user existe
             plan_info = get_plan_status_for_user(au.get('user'), config=config)
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
-        plan_info = None
+    except: pass
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
-        messages_per_chat=messages_per_chat if period != 'year' else None,
+        messages_per_chat=messages_per_chat,
         total_responded=total_responded,
         period=period,
         labels=labels,
@@ -10628,10 +10578,11 @@ def enviar_manual():
             mensaje_historial = "[Mensaje manual desde web]"
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
-            cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-                (numero, mensaje_historial, respuesta_historial)
-            )
+            cursor.execute("""
+                    INSERT INTO conversaciones 
+                    (numero, mensaje, respuesta, timestamp, tipo_mensaje, contenido_extra, respuesta_tipo_mensaje, respuesta_contenido_extra) 
+                    VALUES (%s, %s, %s, UTC_TIMESTAMP(), 'sistema', NULL, %s, %s);
+                """, (numero, '[Mensaje manual desde web]', texto, tipo_mensaje, contenido_extra))
             
             conn.commit()
             cursor.close()
