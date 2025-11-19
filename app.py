@@ -10344,55 +10344,73 @@ def toggle_ai(numero, config=None):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-        config = obtener_configuracion_por_host()
+    config = obtener_configuracion_por_host()
+    conn = get_db_connection(config)
+    try:
+        numero = request.form['numero']
+        texto = request.form['texto'].strip()
+    
+        # Validar que el mensaje no esté vacío
+        if not texto:
+            flash('❌ El mensaje no puede estar vacío', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+    
+        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
+    
+        # --- CORRECCIÓN: DETECCIÓN DE PLATAFORMA ---
+        enviado_ok = False
+
+        if numero.startswith('tg_'):
+            # Lógica para Telegram
+            telegram_token = config.get('telegram_token')
+            if telegram_token:
+                chat_id = numero.replace('tg_', '')
+                enviado_ok = send_telegram_message(chat_id, texto, telegram_token)
+                if not enviado_ok:
+                    app.logger.error(f"❌ Falló envío manual a Telegram {numero}")
+            else:
+                app.logger.error(f"❌ No hay token de Telegram configurado para envío manual a {numero}")
+        else:
+            # Lógica para WhatsApp (Por defecto)
+            # Asegúrate de pasar 'config' si tu función enviar_mensaje lo requiere
+            enviado_ok = enviar_mensaje(numero, texto, config) 
+    
+        if not enviado_ok:
+            flash('⚠️ Hubo un problema al enviar el mensaje a la API, pero se guardará en el historial.', 'warning')
+
+        # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        # Se guarda igual para ambas plataformas
         conn = get_db_connection(config)
+        cursor = conn.cursor()
+    
+        cursor.execute(
+            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
+            (numero, '[Mensaje manual desde web]', texto) 
+        )
+    
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
         try:
-            numero = request.form['numero']
-            texto = request.form['texto'].strip()
-        
-            # Validar que el mensaje no esté vacío
-            if not texto:
-                flash('❌ El mensaje no puede estar vacío', 'error')
-                return redirect(url_for('ver_chat', numero=numero))
-        
-            app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
-        
-            # 1. ENVIAR MENSAJE POR WHATSAPP
-            enviar_mensaje(numero, texto)
-        
-            # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-        
-            # CORREGIDO: Usar UTC_TIMESTAMP() en MySQL para asegurar orden cronológico correcto.
-            cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-                (numero, '[Mensaje manual desde web]', texto) # Ya no pasamos timestamp_local
-            )
-        
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
-            try:
-                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-            except Exception as e:
-                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
-            
-            # 4. MENSAJE DE CONFIRMACIÓN
-            flash('✅ Mensaje enviado correctamente', 'success')
-            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
-            
-        except KeyError:
-            flash('❌ Error: Número de teléfono no proporcionado', 'error')
-            app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+            actualizar_columna_chat(numero, 3, config)  # 3 = Esperando Respuesta
+            app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
         except Exception as e:
-            flash('❌ Error al enviar el mensaje', 'error')
-            app.logger.error(f"🔴 Error en enviar_manual: {e}")
+            app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
         
-        return redirect(url_for('ver_chat', numero=numero))
+        # 4. MENSAJE DE CONFIRMACIÓN
+        flash('✅ Mensaje enviado correctamente', 'success')
+        app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+        
+    except KeyError:
+        flash('❌ Error: Número de teléfono no proporcionado', 'error')
+        app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+    except Exception as e:
+        flash('❌ Error al enviar el mensaje', 'error')
+        app.logger.error(f"🔴 Error en enviar_manual: {e}")
+    
+    return redirect(url_for('ver_chat', numero=numero))
         
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
