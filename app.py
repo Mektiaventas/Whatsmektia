@@ -4948,13 +4948,14 @@ def load_config(config=None):
             asesor1_email VARCHAR(150),
             asesor2_nombre VARCHAR(100),
             asesor2_telefono VARCHAR(50),
-            asesor2_email VARCHAR(150),s
+            asesor2_email VARCHAR(150), -- Aquí estaba el error ",s"
             asesores_json TEXT,
             mensaje_tibio TEXT,
             mensaje_frio TEXT,
             mensaje_dormido TEXT
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     ''')
+    
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     row = cursor.fetchone()
     cursor.close()
