@@ -632,6 +632,50 @@ def _ensure_sesiones_table(conn):
     conn.commit()
     cur.close()
 
+def recalcular_interes_lead(numero, mensaje_actual, intent_ia, config):
+    """
+    Define si un lead es Caliente, Tibio o Frío basado en reglas de negocio.
+    - Frío: Solo 1 mensaje del usuario en el historial.
+    - Caliente: Palabras clave de venta (precio, costo, fechas) o Intención IA alta.
+    - Tibio: Resto de casos.
+    """
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Contar mensajes del usuario (Para detectar 'Frío')
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL", (numero,))
+        count_msgs = cursor.fetchone()[0]
+        
+        nuevo_interes = 'Tibio' # Default
+        
+        # REGLA 1: LEADS FRÍOS (Solo una interacción)
+        if count_msgs <= 1:
+            nuevo_interes = 'Frío'
+        else:
+            # REGLA 2: LEADS CALIENTES (Intención de compra o palabras clave)
+            texto = (mensaje_actual or "").lower()
+            keywords_hot = ['precio', 'costo', 'cuanto cuesta', 'inscripción', 'inscribirme', 'fecha', 'inicio', 'comprar', 'pago', 'dinero']
+            
+            es_hot_keywords = any(k in texto for k in keywords_hot)
+            es_hot_intent = intent_ia in ['COMPRAR_PRODUCTO', 'COTIZAR', 'GUARDAR_CITA', 'SOLICITAR_DATOS']
+            
+            if es_hot_keywords or es_hot_intent:
+                nuevo_interes = 'Caliente'
+            else:
+                nuevo_interes = 'Tibio'
+        
+        # Actualizar en DB
+        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return nuevo_interes
+    except Exception as e:
+        app.logger.error(f"Error recalculando interés: {e}")
+        return 'Tibio'
+
 def registrar_sesion_activa(username):
     try:
         conn = get_clientes_conn()
@@ -3359,37 +3403,46 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar columna antes de consultar
+        # Asegurar que la columna interes exista antes de consultar
         _ensure_interes_column(config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # ... (lógica de asesores existente se mantiene igual) ...
+        # --- 1. Lógica de Asesores (Mover chats de asesores a su columna) ---
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         if col_asesores_id and numeros_asesores:
+             # Si es un asesor y no está en la columna de asesores, moverlo
              placeholders = ', '.join(['%s'] * len(numeros_asesores))
              cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", (col_asesores_id, *numeros_asesores, col_asesores_id))
              conn.commit()
 
+        # --- 2. Obtener Columnas ---
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Agregamos 'cont.interes' a la consulta
+        # --- 3. Obtener Chats con Estado de Interés ---
+        # Se agrega MAX(cont.interes) as interes_db para leer el valor calculado por la IA
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                WHERE numero = cm.numero
-                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
-                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                 WHERE numero = cm.numero
+                 AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                MAX(cont.imagen_url) AS avatar,
+                MAX(cont.plataforma) AS canal,
+                COALESCE(
+                    MAX(cont.alias), 
+                    MAX(cont.nombre), 
+                    cm.numero
+                ) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
-                MAX(cont.interes) as interes_db  -- Obtenemos el valor guardado
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                MAX(cont.interes) as interes_db 
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -3398,42 +3451,40 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # Calcular Interés Dinámico basado en Tiempo
+        # --- 4. Procesamiento de Fechas y Estado 'Dormido' ---
         ahora = datetime.now(tz_mx)
         
         for chat in chats:
-            # Procesar fecha
+            # Recuperar el interés base calculado por contenido (Caliente/Tibio/Frío)
+            # Si es nulo, por defecto 'Tibio'
+            interes_base = chat.get('interes_db') or 'Tibio'
+            
             if chat.get('ultima_fecha'):
                 try:
+                    # Normalizar zona horaria
                     if chat['ultima_fecha'].tzinfo is None:
                         chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
                     else:
                         chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                     
-                    # --- LÓGICA DE INTERÉS ---
-                    # Calculamos horas desde el último mensaje
-                    horas_pasadas = (ahora - chat['ultima_fecha']).total_seconds() / 3600
+                    # --- LÓGICA DE LEADS DORMIDOS (> 7 DÍAS) ---
+                    dias_pasados = (ahora - chat['ultima_fecha']).days
                     
-                    nuevo_interes = 'Alto'
-                    if horas_pasadas < 5:
-                        nuevo_interes = 'Alto'
-                    elif horas_pasadas < 10:
-                        nuevo_interes = 'Medio'
+                    if dias_pasados >= 7:
+                        chat['interes'] = 'Dormido' # Sobrescribe por inactividad prolongada
                     else:
-                        nuevo_interes = 'Bajo'
+                        chat['interes'] = interes_base # Mantiene la clasificación por contenido
                     
-                    # Asignamos al objeto chat para que el frontend lo vea
-                    chat['interes'] = nuevo_interes
-                    
-                    # Opcional: formatear la fecha a string ISO al final
+                    # Convertir a ISO string para el frontend
                     chat['ultima_fecha'] = chat['ultima_fecha'].isoformat()
                     
                 except Exception as e:
-                    app.logger.error(f"Error calculando interés fecha: {e}")
-                    chat['interes'] = chat.get('interes_db', 'Alto') # Fallback
+                    app.logger.error(f"Error procesando fecha/interés para {chat['numero']}: {e}")
+                    chat['interes'] = interes_base
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
-                chat['interes'] = 'Bajo' # Sin mensajes = Bajo
+                # Sin fecha de actividad = Dormido
+                chat['interes'] = 'Dormido'
                 chat['ultima_fecha'] = None
 
         cursor.close()
@@ -9120,6 +9171,12 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             return False
 
         intent = (decision.get('intent') or 'NO_ACTION').upper()
+        try:
+            recalcular_interes_lead(numero, texto, intent, config)
+            app.logger.info(f"🌡 Interés recalculado para {numero} basado en intent {intent}")
+        except Exception as e:
+            app.logger.error(f"Error recalculando interés: {e}")
+        respuesta_text = decision.get('respuesta_text') or ""
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
         document_field = decision.get('document')
@@ -12112,34 +12169,22 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
             INSERT INTO contactos 
                 (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes) 
             VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
-                    -- Al insertar por primera vez, el valor inicial es 1 y el timestamp es NOW().
-                    -- Si hay un duplicado, esta lógica se ignora en la fase INSERT.
-                    1, UTC_TIMESTAMP(),"Alto")
+                    1, UTC_TIMESTAMP(), 'Frío') 
             ON DUPLICATE KEY UPDATE 
-                -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = UTC_TIMESTAMP(),
-                interes = 'Alto',
-                -- Lógica condicional para actualizar el contador de conversaciones
-                -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
+                -- NO actualizamos interes aquí para no sobrescribir la lógica inteligente
+                
                 conversaciones = conversaciones + 
                                  CASE 
-                                     -- 1. Si el timestamp es NULL (registro antiguo/primer uso de la columna)
                                      WHEN timestamp IS NULL THEN 1
-                                     -- 2. Si la diferencia es > 24 horas (86400 segundos)
                                      WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
                                      ELSE 0
                                  END,
-                                 
-                -- Lógica condicional para actualizar el timestamp
-                -- SE ACTUALIZA con UTC_TIMESTAMP() si se cumple la misma condición de arriba
                 timestamp = CASE 
-                                -- 1. Si el timestamp es NULL
                                 WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                                -- 2. Si la diferencia es > 24 horas
                                 WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
-                                -- Si no, mantener el valor actual de timestamp
                                 ELSE timestamp
                             END
         """

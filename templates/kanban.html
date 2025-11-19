@@ -16,7 +16,47 @@
             transform: translateY(0);
         }
     }
+    /* Nuevos Estilos para etiquetas de Interés (Leads) */
+    .badge-interes {
+        font-size: 0.65rem;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
 
+    /* 🔥 Caliente: Preguntas específicas/intención de compra */
+    .interes-caliente {
+        background-color: #ffebee;
+        color: #d32f2f;
+        border: 1px solid #ffcdd2;
+    }
+
+    /* 🌡 Tibio: Información general */
+    .interes-tibio {
+        background-color: #fff3e0; /* Naranja suave */
+        color: #e65100;
+        border: 1px solid #ffe0b2;
+    }
+
+    /* ❄ Frío: Solo un mensaje */
+    .interes-frio {
+        background-color: #e3f2fd; /* Azul suave */
+        color: #1565c0;
+        border: 1px solid #bbdefb;
+    }
+
+    /* 😴 Dormido: > 7 días inactivo */
+    .interes-dormido {
+        background-color: #f5f5f5; /* Gris */
+        color: #616161;
+        border: 1px solid #e0e0e0;
+    }
     @keyframes highlightPulse {
         0% {
             background-color: rgba(255,255,255,0.1);
@@ -564,6 +604,34 @@
                 bindAddColumnButtons(); bindDeleteButtons(); initRenameHandlers(); bindIconPicker(); inicializarSortable();
             })
             .catch(err => console.error('Error creando columna:', err));
+    }
+    function generarBadgeInteres(nivel) {
+        if (!nivel) return '';
+
+        const n = nivel.toLowerCase();
+        let clase = 'interes-tibio';
+        let icono = '🌡';
+        let texto = nivel;
+
+        if (n === 'caliente') {
+            clase = 'interes-caliente';
+            icono = '🔥';
+            texto = 'Caliente';
+        } else if (n === 'tibio') {
+            clase = 'interes-tibio';
+            icono = '🌡';
+            texto = 'Tibio';
+        } else if (n === 'frio' || n === 'frío') {
+            clase = 'interes-frio';
+            icono = '❄';
+            texto = 'Frío';
+        } else if (n === 'dormido') {
+            clase = 'interes-dormido';
+            icono = '😴';
+            texto = 'Dormido';
+        }
+
+        return `<span class="badge-interes ${clase}">${icono} ${texto}</span>`;
     }
     function crearColumnaDOM(data) {
         const div = document.createElement('div');
