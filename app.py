@@ -632,34 +632,35 @@ def _ensure_sesiones_table(conn):
     conn.commit()
     cur.close()
 
-def recalcular_interes_lead(numero, mensaje_actual, intent_ia, config):
+def recalcular_interes_lead(numero, nivel_interes_ia, config):
     """
-    Define el interés BASE en la base de datos según el contenido.
-    - Tibio: Si muestra interés (keywords/intent) y tiene > 1 mensaje.
-    - General: Si no cumple lo anterior.
-    (Los estados Caliente, Frío y Dormido se calculan dinámicamente por tiempo en el Kanban).
+    Define el interés BASE en la base de datos.
+    - Frío ❄: Solo 1 mensaje del usuario en el historial (sin importar qué diga).
+    - Caliente 🔥: >1 mensaje Y la IA detectó interés ESPECÍFICO.
+    - Tibio 🌡: >1 mensaje Y la IA detectó interés GENERAL o BAJO.
     """
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # 1. Contar mensajes del usuario
-        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL", (numero,))
+        # 1. Contar mensajes del usuario para detectar "Fríos" (solo una interacción)
+        # Filtramos mensajes que no sean del sistema
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
         count_msgs = cursor.fetchone()[0]
         
-        texto = (mensaje_actual or "").lower()
-        keywords_interes = ['precio', 'costo', 'info', 'información', 'catálogo', 'catalogo', 'curso', 'carrera', 'inscripción', 'dinero', 'pago']
+        nuevo_interes_db = 'Tibio' # Default
         
-        muestra_interes = any(k in texto for k in keywords_interes) or \
-                          intent_ia in ['COMPRAR_PRODUCTO', 'COTIZAR', 'SOLICITAR_DATOS', 'INFORMACION_SERVICIOS_O_PRODUCTOS']
-        
-        # LÓGICA TIBIO: Muestra interés y ya hay conversación fluida (>1 mensaje)
-        if muestra_interes and count_msgs > 1:
-            nuevo_interes_db = 'Tibio'
+        # REGLA 1: LEADS FRÍOS (Contestaron una sola vez)
+        if count_msgs <= 1:
+            nuevo_interes_db = 'Frío'
         else:
-            # Si no es explícitamente Tibio, lo dejamos como 'General' en DB
-            # (El Kanban decidirá si es Caliente/Frio/Dormido por tiempo)
-            nuevo_interes_db = 'General'
+            # REGLA 2: CALIENTE (Contexto Específico)
+            if nivel_interes_ia == 'ESPECIFICO':
+                nuevo_interes_db = 'Caliente'
+            
+            # REGLA 3: TIBIO (Contexto General o Bajo, pero ya interactuando)
+            else:
+                nuevo_interes_db = 'Tibio'
         
         # Actualizar en DB
         cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
@@ -670,7 +671,7 @@ def recalcular_interes_lead(numero, mensaje_actual, intent_ia, config):
         return nuevo_interes_db
     except Exception as e:
         app.logger.error(f"Error recalculando interés: {e}")
-        return 'General'
+        return 'Tibio'
 
 def registrar_sesion_activa(username):
     try:
@@ -3401,12 +3402,11 @@ def kanban_data(config=None):
         config = obtener_configuracion_por_host()
     try:
         _ensure_interes_column(config)
-        _ensure_columna_interaccion_usuario(config) # Asegurar columna
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # ... (Lógica de asesores igual) ...
+        # ... (Lógica de Asesores se mantiene igual) ...
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         if col_asesores_id and numeros_asesores:
@@ -3417,13 +3417,12 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # AGREGAMOS cont.ultima_interaccion_usuario A LA CONSULTA
+        # Consulta principal
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha, -- Para ORDENAR visualmente (User o IA)
-                MAX(cont.ultima_interaccion_usuario) AS fecha_usuario, -- Para CALCULAR INTERÉS (Solo User)
+                MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
                  WHERE numero = cm.numero
                  AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
@@ -3441,60 +3440,53 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
+        # --- CÁLCULO FINAL DE ESTADOS ---
         ahora = datetime.now(tz_mx)
         
         for chat in chats:
-            interes_base = chat.get('interes_db') or 'General'
+            # 1. Recuperar estado base (Caliente/Tibio/Frío) calculado por la IA y DB
+            interes_final = chat.get('interes_db') or 'Frío'
             
-            # Usamos fecha_usuario para el cálculo. Si es NULL, usamos ultima_fecha como fallback
-            fecha_calculo = chat.get('fecha_usuario') or chat.get('ultima_fecha')
-
-            if fecha_calculo:
+            # 2. Aplicar Regla de TIEMPO (Dormidos)
+            if chat.get('ultima_fecha'):
                 try:
-                    if fecha_calculo.tzinfo is None:
-                        fecha_calculo = pytz.utc.localize(fecha_calculo).astimezone(tz_mx)
+                    fecha_msg = chat['ultima_fecha']
+                    if fecha_msg.tzinfo is None:
+                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
                     else:
-                        fecha_calculo = fecha_calculo.astimezone(tz_mx)
+                        fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # Calcular tiempo real desde que EL USUARIO habló
-                    diferencia = ahora - fecha_calculo
-                    minutos_pasados = diferencia.total_seconds() / 60
-                    horas_pasadas = minutos_pasados / 60
+                    # Calcular horas pasadas desde la última interacción (de cualquiera)
+                    horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     
-                    # --- REGLAS ---
-                    if horas_pasadas >= 20:
-                        chat['interes'] = 'Dormido'
-                    elif horas_pasadas >= 5:
-                        chat['interes'] = 'Frío'
-                    elif minutos_pasados <= 30:
-                        chat['interes'] = 'Caliente'
-                    else:
-                        # Zona intermedia (30m - 5h): Respetar lógica de contenido
-                        if interes_base == 'Tibio':
-                            chat['interes'] = 'Tibio'
-                        else:
-                            chat['interes'] = 'Frío'
-
+                    # REGLA: Si pasan más de 20 horas -> DORMIDO 😴
+                    # (Sobrescribe Caliente, Tibio o Frío)
+                    if horas_pasadas > 20:
+                        interes_final = 'Dormido'
+                    
+                    # Formato ISO para frontend
+                    chat['ultima_fecha'] = fecha_msg.isoformat()
+                    
                 except Exception as e:
                     app.logger.error(f"Error fecha {chat['numero']}: {e}")
-                    chat['interes'] = 'Frío'
+                    chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
-                chat['interes'] = 'Dormido'
-
-            # Formatear fecha visual (esta sigue siendo la última actividad general)
-            if chat.get('ultima_fecha'):
-                # ... (tu lógica de formateo visual existente para ultima_fecha)
-                pass
+                interes_final = 'Dormido' # Sin fecha = Dormido
+                chat['ultima_fecha'] = None
+            
+            # Asignar el resultado final para el Frontend
+            chat['interes'] = interes_final
 
         cursor.close()
         conn.close()
-        # ... (return json igual)
+
         return jsonify({
             'columnas': columnas,
             'chats': chats,
             'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
+
     except Exception as e:
         app.logger.error(f"🔴 Error en kanban_data: {e}")
         return jsonify({'error': str(e)}), 500
@@ -9214,7 +9206,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # --- System prompt (SIN CAMBIOS) ---
+        # --- System prompt (ACTUALIZADO PARA CONTEXTO DE INTERÉS) ---
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
@@ -9235,9 +9227,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que "no hay PDF publicado".
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) Devuelve intent == DATOS_TRANSFERENCIA si el usuario pregunta por "datos de transferencia", "cuenta bancaria", "cómo hacer la transferencia" o similares y el usuario no esta en proceso de compra.
-7) El JSON debe tener estas claves mínimas:
+7) CLASIFICACIÓN DE CONTEXTO (Campo 'nivel_interes'):
+   - "ESPECIFICO": El usuario pregunta por un producto concreto, precio exacto, características técnicas, disponibilidad, o muestra intención clara de compra/cita.
+   - "GENERAL": El usuario hace preguntas abiertas (ubicación, horarios, "qué venden", "info general") sin profundizar en un producto específico.
+   - "BAJO": Saludos simples ("Hola", "Buenos días"), mensajes cortos sin intención clara, o agradecimientos finales.
+
+8) El JSON debe tener estas claves mínimas:
    - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF","COTIZAR"]
    - respuesta_text: string
+   - nivel_interes: "ESPECIFICO" | "GENERAL" | "BAJO"
    - image: filename_or_url_or_null
    - document: url_or_null
    - save_cita: object|null
@@ -9245,8 +9243,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - followups: [ ... ]
    - confidence: 0.0-1.0
    - source: "catalog" | "none"
-7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+9) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+10) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         # --- User content (SIN CAMBIOS) ---
@@ -9309,12 +9307,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             return False
 
         intent = (decision.get('intent') or 'NO_ACTION').upper()
+        
+        # --- NUEVO: Recalcular interés basado en contexto IA ---
+        nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
         try:
-            recalcular_interes_lead(numero, texto, intent, config)
-            app.logger.info(f"🌡 Interés recalculado para {numero} basado en intent {intent}")
+            recalcular_interes_lead(numero, nivel_interes_ia, config)
+            app.logger.info(f"🌡 Interés recalculado para {numero}: IA detectó contexto {nivel_interes_ia}")
         except Exception as e:
             app.logger.error(f"Error recalculando interés: {e}")
-        respuesta_text = decision.get('respuesta_text') or ""
+        # ------------------------------------------------------
+
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
         document_field = decision.get('document')
