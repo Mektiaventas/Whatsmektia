@@ -309,7 +309,37 @@
             .kanban-column::-webkit-scrollbar-thumb:hover {
                 background: rgba(255, 255, 255, 0.3);
             }
+    /* Estilos para etiquetas de Interés */
+    .badge-interes {
+        font-size: 0.65rem;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 4px; /* Espacio debajo */
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
 
+    .interes-alto {
+        background-color: #ffebee;
+        color: #d32f2f;
+        border: 1px solid #ffcdd2;
+    }
+
+    .interes-medio {
+        background-color: #fff8e1;
+        color: #f57f17;
+        border: 1px solid #ffecb3;
+    }
+
+    .interes-bajo {
+        background-color: #e3f2fd;
+        color: #1976d2;
+        border: 1px solid #bbdefb;
+    }
     /* Encabezado de columna */
     .column-header {
         display: flex;
@@ -440,6 +470,12 @@
             {% for chat in chats if chat.columna_id == col.id %}
             <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
                 <div class="card-content">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                        {% set interes = chat.interes|default('Bajo') %}
+                        {% set clase_int = 'interes-alto' if interes == 'Alto' else ('interes-medio' if interes == 'Medio' else 'interes-bajo') %}
+                        {% set icono_int = '🔥' if interes == 'Alto' else ('⚠️' if interes == 'Medio' else '❄️') %}
+                        <span class="badge-interes {{ clase_int }}">{{ icono_int }} {{ interes }}</span>
+                    </div>
                     <div class="card-top-row">
                         <div class="card-avatar-section">
                             {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
@@ -777,35 +813,53 @@
     }
 
     function actualizarChatExistente(elemento, chat) {
+        // 1. Actualizar Alias/Nombre
         const aliasView = elemento.querySelector('.alias-view');
-        // 1. Actualizar el nombre mostrado si ha cambiado
-        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) aliasView.textContent = chat.nombre_mostrado;
+        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
+            aliasView.textContent = chat.nombre_mostrado;
+        }
 
-        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
+        // 2. --- ACTUALIZAR ETIQUETA DE INTERÉS ---
+        const cardContent = elemento.querySelector('.card-content');
+        if (cardContent) {
+            const nuevoBadgeHTML = generarBadgeInteres(chat.interes);
+            const primerHijo = cardContent.firstElementChild;
+
+            // Verificamos si el primer hijo es nuestro contenedor flex del badge
+            // (Podemos identificarlo por sus estilos inline o si contiene badge-interes)
+            if (primerHijo && primerHijo.tagName === 'DIV' && primerHijo.style.display === 'flex') {
+                // Si ya existe, solo actualizamos si el contenido (el texto del interés) cambió
+                if (!primerHijo.innerHTML.includes(chat.interes)) {
+                    primerHijo.innerHTML = nuevoBadgeHTML;
+                }
+            } else {
+                // Si no existe (tarjeta antigua o estructura previa), lo creamos e insertamos al inicio
+                const div = document.createElement('div');
+                div.style.cssText = "display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;";
+                div.innerHTML = nuevoBadgeHTML;
+                cardContent.insertBefore(div, cardContent.firstChild);
+            }
+        }
+
+        // 3. Actualizar Tiempo
         let fechaFormateada = '';
         const timeElement = elemento.querySelector('.card-bottom-row .card-time');
 
         if (timeElement && chat.ultima_fecha) {
             const fechaObj = new Date(chat.ultima_fecha);
-
-            // Replicar el formato de Jinja (%-d-%b   ) (%H:%M)
             const dia = fechaObj.getDate();
             const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
             const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-            // Construir el formato final exacto: d-mes hh:mm
             fechaFormateada = `${dia}-${mes}   ${hora}`;
 
-            // Compara y actualiza el SPAN del tiempo si es necesario
             if (timeElement.textContent.trim() !== fechaFormateada) {
                 timeElement.textContent = fechaFormateada;
             }
         } else if (timeElement) {
-            timeElement.textContent = ''; // Limpiar el tiempo si no hay fecha
+            timeElement.textContent = '';
         }
-        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL TIEMPO ---
 
-        // --- INICIO: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
+        // 4. Actualizar Mensaje y Animación
         const msgElement = elemento.querySelector('.card-bottom-row .card-msg');
         const nuevoMensaje = chat.ultimo_mensaje || '';
         let mensajeActualizado = false;
@@ -817,21 +871,18 @@
             }
         }
 
-        // Aplicar la animación si el mensaje fue actualizado y no está vacío
         if (mensajeActualizado) {
             if (nuevoMensaje.trim()) {
                 elemento.classList.add('new-message');
                 setTimeout(() => elemento.classList.remove('new-message'), 2500);
             }
         }
-        // --- FIN: LÓGICA DE ACTUALIZACIÓN DEL MENSAJE ---
 
-        // 3. Actualizar el contador de mensajes no leídos
+        // 5. Actualizar Contador de No Leídos
         const unread = elemento.querySelector('.card-unread');
         if (chat.sin_leer > 0) {
             if (unread) unread.textContent = chat.sin_leer;
             else {
-                // Si no existe, lo creamos y lo añadimos
                 const span = document.createElement('span');
                 span.className = 'card-unread';
                 span.textContent = chat.sin_leer;
@@ -846,7 +897,7 @@
         const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
         if (!columna) return;
 
-        // --- INICIO DE LA CORRECCIÓN JS ---
+        // --- Lógica de Plataforma (WhatsApp, Telegram, Messenger) ---
         let avatarSrc = '/static/icons/whatsapp-icon.png';
         let platformClass = 'is-whatsapp';
 
@@ -857,11 +908,10 @@
             avatarSrc = '/static/icons/messenger-icon-dos.png';
             platformClass = 'is-messenger';
         }
-        // --- FIN DE LA CORRECCIÓN JS ---
 
         const bandera = getCountryFlag(chat.numero);
 
-        // Formatear la fecha/hora (Añadido para consistencia con la actualización incremental)
+        // --- Formatear Fecha ---
         let fechaFormateada = '';
         if (chat.ultima_fecha) {
             try {
@@ -873,9 +923,18 @@
             } catch (e) { /* ignorar error de fecha */ }
         }
 
+        // --- Generar Etiqueta de Interés ---
+        const interesBadge = generarBadgeInteres(chat.interes);
+
+        // --- Construir HTML ---
         const html = `
     <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
         <div class="card-content">
+            
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;">
+                ${interesBadge}
+            </div>
+
             <div class="card-top-row">
                 <div class="card-avatar-section">
                     <img src="${avatarSrc}" class="card-avatar" alt="Avatar"
@@ -883,7 +942,7 @@
                     ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
                 </div>
                 <div class="card-name-section">
-                                        <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
+                    <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
                     <span class="alias-edit" style="display:none;">
                         <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
                     </span>
@@ -893,13 +952,16 @@
             <div class="card-bottom-row">
                 <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
                 <div class="card-time">
-                    ${fechaFormateada} </div>
+                    ${fechaFormateada} 
+                </div>
             </div>
         </div>
 
         ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
     </a>`;
+
         columna.insertAdjacentHTML('beforeend', html);
+
         setTimeout(() => {
             const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
             if (el) el.classList.remove('new-message');
@@ -925,7 +987,27 @@
         }
         return null;
     }
+    function generarBadgeInteres(nivel) {
+        if (!nivel) return ''; // Si es null, no mostrar nada
 
+        const n = nivel.toLowerCase();
+        let clase = 'interes-bajo';
+        let icono = '❄️';
+
+        if (n === 'alto') {
+            clase = 'interes-alto';
+            icono = '🔥';
+        } else if (n === 'medio') {
+            clase = 'interes-medio';
+            icono = '⚠️';
+        } else {
+            // Bajo
+            clase = 'interes-bajo';
+            icono = '❄️';
+        }
+
+        return `<span class="badge-interes ${clase}">${icono} ${nivel}</span>`;
+    }
     function inicializarSortable() {
         document.querySelectorAll('.column-list').forEach(list => {
             if (list.dataset.sortableInit === '1') return;
