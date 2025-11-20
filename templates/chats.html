@@ -450,32 +450,23 @@ asi {% extends "base.html" %}
         <script>
             // Funciones para manejar el textarea mejorado
             function handleMessageKeyDown(event) {
+                // chats.html: ~L470
                 if (event.key === 'Enter') {
                     if (event.shiftKey) {
                         // Shift+Enter: Insertar nueva línea
-                        event.preventDefault();
-                        const textarea = event.target;
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const value = textarea.value;
-
-                        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
-                        textarea.selectionStart = textarea.selectionEnd = start + 1;
-
-                        // Actualizar altura
-                        autoResizeTextarea(textarea);
+                        // ... (código existente)
                     } else {
                         // Enter solo: Enviar mensaje inmediatamente
                         event.preventDefault();
                         const form = document.getElementById('messageForm');
                         const textarea = document.getElementById('mensaje-texto');
-                        const fileInput = document.getElementById('file-input');
+                        const fileInput = document.getElementById('file-input'); // <--- NUEVA LÍNEA CLAVE
 
-                        // Validar que haya contenido para enviar
+                        // Validar que haya contenido o archivo para enviar
                         const hasText = textarea.value.trim() !== '';
-                        const hasFile = fileInput.files.length > 0;
+                        const hasFile = fileInput.files.length > 0; // <--- NUEVA LÍNEA CLAVE
 
-                        if (!hasText && !hasFile) {
+                        if (!hasText && !hasFile) { // <--- MODIFICACIÓN CLAVE
                             // No hay nada que enviar
                             return;
                         }
@@ -485,6 +476,7 @@ asi {% extends "base.html" %}
                     }
                 }
             }
+            
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
