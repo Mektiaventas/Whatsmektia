@@ -2281,6 +2281,253 @@ def actualizar_icono_columna(columna_id):
     finally:
         cursor.close(); conn.close()
 
+# --- NUEVAS FUNCIONES DE LEADS, FOLLOWUPS Y SCHEDULER ---
+
+def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
+    """Genera un mensaje de seguimiento. Prioriza mensaje configurado, sino usa IA."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Cargar configuración para ver si hay mensaje personalizado
+        cfg = load_config(config)
+        leads_cfg = cfg.get('leads', {})
+        
+        mensaje_personalizado = ""
+        if tipo_interes == 'tibio':
+            mensaje_personalizado = leads_cfg.get('mensaje_tibio')
+        elif tipo_interes == 'frio':
+            mensaje_personalizado = leads_cfg.get('mensaje_frio')
+        elif tipo_interes == 'dormido':
+            mensaje_personalizado = leads_cfg.get('mensaje_dormido')
+            
+        # Si existe un mensaje configurado por el usuario, USARLO DIRECTAMENTE
+        if mensaje_personalizado and mensaje_personalizado.strip():
+            app.logger.info(f"✅ Usando mensaje personalizado de Leads ({tipo_interes}) para {numero}")
+            return mensaje_personalizado.strip()
+
+        # 2. Si no hay mensaje configurado, usar IA
+        historial = obtener_historial(numero, limite=6, config=config)
+        if not historial:
+            return None 
+            
+        contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
+
+        # Prompt para la IA
+        prompt = f"""
+        Eres un asistente de ventas amable y profesional.
+        El usuario dejó de responder (Estado: {tipo_interes}). Tu objetivo es reactivar la conversación SIN ser molesto.
+        
+        HISTORIAL RECIENTE:
+        {contexto}
+        
+        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado.
+        Responde SOLO con el texto del mensaje.
+        """
+        
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.4,
+            "max_tokens": 100
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        mensaje_seguimiento = response.json()['choices'][0]['message']['content'].strip().replace('"', '')
+        
+        return mensaje_seguimiento
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
+        return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
+
+def procesar_followups_automaticos(config):
+    """
+    Busca chats que necesiten seguimiento.
+    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
+    """
+    try:
+        # Asegurar columnas en cada ejecución para robustez
+        _ensure_chat_meta_followup_columns(config) 
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Consulta actualizada para traer también el estado_seguimiento
+        query = """
+            SELECT 
+                c.numero_telefono as numero,
+                COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
+                cm.ultimo_followup,
+                cm.estado_seguimiento
+            FROM contactos c
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero
+            WHERE c.ultima_interaccion_usuario IS NOT NULL 
+               OR c.timestamp IS NOT NULL
+        """
+        cursor.execute(query)
+        candidatos = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if not candidatos:
+            return
+
+        ahora = datetime.now(tz_mx)
+
+        for chat in candidatos:
+            numero = chat['numero']
+            last_msg = chat['ultima_msg']
+            last_followup = chat['ultimo_followup']
+            ultimo_estado_db = chat.get('estado_seguimiento')
+            
+            if last_msg:
+                if last_msg.tzinfo is None:
+                    last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
+                else:
+                    last_msg = last_msg.astimezone(tz_mx)
+            else:
+                continue
+
+            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
+            if last_followup:
+                if last_followup.tzinfo is None:
+                    last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
+                else:
+                    last_followup = last_followup.astimezone(tz_mx)
+                
+                if last_followup >= last_msg:
+                    continue
+
+            # Calcular tiempo pasado
+            diferencia = ahora - last_msg
+            minutos = diferencia.total_seconds() / 60
+            horas = minutos / 60
+            
+            tipo_interes_calculado = None
+            
+            # --- REGLAS DE TIEMPO ---
+            if horas >= 20:
+                tipo_interes_calculado = 'dormido'
+            elif horas >= 5:
+                tipo_interes_calculado = 'frio'
+            elif minutos >= 30:
+                tipo_interes_calculado = 'tibio'
+            
+            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
+            if tipo_interes_calculado == ultimo_estado_db:
+                continue
+
+            # Si cumple condición y es un estado NUEVO, enviamos
+            if tipo_interes_calculado:
+                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
+                
+                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
+                
+                if texto_followup:
+                    enviado = False
+                    if numero.startswith('tg_'):
+                        token = config.get('telegram_token')
+                        if token:
+                            enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                    else:
+                        enviado = enviar_mensaje(numero, texto_followup, config)
+                    
+                    if enviado:
+                        # Guardar respuesta (al bot mismo como respuesta del sistema)
+                        guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
+                        
+                        # Actualizar DB con fecha Y EL NUEVO ESTADO
+                        conn2 = get_db_connection(config)
+                        cur2 = conn2.cursor()
+                        cur2.execute("""
+                            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
+                            VALUES (%s, NOW(), %s)
+                            ON DUPLICATE KEY UPDATE 
+                                ultimo_followup = NOW(),
+                                estado_seguimiento = %s
+                        """, (numero, tipo_interes_calculado, tipo_interes_calculado))
+                        conn2.commit()
+                        cur2.close()
+                        conn2.close()
+                        
+                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
+
+def start_followup_scheduler():
+    """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
+    def _worker():
+        app.logger.info("⏰ Scheduler de Seguimiento (Interés Medio) INICIADO.")
+        # Usar app.app_context() si las funciones de DB/envío requieren contexto
+        with app.app_context():
+            # Asegurar columnas la primera vez
+            for config in NUMEROS_CONFIG.values():
+                _ensure_chat_meta_followup_columns(config) 
+
+            while True:
+                try:
+                    # Iterar por todos los tenants
+                    for tenant_key, config in NUMEROS_CONFIG.items():
+                        try:
+                            # Procesar en el contexto del tenant
+                            procesar_followups_automaticos(config)
+                        except Exception as e:
+                            app.logger.error(f"Error en scheduler tenant {tenant_key}: {e}")
+                    
+                    app.logger.info("💤 Scheduler durmiendo 30 minutos...")
+                    time.sleep(1800) # 1800 segundos = 30 minutos
+                    
+                except Exception as e:
+                    app.logger.error(f"🔴 Error fatal en hilo scheduler: {e}")
+                    time.sleep(60) # Esperar 1 min antes de reintentar si falla
+
+    t = threading.Thread(target=_worker, daemon=True, name="followup_scheduler")
+    t.start()
+    app.logger.info("✅ Followup scheduler thread launched")
+
+def recalcular_interes_lead(numero, nivel_interes_ia, config):
+    """
+    Define el interés BASE en la base de datos (Caliente/Tibio/Frío/Bajo).
+    """
+    try:
+        _ensure_interes_column(config) # Asegurar que la columna exista
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Contar mensajes del usuario para la regla de "Frío" (solo 1 interacción)
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
+        count_msgs = cursor.fetchone()[0]
+        
+        nuevo_interes_db = 'Tibio' # Default para interacciones
+        
+        # REGLA 1: LEADS FRÍOS (Solo 1 o 0 mensajes del usuario)
+        if count_msgs <= 1:
+            nuevo_interes_db = 'Frío'
+        else:
+            # REGLA 2: CALIENTE (Contexto Específico)
+            if nivel_interes_ia == 'ESPECIFICO':
+                nuevo_interes_db = 'Caliente'
+            
+            # REGLA 3: TIBIO (Contexto General o Bajo, pero ya interactuando)
+            else:
+                nuevo_interes_db = 'Tibio'
+        
+        # Actualizar en DB
+        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return nuevo_interes_db
+    except Exception as e:
+        app.logger.error(f"Error recalculando interés: {e}")
+        return 'Tibio'
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2357,6 +2604,70 @@ def inicializar_kanban_multitenant():
             app.logger.info(f"✅ Kanban inicializado para {config['dominio']}")
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
+
+# --- NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
+
+def _ensure_columna_interaccion_usuario(config=None):
+    """Crea una columna dedicada a guardar SOLO la fecha del último mensaje del USUARIO."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'ultima_interaccion_usuario'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN ultima_interaccion_usuario DATETIME DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'ultima_interaccion_usuario' creada.")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error columna interaccion usuario: {e}")
+
+def _ensure_interes_column(config=None):
+    """Asegura que la tabla contactos tenga la columna interes"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'interes'")
+        if cursor.fetchone() is None:
+            # Por defecto 'Frío'
+            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Frío'")
+            conn.commit()
+            app.logger.info("🔧 Columna 'interes' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
+
+def _ensure_chat_meta_followup_columns(config=None):
+    """Asegura columnas en chat_meta para controlar los seguimientos automáticos."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Columna de fecha
+        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'ultimo_followup'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE chat_meta ADD COLUMN ultimo_followup DATETIME DEFAULT NULL")
+            
+        # 2. NUEVA COLUMNA: Estado del seguimiento (para evitar repetir 'tibio' cada hora)
+        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'estado_seguimiento'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE chat_meta ADD COLUMN estado_seguimiento VARCHAR(20) DEFAULT NULL")
+            
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("🔧 Columnas de seguimiento aseguradas en chat_meta")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error asegurando columnas followup: {e}")
+
+# --- FIN NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
@@ -3335,11 +3646,16 @@ def get_country_flag(numero):
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
 app.add_template_filter(get_country_flag, 'bandera')
 
+# app.py (Reemplazar kanban_data)
+
 @app.route('/kanban/data')
 def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
+        # Asegurar columna de interés
+        _ensure_interes_column(config) 
+
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         col_asesores_id = obtener_id_columna_asesores(config)
@@ -3348,7 +3664,6 @@ def kanban_data(config=None):
         # Lógica para mover chats de asesores a la columna "Asesores" si existe
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
-            # Mover a la columna de asesores si el número es de un asesor
             cursor.execute(f"""
                 UPDATE chat_meta
                 SET columna_id = %s
@@ -3356,6 +3671,7 @@ def kanban_data(config=None):
             """, (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
             app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
+            
         # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
@@ -3372,7 +3688,8 @@ def kanban_data(config=None):
                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                MAX(cont.interes) as interes_db -- 🔥 NUEVA COLUMNA DE INTERÉS
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -3381,20 +3698,41 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # Convertir timestamps a ISO strings en zona tz_mx para JSON
+        # --- CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
+        ahora = datetime.now(tz_mx)
+
         for chat in chats:
+            # 1. Interés base de la DB
+            interes_final = chat.get('interes_db') or 'Frío'
+            
+            # 2. Aplicar Regla de TIEMPO (Dormidos)
             if chat.get('ultima_fecha'):
                 try:
-                    if chat['ultima_fecha'].tzinfo is None:
-                        chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx).isoformat()
+                    fecha_msg = chat['ultima_fecha']
+                    if fecha_msg.tzinfo is None:
+                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
                     else:
-                        chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx).isoformat()
-                except Exception:
-                    # Fallback: intentar str() si algo raro ocurre
-                    try:
-                        chat['ultima_fecha'] = str(chat['ultima_fecha'])
-                    except:
-                        chat['ultima_fecha'] = None
+                        fecha_msg = fecha_msg.astimezone(tz_mx)
+                    
+                    # Calcular horas pasadas desde la última interacción
+                    horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
+                    
+                    # REGLA: Si pasan más de 20 horas -> DORMIDO 😴
+                    if horas_pasadas > 20:
+                        interes_final = 'Dormido'
+                    
+                    # Formato ISO para frontend
+                    chat['ultima_fecha'] = fecha_msg.isoformat()
+                    
+                except Exception as e:
+                    app.logger.error(f"Error fecha {chat['numero']}: {e}")
+                    chat['ultima_fecha'] = str(chat['ultima_fecha'])
+            else:
+                interes_final = 'Dormido'
+                chat['ultima_fecha'] = None
+            
+            # Asignar el resultado final para el Frontend
+            chat['interes'] = interes_final
 
         cursor.close()
         conn.close()
@@ -3402,7 +3740,6 @@ def kanban_data(config=None):
         return jsonify({
             'columnas': columnas,
             'chats': chats,
-            # Use milliseconds epoch so clients that compare with Date.now() work reliably
             'timestamp': int(time.time() * 1000),
             'total_chats': len(chats)
         })
@@ -4763,6 +5100,8 @@ def ver_citas(config=None):
     
     return render_template('citas.html', citas=citas)
 
+# --- EN app.py (Reemplazar load_config) ---
+
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4771,6 +5110,7 @@ def load_config(config=None):
     
     # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
     try:
+        # Nota: La lista de columnas aquí DEBE coincidir con la lista en save_config
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS configuracion (
                 id INT PRIMARY KEY DEFAULT 1,
@@ -4829,7 +5169,7 @@ def load_config(config=None):
             'restricciones': {}, 
             'asesores': {}, 
             'asesores_list': [],
-            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''}
+            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''} # <-- AÑADIDO
         }
 
     # ... (resto del mapeo de campos igual que antes) ...
@@ -4862,13 +5202,14 @@ def load_config(config=None):
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
     
+    # --- Mapeo de campos de leads ---
     leads = {
         'mensaje_tibio': row.get('mensaje_tibio', ''),
         'mensaje_frio': row.get('mensaje_frio', ''),
         'mensaje_dormido': row.get('mensaje_dormido', '')
     }
 
-    # ... (Lógica de asesores existente) ...
+    # ... (Lógica de asesores existente sin cambios) ...
     asesores_list = []
     asesores_map = {}
     try:
@@ -4917,7 +5258,7 @@ def load_config(config=None):
         'restricciones': restricciones,
         'asesores': asesores_map,
         'asesores_list': asesores_list,
-        'leads': leads
+        'leads': leads # <-- DEVOLVER EL MAPEO DE LEADS
     }
 
 def save_config(cfg_all, config=None):
@@ -8950,6 +9291,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             negocio_cfg = (cfg_full.get('negocio') or {})
             negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
             negocio_que_hace = (negocio_cfg.get('que_hace') or '').strip()
+            contexto_adicional = (negocio_cfg.get('contexto_adicional') or '').strip()
             MAX_CFG_CHARS = 5000
             negocio_descripcion_short = negocio_descripcion[:MAX_CFG_CHARS]
             negocio_que_hace_short = negocio_que_hace[:MAX_CFG_CHARS]
@@ -8976,7 +9318,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if transcripcion:
                 multimodal_info += f"Transcripción: {transcripcion}\n"
 
-        # --- System prompt (SIN CAMBIOS) ---
+        # --- System prompt (ACTUALIZADO PARA CONTEXTO DE INTERÉS) ---
         system_prompt = f"""
 Eres el asistente conversacional del negocio. Tu tarea: decidir la intención del usuario y preparar exactamente lo
 que el servidor debe ejecutar. Dispones de:
@@ -8987,7 +9329,7 @@ que el servidor debe ejecutar. Dispones de:
 - Descripción del negocio: {negocio_descripcion_short}
 - Cual es tu rol?: {negocio_que_hace_short}
 - Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
-
+- Estos son temas que si llegan a aparecer en el mensaje, debes de pasar a un asesor {contexto_adicional}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
@@ -8997,9 +9339,15 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 4) Si el usuario solicita un PDF/catálogo/folleto y hay un documento publicado, responde con intent=ENVIAR_DOCUMENTO y document debe contener la URL o el identificador del PDF; si no hay PDF disponible, devuelve intent=RESPONDER_TEXTO y explica que "no hay PDF publicado".
 5) Responde SOLO con un JSON válido (objeto) en la parte principal de la respuesta. No incluyas texto fuera del JSON.
 6) Devuelve intent == DATOS_TRANSFERENCIA si el usuario pregunta por "datos de transferencia", "cuenta bancaria", "cómo hacer la transferencia" o similares y el usuario no esta en proceso de compra.
-7) El JSON debe tener estas claves mínimas:
+7) CLASIFICACIÓN DE CONTEXTO (Campo 'nivel_interes'):
+   - "ESPECIFICO": El usuario pregunta por un producto concreto, precio exacto, características técnicas, disponibilidad, o muestra intención clara de compra/cita.
+   - "GENERAL": El usuario hace preguntas abiertas (ubicación, horarios, "qué venden", "info general") sin profundizar en un producto específico.
+   - "BAJO": Saludos simples ("Hola", "Buenos días"), mensajes cortos sin intención clara, o agradecimientos finales.
+
+8) El JSON debe tener estas claves mínimas:
    - intent: one of ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","GUARDAR_CITA","PASAR_ASESOR","COMPRAR_PRODUCTO","SOLICITAR_DATOS","NO_ACTION","ENVIAR_CATALOGO","ENVIAR_TEMARIO","ENVIAR_FLYER","ENVIAR_PDF","COTIZAR"]
    - respuesta_text: string
+   - nivel_interes: "ESPECIFICO" | "GENERAL" | "BAJO"
    - image: filename_or_url_or_null
    - document: url_or_null
    - save_cita: object|null
@@ -9007,8 +9355,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
    - followups: [ ... ]
    - confidence: 0.0-1.0
    - source: "catalog" | "none"
-7) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
-8) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
+9) Si no estás seguro, usa NO_ACTION con confidence baja (<0.4).
+10) Mantén respuesta_text concisa (1-6 líneas) y no incluyas teléfonos ni tokens.
 """
 
         # --- User content (SIN CAMBIOS) ---
@@ -9071,6 +9419,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             return False
 
         intent = (decision.get('intent') or 'NO_ACTION').upper()
+        
+        # --- NUEVO: Recalcular interés basado en contexto IA ---
+        nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
+        try:
+            recalcular_interes_lead(numero, nivel_interes_ia, config)
+            app.logger.info(f"🌡 Interés recalculado para {numero}: IA detectó contexto {nivel_interes_ia}")
+        except Exception as e:
+            app.logger.error(f"Error recalculando interés: {e}")
+        # ------------------------------------------------------
+
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
         document_field = decision.get('document')
@@ -12145,15 +12503,13 @@ def actualizar_columna_chat(numero, columna_id, config=None):
 
 
 def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma=None):
-    """
-    Actualiza la información del contacto y gestiona el conteo de conversaciones
-    usando la columna 'timestamp' para la ventana de 24 horas.
-    """
     if config is None:
         config = obtener_configuracion_por_host()
     
     # Asegurar que las columnas existan
     _ensure_contactos_conversaciones_columns(config)
+    _ensure_interes_column(config) # <--- NUEVA COLUMNA DE INTERÉS
+    _ensure_columna_interaccion_usuario(config) # <--- NUEVA COLUMNA DE ÚLTIMA INTERACCIÓN
 
     conn = None
     cursor = None
@@ -12161,52 +12517,39 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # --- LÓGICA DE ACTUALIZACIÓN CONTEO DE CONVERSACIONES (24 HORAS) ---
-
-        nombre_a_usar = nombre_perfil  # <-- CAMBIO AQUÍ
+        nombre_a_usar = nombre_perfil
         plataforma_a_usar = plataforma or 'WhatsApp'
         
-        # Insertar o actualizar el contacto
-        # La lógica de conteo condicional se implementa en ON DUPLICATE KEY UPDATE
-        
+        # Lógica: Al llegar un mensaje del USUARIO (webhook), actualizamos 'ultima_interaccion_usuario'
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario) 
             VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
-                    -- Al insertar por primera vez, el valor inicial es 1 y el timestamp es NOW().
-                    -- Si hay un duplicado, esta lógica se ignora en la fase INSERT.
-                    1, UTC_TIMESTAMP())
+                    1, UTC_TIMESTAMP(), 'Frío', UTC_TIMESTAMP()) 
             ON DUPLICATE KEY UPDATE 
                 -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = UTC_TIMESTAMP(),
+                ultima_interaccion_usuario = UTC_TIMESTAMP(), -- 👈 AQUÍ GUARDAMOS LA HORA REAL DEL USUARIO
                 
                 -- Lógica condicional para actualizar el contador de conversaciones
                 -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
                 conversaciones = conversaciones + 
                                  CASE 
-                                     -- 1. Si el timestamp es NULL (registro antiguo/primer uso de la columna)
                                      WHEN timestamp IS NULL THEN 1
-                                     -- 2. Si la diferencia es > 24 horas (86400 segundos)
                                      WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
                                      ELSE 0
                                  END,
-                                 
                 -- Lógica condicional para actualizar el timestamp
-                -- SE ACTUALIZA con UTC_TIMESTAMP() si se cumple la misma condición de arriba
                 timestamp = CASE 
-                                -- 1. Si el timestamp es NULL
                                 WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                                -- 2. Si la diferencia es > 24 horas
                                 WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
-                                -- Si no, mantener el valor actual de timestamp
                                 ELSE timestamp
                             END
         """
         
         cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
-        
         conn.commit()
         app.logger.info(f"✅ Información de contacto y conteo de conversaciones actualizado para {numero}")
         
@@ -12292,6 +12635,7 @@ with app.app_context():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
+    start_followup_scheduler()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
