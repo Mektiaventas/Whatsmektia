@@ -801,7 +801,8 @@ def guardar_configuracion_negocio():
         'calendar_email': request.form.get('calendar_email'),  # Nuevo campo para correo de notificaciones
         'transferencia_numero': request.form.get('transferencia_numero'),
         'transferencia_nombre': request.form.get('transferencia_nombre'),
-        'transferencia_banco': request.form.get('transferencia_banco')
+        'transferencia_banco': request.form.get('transferencia_banco'),
+        'contexto_adicional': request.form.get('contexto_adicional')
     }
     
     # Manejar la subida del logo
@@ -901,14 +902,23 @@ def guardar_configuracion_negocio():
             app.logger.info("ℹ️ No hay campos nuevos para actualizar en configuracion")
     else:
         # Insertar nueva configuración
-        fields = ', '.join(datos.keys())
-        placeholders = ', '.join(['%s'] * len(datos))
+        
+        # 1. Filtrar valores None o cadena vacía para asegurar que el SQL sea exacto
+        insert_data = {k: v for k, v in datos.items() if v is not None and v != ''}
+        
+        fields = ', '.join(insert_data.keys())
+        placeholders = ', '.join(['%s'] * len(insert_data))
+        
+        # La declaración SQL incluye 'id' explícitamente
         sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
+        
         try:
-            cursor.execute(sql, [1] + list(datos.values()))
+            # Los valores son [1] + [todos los valores filtrados]
+            cursor.execute(sql, [1] + list(insert_data.values()))
+            conn.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando configuración nueva: {e}")
-            # Intentar crear tabla mínima por compatibilidad básica
+            app.logger.error(f"🔴 Error insertando configuración nueva (FIXED): {e}")
+            # Intentar crear tabla mínima (tu lógica de reparación sigue aquí)
             try:
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS configuracion (
@@ -916,10 +926,12 @@ def guardar_configuracion_negocio():
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """)
                 conn.commit()
-                cursor.execute(sql, [1] + list(datos.values()))
+                # Reintento con los campos filtrados
+                cursor.execute(sql, [1] + list(insert_data.values()))
             except Exception as e2:
                 app.logger.error(f"🔴 Falló intento de reparación al insertar configuracion: {e2}")
-    
+                # Re-lanzar el error para que Flask lo maneje si la reparación falla
+                raise
     try:
         conn.commit()
     except Exception:
