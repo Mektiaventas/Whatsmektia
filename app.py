@@ -903,23 +903,34 @@ def guardar_configuracion_negocio():
     else:
         # Insertar nueva configuración
         
-        # 1. Filtrar valores None o cadena vacía para asegurar que el SQL sea exacto
+        # 1. Filtrar valores None o cadena vacía para asegurar la lista de parámetros
         insert_data = {k: v for k, v in datos.items() if v is not None and v != ''}
         
-        fields = ', '.join(insert_data.keys())
-        placeholders = ', '.join(['%s'] * len(insert_data))
+        # 2. Preparar listas SQL (incluir ID explícitamente)
+        dynamic_fields = ', '.join(insert_data.keys())
+        dynamic_placeholders = ', '.join(['%s'] * len(insert_data))
         
-        # La declaración SQL incluye 'id' explícitamente
-        sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
+        # 3. Construir SQL statement: (id, campo1, campo2, ...) VALUES (1, %s, %s, ...)
+        sql_fields = f"id, {dynamic_fields}"
+        sql_placeholders = f"1, {dynamic_placeholders}"
+        
+        # 4. Construir SQL completo
+        sql = f"INSERT INTO configuracion ({sql_fields}) VALUES ({sql_placeholders})"
+
+        # 5. Construir la lista de valores: [todos los valores filtrados]
+        # NOTA: La lista de valores NO debe incluir el '1' para el ID, ya que el placeholder del ID es '1' en el SQL, no '%s'.
+        values_to_pass = list(insert_data.values())
         
         try:
-            # Los valores son [1] + [todos los valores filtrados]
-            cursor.execute(sql, [1] + list(insert_data.values()))
+            # Ejecutar con la lista de valores filtrados. (El '1' del ID es fijo en la sentencia SQL)
+            cursor.execute(sql, values_to_pass) 
             conn.commit()
+            
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando configuración nueva (FIXED): {e}")
-            # Intentar crear tabla mínima (tu lógica de reparación sigue aquí)
+            app.logger.error(f"🔴 Error insertando configuración nueva (FINAL ATTEMPT): {e}")
+            # Intentar crear tabla mínima (tu lógica de reparación de tabla)
             try:
+                # ... (Lógica de reparación aquí) ...
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS configuracion (
                         id INT PRIMARY KEY DEFAULT 1
@@ -927,10 +938,9 @@ def guardar_configuracion_negocio():
                 """)
                 conn.commit()
                 # Reintento con los campos filtrados
-                cursor.execute(sql, [1] + list(insert_data.values()))
+                cursor.execute(sql, values_to_pass)
             except Exception as e2:
                 app.logger.error(f"🔴 Falló intento de reparación al insertar configuracion: {e2}")
-                # Re-lanzar el error para que Flask lo maneje si la reparación falla
                 raise
     try:
         conn.commit()
