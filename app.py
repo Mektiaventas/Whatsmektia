@@ -3332,7 +3332,7 @@ def get_country_flag(numero):
     # Si no se detectó prefijo de país conocido ni era Telegram
     return url_for('static', filename='icons/whatsapp-icon.png')
 
-SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores']
+SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
 app.add_template_filter(get_country_flag, 'bandera')
 
 @app.route('/kanban/data')
@@ -4768,49 +4768,71 @@ def load_config(config=None):
         config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS configuracion (
-            id INT PRIMARY KEY DEFAULT 1,
-            ia_nombre VARCHAR(100),
-            negocio_nombre VARCHAR(100),
-            descripcion TEXT,
-            url VARCHAR(255),
-            direccion VARCHAR(255),
-            telefono VARCHAR(50),
-            correo VARCHAR(100),
-            que_hace TEXT,
-            tono VARCHAR(50),
-            lenguaje VARCHAR(50),
-            restricciones TEXT,
-            palabras_prohibidas TEXT,
-            max_mensajes INT DEFAULT 10,
-            tiempo_max_respuesta INT DEFAULT 30,
-            logo_url VARCHAR(255),
-            nombre_empresa VARCHAR(100),
-            app_logo VARCHAR(255),
-            calendar_email VARCHAR(255),
-            transferencia_numero VARCHAR(100),
-            transferencia_nombre VARCHAR(200),
-            transferencia_banco VARCHAR(100),
-            -- Asesores de ventas (columnas antiguas para compatibilidad)
-            asesor1_nombre VARCHAR(100),
-            asesor1_telefono VARCHAR(50),
-            asesor1_email VARCHAR(150),
-            asesor2_nombre VARCHAR(100),
-            asesor2_telefono VARCHAR(50),
-            asesor2_email VARCHAR(150),
-            -- Nueva columna JSON que puede contener lista arbitraria de asesores
-            asesores_json TEXT
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-    ''')
+    
+    # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS configuracion (
+                id INT PRIMARY KEY DEFAULT 1,
+                ia_nombre VARCHAR(100),
+                negocio_nombre VARCHAR(100),
+                descripcion TEXT,
+                url VARCHAR(255),
+                direccion VARCHAR(255),
+                telefono VARCHAR(50),
+                correo VARCHAR(100),
+                que_hace TEXT,
+                tono VARCHAR(50),
+                lenguaje VARCHAR(50),
+                contexto_adicional TEXT,
+                restricciones TEXT,
+                palabras_prohibidas TEXT,
+                max_mensajes INT DEFAULT 10,
+                tiempo_max_respuesta INT DEFAULT 30,
+                logo_url VARCHAR(255),
+                nombre_empresa VARCHAR(100),
+                app_logo VARCHAR(255),
+                calendar_email VARCHAR(255),
+                transferencia_numero VARCHAR(100),
+                transferencia_nombre VARCHAR(200),
+                transferencia_banco VARCHAR(100),
+                asesor1_nombre VARCHAR(100),
+                asesor1_telefono VARCHAR(50),
+                asesor1_email VARCHAR(150),
+                asesor2_nombre VARCHAR(100),
+                asesor2_telefono VARCHAR(50),
+                asesor2_email VARCHAR(150),
+                asesores_json TEXT,
+                mensaje_tibio TEXT,
+                mensaje_frio TEXT,
+                mensaje_dormido TEXT
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+        ''')
+        # Consumir cualquier resultado pendiente del CREATE TABLE para limpiar el cursor
+        cursor.fetchall() 
+    except Exception as e:
+        # Si la tabla ya existe o hay warning, lo ignoramos pero seguimos
+        pass
+    
+    # 2. Ejecutar SELECT (ahora el cursor está limpio)
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     row = cursor.fetchone()
+    
     cursor.close()
     conn.close()
 
     if not row:
-        return {'negocio': {}, 'personalizacion': {}, 'restricciones': {}, 'asesores': {}, 'asesores_list': []}
+        # Retornar estructura vacía con defaults para evitar KeyErrors
+        return {
+            'negocio': {}, 
+            'personalizacion': {}, 
+            'restricciones': {}, 
+            'asesores': {}, 
+            'asesores_list': [],
+            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''}
+        }
 
+    # ... (resto del mapeo de campos igual que antes) ...
     negocio = {
         'ia_nombre': row.get('ia_nombre'),
         'negocio_nombre': row.get('negocio_nombre'),
@@ -4818,6 +4840,7 @@ def load_config(config=None):
         'url': row.get('url'),
         'direccion': row.get('direccion'),
         'telefono': row.get('telefono'),
+        'contexto_adicional': row.get('contexto_adicional', ''),
         'correo': row.get('correo'),
         'que_hace': row.get('que_hace'),
         'logo_url': row.get('logo_url', ''),
@@ -4826,7 +4849,7 @@ def load_config(config=None):
         'calendar_email': row.get('calendar_email', ''),
         'transferencia_numero': row.get('transferencia_numero', ''),
         'transferencia_nombre': row.get('transferencia_nombre', ''),
-        'transferencia_banco': row.get('transferencia_banco', '')
+        'transferencia_banco': row.get('transferencia_banco', ''),
     }
     personalizacion = {
         'tono': row.get('tono'),
@@ -4838,8 +4861,14 @@ def load_config(config=None):
         'max_mensajes': row.get('max_mensajes', 10),
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
+    
+    leads = {
+        'mensaje_tibio': row.get('mensaje_tibio', ''),
+        'mensaje_frio': row.get('mensaje_frio', ''),
+        'mensaje_dormido': row.get('mensaje_dormido', '')
+    }
 
-    # Manejo de asesores: preferir columna JSON si existe, si no usar columnas antiguas
+    # ... (Lógica de asesores existente) ...
     asesores_list = []
     asesores_map = {}
     try:
@@ -4848,7 +4877,6 @@ def load_config(config=None):
             try:
                 parsed = json.loads(asesores_json)
                 if isinstance(parsed, list):
-                    # Ensure each advisor dict includes nombre, telefono, email keys
                     for a in parsed:
                         if isinstance(a, dict):
                             asesores_list.append({
@@ -4856,15 +4884,14 @@ def load_config(config=None):
                                 'telefono': (a.get('telefono') or '').strip(),
                                 'email': (a.get('email') or '').strip()
                             })
-                    # Build map for backward compatibility (asesor1_nombre, etc.)
                     for idx, a in enumerate(asesores_list, start=1):
                         asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
                         asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
                         asesores_map[f'asesor{idx}_email'] = a.get('email', '')
             except Exception:
-                app.logger.warning("⚠️ No se pudo parsear asesores_json, fallback a columnas individuales")
+                pass
         if not asesores_list:
-            # Fallback: legacy columns (asesor1, asesor2)
+            # Fallback legacy
             a1n = (row.get('asesor1_nombre') or '').strip()
             a1t = (row.get('asesor1_telefono') or '').strip()
             a1e = (row.get('asesor1_email') or '').strip()
@@ -4881,63 +4908,18 @@ def load_config(config=None):
                 asesores_map['asesor2_nombre'] = a2n
                 asesores_map['asesor2_telefono'] = a2t
                 asesores_map['asesor2_email'] = a2e
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error procesando asesores: {e}")
+    except Exception:
+        pass
 
-    # Return both map (backward compat) and list (preferred)
     return {
         'negocio': negocio,
         'personalizacion': personalizacion,
         'restricciones': restricciones,
-        'asesores': asesores_map if 'asesores_map' in locals() else {},
-        'asesores_list': asesores_list if 'asesores_list' in locals() else []
+        'asesores': asesores_map,
+        'asesores_list': asesores_list,
+        'leads': leads
     }
-# app.py (Añadir en la línea 4776)
 
-@app.route('/configuracion/precios/columnas', methods=['POST'])
-@login_required
-def save_columnas_precios():
-    """Guarda las columnas ocultas para el tenant y la tabla actual."""
-    config = obtener_configuracion_por_host()
-    data = request.get_json(silent=True) or {}
-    table_name = data.get('table')
-    hidden_map = data.get('hidden', {})
-
-    if not table_name:
-        return jsonify({'error': 'table name required'}), 400
-
-    # Convertir el mapa (dict) a un string JSON para guardarlo
-    hidden_json = json.dumps(hidden_map) if hidden_map else None
-    tenant = config.get('dominio')
-
-    conn = None
-    cursor = None
-    try:
-        conn = get_db_connection(config)
-        # Asegurarse de que la tabla exista (esta función ya la tienes)
-        _ensure_columnas_precios_table(conn) 
-        cursor = conn.cursor()
-
-        # Usar INSERT ... ON DUPLICATE KEY UPDATE para guardar o actualizar
-        cursor.execute("""
-            INSERT INTO columnas_precios (tenant, table_name, hidden_json)
-            VALUES (%s, %s, %s)
-            ON DUPLICATE KEY UPDATE
-                hidden_json = VALUES(hidden_json),
-                updated_at = CURRENT_TIMESTAMP
-        """, (tenant, table_name, hidden_json))
-        
-        conn.commit()
-        app.logger.info(f"💾 Columnas ocultas guardadas para {tenant} / {table_name}")
-        return jsonify({'success': True})
-        
-    except Exception as e:
-        if conn: conn.rollback()
-        app.logger.error(f"🔴 save_columnas_precios error: {e}")
-        return jsonify({'error': str(e)}), 500
-    finally:
-        if cursor: cursor.close()
-        if conn: conn.close()
 def save_config(cfg_all, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4946,7 +4928,7 @@ def save_config(cfg_all, config=None):
     res = cfg_all.get('restricciones', {})
     ases = cfg_all.get('asesores', {})  # map for backward compat
     ases_json = cfg_all.get('asesores_json', None)  # optional JSON string / structure
-
+    leads = cfg_all.get('leads', {})
     conn = get_db_connection(config)
     cursor = conn.cursor()
 
@@ -4959,6 +4941,12 @@ def save_config(cfg_all, config=None):
         existing_cols = set()
 
     alter_statements = []
+    if 'mensaje_tibio' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_tibio TEXT DEFAULT NULL")
+    if 'mensaje_frio' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_frio TEXT DEFAULT NULL")
+    if 'mensaje_dormido' not in existing_cols:
+        alter_statements.append("ADD COLUMN mensaje_dormido TEXT DEFAULT NULL")
     if 'logo_url' not in existing_cols:
         alter_statements.append("ADD COLUMN logo_url VARCHAR(255) DEFAULT NULL")
     if 'calendar_email' not in existing_cols:
@@ -4975,6 +4963,8 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor1_telefono VARCHAR(50) DEFAULT NULL")
     if 'asesor1_email' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor1_email VARCHAR(150) DEFAULT NULL")
+    if 'contexto_adicional' not in existing_cols:
+        alter_statements.append("ADD COLUMN contexto_adicional TEXT DEFAULT NULL")
     if 'asesor2_nombre' not in existing_cols:
         alter_statements.append("ADD COLUMN asesor2_nombre VARCHAR(100) DEFAULT NULL")
     if 'asesor2_telefono' not in existing_cols:
@@ -5005,6 +4995,7 @@ def save_config(cfg_all, config=None):
             'telefono': neg.get('telefono'),
             'correo': neg.get('correo'),
             'que_hace': neg.get('que_hace'),
+            'contexto_adicional': neg.get('contexto_adicional'),
             'tono': per.get('tono'),
             'lenguaje': per.get('lenguaje'),
             'restricciones': res.get('restricciones'),
@@ -5026,7 +5017,10 @@ def save_config(cfg_all, config=None):
             'asesor2_nombre': ases.get('asesor2_nombre', None),
             'asesor2_telefono': ases.get('asesor2_telefono', None),
             'asesor2_email': ases.get('asesor2_email', None),
-            'asesores_json': None
+            'asesores_json': None,
+            'mensaje_tibio': leads.get('mensaje_tibio'),
+            'mensaje_frio': leads.get('mensaje_frio'),
+            'mensaje_dormido': leads.get('mensaje_dormido')
         }
 
         # if caller supplied structured advisors (list or json), normalize to JSON string
@@ -5089,6 +5083,51 @@ def save_config(cfg_all, config=None):
         except:
             pass
         raise
+
+@app.route('/configuracion/precios/columnas', methods=['POST'])
+@login_required
+def save_columnas_precios():
+    """Guarda las columnas ocultas para el tenant y la tabla actual."""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table_name = data.get('table')
+    hidden_map = data.get('hidden', {})
+
+    if not table_name:
+        return jsonify({'error': 'table name required'}), 400
+
+    # Convertir el mapa (dict) a un string JSON para guardarlo
+    hidden_json = json.dumps(hidden_map) if hidden_map else None
+    tenant = config.get('dominio')
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        # Asegurarse de que la tabla exista (esta función ya la tienes)
+        _ensure_columnas_precios_table(conn) 
+        cursor = conn.cursor()
+
+        # Usar INSERT ... ON DUPLICATE KEY UPDATE para guardar o actualizar
+        cursor.execute("""
+            INSERT INTO columnas_precios (tenant, table_name, hidden_json)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                hidden_json = VALUES(hidden_json),
+                updated_at = CURRENT_TIMESTAMP
+        """, (tenant, table_name, hidden_json))
+        
+        conn.commit()
+        app.logger.info(f"💾 Columnas ocultas guardadas para {tenant} / {table_name}")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        app.logger.error(f"🔴 save_columnas_precios error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 
 def obtener_max_asesores_from_planes(default=2, cap=10):
     """
@@ -8344,10 +8383,9 @@ def get_columnas_precios():
 @login_required
 def dashboard_conversaciones_data():
     """
-    Devuelve JSON con:
-    - plan_info (si el usuario está autenticado)
-    - active_count: número de chats con actividad en las últimas 24h
-    - labels/values: por día (conversaciones contadas ese día, usando contactos.timestamp).
+    Devuelve JSON para el gráfico.
+    Métrica principal: COUNT(*) de la tabla 'contactos' agrupado por fecha (created_at).
+    Esto representa 'Nuevos Chats' iniciados por día.
     """
     try:
         config = obtener_configuracion_por_host()
@@ -8357,126 +8395,7 @@ def dashboard_conversaciones_data():
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Caso especial: user asked previously '3months' -> now return up to last 90 days,
-        # but start the series at the first day that actually has data within that window.
-        if period == '3months':
-            # Find last day with data in contactos.timestamp
-            try:
-                cursor.execute("SELECT DATE(MAX(timestamp)) FROM contactos")
-                row = cursor.fetchone()
-                last_day = datetime.now().date() 
-                if row and row[0]:
-                    last_day = row[0].date() if hasattr(row[0], 'date') else datetime.strptime(str(row[0]), "%Y-%m-%d").date()
-            except Exception:
-                last_day = datetime.now().date()
-
-            # Window lower bound (maximum 90 days back)
-            window_start = last_day - timedelta(days=89)
-
-            # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (3 meses)
-            sql = """
-                SELECT DATE(timestamp) as dia, SUM(conversaciones) as cnt
-                FROM contactos
-                WHERE timestamp IS NOT NULL AND DATE(timestamp) BETWEEN %s AND %s
-                GROUP BY DATE(timestamp)
-                ORDER BY DATE(timestamp)
-            """
-            cursor.execute(sql, (window_start, last_day))
-            rows = cursor.fetchall()
-
-            # Map counts by date string 'YYYY-MM-DD'
-            counts_map = {}
-            for r in rows:
-                try:
-                    dia = r[0]
-                    if hasattr(dia, 'strftime'):
-                        key = dia.strftime('%Y-%m-%d')
-                    else:
-                        key = str(dia)
-                    cnt = int(r[1] or 0)
-                    counts_map[key] = cnt
-                except Exception:
-                    continue
-
-            # If there are no days with data in the window, return an empty (or single-day) series
-            if not counts_map:
-                labels = []
-                values = []
-            else:
-                # Find earliest date within counts_map (first day that has data)
-                parsed_dates = [datetime.strptime(k, '%Y-%m-%d').date() for k in counts_map.keys()]
-                earliest_with_data = min(parsed_dates)
-
-                # Ensure earliest_with_data is not earlier than window_start
-                if earliest_with_data < window_start:
-                    earliest_with_data = window_start
-
-                # Build labels from earliest_with_data .. last_day (inclusive)
-                labels = []
-                values = []
-                days_range = (last_day - earliest_with_data).days + 1
-                for i in range(days_range):
-                    d = earliest_with_data + timedelta(days=i)
-                    key = d.strftime('%Y-%m-%d')
-                    labels.append(key)
-                    values.append(counts_map.get(key, 0))
-
-            # Chats activos: distinct numero with message in last 24h
-            # Se sigue usando la tabla 'conversaciones' para esta métrica, ya que requiere el historial de mensajes.
-            cursor.execute("SELECT COUNT(conversaciones) FROM contactos WHERE timestamp >= NOW() - INTERVAL 1 DAY")
-            active_count_row = cursor.fetchone()
-            active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
-
-            cursor.close()
-            conn.close()
-
-            # Plan info if user authenticated
-            plan_info = None
-            try:
-                au = session.get('auth_user')
-                if au and au.get('user'):
-                    plan_info = get_plan_status_for_user(au.get('user'), config=config)
-            except Exception:
-                plan_info = None
-
-            return jsonify({
-                'labels': labels,
-                'values': values,
-                'active_count': active_count,
-                'plan_info': plan_info or {}
-            })
-
-        # --- fallback: previous daily behavior for week/month ---
-        start = now - (timedelta(days=30) if period == 'month' else timedelta(days=7))
-
-        # ✅ NUEVA CONSULTA: Usa contactos.timestamp para el conteo diario (semana/mes)
-        cursor.execute("""
-            SELECT DATE(timestamp) as dia, COUNT(*) as cnt
-            FROM contactos
-            WHERE timestamp IS NOT NULL AND timestamp >= %s
-            GROUP BY DATE(timestamp)
-            ORDER BY DATE(timestamp)
-        """, (start,))
-
-        rows = cursor.fetchall()
-        labels = []
-        values = []
-        for r in rows:
-            dia = r[0]
-            if hasattr(dia, 'strftime'):
-                labels.append(dia.strftime('%Y-%m-%d'))
-            else:
-                labels.append(str(dia))
-            values.append(int(r[1] or 0))
-
-        # Chats activos: distinct numero with message in last 24h (mantiene lógica de historial)
-        cursor.execute("SELECT SUM(conversaciones) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
-        active_count_row = cursor.fetchone()
-        active_count = int(active_count_row[0]) if active_count_row and active_count_row[0] is not None else 0
-
-        cursor.close()
-        conn.close()
-
+        # 1. Plan info (si aplica)
         plan_info = None
         try:
             au = session.get('auth_user')
@@ -8485,15 +8404,89 @@ def dashboard_conversaciones_data():
         except Exception:
             plan_info = None
 
-        return jsonify({ 
+        # 2. Definir ventana de tiempo
+        if period == 'year':
+            # Últimos 12 meses (365 días)
+            start = now - timedelta(days=365)
+        elif period == '3months':
+            # Últimos 90 días
+            start = now - timedelta(days=90)
+        elif period == 'month':
+            # Últimos 30 días
+            start = now - timedelta(days=30)
+        else: 
+            # Default: Última semana (7 días)
+            start = now - timedelta(days=7)
+
+        # 3. CONSULTA SQL: Contar nuevos contactos por día
+        # Usamos DATE(created_at) para ignorar la hora y agrupar solo por día/mes/año
+        sql = """
+            SELECT DATE(created_at) as dia, COUNT(*) as total
+            FROM contactos
+            WHERE created_at >= %s
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall() # Lista de tuplas (dia, total)
+
+        # 4. Procesar datos para rellenar días vacíos con 0
+        counts_map = {}
+        for r in rows:
+            try:
+                # r[0] es la fecha (date object o string), r[1] es el count
+                fecha_str = str(r[0])
+                count = int(r[1])
+                counts_map[fecha_str] = count
+            except Exception:
+                continue
+
+        labels = []
+        values = []
+        
+        # Iterar día por día desde 'start' hasta 'now' para llenar huecos
+        current_date = start.date() if isinstance(start, datetime) else start
+        end_date = now.date()
+        
+        while current_date <= end_date:
+            key = current_date.strftime('%Y-%m-%d')
+            
+            # Formato de etiqueta visual
+            if period == 'year':
+                # Si es anual, mostrar Mes Año (ej: Nov 2024)
+                label_visual = current_date.strftime('%b %Y')
+                # Agrupar visualmente por mes si es necesario, o dejar diario si prefieres detalle
+                # Para simplificar en gráfico anual diario:
+                label_visual = current_date.strftime('%d %b') 
+            elif period == '3months':
+                label_visual = current_date.strftime('%d %b')
+            else:
+                label_visual = current_date.strftime('%d/%m')
+
+            labels.append(label_visual)
+            values.append(counts_map.get(key, 0)) # 0 si no hubo chats ese día
+            
+            current_date += timedelta(days=1)
+
+        # 5. Métrica 'Chats Activos' (Conversaciones distintas en las últimas 24h)
+        # Esto consulta la tabla de mensajes para ver actividad reciente
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        row_active = cursor.fetchone()
+        active_count = int(row_active[0]) if row_active and row_active[0] is not None else 0
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
             'labels': labels,
             'values': values,
             'active_count': active_count,
             'plan_info': plan_info or {}
         })
+
     except Exception as e:
         app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
-        return jsonify({'error': str(e)}), 500 
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
 def reset_columnas_precios():
