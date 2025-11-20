@@ -209,6 +209,18 @@ NUMEROS_CONFIG = {
         # Claves de Messenger
         'messenger_page_id_env': 'LACSE_MESSENGER_PAGE_ID',
         'messenger_token_env': 'LACSE_PAGE_ACCESS_TOKEN'
+    },
+    '1019': {  # Número de Lacse
+        'phone_number_id': os.getenv("SOIN3_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("SOIN3_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("SOIN3_DB_HOST"),                  
+        'db_user': os.getenv("SOIN3_DB_USER"),                  
+        'db_password': os.getenv("SOIN3_DB_PASSWORD"),          
+        'db_name': os.getenv("SOIN3_DB_NAME"),                  
+        'dominio': 'soin3.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'SOIN3_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SOIN3_PAGE_ACCESS_TOKEN'
     }
 }
 
@@ -10211,7 +10223,10 @@ def obtener_configuracion_por_host():
         if 'drasgo' in host:
             app.logger.info("✅ Configuración detectada: Drasgo")
             return NUMEROS_CONFIG['1012']
-
+        # DETECCIÓN SOIN3
+        if 'drasgo' in host:
+            app.logger.info("✅ Configuración detectada: Drasgo")
+            return NUMEROS_CONFIG['1019']
         # DETECCIÓN LACSE
         if 'lacse' in host:
             app.logger.info("✅ Configuración detectada: Lacse")
