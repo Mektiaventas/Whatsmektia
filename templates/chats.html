@@ -2228,7 +2228,7 @@ function normalizeText(s) {
         // Validar antes de enviar
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
-            const hasFile = fileInput.files.length > 0;
+            const hasFile = fileInput.files.length > 0; // <--- ESTO ES CLAVE
 
             if (!hasText && !hasFile) {
                 e.preventDefault();
@@ -2236,7 +2236,7 @@ function normalizeText(s) {
                 return false;
             }
 
-            // Mostrar indicador de envío
+            // Mostrar indicador de envío (Tu lógica actual)
             const sendBtn = document.querySelector('.send-btn');
             const originalText = sendBtn.innerHTML;
             sendBtn.innerHTML = '⏳';
@@ -2247,6 +2247,9 @@ function normalizeText(s) {
                 sendBtn.innerHTML = originalText;
                 sendBtn.disabled = false;
             }, 3000);
+
+            // Permitir el envío del formulario (e.g. form.submit())
+            // Nota: e.preventDefault() no está aquí para permitir el submit si pasa la validación.
         });
 
         console.debug('File upload functionality initialized - WhatsApp style');
