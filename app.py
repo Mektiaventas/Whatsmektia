@@ -12537,15 +12537,15 @@ def actualizar_columna_chat(numero, columna_id, config=None):
             if conn: conn.close()
         except: pass
 
-
 def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
     # Asegurar que las columnas existan
     _ensure_contactos_conversaciones_columns(config)
-    _ensure_interes_column(config) # <--- NUEVA COLUMNA DE INTERÉS
-    _ensure_columna_interaccion_usuario(config) # <--- NUEVA COLUMNA DE ÚLTIMA INTERACCIÓN
+    _ensure_interes_column(config)
+    _ensure_columna_interaccion_usuario(config)
+    _ensure_created_at_column(config) # <--- NUEVA VALIDACIÓN
 
     conn = None
     cursor = None
@@ -12556,38 +12556,46 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         nombre_a_usar = nombre_perfil
         plataforma_a_usar = plataforma or 'WhatsApp'
         
-        # Lógica: Al llegar un mensaje del USUARIO (webhook), actualizamos 'ultima_interaccion_usuario'
+        # 1. Obtener hora actual de México
+        ahora_mx = datetime.now(tz_mx)
+
+        # 2. SQL Modificado: 
+        # - Inserta 'created_at' con hora MX.
+        # - Reemplaza UTC_TIMESTAMP() por %s (ahora_mx).
+        # - Usa VALUES(columna) para usar el valor pasado desde Python en la lógica de actualización.
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario) 
-            VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
-                    1, UTC_TIMESTAMP(), 'Frío', UTC_TIMESTAMP()) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at) 
+            VALUES (%s, %s, %s, %s, 
+                    1, %s, 'Frío', %s, %s) 
             ON DUPLICATE KEY UPDATE 
                 -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
-                fecha_actualizacion = UTC_TIMESTAMP(),
-                ultima_interaccion_usuario = UTC_TIMESTAMP(), -- 👈 AQUÍ GUARDAMOS LA HORA REAL DEL USUARIO
+                fecha_actualizacion = VALUES(fecha_actualizacion),
+                ultima_interaccion_usuario = VALUES(ultima_interaccion_usuario),
                 
                 -- Lógica condicional para actualizar el contador de conversaciones
-                -- SUMA 1 si se cumple la condición de 24 horas O si el registro es antiguo (timestamp IS NULL)
+                -- Compara contra el valor nuevo que estamos intentando insertar (VALUES(timestamp)) que es hora MX
                 conversaciones = conversaciones + 
                                  CASE 
                                      WHEN timestamp IS NULL THEN 1
-                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
+                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN 1
                                      ELSE 0
                                  END,
                 -- Lógica condicional para actualizar el timestamp
                 timestamp = CASE 
-                                WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                                WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
+                                WHEN timestamp IS NULL THEN VALUES(timestamp)
+                                WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN VALUES(timestamp)
                                 ELSE timestamp
                             END
         """
         
-        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
+        # Pasar ahora_mx para todos los campos de tiempo (fecha_actualizacion, timestamp, ultima_interaccion, created_at)
+        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar, ahora_mx, ahora_mx, ahora_mx, ahora_mx))
+        
         conn.commit()
-        app.logger.info(f"✅ Información de contacto y conteo de conversaciones actualizado para {numero}")
+        app.logger.info(f"✅ Información de contacto actualizada (Hora MX: {ahora_mx}) para {numero}")
         
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto {numero}: {e}")
