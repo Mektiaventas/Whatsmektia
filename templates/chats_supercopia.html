@@ -1,0 +1,2145 @@
+﻿{% extends "base.html" %}
+{% block title %}Conversaciones{% endblock %}
+
+{% block content %}
+{% set host = request.host.split(':')[0] %}
+{% set parts = host.split('.') %}
+{% set subdomain = '' %}
+{% if parts|length > 2 %}
+    {% set first = parts[0].lower() %}
+    {% if first.startswith('www') %}
+        {% set subdomain = parts[1] %}
+    {% else %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% elif parts|length == 2 %}
+    {% set first = parts[0].lower() %}
+    {% if not first.startswith('www') %}
+        {% set subdomain = parts[0] %}
+    {% endif %}
+{% else %}
+    {% set subdomain = '' %}
+{% endif %}
+{% set negocio_nombre = subdomain|capitalize if subdomain else (tenant_config.negocio_nombre or 'Mektia') %}
+
+<div class="chat-list-header">
+    <h2>Conversaciones - {{ negocio_nombre }}</h2>
+</div>
+<div class="chat-layout-v2">
+    <!-- Lado izquierdo: Lista -->
+    <aside class="chat-list-v2">
+        <div class="chat-list-tools">
+            <button class="add-contact-btn">+ Agregar Contacto</button>
+            <input type="text" placeholder="Buscar chats..." class="search-input" id="search-chats-input">
+        </div>
+
+        <div class="chat-items">
+            {% for chat in chats %}
+            <a href="/chats/{{ chat.numero }}" class="chat-item kanban-card {% if selected == chat.numero %}selected{% endif %}" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
+                <div class="card-content">
+                    <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                            {% endif %}
+
+                            <img src="{{ avatar_src }}" class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            {% set bandera = chat.numero | bandera %}
+                            {% if bandera %}
+                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% endif %}
+                        </div>
+                        <div class="card-name-section">
+                            {% set platform_class = 'is-telegram' if chat.canal == 'Telegram' or chat.numero.startswith('tg_') else 'is-whatsapp' %}
+                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}">{{ chat.nombre_mostrado }}</span>
+                        </div>
+                    </div>
+
+                    <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
+                    <div class="card-bottom-row">
+                        <div class="card-msg">
+                            {% if chat.ultimo_mensaje %}
+                            {% if chat.tipo_mensaje == 'imagen' %}
+                            📷 Imagen
+                            {% else %}
+                            {{ chat.ultimo_mensaje[:35] }}{% if chat.ultimo_mensaje|length > 35 %}...{% endif %}
+                            {% endif %}
+                            {% else %}
+                            &nbsp;
+                            {% endif %}
+                        </div>
+                        <div class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    <!-- Indicador de mensajes no leídos -->
+                    {% if chat.sin_leer and chat.sin_leer > 0 %}
+                    <span class="card-unread">{{ chat.sin_leer }}</span>
+                    {% endif %}
+                </div>
+            </a>
+            {% endfor %}
+        </div>
+    </aside>
+
+    <!-- Centro: Mensajes -->
+    <section class="chat-panel-v2">
+        {% if selected %}
+        <div class="chat-panel-header" data-num="{{ selected }}">
+            <div class="chat-header-info">
+                <div class="chat-title">
+                    {% set selected_chat = (chats | selectattr("numero", "equalto", selected) | first) %}
+                    {% set avatar_src_header = '/static/icons/whatsapp-icon.png' %}
+                    {% if selected and (selected.startswith('tg_') or (selected_chat and selected_chat.canal == 'Telegram')) %}
+                    {% set avatar_src_header = '/static/icons/telegram-icon-dos.png' %}
+                    {% endif %}
+
+                    <img src="{{ avatar_src_header }}" class="card-avatar" alt="Avatar"
+                         style="width: 24px; height: 24px; border-radius: 4px; margin-right: 6px;">
+
+                    <span class="alias-view" data-num="{{ selected }}">
+                        {{ selected_chat.nombre_mostrado if selected_chat else selected }}
+                    </span>
+
+                    {% if is_admin %}
+                    <span class="alias-edit" style="display:none;">
+                        {% set chat_info = (chats | selectattr('numero', 'equalto', selected) | first) %}
+                        <input type="text"
+                               value="{{ chat_info.alias if chat_info and chat_info.alias else (chat_info.nombre if chat_info and chat_info.nombre else selected) }}"
+                               data-num="{{ selected }}"
+                               maxlength="100"
+                               style="width:110px;">
+                    </span>
+                    <button type="button" class="edit-alias-btn" data-num="{{ selected }}" title="Editar nombre">✏️</button>
+                    {% endif %}
+                </div>
+                <span class="chat-number">{{ selected }}</span>
+            </div>
+
+            <div class="chat-controls">
+                <span class="badge {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}bg-success{% else %}bg-warning{% endif %}">
+                    {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                    🤖 IA ACTIVADA
+                    {% else %}
+                    👤 MODO MANUAL
+                    {% endif %}
+                </span>
+                <form action="/toggle_ai/{{ selected }}" method="POST">
+                    <button type="submit" class="toggle-btn {{ 'on' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'off' }}">
+                        IA {{ 'ON' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'OFF' }}
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% else %}
+        <div class="chat-panel-header">
+            <span>Selecciona un chat</span>
+        </div>
+        {% endif %}
+        <div class="msgs-wrap-v2" id="msgs">
+            {% if mensajes %}
+            {% for msg in mensajes %}
+            {% if msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
+                <div class="message-content">
+                    {% if msg.es_imagen and msg.imagen_url %}
+                    <div class="image-message">
+                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
+                        {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
+                        <div class="image-caption">
+                            {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.contenido_extra }}" type="audio/ogg">
+                            <source src="{{ msg.contenido_extra }}" type="audio/mpeg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.contenido_extra }}" download="audio-mensaje.ogg" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+                        {% if msg.transcripcion_audio %}
+                        <div class="audio-transcription">
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                        </div>
+                        {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
+                        <div class="audio-transcription">
+                            <strong>Mensaje:</strong> {{ msg.mensaje }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="text-message" style="white-space: normal; line-height: 1.2;">
+                        {{ msg.mensaje | safe }}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if msg.mensaje == '[Mensaje manual desde web]' and msg.respuesta %}
+            <div class="msg-box msg-manual">
+                <div class="message-content">
+                    <div class="manual-indicator">📤 Mensaje enviado:</div>
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
+                    </div>
+                </div>
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if msg.respuesta and msg.respuesta != '[Respuesta vacía]' and msg.mensaje != '[Mensaje manual desde web]' %}
+            <div class="msg-box msg-ai" data-msg-id="{{ msg.id if msg.id else '' }}">
+                <div class="message-content">
+
+                    {% if msg.respuesta_tipo_mensaje == 'imagen' and msg.respuesta_contenido_extra %}
+                    <div class="image-message">
+                        <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
+                        {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
+                        <div class="image-caption">
+                            {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %}
+                    <div class="audio-player">
+                        <audio id="audio-bot-{{ loop.index }}" class="whatsapp-audio">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/mpeg">
+                            <source src="{{ msg.respuesta_contenido_extra }}" type="audio/ogg">
+                            Tu navegador no soporta el elemento de audio.
+                        </audio>
+                        <div class="audio-controls">
+                            <button class="audio-play-btn" onclick="toggleAudio('audio-bot-{{ loop.index }}', this)">
+                                ▶️
+                            </button>
+                            <div class="audio-progress" onclick="seekAudio('audio-bot-{{ loop.index }}', this, event)">
+                                <div class="audio-progress-bar"></div>
+                            </div>
+                            <span class="audio-duration" id="duration-bot-{{ loop.index }}">0:00</span>
+                            <a href="{{ msg.respuesta_contenido_extra }}" download="audio-respuesta.mp3" class="audio-download-btn" title="Descargar audio">
+                                ⬇️
+                            </a>
+                        </div>
+                        {% if msg.respuesta %}
+                        <div class="audio-transcription">
+                            <strong>Respuesta:</strong> {{ msg.respuesta }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% else %}
+                    <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
+                        {{ msg.respuesta | whatsapp_format | safe }}
+                    </div>
+                    {% endif %}
+
+                </div>
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+                    {% if msg.timestamp %}
+                    {{ msg.timestamp.strftime('%-d-') }}{{ msg.timestamp.strftime('%b').lower() }}   {{ msg.timestamp.strftime('%H:%M') }}
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% else %}
+            <div class="no-chat-selected">
+                <p>Selecciona un chat para ver mensajes.</p>
+            </div>
+            {% endif %}
+        </div>
+
+
+        {% if selected %}
+        {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
+        <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
+            <input type="hidden" name="numero" value="{{ selected }}">
+
+            <!-- Preview de archivo seleccionado -->
+            <div id="file-preview-container" style="width: 100%; order: -1;">
+                <div id="file-preview" class="file-preview" style="display: none; padding: 12px; background: #f0f0f0; border-radius: 8px; margin: 0 10px 10px 10px; border: 1px dashed #ccc;">
+                    <div class="file-preview-content" style="display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center; gap: 10px;">
+                            <span id="file-icon" style="font-size: 24px;"></span>
+                            <div>
+                                <div id="file-name" style="font-weight: bold; font-size: 14px;"></div>
+                                <div id="file-size" style="font-size: 12px; color: #666;"></div>
+                            </div>
+                        </div>
+                        <button type="button" id="remove-file" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">×</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="input-group">
+                <!-- Botón para adjuntar archivos -->
+                <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
+                    📎
+                </button>
+                <input type="file" id="file-input" name="archivo" style="display: none;"
+                       accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
+
+                <!-- textarea -->
+                <textarea name="texto"
+                          id="mensaje-texto"
+                          placeholder="Escribe un mensaje manual..."
+                          class="reply-textarea"
+                          autocomplete="off"
+                          rows="1"
+                          onkeydown="handleMessageKeyDown(event)"
+                          oninput="autoResizeTextarea(this)"
+                          style="resize: none; overflow-y: auto;"
+                          required></textarea>
+
+                <button type="submit" class="send-btn">Enviar</button>
+            </div>
+        </form>
+
+        <style>
+            /* Estilos para el textarea mejorado */
+            .reply-textarea {
+                flex: 1;
+                border: 1px solid #ccc;
+                border-radius: 20px;
+                padding: 12px 16px;
+                font-size: 14px;
+                line-height: 1.4;
+                min-height: 44px;
+                max-height: none; /* Sin límite de altura */
+                font-family: inherit;
+                background: white;
+                outline: none;
+                transition: border-color 0.2s;
+                white-space: pre-wrap; /* Mantener espacios y saltos de línea */
+                word-wrap: break-word;
+            }
+
+                .reply-textarea:focus {
+                    border-color: #007bff;
+                }
+
+            .input-group {
+                display: flex;
+                align-items: flex-end;
+                gap: 10px;
+                padding: 10px;
+                background: #f5f5f5;
+                border-top: 1px solid #ddd;
+            }
+
+            .reply-form {
+                display: flex;
+                flex-direction: column;
+                width: 100%;
+            }
+
+            .send-btn {
+                background: #25D366;
+                color: white;
+                border: none;
+                border-radius: 50%;
+                width: 44px;
+                height: 44px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: background 0.2s;
+                font-size: 16px;
+            }
+
+                .send-btn:hover {
+                    background: #128C7E;
+                }
+
+            .emoji-pick-btn {
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 8px;
+                border-radius: 50%;
+                transition: background 0.2s;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+                .emoji-pick-btn:hover {
+                    background: #e0e0e0;
+                }
+
+            /* SOLUCIÓN DEFINITIVA PARA EL ESPACIO EN LA PRIMERA LÍNEA */
+            .msg-user .text-message,
+            .msg-ai .text-message,
+            .msg-manual .text-message {
+                white-space: pre-wrap;
+                line-height: 1.3 !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                font-size: 14px;
+                word-wrap: break-word;
+                display: block;
+                /* ELIMINAR CUALQUIER ESPACIO EN LA PRIMERA LÍNEA */
+                text-indent: 0 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* ELIMINAR ESPACIO EN LA PRIMERA LÍNEA DE MANERA RADICAL */
+            .msg-user .message-content,
+            .msg-ai .message-content,
+            .msg-manual .message-content {
+                margin: 0 !important;
+                padding: 8px 12px !important; /* Solo padding interno, sin margen */
+                line-height: 1.3;
+            }
+
+            /* Asegurar que no haya espacio antes del primer carácter */
+            .text-message::first-line {
+                line-height: 1.3 !important;
+                margin-top: 0 !important;
+                padding-top: 0 !important;
+            }
+
+            /* Eliminar cualquier transformación que cause espacio */
+            .msg-ai .text-message,
+            .msg-user .text-message,
+            .msg-manual .text-message {
+                transform: none !important;
+            }
+        </style>
+
+        <script>
+            // Funciones para manejar el textarea mejorado
+            function handleMessageKeyDown(event) {
+                if (event.key === 'Enter') {
+                    if (event.shiftKey) {
+                        // Shift+Enter: Insertar nueva línea
+                        event.preventDefault();
+                        const textarea = event.target;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const value = textarea.value;
+
+                        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
+                        textarea.selectionStart = textarea.selectionEnd = start + 1;
+
+                        // Actualizar altura
+                        autoResizeTextarea(textarea);
+                    } else {
+                        // Enter solo: Enviar mensaje inmediatamente
+                        event.preventDefault();
+                        const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
+                        const fileInput = document.getElementById('file-input');
+
+                        // Validar que haya contenido para enviar
+                        const hasText = textarea.value.trim() !== '';
+                        const hasFile = fileInput.files.length > 0;
+
+                        if (!hasText && !hasFile) {
+                            // No hay nada que enviar
+                            return;
+                        }
+
+                        // Enviar el formulario inmediatamente
+                        form.submit();
+                    }
+                }
+            }
+
+            function autoResizeTextarea(textarea) {
+                // Guardar la altura actual antes de resetear
+                const currentHeight = textarea.style.height;
+
+                // Resetear altura para calcular la nueva
+                textarea.style.height = 'auto';
+
+                // Calcular nueva altura sin límites
+                const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
+
+                // Aplicar nueva altura
+                textarea.style.height = newHeight + 'px';
+
+                // Si el contenido se redujo mucho, mantener un tamaño mínimo
+                if (textarea.value === '' || textarea.value.trim() === '') {
+                    textarea.style.height = '44px';
+                }
+            }
+
+            // Inicializar altura del textarea al cargar
+            document.addEventListener('DOMContentLoaded', function () {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea) {
+                    autoResizeTextarea(textarea);
+                }
+            });
+
+            // Función para resetear el textarea si está vacío
+            function resetTextareaIfEmpty() {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
+                    textarea.style.height = '44px';
+                }
+            }
+
+            // Observar cambios en el textarea para resetear cuando esté vacío
+            document.addEventListener('input', function (event) {
+                if (event.target.id === 'mensaje-texto') {
+                    // Si el usuario borra todo el contenido, resetear altura
+                    if (event.target.value === '') {
+                        setTimeout(() => {
+                            resetTextareaIfEmpty();
+                        }, 100);
+                    }
+                }
+            });
+        </script>
+        {% else %}
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}
+        {% endif %}
+    </section>
+
+    <aside class="sidebar-right" style="color: white;text-align: center;padding: inherit;border-top: blue;border-start-start-radius: revert-layer;">
+        {% if selected %}
+        <div class="sidebar-section">
+            <h3>Acciones</h3>
+            {% if is_admin %}
+            <form action="/chats/{{ selected }}/eliminar" method="POST" onsubmit="return confirm('¿Estás seguro de eliminar este chat? Se borrará todo el historial.');">
+                <button type="submit" class="delete-btn">
+                    🗑️ Eliminar Chat
+                </button>
+            </form>
+            {% endif %}
+        </div>
+
+        <div class="sidebar-section">
+            <h3>Información</h3>
+            <div class="chat-info-stats">
+                <div class="stat-item">
+                    <span class="stat-label">Total mensajes:</span>
+                    <span class="stat-value">{{ mensajes|length if mensajes else 0 }}</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">Última actividad:</span>
+                    <span class="stat-value">
+                        {% if mensajes and mensajes[-1].timestamp %}
+                        {{ mensajes[-1].timestamp.strftime('%H:%M') }}
+                        {% else %}
+                        N/A
+                        {% endif %}
+                    </span>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </aside>
+</div>
+
+<button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
+<style>
+    :root {
+        --left-width: 340px;
+        --right-width: 320px;
+        --gap: 16px;
+        --bg-card: #1f2937;
+        --text-light: #ffffff;
+    }
+
+    /* Layout base */
+    .chat-layout-v2 {
+        display: flex;
+        gap: var(--gap);
+        align-items: stretch;
+        height: calc(100vh - 120px); /* leave room for header/footer */
+        padding: 12px;
+        box-sizing: border-box;
+    }
+
+    .chat-list-v2 {
+        width: var(--left-width);
+        min-width: 220px;
+        max-width: 420px;
+        border-radius: 8px;
+        background: var(--bg-card);
+        padding: 8px;
+        box-sizing: border-box;
+        overflow-y: auto;
+        transition: transform 240ms ease, box-shadow 200ms ease;
+        position: relative;
+        z-index: 30;
+    }
+
+    .chat-panel-v2 {
+        flex: 1 1 auto;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        background: transparent;
+        overflow: hidden;
+    }
+
+    .sidebar-right {
+        width: var(--right-width);
+        min-width: 220px;
+        max-width: 420px;
+        border-radius: 8px;
+        background: var(--bg-card);
+        padding: 8px;
+        box-sizing: border-box;
+        overflow-y: auto;
+    }
+
+    /* Chat items & messages */
+    .chat-items {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .chat-item {
+        display: block;
+        color: inherit;
+        text-decoration: none;
+    }
+
+    .card-content {
+        padding: 10px 8px; /* Más padding vertical */
+        display: flex;
+        flex-direction: column;
+        gap: 4px; /* Menor gap para más espacio */
+        color: var(--text-light);
+        position: relative;
+        min-height: 80px; /* Aumentado a 80px */
+        padding-bottom: 16px; /* Espacio extra en la parte inferior */
+    }
+
+    .card-title-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+
+    .card-avatar-section {
+        width: 44px;
+        height: 44px;
+        flex: 0 0 44px;
+    }
+
+    .card-avatar {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        border-radius: 8px;
+    }
+
+    .card-flag {
+        width: 20px;
+        height: 14px;
+        object-fit: cover;
+        border-radius: 2px;
+    }
+
+    .alias-view {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--text-light);
+        display: inline-block;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 200px !important; /* Reducido de 280px a 200px */
+        margin-right: auto !important; /* Fuerza a estar más a la izquierda */
+        flex: 1;
+    }
+
+    .card-time {
+        position: absolute !important;
+        bottom: 4px !important; /* Cambiado de 12px a 4px - MUCHO más abajo */
+        right: 8px !important;
+        font-size: 0.65rem !important; /* Un poco más pequeño */
+        opacity: 0.85;
+        color: #d1d5db;
+        background: rgba(0,0,0,0.4); /* Fondo más oscuro para mejor contraste */
+        padding: 1px 4px; /* Padding reducido */
+        border-radius: 3px;
+        z-index: 2;
+        white-space: nowrap;
+    }
+
+    .card-msg {
+        font-size: 13px;
+        color: #d1d5db;
+        opacity: 0.95;
+    }
+
+    /* Messages panel */
+    .msgs-wrap-v2 {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 4px; /* Reducir de 8px si es necesario */
+        background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+        border-radius: 8px;
+    }
+
+    .msg-box {
+        max-width: 70%;
+        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
+        border-radius: 18px;
+        box-sizing: border-box;
+        margin: 1px 0; /* Reducir de 2px a 1px */
+        position: relative;
+        word-wrap: break-word;
+    }
+
+    .msg-user {
+        align-self: flex-end;
+        background: #005c4b;
+        color: white;
+        border-bottom-right-radius: 5px;
+    }
+
+    .msg-ai {
+        align-self: flex-start;
+        background: #202c33;
+        color: #e9edef;
+        border-bottom-left-radius: 5px;
+    }
+
+    .text-message {
+        line-height: 1.3; /* Mejor legibilidad */
+        white-space: pre-wrap; /* Mantener formato pero eliminar espacios iniciales */
+        font-size: 14px;
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        display: block;
+        overflow-wrap: break-word;
+    }
+
+    .msg-manual {
+        align-self: end;
+        background: #0ea5a4;
+        color: white;
+    }
+
+    .msg-meta {
+        font-size: 11px;
+        color: #9ca3af;
+        margin-top: 6px;
+    }
+
+    /* Mobile toggle button */
+    .mobile-chat-toggle {
+        display: none;
+        position: fixed;
+        right: 18px;
+        bottom: 18px;
+        z-index: 1200;
+        background: #0b78d1;
+        color: white;
+        border: none;
+        padding: 10px 14px;
+        border-radius: 999px;
+        box-shadow: 0 6px 18px rgba(2,6,23,0.35);
+        cursor: pointer;
+        font-size: 18px;
+    }
+
+    /* New: mobile overlay behaviour for left panel */
+    @media (max-width: 900px) {
+        :root {
+            --left-width: 320px;
+            --right-width: 0px;
+        }
+
+        .chat-layout-v2 {
+            gap: 8px;
+            height: calc(100vh - 100px);
+        }
+
+        /* hide right sidebar on medium screens */
+        .sidebar-right {
+            display: none;
+        }
+
+        /* make list a fixed overlay off-canvas by default */
+        .chat-list-v2 {
+            position: fixed;
+            left: -100%;
+            top: 0;
+            height: 100vh;
+            z-index: 1000;
+            background: var(--bg-card);
+            transition: left 0.3s ease;
+            width: var(--left-width);
+        }
+
+            .chat-list-v2.mobile-visible {
+                left: 0;
+                transform: translateX(0);
+            }
+
+        .chat-panel-v2 {
+            margin-left: 0;
+            padding-right: 8px;
+            width: 100%;
+        }
+
+        .mobile-chat-toggle {
+            display: block;
+        }
+    }
+
+    /* Small phones: full screen single panel */
+    @media (max-width: 480px) {
+        .chat-layout-v2 {
+            padding: 8px;
+        }
+
+        .chat-list-v2 {
+            width: 85vw;
+        }
+
+            .chat-list-v2 .alias-view {
+                font-size: 0.85rem !important;
+                font-weight: 600 !important;
+                max-width: calc(100% - 60px) !important;
+            }
+
+            .chat-list-v2 .card-avatar {
+                width: 28px !important;
+                height: 28px !important;
+            }
+
+            .chat-list-v2 .card-flag {
+                width: 18px !important;
+                height: 12px !important;
+            }
+
+            .chat-list-v2 .card-time {
+                font-size: 0.65rem !important;
+            }
+
+        .chat-panel-v2 {
+            padding-left: 6px;
+            padding-right: 6px;
+        }
+
+        .msgs-wrap-v2 {
+            padding: 8px;
+        }
+    }
+
+    /* Accessibility / minor aesthetics */
+    .chat-item.selected {
+        outline: 2px solid rgba(59,130,246,0.2);
+    }
+
+    .new-message {
+        box-shadow: 0 6px 18px rgba(2,6,23,0.25);
+        transform: translateY(-2px);
+    }
+
+    /* Agregar esto al final del CSS */
+    .emoji-picker-list {
+        z-index: 10000 !important;
+        background: white !important;
+        border: 1px solid #ccc !important;
+        border-radius: 8px !important;
+        padding: 8px !important;
+        max-width: 320px !important;
+        max-height: 200px !important;
+        overflow-y: auto !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+    }
+
+    .emoji-option {
+        font-size: 20px !important;
+        background: none !important;
+        border: 0 !important;
+        cursor: pointer !important;
+        padding: 5px !important;
+        margin: 2px !important;
+        border-radius: 4px !important;
+        transition: background-color 0.2s !important;
+    }
+
+        .emoji-option:hover {
+            background-color: #f0f0f0 !important;
+        }
+
+    /* ===== ESTILOS IDÉNTICOS A KANBAN PARA LISTA DE CHATS ===== */
+    .chat-list-v2 .kanban-card {
+        display: flex;
+        flex-direction: column;
+        padding: 5px 11px;
+        margin-bottom: 8px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgb(255, 255, 255);
+        transition: all 0.2s ease;
+        min-height: auto;
+        height: auto;
+        position: relative;
+        overflow: hidden;
+        border-block-color: antiquewhite;
+    }
+
+    .chat-list-v2 .card-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 4px;
+    }
+
+    /* Primera fila: Avatar, bandera, nombre - IDÉNTICO A KANBAN */
+    .chat-list-v2 .card-title-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        min-width: 0 !important;
+        flex: 0 0 auto !important;
+    }
+
+    .chat-list-v2 .card-avatar-section {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .chat-list-v2 .card-avatar {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 50% !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-list-v2 .card-flag {
+        width: 18px !important;
+        height: 12px !important;
+        border-radius: 2px !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .chat-list-v2 .card-name-section {
+        flex-grow: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .chat-list-v2 .alias-view {
+        font-size: 0.85rem !important;
+        font-weight: 600 !important;
+        line-height: 1.2 !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+        max-width: calc(190px) !important;
+        flex: 1 1 auto !important;
+        color: #e2e5ed !important;
+        margin-right: auto !important;
+    }
+
+        /* Colores por plataforma igual que Kanban */
+        .chat-list-v2 .alias-view.is-whatsapp {
+            color: #00ff10 !important;
+        }
+
+        .chat-list-v2 .alias-view.is-telegram {
+            color: #00bfff !important;
+        }
+
+    /* Segunda fila: Mensaje y fecha - IDÉNTICO A KANBAN */
+    .chat-list-v2 .card-bottom-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        margin-top: 2px;
+    }
+
+    .chat-list-v2 .card-msg {
+        color: #fff !important;
+        font-size: 0.75rem !important;
+        font-weight: 400 !important;
+        line-height: 1.3 !important;
+        flex-grow: 1;
+        min-width: 0;
+        max-width: 75%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .chat-list-v2 .card-time {
+        font-size: 0.65rem !important;
+        color: rgba(255, 255, 255, 0.6) !important;
+        white-space: nowrap !important;
+        flex-shrink: 0;
+        margin-left: 8px;
+        align-self: flex-end;
+        padding-bottom: 2px;
+        position: static !important;
+        background: none !important;
+        padding: 0 !important;
+    }
+
+    /* Indicador de mensajes no leídos - IDÉNTICO A KANBAN */
+    .chat-list-v2 .card-unread {
+        position: absolute !important;
+        top: 8px !important;
+        right: 8px !important;
+        background: #00E091 !important;
+        color: #fff !important;
+        border-radius: 10px !important;
+        padding: 1px 6px !important;
+        font-size: 0.7rem !important;
+        font-weight: 600 !important;
+        min-width: 18px !important;
+        text-align: center !important;
+        box-shadow: 0 0 5px rgba(0, 224, 145, 0.4) !important;
+        z-index: 2 !important;
+    }
+
+    /* Eliminar estilos viejos que causan conflicto */
+    .chat-list-v2 .card-meta-row {
+        display: none !important;
+    }
+
+    /* Estilos para el header del chat seleccionado */
+    .chat-title {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+        .chat-title .alias-view {
+            font-size: 1rem;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+
+        .chat-title .edit-alias-btn {
+            font-size: 12px;
+            padding: 2px 4px;
+        }
+    /* ===== SOLUCIÓN DEFINITIVA PARA ELIMINAR ESPACIOS INICIALES ===== */
+
+    /* SOLUCIÓN RADICAL PARA ELIMINAR ESPACIOS INICIALES */
+    .msg-ai .text-message,
+    .msg-manual .text-message {
+        white-space: pre-wrap;
+        line-height: 1.3 !important; /* Forzar line-height consistente */
+        text-indent: 0 !important;
+        padding-left: 0 !important;
+        margin-left: 0 !important;
+        display: block;
+        overflow-wrap: break-word;
+        /* NUEVAS PROPIEDADES PARA EVITAR ESPACIADO */
+        margin-top: 0 !important;
+        margin-bottom: 0 !important;
+        padding-top: 0 !important;
+        padding-bottom: 0 !important;
+    }
+
+    .msg-ai .message-content,
+    .msg-manual .message-content {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    .msg-ai .text-message::first-line,
+    .msg-manual .text-message::first-line {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
+    }
+
+    /* SOLUCIÓN NUCLEAR - si persiste el espacio */
+    .msg-ai .text-message {
+        transform: translateX(-2px) !important;
+    }
+    /* === AÑADE AQUÍ LA NUEVA CLASE === */
+    .text-message.no-initial-space {
+        margin: 0 !important;
+        padding: 0 !important;
+        text-indent: 0 !important;
+        line-height: 1.3 !important;
+    }
+
+        .text-message.no-initial-space::first-letter {
+            margin-left: 0 !important;
+            padding-left: 0 !important;
+        }
+    /* Estilos mejorados para adjuntar archivos */
+    .file-attach-btn {
+        background: none;
+        border: none;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 8px;
+        border-radius: 50%;
+        transition: background 0.2s;
+        width: 44px;
+        height: 44px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+        .file-attach-btn:hover {
+            background: #e0e0e0;
+        }
+
+    .file-preview {
+        background: #ffffff;
+        border: 2px dashed #25D366;
+        animation: fadeIn 0.3s ease-in;
+    }
+
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    .file-preview-content {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+    }
+
+    .file-type-icon {
+        margin-right: 8px;
+        font-size: 20px;
+    }
+
+    /* Efecto de hover en el botón de eliminar */
+    #remove-file:hover {
+        background: #cc0000;
+        transform: scale(1.1);
+        transition: all 0.2s ease;
+    }
+</style>
+<script>
+/* Small helpers */
+function coalesce(...args) {
+    for (let i = 0; i < args.length; i++) {
+        const v = args[i];
+        if (v !== undefined && v !== null) return v;
+    }
+    return null;
+}
+
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function escapeHtml(unsafe) {
+    if (unsafe === null || unsafe === undefined) return '';
+    return String(unsafe)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+}
+
+function truncate(str, n) {
+    if (!str) return '';
+    return str.length > n ? str.substring(0, n) + '...' : str;
+}
+
+    // chats.html (Línea ~334)
+    function formatClientTime(serverTs) {
+        // Asumimos que serverTs ya está en UTC o es un timestamp numérico válido
+        let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+        if (isNaN(d.getTime())) d = new Date();
+
+        // Formato IDÉNTICO al Kanban: día-mes hora:minuto
+        const day = d.getDate();
+
+        // 🚨 CORRECCIÓN CLAVE: Eliminar la zona horaria y usar el TZ del cliente/servidor.
+        // Asumimos que el objeto 'd' ya fue creado a partir de un timestamp de México
+        // o que el navegador lo ajusta correctamente a la hora local del cliente.
+        const month = d.toLocaleString('es-MX', {
+            month: 'short',
+            // ELIMINADO: timeZone: 'America/Mexico_City'
+        }).toLowerCase().replace('.', '').trim();
+
+        const time = d.toLocaleTimeString('es-MX', {
+            // ELIMINADO: timeZone: 'America/Mexico_City',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+
+        // Formato exacto igual a Kanban: "d-mes   hh:mm"
+        return `${day}-${month}   ${time}`;
+    }
+    // Función para obtener bandera (igual que en kanban)
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    }
+/* State */
+let chatAutoRefresh = true;
+let refreshIntervalMs = 5000;
+let messagePollIntervalMs = 5000;
+let selectedChatId = {{ selected|tojson }};
+let lastChatsTimestamp = 0;
+let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
+let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
+let isEditingAlias = false;
+let aliasTimers = new Map();
+let chatsIntervalHandle = null;
+let messagesIntervalHandle = null;
+
+/* Deduplication set (initialized from DOM on poll init) */
+let seenMessageKeys = new Set();
+
+/* ===================== CHAT-LIST ===================== */
+
+function actualizarListaChats() {
+    if (!chatAutoRefresh) return;
+    fetch('/chats/data', { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !data.chats) return;
+            const ts = Number(data.timestamp) || Date.now();
+            if (ts <= lastChatsTimestamp) return;
+            lastChatsTimestamp = ts;
+            actualizarIncrementalChats(data.chats);
+        })
+        .catch(err => console.error('Error actualizando lista de chats:', err));
+}
+
+const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+
+    function crearNuevoChatHTML(chat) {
+        const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+        const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+
+        // DETERMINAR PLATAFORMA SIEMPRE - no solo cuando hay chat seleccionado
+        const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
+        const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
+
+        let imagen = '/static/icons/whatsapp-icon.png';
+        if (isTelegram) {
+            imagen = '/static/icons/telegram-icon-dos.png';
+        }
+
+        const banderaUrl = getCountryFlag(num) || '';
+        const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+        const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+        const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+        const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+        const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+
+        return `
+    <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+            <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
+            <div class="card-title-row">
+                <div class="card-avatar-section">
+                    <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
+                </div>
+                <div class="card-name-section">
+                    <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
+                </div>
+            </div>
+
+            <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
+            <div class="card-bottom-row">
+                <div class="card-msg">${preview}</div>
+                <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
+            </div>
+
+            <!-- Indicador de mensajes no leídos -->
+            ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+        </div>
+    </a>`.trim();
+    }
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+
+    for (let i = chats.length - 1; i >= 0; i--) {
+        const chat = chats[i];
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
+            }
+        } else {
+            const tmp = document.createElement('div');
+            const hasBuilder = typeof crearNuevoChatHTML === 'function';
+            tmp.innerHTML = hasBuilder
+                ? crearNuevoChatHTML(chat)
+                : `
+            <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
+                        </div>
+                        <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
+                    </div>
+                    <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
+                </div>
+            </a>`;
+            const el = tmp.firstElementChild;
+            if (!el) continue;
+            container.insertBefore(el, container.firstElementChild);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
+        }
+    }
+
+    existing.forEach((node) => node.remove());
+}
+
+try {
+    const msgsEl = document.getElementById('msgs');
+    if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+} catch (e) {
+    console.warn('Initial scroll to bottom failed:', e);
+}
+
+function actualizarChatExistente(elemento, chat) {
+    if (!elemento) return;
+    const nombre = coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, chat.numero);
+    const aliasView = elemento.querySelector('.alias-view');
+    if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
+
+    // === MANTENER LOS ICONOS CORRECTOS ===
+    const avatarImg = elemento.querySelector('.card-avatar');
+    if (avatarImg) {
+        // Determinar el icono correcto basado en el número/canal
+        let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
+        }
+
+        // Solo actualizar si es diferente
+        if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
+            avatarImg.setAttribute('src', nuevoAvatarSrc);
+        }
+    }
+    // === FIN MANTENER ICONOS ===
+
+
+
+    const timeEl = elemento.querySelector('.card-time');
+    if (timeEl) {
+        timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+    } else {
+        const titleRow = elemento.querySelector('.card-title-row');
+        if (titleRow) {
+            const span = document.createElement('span');
+            span.className = 'card-time';
+            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+            titleRow.appendChild(span);
+        }
+    }
+
+    const bandera = getCountryFlag(chat.numero) || '';
+    let flagImg = elemento.querySelector('.card-flag');
+    if (bandera) {
+        if (flagImg) {
+            if (flagImg.getAttribute('src') !== bandera) flagImg.setAttribute('src', bandera);
+        } else {
+            const titleRow = elemento.querySelector('.card-title-row');
+            if (titleRow) {
+                const img = document.createElement('img');
+                img.className = 'card-flag';
+                img.alt = 'País';
+                img.title = 'País';
+                img.src = bandera;
+                titleRow.insertBefore(img, titleRow.querySelector('.alias-view'));
+            }
+        }
+    } else if (flagImg) {
+        flagImg.remove();
+    }
+
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const unreadEl = elemento.querySelector('.card-unread');
+    if (sin_leer > 0) {
+        if (unreadEl) unreadEl.textContent = sin_leer;
+        else {
+            const metaRow = elemento.querySelector('.card-meta-row');
+            if (metaRow) {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = sin_leer;
+                metaRow.appendChild(span);
+            }
+        }
+    } else if (unreadEl) {
+        unreadEl.remove();
+    }
+
+    const msgEl = elemento.querySelector('.card-msg');
+    const previewText = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes');
+    if (msgEl && msgEl.textContent.trim() !== previewText) {
+        msgEl.textContent = previewText;
+        elemento.classList.add('new-message');
+        setTimeout(() => elemento.classList.remove('new-message'), 1200);
+    }
+
+    if (selectedChatId && String(selectedChatId) === String(chat.numero)) elemento.classList.add('selected');
+    else elemento.classList.remove('selected');
+}
+
+/* ===================== MESSAGES POLLING & DEDUPE ===================== */
+
+function buildMessageKeyFor(m) {
+    const id = coalesce(m.id, m[0], m['id']);
+    if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
+        return 'id:' + String(id);
+    }
+    const content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], '')).trim();
+    let ts = coalesce(m.ts_ms, m.ts, 0);
+    if (!ts && m.timestamp) {
+        const parsed = Date.parse(m.timestamp);
+        ts = isNaN(parsed) ? 0 : parsed;
+    }
+    ts = Number(ts) || 0;
+    const rounded = Math.floor(ts / 1000);
+    return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
+}
+
+function pollSelectedMessages() {
+    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
+
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
+
+            let maxTs = lastMessageTimestamp;
+
+            data.messages.forEach(m => {
+                let ts = 0;
+                if (m.timestamp) {
+                    ts = Date.parse(m.timestamp);
+                    if (!isNaN(ts)) {
+                        maxTs = Math.max(maxTs, ts);
+                    }
+                }
+            });
+
+            if (maxTs > lastMessageTimestamp) {
+                lastMessageTimestamp = maxTs + 1;
+            }
+
+            appendUserMessagesToPanel(data.messages);
+            appendAIResponsesToPanel(data.messages);
+        })
+        .catch(err => console.error('Error polling messages:', err));
+}
+    /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
+
+    function setupChatSearch() {
+        const searchInput = document.getElementById('search-chats-input');
+        const chatItems = document.querySelectorAll('.chat-item');
+
+        if (!searchInput) {
+            console.warn('Search input not found');
+            return;
+        }
+
+        searchInput.addEventListener('input', function (e) {
+            const searchTerm = normalizeText(e.target.value);
+
+            chatItems.forEach(chatItem => {
+                const aliasElement = chatItem.querySelector('.alias-view');
+                const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
+
+                if (!aliasElement) return;
+
+                const chatName = normalizeText(aliasElement.textContent);
+                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+                const matchesSearch = chatName.includes(searchTerm) ||
+                    chatNumber.includes(searchTerm) ||
+                    (searchTerm === ''); // Mostrar todos si está vacío
+
+                chatItem.style.display = matchesSearch ? 'block' : 'none';
+            });
+        });
+
+        // También buscar en chats cargados dinámicamente
+        const observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                if (mutation.addedNodes.length) {
+                    // Si se añaden nuevos chats, reaplicar el filtro actual
+                    const currentSearch = normalizeText(searchInput.value);
+                    if (currentSearch) {
+                        searchInput.dispatchEvent(new Event('input'));
+                    }
+                }
+            });
+        });
+
+        const chatContainer = document.querySelector('.chat-items');
+        if (chatContainer) {
+            observer.observe(chatContainer, { childList: true, subtree: true });
+        }
+
+        console.debug('Chat search functionality initialized');
+    }
+    function appendAIResponsesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
+
+        for (const m of messages) {
+            let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
+
+            // ELIMINACIÓN MÁS AGRESIVA DE ESPACIOS
+            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios iniciales
+            aiText = aiText.replace(/\n\s*\n/g, '\n\n'); // Normaliza saltos múltiples
+            aiText = aiText.trim(); // Trim general
+
+            if (!aiText) continue;
+
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let key;
+            if (id) {
+                key = 'ai:id:' + id;
+                if (seenMessageKeys.has(key)) continue;
+            } else {
+                let ts = Number(coalesce(m.ts_ms, 0));
+                if (!ts && m.timestamp) {
+                    const parsed = Date.parse(m.timestamp);
+                    ts = isNaN(parsed) ? Date.now() : parsed;
+                }
+                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+                if (seenMessageKeys.has(key)) continue;
+            }
+
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-ai';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+            const fechaFormateada = formatClientTime(tsVal);
+
+            // Aplicar clase especial para evitar espacios
+            div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            container.appendChild(div);
+            appended = true;
+
+            seenMessageKeys.add(key);
+            if (id) seenMessageKeys.add('id:' + id);
+        }
+
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
+    function appendUserMessagesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
+
+        for (const m of messages) {
+            const key = buildMessageKeyFor(m);
+            if (!key) continue;
+            if (seenMessageKeys.has(key)) {
+                const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+                if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+                continue;
+            }
+
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
+            // SOLO eliminar espacios iniciales, mantener trim() para el resto
+            content = content.replace(/^\s+/, '').trim();
+            const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+
+            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
+            content = content.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
+            content = content.trimStart();
+            // === FIN DE LAS LÍNEAS NUEVAS ===
+
+            if (!content || (respuesta && respuesta.trim().length > 0)) {
+                if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+                seenMessageKeys.add(key);
+                continue;
+            }
+
+            let ts = coalesce(m.ts_ms, 0);
+            if (!ts && m.timestamp) {
+                const parsed = Date.parse(m.timestamp);
+                ts = isNaN(parsed) ? Date.now() : parsed;
+            }
+            ts = Number(ts) || Date.now();
+
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-user';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+            const fechaFormateada = formatClientTime(ts);
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+
+            container.appendChild(div);
+            appended = true;
+            if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+            seenMessageKeys.add(key);
+        }
+
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
+/* ===================== ALIAS EDITING & EMOJI ===================== */
+
+    function enhanceAliasButtons() {
+        // SOLO aplicar a botones en el header del chat central, NO en la lista lateral
+        document.querySelectorAll('.chat-panel-header .edit-alias-btn, .chat-title .edit-alias-btn').forEach(btn => {
+            btn.removeEventListener('click', onEditAliasClick);
+            btn.addEventListener('click', onEditAliasClick);
+        });
+
+        // ELIMINAR cualquier botón de edición en la lista lateral
+        document.querySelectorAll('.chat-list-v2 .edit-alias-btn, .chat-items .edit-alias-btn').forEach(btn => {
+            btn.remove();
+        });
+    }
+
+    function onEditAliasClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const btn = e.currentTarget;
+
+        // Buscar el contenedor padre correcto - IMPORTANTE para el chat del centro
+        const parent = btn.closest('.card-title-row') ||
+            btn.closest('.chat-title') ||
+            btn.closest('.chat-content') ||
+            btn.closest('.card-content');
+
+        if (parent) {
+            activarEdicionAlias(parent);
+        }
+    }
+
+    function activarEdicionAlias(parent) {
+        if (!parent) return;
+        const view = parent.querySelector('.alias-view');
+        const edit = parent.querySelector('.alias-edit');
+        if (!view || !edit) return;
+        const input = edit.querySelector('input[type=text]');
+        if (!input) return;
+
+        // Guardar el valor actual antes de editar
+        const valorOriginal = view.textContent;
+
+        view.style.display = 'none';
+        edit.style.display = 'flex';
+        input.focus();
+        input.select();
+        isEditingAlias = true;
+
+        const finish = () => {
+            const nuevo = (input.value || '').trim();
+            edit.style.display = 'none';
+            view.style.display = '';
+
+            if (!nuevo || nuevo === valorOriginal) {
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+                return;
+            }
+
+            view.textContent = nuevo;
+            fetch(`/contactos/${input.dataset.num}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({ alias: nuevo }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Error en la respuesta');
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Alias guardado exitosamente');
+                })
+                .catch(err => console.warn('Error guardando alias:', err))
+                .finally(() => {
+                    isEditingAlias = false;
+                });
+        };
+
+        input.onblur = () => setTimeout(finish, 200);
+        input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                finish();
+            }
+            if (ev.key === 'Escape') {
+                edit.style.display = 'none';
+                view.style.display = '';
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+            }
+        };
+    }
+
+
+
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
+
+    // chats.html (Cerca de la línea 602)
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
+
+    function setupEmojiPicker() {
+        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        // Contenedores del DOM
+        const picker = document.getElementById('emoji-picker-list');
+        const trigger = document.getElementById('emoji-pick-btn');
+        const input = document.getElementById('mensaje-texto');
+
+        if (!picker || !trigger || !input) {
+            console.warn('Faltan elementos DOM para el emoji picker (picker, trigger o input)');
+            return;
+        }
+
+        function buildPicker(container) {
+            if (container.dataset.built === '1') return;
+            container.innerHTML = EMOJIS.map(e =>
+                // Usamos clases CSS correctas
+                `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`
+            ).join('');
+            container.dataset.built = '1';
+        }
+
+        // 1. Construir el selector
+        buildPicker(picker);
+
+        // 2. Manejar clic en el botón de activación (trigger)
+        trigger.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const isVisible = picker.style.display === 'block';
+
+            if (isVisible) {
+                picker.style.display = 'none';
+            } else {
+                // Posicionar el selector justo encima del botón de entrada
+                const formGroup = trigger.closest('.input-group');
+                if (formGroup) {
+                    // Mueve el selector dentro del input-group (si es necesario)
+                    formGroup.appendChild(picker);
+                    const triggerRect = trigger.getBoundingClientRect();
+                    const formRect = formGroup.getBoundingClientRect();
+
+                    // Intentar posicionar encima del input-group
+                    picker.style.bottom = `${formRect.height + 8}px`;
+                    picker.style.left = '0px';
+
+                    picker.style.display = 'block';
+                }
+            }
+        });
+
+        // 3. Manejar clic en una opción de emoji
+        picker.addEventListener('click', function (ev) {
+            const emojiBtn = ev.target.closest('.emoji-option');
+            if (emojiBtn) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+
+                // Insertar el emoji en la posición del cursor
+                const start = input.selectionStart || input.value.length;
+                const end = input.selectionEnd || input.value.length;
+                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+
+                // Mover el cursor después del emoji insertado
+                const pos = start + emoji.length;
+                input.selectionStart = input.selectionEnd = pos;
+
+                input.focus();
+                picker.style.display = 'none'; // Ocultar después de seleccionar
+            }
+        });
+
+        // 4. Ocultar si se hace clic fuera del selector o del botón
+        document.addEventListener('click', function (ev) {
+            const isInsidePicker = picker.contains(ev.target);
+            const isTrigger = trigger.contains(ev.target);
+
+            if (!isInsidePicker && !isTrigger) {
+                picker.style.display = 'none';
+            }
+        });
+
+        console.debug('setupEmojiPicker initialized');
+    }
+
+
+/* ===================== AUDIO & UI HELPERS ===================== */
+
+function toggleChatList() {
+    document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
+}function toggleAudio(id, btn) {
+    const audio = document.getElementById(id);
+    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
+    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
+    if (!audio) return;
+    if (audio.paused) {
+        audio.play().then(() => {
+            btn.textContent = '⏸️';
+            audio.ontimeupdate = () => {
+                if (audio.duration) {
+                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
+                    if (durSpan) {
+                        const m = Math.floor(audio.currentTime / 60);
+                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
+                        durSpan.textContent = `${m}:${s}`;
+                    }
+                }
+            };
+        }).catch(console.error);
+    } else {
+        audio.pause();
+        btn.textContent = '▶️';
+    }
+}
+
+function seekAudio(id, progressBar, evt) {
+    const audio = document.getElementById(id);
+    const inner = progressBar.querySelector('.audio-progress-bar');
+    const rect = progressBar.getBoundingClientRect();
+    const clickX = evt.clientX - rect.left;
+    if (audio && audio.duration) {
+        audio.currentTime = (clickX / rect.width) * audio.duration;
+        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    console.log('DOM cargado - inicializando componentes');
+    enhanceAliasButtons();
+
+    // INICIALIZACIÓN DIRECTA DE EMOJIS
+    setupEmojiPicker();
+    setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
+    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
+    console.log('Emoji picker inicializado');
+    console.log('Búsqueda de chats inicializada');
+    console.log('File upload inicializado');
+
+    // Start automatic chat-list refresh
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats();
+        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+            if (!document.hidden) actualizarListaChats();
+        }, refreshIntervalMs);
+    }
+
+    // Initialize message polling if chat is selected
+    function initMessagesStateFromDOM() {
+        try {
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
+            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            let maxTs = Number(lastMessageTimestamp) || 0;
+            nodes.forEach(n => {
+                const idAttr = n.getAttribute('data-msg-id');
+                const id = Number(idAttr) || 0;
+                if (id) {
+                    seenMessageKeys.add('id:' + String(id));
+                }
+            });
+            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+        } catch (e) {
+            console.warn('initMessagesStateFromDOM failed', e);
+        }
+    }
+
+    if (selectedChatId) {
+        initMessagesStateFromDOM();
+        if (!messagesIntervalHandle) {
+            pollSelectedMessages();
+            messagesIntervalHandle = setInterval(() => {
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
+        }
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
+        } else {
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => {
+                    if (!document.hidden) actualizarListaChats();
+                }, refreshIntervalMs);
+            }
+            if (selectedChatId && !messagesIntervalHandle) {
+                initMessagesStateFromDOM();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
+        }
+    });
+});
+// Función mejorada para la búsqueda de chats
+function setupChatSearch() {
+    const searchInput = document.getElementById('search-chats-input');
+
+    if (!searchInput) {
+        console.warn('Search input not found');
+        return;
+    }
+
+    function performSearch() {
+        const searchTerm = normalizeText(searchInput.value);
+        const chatItems = document.querySelectorAll('.chat-item');
+
+        let foundAny = false;
+
+        chatItems.forEach(chatItem => {
+            const aliasElement = chatItem.querySelector('.alias-view');
+
+            if (!aliasElement) return;
+
+            const chatName = normalizeText(aliasElement.textContent);
+            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+            const matchesSearch = chatName.includes(searchTerm) ||
+                                chatNumber.includes(searchTerm) ||
+                                (searchTerm === '');
+
+            chatItem.style.display = matchesSearch ? 'block' : 'none';
+
+            if (matchesSearch && searchTerm !== '') {
+                foundAny = true;
+            }
+        });
+
+        // Opcional: Mostrar mensaje si no se encontraron resultados
+        const noResultsMsg = document.getElementById('no-search-results');
+        if (searchTerm !== '' && !foundAny) {
+            if (!noResultsMsg) {
+                const msg = document.createElement('div');
+                msg.id = 'no-search-results';
+                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
+                msg.style.padding = '10px';
+                msg.style.textAlign = 'center';
+                msg.style.color = '#999';
+                document.querySelector('.chat-items').appendChild(msg);
+            }
+        } else if (noResultsMsg) {
+            noResultsMsg.remove();
+        }
+    }
+
+    searchInput.addEventListener('input', performSearch);
+
+    // También aplicar búsqueda cuando se actualicen los chats dinámicamente
+    const observer = new MutationObserver(function(mutations) {
+        const currentSearch = normalizeText(searchInput.value);
+        if (currentSearch) {
+            performSearch();
+        }
+    });
+
+    const chatContainer = document.querySelector('.chat-items');
+    if (chatContainer) {
+        observer.observe(chatContainer, { childList: true, subtree: true });
+    }
+
+    console.debug('Chat search functionality initialized - insensible a tildes');
+}
+
+// Función normalizadora mejorada (insensible a tildes)
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s)
+        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
+        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
+    function setupFileUpload() {
+        const fileInput = document.getElementById('file-input');
+        const fileAttachBtn = document.getElementById('file-attach-btn');
+        const filePreview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const fileIcon = document.getElementById('file-icon');
+        const removeFileBtn = document.getElementById('remove-file');
+        const messageForm = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
+
+        // Variable para almacenar el archivo seleccionado
+        let selectedFile = null;
+
+        // Abrir selector de archivos al hacer clic en el botón
+        fileAttachBtn.addEventListener('click', function () {
+            fileInput.click();
+        });
+
+        // Manejar selección de archivo
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                selectedFile = file;
+                showFilePreview(file);
+            }
+        });
+
+        // Eliminar archivo seleccionado
+        removeFileBtn.addEventListener('click', function () {
+            clearFileSelection();
+        });
+
+        function showFilePreview(file) {
+            const fileType = getFileType(file.name);
+            const icon = getFileIcon(fileType);
+
+            fileIcon.textContent = icon;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            filePreview.style.display = 'block';
+
+            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
+            textarea.placeholder = "Añade un mensaje (opcional)...";
+            textarea.required = false; // Ya no es requerido porque hay archivo
+
+            // Hacer scroll para mostrar la previsualización
+            filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function clearFileSelection() {
+            fileInput.value = '';
+            selectedFile = null;
+            filePreview.style.display = 'none';
+            fileName.textContent = '';
+            fileSize.textContent = '';
+            fileIcon.textContent = '';
+            textarea.placeholder = "Escribe un mensaje manual...";
+            textarea.required = true; // Vuelve a ser requerido
+        }
+
+        // Validar antes de enviar
+        messageForm.addEventListener('submit', function (e) {
+            const hasText = textarea.value.trim() !== '';
+            const hasFile = selectedFile !== null;
+
+            if (!hasText && !hasFile) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje o selecciona un archivo');
+                return false;
+            }
+
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '⏳';
+            sendBtn.disabled = true;
+
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });
+
+        console.debug('File upload functionality initialized - WhatsApp style');
+    }
+</script>
+{% endblock %}       
