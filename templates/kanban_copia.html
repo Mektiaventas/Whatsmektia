@@ -1,0 +1,1203 @@
+﻿{% extends "base.html" %}
+{% block title %}Tablero Kanban{% endblock %}
+
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/kanban.css') }}">
+
+<style>
+    @keyframes fadeIn {
+        from {
+            opacity: 0;
+            transform: translateY(10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    /* Nuevos Estilos para etiquetas de Interés (Leads) */
+    .badge-interes {
+        font-size: 0.65rem;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-weight: 700;
+        text-transform: uppercase;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-bottom: 4px;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+
+    /* 🔥 Caliente: Preguntas específicas/intención de compra */
+    .interes-caliente {
+        background-color: #ffebee;
+        color: #d32f2f;
+        border: 1px solid #ffcdd2;
+    }
+
+    /* 🌡 Tibio: Información general */
+    .interes-tibio {
+        background-color: #fff3e0; /* Naranja suave */
+        color: #e65100;
+        border: 1px solid #ffe0b2;
+    }
+
+    /* ❄ Frío: Solo un mensaje */
+    .interes-frio {
+        background-color: #e3f2fd; /* Azul suave */
+        color: #1565c0;
+        border: 1px solid #bbdefb;
+    }
+
+    /* 😴 Dormido: > 7 días inactivo */
+    .interes-dormido {
+        background-color: #f5f5f5; /* Gris */
+        color: #616161;
+        border: 1px solid #e0e0e0;
+    }
+
+    @keyframes highlightPulse {
+        0% {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        50% {
+            background-color: rgba(255,224,130,0.4);
+        }
+
+        100% {
+            background-color: rgba(255,255,255,0.1);
+        }
+    }
+
+    @keyframes gentleShake {
+        0%,100% {
+            transform: translateX(0);
+        }
+
+        25% {
+            transform: translateX(-3px);
+        }
+
+        75% {
+            transform: translateX(3px);
+        }
+    }
+
+    .kanban-card.new-message {
+        animation: fadeIn .5s ease-out, highlightPulse 2s ease-in-out, gentleShake .5s ease-in-out;
+    }
+
+    .kanban-card {
+        transition: all .3s ease;
+    }
+
+    .add-chat-btn {
+        background: #2196f3;
+        border: none;
+        color: #fff;
+        font-weight: bold;
+        padding: 2px 8px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        line-height: 1;
+    }
+
+        .add-chat-btn:hover {
+            background: #1976d2;
+        }
+
+    /* Icono de columna y selector */
+    .col-icon {
+        width: 50px;
+        height: 50px;
+        margin-right: 6px;
+        cursor: pointer;
+        border-radius: 4px;
+        object-fit: contain;
+        background: #ffffff22;
+        padding: 2px;
+    }
+
+    .card-time {
+        font-size: small;
+    }
+
+    .icon-picker {
+        position: absolute;
+        background: #1f2630;
+        border: 1px solid #2e3a46;
+        border-radius: 4px;
+        padding: 3px;
+        display: none;
+        z-index: 9999;
+        box-shadow: 0 10px 24px -12px rgba(0,0,0,.5);
+    }
+
+        .icon-picker button {
+            width: 32px;
+            height: 32px;
+            margin: 2px;
+            font-size: 18px;
+            border: none;
+            cursor: pointer;
+            background: transparent;
+            border-radius: 6px;
+        }
+
+            .icon-picker button:hover {
+                background: #2b3440;
+            }
+
+    /* =========================
+       MEJORAS EN DISEÑO KANBAN
+       ========================= */
+    .kanban-card {
+        display: flex;
+        flex-direction: column;
+        padding: 5px 11px;
+        margin-bottom: 8px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgb(255, 255, 255);
+        transition: all 0.2s ease;
+        min-height: auto;
+        height: 90px;
+        position: relative;
+        overflow: hidden;
+        border-block-color: antiquewhite;
+    }
+
+        .kanban-card:hover {
+            background: rgba(255, 255, 255, 0.08);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+    .card-content {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        gap: 4px;
+    }
+
+    /* Primera fila: Avatar, bandera, nombre y botón de editar */
+    .card-top-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 0 0 auto;
+    }
+
+    .card-avatar-section {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .card-avatar {
+        width: 28px !important;
+        height: 28px !important;
+        border-radius: 50% !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .card-flag {
+        width: 18px !important;
+        height: 12px !important;
+        border-radius: 2px !important;
+        flex-shrink: 0;
+        object-fit: cover !important;
+        border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .card-name-section {
+        flex-grow: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .alias-view {
+        font-size: 0.85rem;
+        font-weight: 600;
+        line-height: 1.2;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        /* Color por defecto (puedes elegir uno neutro o WhatsApp como base) */
+        color: #e2e5ed; /* Blanco/gris claro por defecto */
+
+        max-width: calc(190px); /* Mantener la restricción de ancho */
+        flex: 1 1 auto; /* Permitir que ocupe el espacio */
+    }
+
+        /* Color para WhatsApp (Verde) */
+        .alias-view.is-whatsapp {
+            color: #00ff10; /* Verde brillante */
+        }
+
+        /* Color para Telegram (Azul) */
+        .alias-view.is-telegram {
+            color: #00bfff; /* Azul Telegram/cielo */
+        }
+
+        .alias-view.is-messenger {
+            color: #c000ff; /* Azul Telegram/cielo */
+        }
+
+    .edit-alias-btn {
+        font-size: 12px;
+        padding: 2px 4px;
+        background: rgba(255, 255, 255, 0.1);
+        border: none;
+        border-radius: 4px;
+        color: #fff;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.2s;
+    }
+
+        .edit-alias-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+    /* Segunda fila: Mensaje y fecha */
+    .card-bottom-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        width: 100%;
+        margin-top: 2px;
+    }
+
+    .card-msg {
+        color: #fff;
+        font-size: 0.75rem;
+        font-weight: 400;
+        line-height: 1.3;
+        flex-grow: 1;
+        min-width: 0;
+        max-width: 75%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .card-time {
+        font-size: 0.65rem;
+        color: rgba(255, 255, 255, 0.6);
+        white-space: nowrap;
+        flex-shrink: 0;
+        margin-left: 8px;
+        align-self: flex-end;
+        padding-bottom: 20px;
+    }
+
+    /* Indicador de mensajes no leídos */
+    .card-unread {
+        position: absolute;
+        top: 8px;
+        right: 8px;
+        background: #00E091;
+        color: #fff;
+        border-radius: 10px;
+        padding: 1px 6px;
+        font-size: 0.7rem;
+        font-weight: 600;
+        min-width: 18px;
+        text-align: center;
+        box-shadow: 0 0 5px rgba(0, 224, 145, 0.4);
+        z-index: 2;
+    }
+
+    /* Mejoras en la columna */
+    .kanban-column {
+        flex-shrink: 0;
+        flex-basis: 280px;
+        width: 280px;
+        margin-right: 15px;
+        background: rgba(30, 39, 46, 0.6);
+        border-radius: 12px;
+        padding: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.05);
+        height: calc(100vh - 120px);
+        max-height: calc(100vh - 120px);
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+
+        .kanban-column::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .kanban-column::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+        }
+
+        .kanban-column::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+
+            .kanban-column::-webkit-scrollbar-thumb:hover {
+                background: rgba(255, 255, 255, 0.3);
+            }
+
+    /* Encabezado de columna */
+    .column-header {
+        display: flex;
+        align-items: center;
+        padding: 8px 10px;
+        margin-bottom: 12px;
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.05);
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .col-name {
+        flex-grow: 1;
+        font-size: 0.95rem;
+        font-weight: 600;
+        margin: 0;
+        padding: 4px 8px;
+        border-radius: 4px;
+        transition: background 0.2s;
+    }
+
+        .col-name:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .col-name:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+    /* Botones de columna */
+    .add-chat-btn, .delete-col-btn {
+        width: 28px;
+        height: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+        margin-left: 6px;
+        font-size: 16px;
+        flex-shrink: 0;
+    }
+
+    .add-chat-btn {
+        background: rgba(33, 150, 243, 0.7);
+    }
+
+    .delete-col-btn {
+        background: rgba(244, 67, 54, 0.7);
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .kanban-card {
+            padding: 6px 8px;
+            margin-bottom: 6px;
+        }
+
+        .card-avatar {
+            width: 90px !important;
+            height: 90px !important;
+        }
+
+        .card-flag {
+            width: 16px !important;
+            height: 10px !important;
+        }
+
+        .alias-view {
+            font-size: 0.8rem;
+        }
+
+        .card-msg {
+            font-size: 0.7rem;
+            max-width: 70%;
+        }
+
+        .card-time {
+            font-size: 0.6rem;
+        }
+
+        .card-unread {
+            font-size: 0.65rem;
+            padding: 0 5px;
+            min-width: 16px;
+        }
+
+        .kanban-column {
+            flex-basis: 240px;
+            width: 240px;
+            margin-right: 10px;
+            padding: 10px;
+        }
+        /* Color para Telegram (Azul) */
+        .alias-view.is-telegram {
+            color: #00bfff; /* Azul Telegram/cielo */
+        }
+
+        /* Color para Messenger (Azul/Púrpura) */
+        .alias-view.is-messenger {
+            color: #0084ff;
+        }
+    }
+</style>
+
+
+
+{# Reemplazar TODO el bloque div#kanban-board existente con esto: #}
+<div id="kanban-board" class="kanban-board">
+    {% for col in columnas %}
+    <div class="kanban-column" data-col-id="{{ col.id }}" data-orden="{{ col.orden }}">
+        <div class="column-header" style="--col-color: {{ col.color or '#37474f' }}">
+            {% set default_icon = '/static/icons/default-avatar.png' %}
+            <img src="{{ col.icono or default_icon }}"
+                 class="col-icon" alt="icono" title="Cambiar icono"
+                 data-col-id="{{ col.id }}"
+                 onerror="this.onerror=null;this.src='{{ default_icon }}';">
+            <h3 contenteditable="true" data-col-id="{{ col.id }}" class="col-name">{{ col.nombre }}</h3>
+            <button class="add-chat-btn" data-after="{{ col.id }}" title="Agregar columna a la derecha">+</button>
+            <button class="delete-col-btn" data-col-id="{{ col.id }}" title="Eliminar columna"
+                    style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">
+                ×
+            </button>
+        </div>
+        <div class="column-list" data-col-id="{{ col.id }}">
+            {% for chat in chats if chat.columna_id == col.id %}
+            <a href="/chats/{{ chat.numero }}" class="kanban-card kanban-chat-link" data-chat-num="{{ chat.numero }}" style="text-decoration:none;color:inherit;display:block;">
+                <div class="card-content">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+                        {% set interes = chat.interes|default('Frío') %}
+                        {% set n = interes|lower %}
+                        {% set clase_int = 'interes-frio' %}
+                        {% set icono_int = '❄' %}
+
+                        {% if n == 'caliente' %}
+                        {% set clase_int = 'interes-caliente' %}
+                        {% set icono_int = '🔥' %}
+                        {% elif n == 'tibio' %}
+                        {% set clase_int = 'interes-tibio' %}
+                        {% set icono_int = '🌡' %}
+                        {% elif n == 'dormido' %}
+                        {% set clase_int = 'interes-dormido' %}
+                        {% set icono_int = '😴' %}
+                        {% endif %}
+
+                        <span class="badge-interes {{ clase_int }}">{{ icono_int }} {{ interes|capitalize }}</span>
+                    </div>
+                    <div class="card-top-row">
+                        <div class="card-avatar-section">
+                            {% if chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            {% set avatar_src = '/static/icons/telegram-icon-dos.png' %}
+                            {% set platform_class = 'is-telegram' %}
+                            {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
+                            {% set avatar_src = '/static/icons/maxi.png' %}
+                            {% set platform_class = 'is-messenger' %}
+                            {% else %}
+                            {% set avatar_src = '/static/icons/whatsapp-icon.png' %}
+                            {% set platform_class = 'is-whatsapp' %}
+                            {% endif %}
+
+                            <img src="{{ avatar_src }}"
+                                 class="card-avatar" alt="Avatar"
+                                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                            {% set bandera = chat.numero | bandera %}
+                            {% if bandera %}
+                            <img src="{{ bandera }}" class="card-flag" alt="País" title="País">
+                            {% elif chat.numero.startswith('tg_') or chat.canal == 'Telegram' %}
+                            <img src="/static/icons/telegram-icon-dos.png" class="card-flag" alt="País" title="País">
+                            {% elif chat.numero.startswith('fb_') or chat.canal == 'Facebook' %}
+                            <img src="/static/icons/maxi.png" class="card-flag" alt="País" title="País">
+                            {% endif %}
+                        </div>
+                        <div class="card-name-section">
+                            <span class="alias-view {{ platform_class }}" data-num="{{ chat.numero }}" data-nombre="{{ chat.nombre or '' }}" data-alias="{{ chat.alias or '' }}">{{ chat.nombre_mostrado }}</span>
+                        </div>
+                    </div>
+
+                    <div class="card-bottom-row">
+                        <div class="card-msg">{{ chat.ultimo_mensaje or "&nbsp;" }}</div>
+                        <div class="card-time">
+                            {% if chat.ultima_fecha %}
+                            {{ chat.ultima_fecha.strftime('%-d-%b   ').lower() }} {{ chat.ultima_fecha.strftime('%H:%M') }}
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+
+                {% if chat.sin_leer > 0 %}
+                <span class="card-unread">{{ chat.sin_leer }}</span>
+                {% endif %}
+            </a>
+            {% endfor %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+<div id="iconPicker" class="icon-picker" role="menu" aria-hidden="true"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+<script>
+    let editingColId = null;
+    let editingColText = null;
+    let kanbanAutoRefresh = true;
+    let refreshInterval = 2000; // Actualización cada 2 segundos
+    const renameTimers = new Map(); // debounce timers por columna
+
+    document.addEventListener('DOMContentLoaded', () => {
+        bindColumnHeaderEvents();
+        bindAddColumnButtons();
+        bindDeleteButtons();
+        initRenameHandlers();
+        bindIconPicker();
+        bindMarkReadOnClick();
+        startAutoRefresh();
+        inicializarSortable();
+
+        // Configurar edición de alias
+        setupAliasEditing();
+
+        document.addEventListener('visibilitychange', () => kanbanAutoRefresh = !document.hidden);
+    });
+
+    // --- LÓGICA DE INTERÉS (BADGES) ---
+    function generarBadgeInteres(nivel) {
+        if (!nivel) return '';
+
+        const n = String(nivel).toLowerCase();
+        let clase = 'interes-tibio';
+        let icono = '🌡';
+        let texto = nivel;
+
+        if (n === 'caliente') {
+            clase = 'interes-caliente';
+            icono = '🔥';
+            texto = 'Caliente';
+        } else if (n === 'tibio') {
+            clase = 'interes-tibio';
+            icono = '🌡';
+            texto = 'Tibio';
+        } else if (n === 'frio' || n === 'frío') {
+            clase = 'interes-frio';
+            icono = '❄';
+            texto = 'Frío';
+        } else if (n === 'dormido') {
+            clase = 'interes-dormido';
+            icono = '😴';
+            texto = 'Dormido';
+        }
+
+        return `<span class="badge-interes ${clase}">${icono} ${texto}</span>`;
+    }
+
+    // --- EVENTOS Y UTILIDADES ---
+
+    function bindMarkReadOnClick() {
+        document.addEventListener('click', (e) => {
+            try {
+                const a = e.target.closest && e.target.closest('.kanban-chat-link');
+                if (!a) return;
+                // permitir abrir en nueva pestaña / modificar con teclas modificadoras
+                if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                e.preventDefault();
+                const numero = a.dataset.chatNum;
+                if (!numero) {
+                    window.location = a.href;
+                    return;
+                }
+                // Fire-and-forget: marcar mensajes como leídos antes de navegar.
+                fetch(`/chats/${encodeURIComponent(numero)}/marcar-leido`, { method: 'POST' })
+                    .catch(err => console.warn('Error marcando como leído:', err))
+                    .finally(() => {
+                        // navegar al href aunque la petición falle o tarde
+                        window.location = a.href;
+                    });
+            } catch (err) {
+                // en caso de error, fallback a navegación normal
+                const anchor = e.target.closest && e.target.closest('a');
+                if (anchor && anchor.href) window.location = anchor.href;
+            }
+        }, { passive: true });
+    }
+
+    function setupAliasEditing() {
+        try {
+            document.querySelectorAll('.edit-alias-btn').forEach(btn => {
+                if (btn.dataset.boundAlias === '1') return;
+                btn.dataset.boundAlias = '1';
+                btn.addEventListener('click', function (e) {
+                    e.preventDefault(); e.stopPropagation();
+                    // Encontrar contenedor correcto dentro de la tarjeta
+                    const parent = this.closest('.card-top-row') || this.closest('.card-content') || this.closest('.kanban-card') || this.parentElement;
+                    if (!parent) return;
+                    activarEdicionAlias(parent);
+                });
+            });
+        } catch (err) {
+            console.error('Error binding edit-alias-btn handlers:', err);
+        }
+    }
+
+    function bindAddColumnButtons() {
+        document.querySelectorAll('.add-chat-btn').forEach(btn => {
+            btn.removeEventListener('click', addColumnClickHandler);
+            btn.addEventListener('click', addColumnClickHandler);
+        });
+    }
+
+    function addColumnClickHandler(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const baseCol = this.closest('.kanban-column');
+        if (!baseCol) return;
+        const afterId = parseInt(this.dataset.after, 10);
+
+        fetch('/kanban/columna/agregar', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ after_id: afterId })
+        })
+            .then(r => r.json())
+            .then(data => {
+                if (!data.success) { alert(data.error || 'Error al crear columna'); return; }
+                const nuevaCol = crearColumnaDOM(data);
+                insertarColumnaDespues(baseCol, nuevaCol);
+                // Re-bind all events for dynamic elements
+                bindAddColumnButtons(); bindDeleteButtons(); initRenameHandlers(); bindIconPicker(); inicializarSortable();
+            })
+            .catch(err => console.error('Error creando columna:', err));
+    }
+
+    function crearColumnaDOM(data) {
+        const div = document.createElement('div');
+        div.className = 'kanban-column';
+        div.dataset.colId = data.id;
+        div.dataset.orden = data.orden;
+        const iconSrc = data.icono || '/static/icons/default-avatar.png';
+        div.innerHTML = `
+        <div class="column-header" style="--col-color:${data.color || '#37474f'}">
+            <img src="${iconSrc}" class="col-icon" alt="icono" title="Cambiar icono"
+                 data-col-id="${data.id}"
+                 onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+            <h3 contenteditable="true" data-col-id="${data.id}" class="col-name">${data.nombre}</h3>
+            <button class="add-chat-btn" data-after="${data.id}" title="Agregar columna a la derecha">+</button>
+            <button class="delete-col-btn" data-col-id="${data.id}" title="Eliminar columna"
+                style="color:#c00;font-weight:bold;background:none;border:none;font-size:18px;cursor:pointer;">×</button>
+        </div>
+        <div class="column-list" data-col-id="${data.id}"></div>`;
+        return div;
+    }
+
+    function insertarColumnaDespues(baseCol, nuevaCol) {
+        if (baseCol.nextElementSibling) baseCol.parentNode.insertBefore(nuevaCol, baseCol.nextElementSibling);
+        else baseCol.parentNode.appendChild(nuevaCol);
+    }
+
+    /* --- ICON PICKER --- */
+    function bindIconPicker() {
+        const picker = document.getElementById('iconPicker');
+        if (!picker) return;
+
+        const emojis = ['🆕', '💬', '⏳', '✅', '📞', '🛠️', '📦', '🚀', '📝', '📅', '⭐', '📍', '🏷️', '🎯'];
+        picker.innerHTML = emojis.map(e => `<button type="button" data-emoji="${e}">${e}</button>`).join('');
+
+        document.querySelectorAll('.col-icon').forEach(img => {
+            img.addEventListener('click', (e) => {
+                e.stopPropagation();
+                showIconPickerAt(img, picker);
+                picker.dataset.targetColId = img.dataset.colId;
+                picker.dataset.targetImgSelector = `.col-icon[data-col-id="${img.dataset.colId}"]`;
+            });
+        });
+
+        picker.querySelectorAll('button').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const emoji = btn.dataset.emoji;
+                const dataUrl = emojiToSvgDataUrl(emoji);
+                const colId = picker.dataset.targetColId;
+                const img = document.querySelector(picker.dataset.targetImgSelector);
+                if (img) img.src = dataUrl;
+
+                fetch(`/kanban/columna/${colId}/icono`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ icono: dataUrl })
+                }).catch(console.error);
+
+                hideIconPicker(picker);
+            });
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!picker.contains(e.target)) hideIconPicker(picker);
+        });
+    }
+
+    function showIconPickerAt(anchorEl, picker) {
+        const r = anchorEl.getBoundingClientRect();
+        picker.style.left = `${r.left + window.scrollX}px`;
+        picker.style.top = `${r.bottom + window.scrollY + 6}px`;
+        picker.style.display = 'block';
+        picker.setAttribute('aria-hidden', 'false');
+    }
+    function hideIconPicker(picker) {
+        picker.style.display = 'none';
+        picker.setAttribute('aria-hidden', 'true');
+    }
+    function emojiToSvgDataUrl(emoji) {
+        const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='36' height='36'>
+  <rect width='100%' height='100%' rx='6' ry='6' fill='#ffffff' fill-opacity='0.08'/>
+  <text x='50%' y='55%' dominant-baseline='middle' text-anchor='middle' font-size='20'>${emoji}</text>
+</svg>`;
+        return 'data:image/svg+xml;utf8,' + encodeURIComponent(svg);
+    }
+
+    /* --- ELIMINAR COLUMNA --- */
+    function bindDeleteButtons() {
+        document.querySelectorAll('.delete-col-btn').forEach(btn => {
+            if (btn.dataset.bound === '1') return; btn.dataset.bound = '1';
+            btn.addEventListener('click', e => {
+                e.preventDefault();
+                const colId = btn.dataset.colId;
+                const totalCols = document.querySelectorAll('.kanban-column').length;
+                if (totalCols <= 1) { alert('No se puede eliminar la última columna'); return; }
+
+                if (!confirm('¿Estás seguro de eliminar esta columna? Los chats se moverán a otra columna.')) return;
+
+                fetch(`/kanban/columna/${colId}/eliminar`, { method: 'POST' })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (data.success) {
+                            const colEl = document.querySelector(`.kanban-column[data-col-id="${colId}"]`);
+                            if (colEl) colEl.remove();
+                        } else { alert(data.error || 'No se pudo eliminar'); }
+                    });
+            });
+        });
+    }
+
+    /* --- RENOMBRAR COLUMNA --- */
+    function initRenameHandlers() {
+        document.querySelectorAll('.col-name[contenteditable="true"]').forEach(header => {
+            if (header.dataset.bound === '1') return; header.dataset.bound = '1';
+
+            header.addEventListener('focus', () => {
+                editingColId = header.dataset.colId;
+                editingColText = header.textContent;
+                kanbanAutoRefresh = false; // pausa mientras editas
+            });
+
+            header.addEventListener('input', () => {
+                editingColText = header.textContent;
+                const id = header.dataset.colId;
+                if (renameTimers.has(id)) clearTimeout(renameTimers.get(id));
+                // guarda 600ms después de dejar de teclear
+                const t = setTimeout(() => saveColumnName(id, header.textContent.trim()), 600);
+                renameTimers.set(id, t);
+            });
+
+            header.addEventListener('blur', () => {
+                const id = header.dataset.colId;
+                const nombre = header.textContent.trim();
+                if (renameTimers.has(id)) {
+                    clearTimeout(renameTimers.get(id));
+                    renameTimers.delete(id);
+                }
+                saveColumnName(id, nombre).finally(() => {
+                    // reanuda refresh con un pequeño delay para evitar parpadeo
+                    setTimeout(() => { kanbanAutoRefresh = true; }, 300);
+                    editingColId = null;
+                    editingColText = null;
+                });
+            });
+
+            header.addEventListener('keydown', e => {
+                if (e.key === 'Enter') { e.preventDefault(); header.blur(); }
+            });
+        });
+    }
+    function saveColumnName(columnaId, nombre) {
+        return fetch(`/kanban/columna/${columnaId}/renombrar`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nombre })
+        }).then(r => r.json()).then(data => {
+            if (!data.success) console.warn('No se pudo guardar el nombre');
+        }).catch(err => console.error('Error guardando nombre:', err));
+    }
+
+    /* --- AUTO REFRESH --- */
+    function startAutoRefresh() {
+        setInterval(actualizarKanban, refreshInterval);
+    }
+
+    function actualizarKanban() {
+        if (!kanbanAutoRefresh) return;
+
+        // Guardamos el scroll actual solo si no estamos arrastrando
+        // (SortableJS maneja el drag, refrescar puede interferir, pero usually ok con diffing)
+
+        fetch('/kanban/data')
+            .then(r => r.json())
+            .then(data => {
+                actualizarIncremental(data);
+                if (editingColId) {
+                    const colHeader = document.querySelector(`.col-name[data-col-id="${editingColId}"]`);
+                    if (colHeader && editingColText) {
+                        colHeader.focus();
+                        colHeader.textContent = editingColText; // Restaurar texto en edición si se sobrescribió
+                    }
+                }
+                // Reinicializar edición de alias para nuevos elementos
+                setupAliasEditing();
+            })
+            .catch(err => console.error('❌ Error actualizando Kanban:', err));
+    }
+
+    function actualizarIncremental(data) {
+        // 1. Actualizar columnas (nombres/iconos)
+        data.columnas.forEach(col => {
+            const nameEl = document.querySelector(`.col-name[data-col-id="${col.id}"]`);
+            // no sobreescribir si es el elemento activo o está en edición
+            if (nameEl && document.activeElement !== nameEl &&
+                editingColId !== col.id.toString() && nameEl.textContent !== col.nombre) {
+                nameEl.textContent = col.nombre;
+            }
+            const iconEl = document.querySelector(`.col-icon[data-col-id="${col.id}"]`);
+            if (iconEl && col.icono && iconEl.src !== col.icono) {
+                iconEl.src = col.icono;
+            }
+        });
+
+        // 2. Mapear estado actual del DOM
+        const chatsActuales = new Map();
+        document.querySelectorAll('.kanban-card').forEach(card => {
+            chatsActuales.set(card.dataset.chatNum, {
+                element: card,
+                columnaId: card.closest('.kanban-column').dataset.colId
+            });
+        });
+
+        // 3. Procesar datos del servidor
+        data.chats.forEach(chat => {
+            const existente = chatsActuales.get(chat.numero);
+
+            if (existente) {
+                // Si existe, actualizamos contenido
+                actualizarChatExistente(existente.element, chat);
+
+                // Si cambió de columna, lo movemos
+                if (existente.columnaId !== chat.columna_id.toString()) {
+                    moverChatAColumna(chat.numero, chat.columna_id);
+                }
+
+                // Lo quitamos del mapa para no borrarlo después
+                chatsActuales.delete(chat.numero);
+            } else {
+                // Si no existe, lo creamos
+                agregarNuevoChat(chat);
+            }
+        });
+
+        // 4. Eliminar chats que ya no están en el servidor
+        chatsActuales.forEach((info, numero) => eliminarChat(numero));
+    }
+
+    /* --- AGREGAR CHAT (CON BADGE Y PLATAFORMA) --- */
+    function agregarNuevoChat(chat) {
+        const columna = document.querySelector(`.column-list[data-col-id="${chat.columna_id}"]`);
+        if (!columna) return;
+
+        // Lógica de Iconos de Plataforma
+        let avatarSrc = '/static/icons/whatsapp-icon.png';
+        let platformClass = 'is-whatsapp';
+
+        if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
+            avatarSrc = '/static/icons/telegram-icon-dos.png';
+            platformClass = 'is-telegram';
+        } else if (chat.numero && (chat.numero.startsWith('fb_') || chat.canal === 'Facebook')) {
+            avatarSrc = '/static/icons/messenger-icon-dos.png';
+            platformClass = 'is-messenger';
+        }
+
+        const bandera = getCountryFlag(chat.numero);
+
+        // Formatear fecha
+        let fechaFormateada = '';
+        if (chat.ultima_fecha) {
+            try {
+                const fechaObj = new Date(chat.ultima_fecha);
+                const dia = fechaObj.getDate();
+                const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+                const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+                fechaFormateada = `${dia}-${mes}   ${hora}`;
+            } catch (e) { /* ignorar error */ }
+        }
+
+        // Generar Badge de Interés
+        const interesBadge = generarBadgeInteres(chat.interes || 'Frío');
+
+        const html = `
+    <a href="/chats/${chat.numero}" class="kanban-card kanban-chat-link new-message" data-chat-num="${chat.numero}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;">
+                ${interesBadge}
+            </div>
+
+            <div class="card-top-row">
+                <div class="card-avatar-section">
+                    <img src="${avatarSrc}" class="card-avatar" alt="Avatar"
+                         onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${bandera ? `<img src="${bandera}" class="card-flag" alt="País" title="País">` : ''}
+                </div>
+                <div class="card-name-section">
+                    <span class="alias-view ${platformClass}" data-num="${chat.numero}" data-nombre="${chat.nombre || ''}" data-alias="${chat.alias || ''}">${chat.nombre_mostrado}</span>
+                    <span class="alias-edit" style="display:none;">
+                        <input type="text" value="${chat.alias || chat.nombre || chat.numero}" data-num="${chat.numero}" data-alias="${chat.alias || ''}" data-nombre="${chat.nombre || ''}" maxlength="100" style="width:110px;">
+                    </span>
+                </div>
+            </div>
+
+            <div class="card-bottom-row">
+                <div class="card-msg">${chat.ultimo_mensaje || ''}</div>
+                <div class="card-time">
+                    ${fechaFormateada}
+                </div>
+            </div>
+        </div>
+
+        ${chat.sin_leer > 0 ? `<span class="card-unread">${chat.sin_leer}</span>` : ''}
+    </a>`;
+
+        columna.insertAdjacentHTML('beforeend', html);
+
+        setTimeout(() => {
+            const el = document.querySelector(`.kanban-card[data-chat-num="${chat.numero}"]`);
+            if (el) el.classList.remove('new-message');
+        }, 2500);
+    }
+
+    /* --- ACTUALIZAR CHAT (CON BADGE DINÁMICO) --- */
+    function actualizarChatExistente(elemento, chat) {
+        // 1. Actualizar Alias/Nombre
+        const aliasView = elemento.querySelector('.alias-view');
+        if (aliasView && aliasView.textContent !== chat.nombre_mostrado) {
+            aliasView.textContent = chat.nombre_mostrado;
+        }
+
+        // 2. Actualizar Badge de Interés
+        const cardContent = elemento.querySelector('.card-content');
+        if (cardContent) {
+            const nuevoBadgeHTML = generarBadgeInteres(chat.interes || 'Frío');
+            const primerHijo = cardContent.firstElementChild;
+
+            // Detectar si el primer hijo es el contenedor del badge (div flex)
+            if (primerHijo && primerHijo.tagName === 'DIV' && primerHijo.style.display === 'flex') {
+                // Solo actualizar si el contenido cambió (evita parpadeo)
+                if (primerHijo.innerHTML.trim() !== nuevoBadgeHTML.trim()) {
+                    primerHijo.innerHTML = nuevoBadgeHTML;
+                }
+            } else {
+                // Si no existe (tarjeta antigua), crearlo
+                const div = document.createElement('div');
+                div.style.cssText = "display:flex; justify-content:space-between; align-items:center; margin-bottom: 2px;";
+                div.innerHTML = nuevoBadgeHTML;
+                cardContent.insertBefore(div, cardContent.firstChild);
+            }
+        }
+
+        // 3. Actualizar Tiempo
+        let fechaFormateada = '';
+        const timeElement = elemento.querySelector('.card-bottom-row .card-time');
+        if (timeElement && chat.ultima_fecha) {
+            const fechaObj = new Date(chat.ultima_fecha);
+            const dia = fechaObj.getDate();
+            const mes = fechaObj.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+            const hora = fechaObj.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+            fechaFormateada = `${dia}-${mes}   ${hora}`;
+
+            if (timeElement.textContent.trim() !== fechaFormateada) {
+                timeElement.textContent = fechaFormateada;
+            }
+        }
+
+        // 4. Actualizar Mensaje y Animación
+        const msgElement = elemento.querySelector('.card-bottom-row .card-msg');
+        const nuevoMensaje = chat.ultimo_mensaje || '';
+        let mensajeActualizado = false;
+
+        if (msgElement) {
+            if (msgElement.textContent !== nuevoMensaje) {
+                msgElement.textContent = nuevoMensaje;
+                mensajeActualizado = true;
+            }
+        }
+
+        if (mensajeActualizado) {
+            if (nuevoMensaje.trim()) {
+                elemento.classList.add('new-message');
+                setTimeout(() => elemento.classList.remove('new-message'), 2500);
+            }
+        }
+
+        // 5. Actualizar No Leídos
+        const unread = elemento.querySelector('.card-unread');
+        if (chat.sin_leer > 0) {
+            if (unread) unread.textContent = chat.sin_leer;
+            else {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = chat.sin_leer;
+                elemento.appendChild(span);
+            }
+        } else if (unread) unread.remove();
+    }
+
+    function moverChatAColumna(numero, nuevaColumnaId) {
+        const chatEl = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+        const destino = document.querySelector(`.column-list[data-col-id="${nuevaColumnaId}"]`);
+        if (chatEl && destino) destino.appendChild(chatEl);
+    }
+
+    function eliminarChat(numero) {
+        const el = document.querySelector(`.kanban-card[data-chat-num="${numero}"]`);
+        if (el) el.remove();
+    }
+
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    }
+
+    function inicializarSortable() {
+        document.querySelectorAll('.column-list').forEach(list => {
+            if (list.dataset.sortableInit === '1') return;
+            list.dataset.sortableInit = '1';
+            new Sortable(list, {
+                group: 'kanban',
+                animation: 150,
+                ghostClass: 'sortable-ghost',
+                onEnd: evt => {
+                    const numero = evt.item.dataset.chatNum;
+                    const nuevaCol = evt.to.closest('.kanban-column').dataset.colId;
+                    fetch('/kanban/mover', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ numero, columna_id: nuevaCol })
+                    });
+                }
+            });
+        });
+    }
+
+    function bindColumnHeaderEvents() { /* reservado */ }
+
+    /* --- EDITAR ALIAS (Click en lápiz) --- */
+    function activarEdicionAlias(parent) {
+        if (!parent) return;
+        const card = parent.closest('.kanban-card, .kanban-chat-link, .card-content') || parent;
+        const viewElement = card.querySelector('.alias-view');
+        const editElement = card.querySelector('.alias-edit');
+        if (!viewElement || !editElement) return;
+
+        const displayed = (viewElement.textContent || '').trim();
+        const fullname = (viewElement.dataset && viewElement.dataset.nombre) ? (viewElement.dataset.nombre || '').trim() : '';
+        const original = fullname || displayed;
+
+        const input = editElement.querySelector('input[type=text]');
+        if (!input) return;
+
+        if (!input.dataset.num || input.dataset.num.trim() === '') {
+            const numFromView = viewElement.dataset.num || card.dataset.chatNum || input.getAttribute('data-num') || '';
+            if (numFromView) input.dataset.num = numFromView;
+        }
+
+        const aliasFromDataset = (input.dataset && input.dataset.alias) ? (input.dataset.alias || '').trim() : '';
+        const candidate = aliasFromDataset || (input.value || '').trim() || fullname || input.dataset.num || '';
+        input.value = candidate;
+
+        card.classList.add('alias-editing');
+        viewElement.style.display = 'none';
+        editElement.style.display = 'flex';
+        input.focus();
+        input.select();
+
+        let submitted = false;
+
+        function finishAndRestore(valueToShow) {
+            try { card.classList.remove('alias-editing'); } catch (e) { }
+            editElement.style.display = 'none';
+
+            let show = valueToShow;
+            if ((!show || String(show).trim() === '') && fullname) show = fullname;
+            if (!show) show = original;
+
+            viewElement.textContent = show;
+            try {
+                if (input && input.dataset) {
+                    if (String(show).trim() === (fullname || '').trim()) input.dataset.alias = '';
+                    else input.dataset.alias = String(show).trim();
+                }
+            } catch (e) { }
+            viewElement.style.display = '';
+        }
+
+        function terminar() {
+            const nuevo = (input.value || '').trim();
+            if (nuevo === '' || nuevo === original) {
+                finishAndRestore(original);
+                return;
+            }
+            submitted = true;
+            fetch(`/contactos/${encodeURIComponent(input.dataset.num)}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({ alias: nuevo }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+                .then(res => {
+                    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                    return res;
+                })
+                .then(() => {
+                    finishAndRestore(nuevo);
+                })
+                .catch(err => {
+                    console.warn('Error guardando alias:', err);
+                    finishAndRestore(original);
+                });
+        }
+
+        input.onblur = () => {
+            setTimeout(() => { if (!submitted) terminar(); }, 0);
+        };
+
+        input.onkeydown = e => {
+            if (e.key === 'Enter') { e.preventDefault(); terminar(); }
+            if (e.key === 'Escape') {
+                try { card.classList.remove('alias-editing'); } catch (ee) { }
+                editElement.style.display = 'none';
+                viewElement.style.display = '';
+            }
+        };
+    }
+</script>
+{% endblock %}
