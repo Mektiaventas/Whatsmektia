@@ -2380,7 +2380,7 @@ def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
 def procesar_followups_automaticos(config):
     """
     Busca chats que necesiten seguimiento.
-    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
+    CONFIGURACIÓN: UN SOLO MENSAJE DE RECUPERACIÓN.
     """
     try:
         # Asegurar columnas en cada ejecución para robustez
@@ -2389,7 +2389,7 @@ def procesar_followups_automaticos(config):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Consulta actualizada para traer también el estado_seguimiento
+        # Usamos preferentemente ultima_interaccion_usuario para evitar bucles si el bot habla solo
         query = """
             SELECT 
                 c.numero_telefono as numero,
@@ -2415,8 +2415,8 @@ def procesar_followups_automaticos(config):
             numero = chat['numero']
             last_msg = chat['ultima_msg']
             last_followup = chat['ultimo_followup']
-            ultimo_estado_db = chat.get('estado_seguimiento')
             
+            # 1. Validar fechas
             if last_msg:
                 if last_msg.tzinfo is None:
                     last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
@@ -2425,40 +2425,39 @@ def procesar_followups_automaticos(config):
             else:
                 continue
 
-            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
+            # 2. REGLA DE ORO: Si ya enviamos un followup DESPUÉS de que el usuario habló por última vez, NO ENVIAR MÁS.
+            # Esto garantiza 1 solo mensaje por silencio del usuario.
             if last_followup:
                 if last_followup.tzinfo is None:
                     last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
                 else:
                     last_followup = last_followup.astimezone(tz_mx)
                 
+                # Si la fecha del último followup es MAYOR (más reciente) que el último mensaje del usuario
+                # significa que ya le escribimos y no ha contestado. No insistir.
                 if last_followup >= last_msg:
                     continue
 
-            # Calcular tiempo pasado
+            # 3. Calcular tiempo de silencio
             diferencia = ahora - last_msg
-            minutos = diferencia.total_seconds() / 60
-            horas = minutos / 60
+            horas = diferencia.total_seconds() / 3600
             
             tipo_interes_calculado = None
             
-            # --- REGLAS DE TIEMPO ---
+            # --- NUEVA REGLA: SOLO UN TIPO DE MENSAJE ---
+            # Solo enviar si han pasado al menos 24 horas (puedes cambiar 24 por 48 u otro número)
             if horas >= 20:
-                tipo_interes_calculado = 'dormido'
-            elif horas >= 5:
-                tipo_interes_calculado = 'frio'
-            elif minutos >= 30:
-                tipo_interes_calculado = 'tibio'
-            
-            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
-            if tipo_interes_calculado == ultimo_estado_db:
+                tipo_interes_calculado = 'seguimiento_unico'
+            else:
+                # Si no ha pasado el tiempo suficiente, saltamos
                 continue
 
-            # Si cumple condición y es un estado NUEVO, enviamos
+            # Si cumple condición, enviamos
             if tipo_interes_calculado:
-                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
+                app.logger.info(f"💡 Generando seguimiento ÚNICO para {numero} (Horas inactivo: {horas:.1f})...")
                 
-                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
+                # Usamos 'dormido' para que la IA genere un mensaje de reactivación amable
+                texto_followup = generar_mensaje_seguimiento_ia(numero, config, 'dormido')
                 
                 if texto_followup:
                     enviado = False
@@ -2470,24 +2469,24 @@ def procesar_followups_automaticos(config):
                         enviado = enviar_mensaje(numero, texto_followup, config)
                     
                     if enviado:
-                        # Guardar respuesta (al bot mismo como respuesta del sistema)
+                        # Guardar respuesta interna
                         guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
                         
                         # Actualizar DB con fecha Y EL NUEVO ESTADO
                         conn2 = get_db_connection(config)
                         cur2 = conn2.cursor()
                         cur2.execute("""
-                            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
-                            VALUES (%s, NOW(), %s)
-                            ON DUPLICATE KEY UPDATE 
-                                ultimo_followup = NOW(),
-                                estado_seguimiento = %s
+                        INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento)
+                        VALUES (%s, NOW(), %s)
+                        ON DUPLICATE KEY UPDATE
+                        ultimo_followup = NOW(),
+                        estado_seguimiento = %s
                         """, (numero, tipo_interes_calculado, tipo_interes_calculado))
                         conn2.commit()
                         cur2.close()
                         conn2.close()
                         
-                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
+                        app.logger.info(f"✅ Seguimiento enviado a {numero}. No se enviarán más hasta que el usuario responda.")
 
     except Exception as e:
         app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
