@@ -209,18 +209,6 @@ NUMEROS_CONFIG = {
         # Claves de Messenger
         'messenger_page_id_env': 'LACSE_MESSENGER_PAGE_ID',
         'messenger_token_env': 'LACSE_PAGE_ACCESS_TOKEN'
-    },
-    '1019': {  # Número de Lacse
-        'phone_number_id': os.getenv("SOIN3_PHONE_NUMBER_ID"),  
-        'whatsapp_token': os.getenv("SOIN3_WHATSAPP_TOKEN"),    
-        'db_host': os.getenv("SOIN3_DB_HOST"),                  
-        'db_user': os.getenv("SOIN3_DB_USER"),                  
-        'db_password': os.getenv("SOIN3_DB_PASSWORD"),          
-        'db_name': os.getenv("SOIN3_DB_NAME"),                  
-        'dominio': 'soin3.mektia.com',
-        # Claves de Messenger
-        'messenger_page_id_env': 'SOIN3_MESSENGER_PAGE_ID',
-        'messenger_token_env': 'SOIN3_PAGE_ACCESS_TOKEN'
     }
 }
 
@@ -801,8 +789,7 @@ def guardar_configuracion_negocio():
         'calendar_email': request.form.get('calendar_email'),  # Nuevo campo para correo de notificaciones
         'transferencia_numero': request.form.get('transferencia_numero'),
         'transferencia_nombre': request.form.get('transferencia_nombre'),
-        'transferencia_banco': request.form.get('transferencia_banco'),
-        'contexto_adicional': request.form.get('contexto_adicional')
+        'transferencia_banco': request.form.get('transferencia_banco')
     }
     
     # Manejar la subida del logo
@@ -902,46 +889,25 @@ def guardar_configuracion_negocio():
             app.logger.info("ℹ️ No hay campos nuevos para actualizar en configuracion")
     else:
         # Insertar nueva configuración
-        
-        # 1. Filtrar valores None o cadena vacía para asegurar la lista de parámetros
-        insert_data = {k: v for k, v in datos.items() if v is not None and v != ''}
-        
-        # 2. Preparar listas SQL (incluir ID explícitamente)
-        dynamic_fields = ', '.join(insert_data.keys())
-        dynamic_placeholders = ', '.join(['%s'] * len(insert_data))
-        
-        # 3. Construir SQL statement: (id, campo1, campo2, ...) VALUES (1, %s, %s, ...)
-        sql_fields = f"id, {dynamic_fields}"
-        sql_placeholders = f"1, {dynamic_placeholders}"
-        
-        # 4. Construir SQL completo
-        sql = f"INSERT INTO configuracion ({sql_fields}) VALUES ({sql_placeholders})"
-
-        # 5. Construir la lista de valores: [todos los valores filtrados]
-        # NOTA: La lista de valores NO debe incluir el '1' para el ID, ya que el placeholder del ID es '1' en el SQL, no '%s'.
-        values_to_pass = list(insert_data.values())
-        
+        fields = ', '.join(datos.keys())
+        placeholders = ', '.join(['%s'] * len(datos))
+        sql = f"INSERT INTO configuracion (id, {fields}) VALUES (1, {placeholders})"
         try:
-            # Ejecutar con la lista de valores filtrados. (El '1' del ID es fijo en la sentencia SQL)
-            cursor.execute(sql, values_to_pass) 
-            conn.commit()
-            
+            cursor.execute(sql, [1] + list(datos.values()))
         except Exception as e:
-            app.logger.error(f"🔴 Error insertando configuración nueva (FINAL ATTEMPT): {e}")
-            # Intentar crear tabla mínima (tu lógica de reparación de tabla)
+            app.logger.error(f"🔴 Error insertando configuración nueva: {e}")
+            # Intentar crear tabla mínima por compatibilidad básica
             try:
-                # ... (Lógica de reparación aquí) ...
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS configuracion (
                         id INT PRIMARY KEY DEFAULT 1
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """)
                 conn.commit()
-                # Reintento con los campos filtrados
-                cursor.execute(sql, values_to_pass)
+                cursor.execute(sql, [1] + list(datos.values()))
             except Exception as e2:
                 app.logger.error(f"🔴 Falló intento de reparación al insertar configuracion: {e2}")
-                raise
+    
     try:
         conn.commit()
     except Exception:
@@ -2380,7 +2346,7 @@ def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
 def procesar_followups_automaticos(config):
     """
     Busca chats que necesiten seguimiento.
-    CONFIGURACIÓN: UN SOLO MENSAJE DE RECUPERACIÓN.
+    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
     """
     try:
         # Asegurar columnas en cada ejecución para robustez
@@ -2389,7 +2355,7 @@ def procesar_followups_automaticos(config):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Usamos preferentemente ultima_interaccion_usuario para evitar bucles si el bot habla solo
+        # Consulta actualizada para traer también el estado_seguimiento
         query = """
             SELECT 
                 c.numero_telefono as numero,
@@ -2415,8 +2381,8 @@ def procesar_followups_automaticos(config):
             numero = chat['numero']
             last_msg = chat['ultima_msg']
             last_followup = chat['ultimo_followup']
+            ultimo_estado_db = chat.get('estado_seguimiento')
             
-            # 1. Validar fechas
             if last_msg:
                 if last_msg.tzinfo is None:
                     last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
@@ -2425,39 +2391,40 @@ def procesar_followups_automaticos(config):
             else:
                 continue
 
-            # 2. REGLA DE ORO: Si ya enviamos un followup DESPUÉS de que el usuario habló por última vez, NO ENVIAR MÁS.
-            # Esto garantiza 1 solo mensaje por silencio del usuario.
+            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
             if last_followup:
                 if last_followup.tzinfo is None:
                     last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
                 else:
                     last_followup = last_followup.astimezone(tz_mx)
                 
-                # Si la fecha del último followup es MAYOR (más reciente) que el último mensaje del usuario
-                # significa que ya le escribimos y no ha contestado. No insistir.
                 if last_followup >= last_msg:
                     continue
 
-            # 3. Calcular tiempo de silencio
+            # Calcular tiempo pasado
             diferencia = ahora - last_msg
-            horas = diferencia.total_seconds() / 3600
+            minutos = diferencia.total_seconds() / 60
+            horas = minutos / 60
             
             tipo_interes_calculado = None
             
-            # --- NUEVA REGLA: SOLO UN TIPO DE MENSAJE ---
-            # Solo enviar si han pasado al menos 24 horas (puedes cambiar 24 por 48 u otro número)
+            # --- REGLAS DE TIEMPO ---
             if horas >= 20:
-                tipo_interes_calculado = 'seguimiento_unico'
-            else:
-                # Si no ha pasado el tiempo suficiente, saltamos
+                tipo_interes_calculado = 'dormido'
+            elif horas >= 5:
+                tipo_interes_calculado = 'frio'
+            elif minutos >= 30:
+                tipo_interes_calculado = 'tibio'
+            
+            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
+            if tipo_interes_calculado == ultimo_estado_db:
                 continue
 
-            # Si cumple condición, enviamos
+            # Si cumple condición y es un estado NUEVO, enviamos
             if tipo_interes_calculado:
-                app.logger.info(f"💡 Generando seguimiento ÚNICO para {numero} (Horas inactivo: {horas:.1f})...")
+                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
                 
-                # Usamos 'dormido' para que la IA genere un mensaje de reactivación amable
-                texto_followup = generar_mensaje_seguimiento_ia(numero, config, 'dormido')
+                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
                 
                 if texto_followup:
                     enviado = False
@@ -2469,24 +2436,24 @@ def procesar_followups_automaticos(config):
                         enviado = enviar_mensaje(numero, texto_followup, config)
                     
                     if enviado:
-                        # Guardar respuesta interna
+                        # Guardar respuesta (al bot mismo como respuesta del sistema)
                         guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
                         
                         # Actualizar DB con fecha Y EL NUEVO ESTADO
                         conn2 = get_db_connection(config)
                         cur2 = conn2.cursor()
                         cur2.execute("""
-                        INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento)
-                        VALUES (%s, NOW(), %s)
-                        ON DUPLICATE KEY UPDATE
-                        ultimo_followup = NOW(),
-                        estado_seguimiento = %s
+                            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
+                            VALUES (%s, NOW(), %s)
+                            ON DUPLICATE KEY UPDATE 
+                                ultimo_followup = NOW(),
+                                estado_seguimiento = %s
                         """, (numero, tipo_interes_calculado, tipo_interes_calculado))
                         conn2.commit()
                         cur2.close()
                         conn2.close()
                         
-                        app.logger.info(f"✅ Seguimiento enviado a {numero}. No se enviarán más hasta que el usuario responda.")
+                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
 
     except Exception as e:
         app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
@@ -10346,10 +10313,7 @@ def obtener_configuracion_por_host():
         if 'maindsteel' in host:
             app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['1011']
-        # DETECCIÓN SOIN3
-        if 'soin3' in host:
-            app.logger.info("✅ Configuración detectada: Maindsteel")
-            return NUMEROS_CONFIG['1019']
+
         # DETECCIÓN DRASGO
         if 'drasgo' in host:
             app.logger.info("✅ Configuración detectada: Drasgo")
