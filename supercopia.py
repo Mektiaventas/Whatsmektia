@@ -198,6 +198,18 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
+    '000': {  # Número de Drasgo
+        'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
+        'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("SUPAG_DB_HOST"), # Nota: Tienes un typo aquí (DRASCO)                 
+        'db_user': os.getenv("SUPAG_DB_USER"),                
+        'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
+        'db_name': os.getenv("SUPAG_DB_NAME"),                  
+        'dominio': 'supag.mektia.com',
+        # Claves de Messenger
+        'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
+    },
     '1013': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
@@ -10313,6 +10325,11 @@ def obtener_configuracion_por_host():
         if 'maindsteel' in host:
             app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['1011']
+
+        # DETECCIÓN SUPAGPRUEBA
+        if 'supagprueba' in host:
+            app.logger.info("✅ Configuración detectada: Maindsteel")
+            return NUMEROS_CONFIG['000']
 
         # DETECCIÓN DRASGO
         if 'drasgo' in host:
