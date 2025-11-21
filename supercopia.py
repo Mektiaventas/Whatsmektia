@@ -150,6 +150,19 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'UNILOVA_MESSENGER_PAGE_ID',
         'messenger_token_env': 'UNILOVA_PAGE_ACCESS_TOKEN'
     },
+    '003': {  # Número de Unilova
+        'phone_number_id': os.getenv("SOIN3_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("SOIN3_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("SOIN3_DB_HOST"),
+        'db_user': os.getenv("SOIN3_DB_USER"),
+        'db_password': os.getenv("SOIN3_DB_PASSWORD"),
+        'db_name': os.getenv("SOIN3_DB_NAME"),
+        'dominio': 'SOIN3.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SOIN3"),
+        # Claves de Messenger
+        'messenger_page_id_env': 'SOIN3_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SOIN3_PAGE_ACCESS_TOKEN'
+    },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("LAPORFIRIANNA_WHATSAPP_TOKEN"),
@@ -10349,6 +10362,10 @@ def obtener_configuracion_por_host():
         if 'supagprueba' in host:
             app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['000']
+
+        if 'soin3' in host:
+            app.logger.info("✅ Configuración detectada: Maindsteel")
+            return NUMEROS_CONFIG['003']
 
         # DETECCIÓN DRASGO
         if 'drasgo' in host:
