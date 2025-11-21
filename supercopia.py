@@ -353,6 +353,25 @@ def get_clientes_conn():
         password=os.getenv("CLIENTES_DB_PASSWORD"),
         database=os.getenv("CLIENTES_DB_NAME")
     )
+
+def _ensure_created_at_column(config=None):
+    """Asegura que la tabla contactos tenga la columna created_at"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'created_at'")
+        if cursor.fetchone() is None:
+            # Crear columna por defecto con timestamp actual
+            cursor.execute("ALTER TABLE contactos ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+            conn.commit()
+            app.logger.info("🔧 Columna 'created_at' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna created_at: {e}")
+
 def descargar_template_excel(columnas):
     """Genera un archivo Excel con los encabezados de columna dados y sin datos."""
     try:
