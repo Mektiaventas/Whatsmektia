@@ -8591,7 +8591,114 @@ def get_columnas_precios():
         app.logger.warning(f"⚠️ get_columnas_precios error: {e}")
         return jsonify({'hidden': {}})
 
+@app.route('/dashboard/conversaciones-data')
+@login_required
+def dashboard_conversaciones_data():
+    """
+    Devuelve JSON para el gráfico.
+    Métrica principal: COUNT(*) de la tabla 'contactos' agrupado por fecha (created_at).
+    Esto representa 'Nuevos Chats' iniciados por día.
+    """
+    try:
+        config = obtener_configuracion_por_host()
+        period = request.args.get('period', 'week')
+        now = datetime.now()
 
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+
+        # 1. Plan info (si aplica)
+        plan_info = None
+        try:
+            au = session.get('auth_user')
+            if au and au.get('user'):
+                plan_info = get_plan_status_for_user(au.get('user'), config=config)
+        except Exception:
+            plan_info = None
+
+        # 2. Definir ventana de tiempo
+        if period == 'year':
+            # Últimos 12 meses (365 días)
+            start = now - timedelta(days=365)
+        elif period == '3months':
+            # Últimos 90 días
+            start = now - timedelta(days=90)
+        elif period == 'month':
+            # Últimos 30 días
+            start = now - timedelta(days=30)
+        else: 
+            # Default: Última semana (7 días)
+            start = now - timedelta(days=7)
+
+        # 3. CONSULTA SQL: Contar nuevos contactos por día
+        # Usamos DATE(created_at) para ignorar la hora y agrupar solo por día/mes/año
+        sql = """
+            SELECT DATE(created_at) as dia, COUNT(*) as total
+            FROM contactos
+            WHERE created_at >= %s
+            GROUP BY DATE(created_at)
+            ORDER BY DATE(created_at) ASC
+        """
+        cursor.execute(sql, (start,))
+        rows = cursor.fetchall() # Lista de tuplas (dia, total)
+
+        # 4. Procesar datos para rellenar días vacíos con 0
+        counts_map = {}
+        for r in rows:
+            try:
+                # r[0] es la fecha (date object o string), r[1] es el count
+                fecha_str = str(r[0])
+                count = int(r[1])
+                counts_map[fecha_str] = count
+            except Exception:
+                continue
+
+        labels = []
+        values = []
+        
+        # Iterar día por día desde 'start' hasta 'now' para llenar huecos
+        current_date = start.date() if isinstance(start, datetime) else start
+        end_date = now.date()
+        
+        while current_date <= end_date:
+            key = current_date.strftime('%Y-%m-%d')
+            
+            # Formato de etiqueta visual
+            if period == 'year':
+                # Si es anual, mostrar Mes Año (ej: Nov 2024)
+                label_visual = current_date.strftime('%b %Y')
+                # Agrupar visualmente por mes si es necesario, o dejar diario si prefieres detalle
+                # Para simplificar en gráfico anual diario:
+                label_visual = current_date.strftime('%d %b') 
+            elif period == '3months':
+                label_visual = current_date.strftime('%d %b')
+            else:
+                label_visual = current_date.strftime('%d/%m')
+
+            labels.append(label_visual)
+            values.append(counts_map.get(key, 0)) # 0 si no hubo chats ese día
+            
+            current_date += timedelta(days=1)
+
+        # 5. Métrica 'Chats Activos' (Conversaciones distintas en las últimas 24h)
+        # Esto consulta la tabla de mensajes para ver actividad reciente
+        cursor.execute("SELECT COUNT(DISTINCT numero) FROM conversaciones WHERE timestamp >= NOW() - INTERVAL 1 DAY")
+        row_active = cursor.fetchone()
+        active_count = int(row_active[0]) if row_active and row_active[0] is not None else 0
+
+        cursor.close()
+        conn.close()
+
+        return jsonify({
+            'labels': labels,
+            'values': values,
+            'active_count': active_count,
+            'plan_info': plan_info or {}
+        })
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en /dashboard/conversaciones-data: {e}")
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/configuracion/precios/columnas/restablecer', methods=['POST'])
 def reset_columnas_precios():
