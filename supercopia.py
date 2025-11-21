@@ -262,9 +262,9 @@ from whatsapp import (
     texto_a_voz,
     enviar_mensaje,
     enviar_imagen,
-    enviar_documento,
+    enviar_documento,  # ← Asegúrate de que esta esté incluida
     enviar_mensaje_voz
-)
+) 
 from files import (extraer_texto_pdf,
 extraer_texto_e_imagenes_pdf, extraer_texto_excel,
 extraer_texto_csv,
@@ -277,10 +277,14 @@ get_productos_dir_for_config,
 determinar_extension
 )
 ALLOWED_EXTENSIONS = {
-    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',  # Documentos e imágenes
-    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',     # Videos
-    'xlsx', 'xls', 'csv', 'docx'                          # Office y documentos
-}
+    'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+    'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',
+    'xlsx', 'xls', 'csv', 'docx', 'doc', 
+    'ppt', 'pptx',  # PowerPoint
+    'mp3', 'wav', 'ogg', 'm4a',  # Audio
+    'zip', 'rar', '7z',  # Comprimidos
+    'rtf'  # Texto enriquecido
+} 
 PREFIJOS_PAIS = {
     '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br',
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
@@ -587,39 +591,13 @@ def logout():
     return redirect(url_for('login'))
 
 def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
 def _get_or_create_session_id():
     sid = session.get('sid')
     if not sid:
         sid = os.urandom(16).hex()
         session['sid'] = sid
     return sid
-
-def _ensure_chat_meta_followup_columns(config=None):
-    """Asegura columnas en chat_meta para controlar los seguimientos automáticos."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # 1. Columna de fecha
-        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'ultimo_followup'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE chat_meta ADD COLUMN ultimo_followup DATETIME DEFAULT NULL")
-            
-        # 2. NUEVA COLUMNA: Estado del seguimiento (para evitar repetir 'tibio' cada hora)
-        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'estado_seguimiento'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE chat_meta ADD COLUMN estado_seguimiento VARCHAR(20) DEFAULT NULL")
-            
-        conn.commit()
-        cursor.close()
-        conn.close()
-        app.logger.info("🔧 Columnas de seguimiento aseguradas en chat_meta")
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error asegurando columnas followup: {e}")
 
 def _ensure_sesiones_table(conn):
     cur = conn.cursor()
@@ -638,47 +616,6 @@ def _ensure_sesiones_table(conn):
     """)
     conn.commit()
     cur.close()
-
-def recalcular_interes_lead(numero, nivel_interes_ia, config):
-    """
-    Define el interés BASE en la base de datos.
-    - Frío ❄: Solo 1 mensaje del usuario en el historial (sin importar qué diga).
-    - Caliente 🔥: >1 mensaje Y la IA detectó interés ESPECÍFICO.
-    - Tibio 🌡: >1 mensaje Y la IA detectó interés GENERAL o BAJO.
-    """
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # 1. Contar mensajes del usuario para detectar "Fríos" (solo una interacción)
-        # Filtramos mensajes que no sean del sistema
-        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
-        count_msgs = cursor.fetchone()[0]
-        
-        nuevo_interes_db = 'Tibio' # Default
-        
-        # REGLA 1: LEADS FRÍOS (Contestaron una sola vez)
-        if count_msgs <= 1:
-            nuevo_interes_db = 'Frío'
-        else:
-            # REGLA 2: CALIENTE (Contexto Específico)
-            if nivel_interes_ia == 'ESPECIFICO':
-                nuevo_interes_db = 'Caliente'
-            
-            # REGLA 3: TIBIO (Contexto General o Bajo, pero ya interactuando)
-            else:
-                nuevo_interes_db = 'Tibio'
-        
-        # Actualizar en DB
-        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        return nuevo_interes_db
-    except Exception as e:
-        app.logger.error(f"Error recalculando interés: {e}")
-        return 'Tibio'
 
 def registrar_sesion_activa(username):
     try:
@@ -852,8 +789,7 @@ def guardar_configuracion_negocio():
         'calendar_email': request.form.get('calendar_email'),  # Nuevo campo para correo de notificaciones
         'transferencia_numero': request.form.get('transferencia_numero'),
         'transferencia_nombre': request.form.get('transferencia_nombre'),
-        'transferencia_banco': request.form.get('transferencia_banco'),
-        'contexto_adicional': request.form.get('contexto_adicional')
+        'transferencia_banco': request.form.get('transferencia_banco')
     }
     
     # Manejar la subida del logo
@@ -884,8 +820,7 @@ def guardar_configuracion_negocio():
             'calendar_email': "ALTER TABLE configuracion ADD COLUMN calendar_email VARCHAR(255)",
             'transferencia_numero': "ALTER TABLE configuracion ADD COLUMN transferencia_numero VARCHAR(100)",
             'transferencia_nombre': "ALTER TABLE configuracion ADD COLUMN transferencia_nombre VARCHAR(200)",
-            'transferencia_banco': "ALTER TABLE configuracion ADD COLUMN transferencia_banco VARCHAR(100)",
-            'contexto_adicional': "ALTER TABLE configuracion ADD COLUMN contexto_adicional TEXT DEFAULT NULL"
+            'transferencia_banco': "ALTER TABLE configuracion ADD COLUMN transferencia_banco VARCHAR(100)"
         }
         for col, alter_sql in required_cols.items():
             try:
@@ -2346,6 +2281,253 @@ def actualizar_icono_columna(columna_id):
     finally:
         cursor.close(); conn.close()
 
+# --- NUEVAS FUNCIONES DE LEADS, FOLLOWUPS Y SCHEDULER ---
+
+def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
+    """Genera un mensaje de seguimiento. Prioriza mensaje configurado, sino usa IA."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        # 1. Cargar configuración para ver si hay mensaje personalizado
+        cfg = load_config(config)
+        leads_cfg = cfg.get('leads', {})
+        
+        mensaje_personalizado = ""
+        if tipo_interes == 'tibio':
+            mensaje_personalizado = leads_cfg.get('mensaje_tibio')
+        elif tipo_interes == 'frio':
+            mensaje_personalizado = leads_cfg.get('mensaje_frio')
+        elif tipo_interes == 'dormido':
+            mensaje_personalizado = leads_cfg.get('mensaje_dormido')
+            
+        # Si existe un mensaje configurado por el usuario, USARLO DIRECTAMENTE
+        if mensaje_personalizado and mensaje_personalizado.strip():
+            app.logger.info(f"✅ Usando mensaje personalizado de Leads ({tipo_interes}) para {numero}")
+            return mensaje_personalizado.strip()
+
+        # 2. Si no hay mensaje configurado, usar IA
+        historial = obtener_historial(numero, limite=6, config=config)
+        if not historial:
+            return None 
+            
+        contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
+
+        # Prompt para la IA
+        prompt = f"""
+        Eres un asistente de ventas amable y profesional.
+        El usuario dejó de responder (Estado: {tipo_interes}). Tu objetivo es reactivar la conversación SIN ser molesto.
+        
+        HISTORIAL RECIENTE:
+        {contexto}
+        
+        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado.
+        Responde SOLO con el texto del mensaje.
+        """
+        
+        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.4,
+            "max_tokens": 100
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
+        response.raise_for_status()
+        mensaje_seguimiento = response.json()['choices'][0]['message']['content'].strip().replace('"', '')
+        
+        return mensaje_seguimiento
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
+        return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
+
+def procesar_followups_automaticos(config):
+    """
+    Busca chats que necesiten seguimiento.
+    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
+    """
+    try:
+        # Asegurar columnas en cada ejecución para robustez
+        _ensure_chat_meta_followup_columns(config) 
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Consulta actualizada para traer también el estado_seguimiento
+        query = """
+            SELECT 
+                c.numero_telefono as numero,
+                COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
+                cm.ultimo_followup,
+                cm.estado_seguimiento
+            FROM contactos c
+            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero
+            WHERE c.ultima_interaccion_usuario IS NOT NULL 
+               OR c.timestamp IS NOT NULL
+        """
+        cursor.execute(query)
+        candidatos = cursor.fetchall()
+        cursor.close()
+        conn.close()
+
+        if not candidatos:
+            return
+
+        ahora = datetime.now(tz_mx)
+
+        for chat in candidatos:
+            numero = chat['numero']
+            last_msg = chat['ultima_msg']
+            last_followup = chat['ultimo_followup']
+            ultimo_estado_db = chat.get('estado_seguimiento')
+            
+            if last_msg:
+                if last_msg.tzinfo is None:
+                    last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
+                else:
+                    last_msg = last_msg.astimezone(tz_mx)
+            else:
+                continue
+
+            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
+            if last_followup:
+                if last_followup.tzinfo is None:
+                    last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
+                else:
+                    last_followup = last_followup.astimezone(tz_mx)
+                
+                if last_followup >= last_msg:
+                    continue
+
+            # Calcular tiempo pasado
+            diferencia = ahora - last_msg
+            minutos = diferencia.total_seconds() / 60
+            horas = minutos / 60
+            
+            tipo_interes_calculado = None
+            
+            # --- REGLAS DE TIEMPO ---
+            if horas >= 20:
+                tipo_interes_calculado = 'dormido'
+            elif horas >= 5:
+                tipo_interes_calculado = 'frio'
+            elif minutos >= 30:
+                tipo_interes_calculado = 'tibio'
+            
+            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
+            if tipo_interes_calculado == ultimo_estado_db:
+                continue
+
+            # Si cumple condición y es un estado NUEVO, enviamos
+            if tipo_interes_calculado:
+                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
+                
+                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
+                
+                if texto_followup:
+                    enviado = False
+                    if numero.startswith('tg_'):
+                        token = config.get('telegram_token')
+                        if token:
+                            enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                    else:
+                        enviado = enviar_mensaje(numero, texto_followup, config)
+                    
+                    if enviado:
+                        # Guardar respuesta (al bot mismo como respuesta del sistema)
+                        guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
+                        
+                        # Actualizar DB con fecha Y EL NUEVO ESTADO
+                        conn2 = get_db_connection(config)
+                        cur2 = conn2.cursor()
+                        cur2.execute("""
+                            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
+                            VALUES (%s, NOW(), %s)
+                            ON DUPLICATE KEY UPDATE 
+                                ultimo_followup = NOW(),
+                                estado_seguimiento = %s
+                        """, (numero, tipo_interes_calculado, tipo_interes_calculado))
+                        conn2.commit()
+                        cur2.close()
+                        conn2.close()
+                        
+                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
+
+def start_followup_scheduler():
+    """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
+    def _worker():
+        app.logger.info("⏰ Scheduler de Seguimiento (Interés Medio) INICIADO.")
+        # Usar app.app_context() si las funciones de DB/envío requieren contexto
+        with app.app_context():
+            # Asegurar columnas la primera vez
+            for config in NUMEROS_CONFIG.values():
+                _ensure_chat_meta_followup_columns(config) 
+
+            while True:
+                try:
+                    # Iterar por todos los tenants
+                    for tenant_key, config in NUMEROS_CONFIG.items():
+                        try:
+                            # Procesar en el contexto del tenant
+                            procesar_followups_automaticos(config)
+                        except Exception as e:
+                            app.logger.error(f"Error en scheduler tenant {tenant_key}: {e}")
+                    
+                    app.logger.info("💤 Scheduler durmiendo 30 minutos...")
+                    time.sleep(1800) # 1800 segundos = 30 minutos
+                    
+                except Exception as e:
+                    app.logger.error(f"🔴 Error fatal en hilo scheduler: {e}")
+                    time.sleep(60) # Esperar 1 min antes de reintentar si falla
+
+    t = threading.Thread(target=_worker, daemon=True, name="followup_scheduler")
+    t.start()
+    app.logger.info("✅ Followup scheduler thread launched")
+
+def recalcular_interes_lead(numero, nivel_interes_ia, config):
+    """
+    Define el interés BASE en la base de datos (Caliente/Tibio/Frío/Bajo).
+    """
+    try:
+        _ensure_interes_column(config) # Asegurar que la columna exista
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Contar mensajes del usuario para la regla de "Frío" (solo 1 interacción)
+        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
+        count_msgs = cursor.fetchone()[0]
+        
+        nuevo_interes_db = 'Tibio' # Default para interacciones
+        
+        # REGLA 1: LEADS FRÍOS (Solo 1 o 0 mensajes del usuario)
+        if count_msgs <= 1:
+            nuevo_interes_db = 'Frío'
+        else:
+            # REGLA 2: CALIENTE (Contexto Específico)
+            if nivel_interes_ia == 'ESPECIFICO':
+                nuevo_interes_db = 'Caliente'
+            
+            # REGLA 3: TIBIO (Contexto General o Bajo, pero ya interactuando)
+            else:
+                nuevo_interes_db = 'Tibio'
+        
+        # Actualizar en DB
+        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return nuevo_interes_db
+    except Exception as e:
+        app.logger.error(f"Error recalculando interés: {e}")
+        return 'Tibio'
+
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
@@ -2422,6 +2604,70 @@ def inicializar_kanban_multitenant():
             app.logger.info(f"✅ Kanban inicializado para {config['dominio']}")
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
+
+# --- NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
+
+def _ensure_columna_interaccion_usuario(config=None):
+    """Crea una columna dedicada a guardar SOLO la fecha del último mensaje del USUARIO."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'ultima_interaccion_usuario'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE contactos ADD COLUMN ultima_interaccion_usuario DATETIME DEFAULT NULL")
+            conn.commit()
+            app.logger.info("🔧 Columna 'ultima_interaccion_usuario' creada.")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error columna interaccion usuario: {e}")
+
+def _ensure_interes_column(config=None):
+    """Asegura que la tabla contactos tenga la columna interes"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'interes'")
+        if cursor.fetchone() is None:
+            # Por defecto 'Frío'
+            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Frío'")
+            conn.commit()
+            app.logger.info("🔧 Columna 'interes' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
+
+def _ensure_chat_meta_followup_columns(config=None):
+    """Asegura columnas en chat_meta para controlar los seguimientos automáticos."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Columna de fecha
+        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'ultimo_followup'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE chat_meta ADD COLUMN ultimo_followup DATETIME DEFAULT NULL")
+            
+        # 2. NUEVA COLUMNA: Estado del seguimiento (para evitar repetir 'tibio' cada hora)
+        cursor.execute("SHOW COLUMNS FROM chat_meta LIKE 'estado_seguimiento'")
+        if cursor.fetchone() is None:
+            cursor.execute("ALTER TABLE chat_meta ADD COLUMN estado_seguimiento VARCHAR(20) DEFAULT NULL")
+            
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("🔧 Columnas de seguimiento aseguradas en chat_meta")
+    except Exception as e:
+        app.logger.warning(f"⚠️ Error asegurando columnas followup: {e}")
+
+# --- FIN NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
 
 def detectar_pedido_inteligente(mensaje, numero, historial=None, config=None):
     """Detección inteligente de pedidos que interpreta contexto y datos faltantes"""
@@ -3089,75 +3335,73 @@ def dashboard_platform_data():
     config = obtener_configuracion_por_host()
     
     try:
-        # --- 1. Obtener números a excluir (Asesores y administradores) ---
+        # --- 1. Obtener números a excluir (Asesores y ALERT_NUMBER) ---
         cfg_full = load_config(config) 
         asesores_list = cfg_full.get('asesores_list', [])
         
+        # Recopilar todos los números de teléfono de los asesores configurados
         numeros_a_excluir = {
             (a.get('telefono') or '').strip() 
             for a in asesores_list 
             if a.get('telefono')
         }
         
+        # Añadir números de alerta
         if ALERT_NUMBER:
             numeros_a_excluir.add(ALERT_NUMBER)
+        # Añadir tu número personal
         numeros_a_excluir.add('5214493432744')
         numeros_a_excluir.add('5214491182201')
+        
+        # Limpiar números vacíos
         numeros_a_excluir.discard('')
 
-        # Convertir a tupla para SQL
+        # Convertir a una lista/tupla para usar en la cláusula SQL IN
         exclusion_list = tuple(numeros_a_excluir)
+        
+        if exclusion_list:
+            app.logger.info(f"📊 Excluyendo números internos del dashboard: {exclusion_list}")
         
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
 
-        # Preparar cláusula de exclusión
+        # 2. Conteo de Conversaciones por Plataforma (Clientes)
+        # Filtramos `conv.numero` para excluir los números internos
         exclusion_clause = f"AND conv.numero NOT IN ({', '.join(['%s'] * len(exclusion_list))})" if exclusion_list else ""
         
-        # --- 2. Consulta INTELIGENTE de Conversaciones ---
-        # Detecta 'fb_' como Messenger y 'tg_' como Telegram automáticamente
-        sql_conversations = f"""
+        # Consulta de Conversaciones
+        cursor.execute(f"""
             SELECT 
-                CASE 
-                    WHEN conv.numero LIKE 'fb_%%' THEN 'Messenger'
-                    WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram'
-                    WHEN c.plataforma = 'Facebook' THEN 'Messenger'
-                    WHEN c.plataforma = 'Telegram' THEN 'Telegram'
-                    ELSE 'WhatsApp'
-                END AS platform, 
+                COALESCE(c.plataforma, 
+                         CASE WHEN conv.numero LIKE 'tg_%%' THEN 'Telegram' ELSE 'WhatsApp' END
+                ) AS platform, 
                 COUNT(DISTINCT conv.numero) AS conversation_count
             FROM conversaciones conv
             LEFT JOIN contactos c ON conv.numero = c.numero_telefono
             WHERE 1=1 {exclusion_clause}
             GROUP BY platform
             ORDER BY conversation_count DESC
-        """
-        cursor.execute(sql_conversations, exclusion_list)
+        """, exclusion_list)
         conversations_raw = cursor.fetchall()
 
-        # --- 3. Consulta INTELIGENTE de Contactos ---
-        sql_contacts = f"""
+        # 3. Conteo de Contactos Totales por Plataforma (Clientes)
+        # Filtramos `numero_telefono` para excluir los números internos
+        # Usamos la misma lista de exclusión
+        cursor.execute(f"""
             SELECT 
-                CASE 
-                    WHEN numero_telefono LIKE 'fb_%%' THEN 'Messenger'
-                    WHEN numero_telefono LIKE 'tg_%%' THEN 'Telegram'
-                    WHEN plataforma = 'Facebook' THEN 'Messenger'
-                    WHEN plataforma = 'Telegram' THEN 'Telegram'
-                    ELSE 'WhatsApp'
-                END AS platform, 
+                COALESCE(plataforma, 'WhatsApp') AS platform, 
                 COUNT(*) AS contact_count
             FROM contactos
             WHERE numero_telefono NOT IN ({', '.join(['%s'] * len(exclusion_list))})
             GROUP BY platform
             ORDER BY contact_count DESC
-        """
-        cursor.execute(sql_contacts, exclusion_list)
+        """, exclusion_list)
         contacts_raw = cursor.fetchall()
         
         cursor.close()
         conn.close()
 
-        # Formatear datos para el frontend
+        # Formatear para Chart.js (sin cambios)
         conv_labels = [row['platform'] for row in conversations_raw]
         conv_values = [row['conversation_count'] for row in conversations_raw]
         
@@ -3399,46 +3643,53 @@ def get_country_flag(numero):
     # Si no se detectó prefijo de país conocido ni era Telegram
     return url_for('static', filename='icons/whatsapp-icon.png')
 
-# Agrega 'leads' a la lista
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
 app.add_template_filter(get_country_flag, 'bandera')
+
+# app.py (Reemplazar kanban_data)
 
 @app.route('/kanban/data')
 def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        _ensure_interes_column(config)
+        # Asegurar columna de interés
+        _ensure_interes_column(config) 
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        
-        # ... (Lógica de Asesores se mantiene igual) ...
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
+        
+        # Lógica para mover chats de asesores a la columna "Asesores" si existe
         if col_asesores_id and numeros_asesores:
-             placeholders = ', '.join(['%s'] * len(numeros_asesores))
-             cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", (col_asesores_id, *numeros_asesores, col_asesores_id))
-             conn.commit()
-
+            placeholders = ', '.join(['%s'] * len(numeros_asesores))
+            cursor.execute(f"""
+                UPDATE chat_meta
+                SET columna_id = %s
+                WHERE numero IN ({placeholders}) AND columna_id != %s
+            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+            conn.commit()
+            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
+            
+        # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Consulta principal
+        # Obtener chats con nombres de contactos
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
                 MAX(c.timestamp) AS ultima_fecha,
                 (SELECT mensaje FROM conversaciones 
-                 WHERE numero = cm.numero
-                 AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
-                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                MAX(cont.imagen_url) AS avatar,
-                MAX(cont.plataforma) AS canal,
+                WHERE numero = cm.numero
+                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
+                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                 COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
-                (SELECT COUNT(*) FROM conversaciones WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
-                MAX(cont.interes) as interes_db 
+                (SELECT COUNT(*) FROM conversaciones 
+                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                MAX(cont.interes) as interes_db -- 🔥 NUEVA COLUMNA DE INTERÉS
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -3447,11 +3698,11 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # --- CÁLCULO FINAL DE ESTADOS ---
+        # --- CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
         ahora = datetime.now(tz_mx)
-        
+
         for chat in chats:
-            # 1. Recuperar estado base (Caliente/Tibio/Frío) calculado por la IA y DB
+            # 1. Interés base de la DB
             interes_final = chat.get('interes_db') or 'Frío'
             
             # 2. Aplicar Regla de TIEMPO (Dormidos)
@@ -3463,11 +3714,10 @@ def kanban_data(config=None):
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # Calcular horas pasadas desde la última interacción (de cualquiera)
+                    # Calcular horas pasadas desde la última interacción
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     
                     # REGLA: Si pasan más de 20 horas -> DORMIDO 😴
-                    # (Sobrescribe Caliente, Tibio o Frío)
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
                     
@@ -3478,7 +3728,7 @@ def kanban_data(config=None):
                     app.logger.error(f"Error fecha {chat['numero']}: {e}")
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
-                interes_final = 'Dormido' # Sin fecha = Dormido
+                interes_final = 'Dormido'
                 chat['ultima_fecha'] = None
             
             # Asignar el resultado final para el Frontend
@@ -4022,116 +4272,6 @@ def guardar_cita(info_cita, config=None):
         app.logger.error(traceback.format_exc())
         return None
     
-def _ensure_columna_interaccion_usuario(config=None):
-    """Crea una columna dedicada a guardar SOLO la fecha del último mensaje del USUARIO."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'ultima_interaccion_usuario'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE contactos ADD COLUMN ultima_interaccion_usuario DATETIME DEFAULT NULL")
-            conn.commit()
-            app.logger.info("🔧 Columna 'ultima_interaccion_usuario' creada.")
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error columna interaccion usuario: {e}")
-
-def _ensure_interes_column(config=None):
-    """Asegura que la tabla contactos tenga la columna interes"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'interes'")
-        if cursor.fetchone() is None:
-            # CAMBIO: Por defecto 'Frío' en lugar de 'Alto'
-            cursor.execute("ALTER TABLE contactos ADD COLUMN interes VARCHAR(20) DEFAULT 'Frío'")
-            conn.commit()
-            app.logger.info("🔧 Columna 'interes' creada en tabla 'contactos'")
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columna interes: {e}")
-
-@app.route('/migrar-fechas-usuarios')
-def migrar_fechas_usuarios():
-    config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Asegurar columna
-        _ensure_columna_interaccion_usuario(config)
-
-        # Actualizar la fecha del usuario buscando su último mensaje real en 'conversaciones'
-        # (Ignoramos mensajes donde 'respuesta' no es NULL, asumiendo que esos son del bot o sistema,
-        #  o buscamos donde 'mensaje' no sea NULL)
-        # La lógica exacta: El timestamp del último mensaje donde el usuario escribió algo.
-        sql = """
-        UPDATE contactos c
-        SET ultima_interaccion_usuario = (
-            SELECT MAX(timestamp) 
-            FROM conversaciones conv 
-            WHERE conv.numero = c.numero_telefono 
-            AND conv.mensaje IS NOT NULL 
-            AND conv.mensaje != ''
-            AND conv.mensaje != '[Mensaje manual desde web]'
-        )
-        WHERE ultima_interaccion_usuario IS NULL;
-        """
-        cursor.execute(sql)
-        conn.commit()
-        
-        cursor.close()
-        conn.close()
-        return "✅ Migración de fechas de usuario completada."
-    except Exception as e:
-        return f"❌ Error: {e}"
-
-@app.route('/migrar-interes-legacy')
-def migrar_interes_legacy():
-    """
-    Ruta de mantenimiento para convertir etiquetas viejas a nuevas.
-    Alto -> Tibio (o Caliente si prefieres)
-    Medio -> Tibio
-    Bajo -> Frío
-    """
-    config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # 1. Convertir 'Alto' a 'Tibio' (O 'Caliente' si prefieres ser optimista)
-        cursor.execute("UPDATE contactos SET interes = 'Tibio' WHERE interes = 'Alto'")
-        
-        # 2. Convertir 'Medio' a 'Tibio'
-        cursor.execute("UPDATE contactos SET interes = 'Tibio' WHERE interes = 'Medio'")
-        
-        # 3. Convertir 'Bajo' a 'Frío'
-        cursor.execute("UPDATE contactos SET interes = 'Frío' WHERE interes = 'Bajo'")
-        
-        # 4. Actualizar 'Dormidos' por fecha (más de 7 días sin actividad)
-        # Esto asegura que la BD refleje la realidad de fechas antiguas
-        cursor.execute("""
-            UPDATE contactos 
-            SET interes = 'Dormido' 
-            WHERE fecha_actualizacion < NOW() - INTERVAL 7 DAY
-        """)
-
-        conn.commit()
-        affected = cursor.rowcount
-        cursor.close()
-        conn.close()
-        
-        return f"✅ Migración completada. Base de datos actualizada al nuevo sistema de leads."
-        
-    except Exception as e:
-        return f"❌ Error en migración: {e}"
-
 def enviar_confirmacion_cita(numero, info_cita, cita_id, config=None):
     """Envía confirmación de cita por WhatsApp"""
     if config is None:
@@ -4245,10 +4385,10 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
-
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
-    return send_from_directory(UPLOAD_FOLDER, filename)
+    """Sirve archivos subidos desde la carpeta UPLOAD_FOLDER"""
+    return send_from_directory(UPLOAD_FOLDER, filename) 
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -4960,6 +5100,8 @@ def ver_citas(config=None):
     
     return render_template('citas.html', citas=citas)
 
+# --- EN app.py (Reemplazar load_config) ---
+
 def load_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
@@ -4968,6 +5110,7 @@ def load_config(config=None):
     
     # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
     try:
+        # Nota: La lista de columnas aquí DEBE coincidir con la lista en save_config
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS configuracion (
                 id INT PRIMARY KEY DEFAULT 1,
@@ -5026,7 +5169,7 @@ def load_config(config=None):
             'restricciones': {}, 
             'asesores': {}, 
             'asesores_list': [],
-            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''}
+            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''} # <-- AÑADIDO
         }
 
     # ... (resto del mapeo de campos igual que antes) ...
@@ -5059,13 +5202,14 @@ def load_config(config=None):
         'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
     }
     
+    # --- Mapeo de campos de leads ---
     leads = {
         'mensaje_tibio': row.get('mensaje_tibio', ''),
         'mensaje_frio': row.get('mensaje_frio', ''),
         'mensaje_dormido': row.get('mensaje_dormido', '')
     }
 
-    # ... (Lógica de asesores existente) ...
+    # ... (Lógica de asesores existente sin cambios) ...
     asesores_list = []
     asesores_map = {}
     try:
@@ -5114,7 +5258,7 @@ def load_config(config=None):
         'restricciones': restricciones,
         'asesores': asesores_map,
         'asesores_list': asesores_list,
-        'leads': leads
+        'leads': leads # <-- DEVOLVER EL MAPEO DE LEADS
     }
 
 def save_config(cfg_all, config=None):
@@ -5281,6 +5425,51 @@ def save_config(cfg_all, config=None):
             pass
         raise
 
+@app.route('/configuracion/precios/columnas', methods=['POST'])
+@login_required
+def save_columnas_precios():
+    """Guarda las columnas ocultas para el tenant y la tabla actual."""
+    config = obtener_configuracion_por_host()
+    data = request.get_json(silent=True) or {}
+    table_name = data.get('table')
+    hidden_map = data.get('hidden', {})
+
+    if not table_name:
+        return jsonify({'error': 'table name required'}), 400
+
+    # Convertir el mapa (dict) a un string JSON para guardarlo
+    hidden_json = json.dumps(hidden_map) if hidden_map else None
+    tenant = config.get('dominio')
+
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        # Asegurarse de que la tabla exista (esta función ya la tienes)
+        _ensure_columnas_precios_table(conn) 
+        cursor = conn.cursor()
+
+        # Usar INSERT ... ON DUPLICATE KEY UPDATE para guardar o actualizar
+        cursor.execute("""
+            INSERT INTO columnas_precios (tenant, table_name, hidden_json)
+            VALUES (%s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+                hidden_json = VALUES(hidden_json),
+                updated_at = CURRENT_TIMESTAMP
+        """, (tenant, table_name, hidden_json))
+        
+        conn.commit()
+        app.logger.info(f"💾 Columnas ocultas guardadas para {tenant} / {table_name}")
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        if conn: conn.rollback()
+        app.logger.error(f"🔴 save_columnas_precios error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
+
 def obtener_max_asesores_from_planes(default=2, cap=10):
     """
     Lee la tabla `planes` en la BD de clientes y retorna el máximo valor de la columna `asesores`.
@@ -5376,6 +5565,85 @@ def obtener_producto_por_sku_o_nombre(query, config=None):
     except Exception as e:
         app.logger.error(f"🔴 obtener_producto_por_sku_o_nombre error: {e}")
         return None
+
+# app.py (Reemplazar la función en la línea 1297)
+
+def obtener_precios_paginados(config, page=1, page_size=100, search_query=None):
+    """
+    Obtiene una página específica de productos y el conteo total,
+    opcionalmente filtrada por un término de búsqueda.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    conn = None
+    cursor = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # Parámetros y cláusula WHERE para la búsqueda
+        params = []
+        where_clause = ""
+        
+        if search_query:
+            # Busca en múltiples columnas
+            search_like = f"%{search_query}%"
+            where_clause = """
+                WHERE (
+                    sku LIKE %s 
+                    OR categoria LIKE %s 
+                    OR subcategoria LIKE %s 
+                    OR linea LIKE %s 
+                    OR modelo LIKE %s 
+                    OR descripcion LIKE %s
+                )
+            """
+            # Añade el parámetro de búsqueda 6 veces (una por cada columna)
+            params.extend([search_like] * 6)
+
+        # 1. Contar el total de productos (con el filtro aplicado)
+        cursor.execute(f"SELECT COUNT(*) as total FROM precios {where_clause}", tuple(params))
+        total_items = cursor.fetchone()['total']
+        total_pages = math.ceil(total_items / page_size) if total_items > 0 else 1
+        
+        # Asegurar que la página actual no esté fuera de rango
+        if page > total_pages:
+            page = total_pages
+        if page < 1:
+            page = 1
+
+        # 2. Calcular el offset
+        offset = (page - 1) * page_size
+        
+        # 3. Obtener solo la página actual (con el filtro y paginación)
+        query_paginada = f"""
+            SELECT * FROM precios 
+            {where_clause}
+            ORDER BY sku, categoria, modelo
+            LIMIT %s OFFSET %s;
+        """
+        params.extend([page_size, offset])
+        
+        cursor.execute(query_paginada, tuple(params))
+        
+        items = cursor.fetchall()
+        
+        return {
+            'items': items,
+            'total_items': total_items,
+            'total_pages': total_pages,
+            'current_page': page,
+            'page_size': page_size,
+            'search_query': search_query # Devolver la búsqueda para los enlaces
+        }
+        
+    except Exception as e:
+        print(f"Error obteniendo precios paginados: {str(e)}")
+        return {'items': [], 'total_items': 0, 'total_pages': 1, 'current_page': 1, 'search_query': search_query}
+    finally:
+        if cursor: cursor.close()
+        if conn: conn.close()
 
 def obtener_precio_por_id(pid, config=None):
     if config is None:
@@ -5768,145 +6036,6 @@ def procesar_codigo():
         app.logger.error(f"🔴 Error en procesar_codigo: {e}")
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}<br><a href='/autorizar-manual'>Intentar de nuevo</a>"
-
-def procesar_followups_automaticos(config):
-    """
-    Busca chats que necesiten seguimiento.
-    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
-    """
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor(dictionary=True)
-        
-        # Consulta actualizada para traer también el estado_seguimiento
-        query = """
-            SELECT 
-                c.numero_telefono as numero,
-                COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
-                cm.ultimo_followup,
-                cm.estado_seguimiento
-            FROM contactos c
-            LEFT JOIN chat_meta cm ON c.numero_telefono = cm.numero
-            WHERE c.ultima_interaccion_usuario IS NOT NULL 
-               OR c.timestamp IS NOT NULL
-        """
-        cursor.execute(query)
-        candidatos = cursor.fetchall()
-        cursor.close()
-        conn.close()
-
-        if not candidatos:
-            return
-
-        ahora = datetime.now(tz_mx)
-
-        for chat in candidatos:
-            numero = chat['numero']
-            last_msg = chat['ultima_msg']
-            last_followup = chat['ultimo_followup']
-            ultimo_estado_db = chat.get('estado_seguimiento') # Estado guardado (ej: 'tibio')
-            
-            if last_msg:
-                if last_msg.tzinfo is None:
-                    last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
-                else:
-                    last_msg = last_msg.astimezone(tz_mx)
-            else:
-                continue
-
-            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
-            if last_followup:
-                if last_followup.tzinfo is None:
-                    last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
-                else:
-                    last_followup = last_followup.astimezone(tz_mx)
-                
-                if last_followup >= last_msg:
-                    continue
-
-            # Calcular tiempo pasado
-            diferencia = ahora - last_msg
-            minutos = diferencia.total_seconds() / 60
-            horas = minutos / 60
-            
-            tipo_interes_calculado = None
-            
-            # --- REGLAS DE TIEMPO ---
-            if horas >= 20:
-                tipo_interes_calculado = 'dormido'
-            elif horas >= 5:
-                tipo_interes_calculado = 'frio'
-            elif minutos >= 30:
-                tipo_interes_calculado = 'tibio'
-            
-            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
-            # Si el estado calculado es igual al último enviado, SALTAR (ya se envió)
-            if tipo_interes_calculado == ultimo_estado_db:
-                continue
-
-            # Si cumple condición y es un estado NUEVO, enviamos
-            if tipo_interes_calculado:
-                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
-                
-                texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
-                
-                if texto_followup:
-                    enviado = False
-                    if numero.startswith('tg_'):
-                        token = config.get('telegram_token')
-                        if token:
-                            enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
-                    else:
-                        enviado = enviar_mensaje(numero, texto_followup, config)
-                    
-                    if enviado:
-                        # Guardar respuesta
-                        guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
-                        
-                        # Actualizar DB con fecha Y EL NUEVO ESTADO para bloquear repeticiones
-                        conn2 = get_db_connection(config)
-                        cur2 = conn2.cursor()
-                        cur2.execute("""
-                            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
-                            VALUES (%s, NOW(), %s)
-                            ON DUPLICATE KEY UPDATE 
-                                ultimo_followup = NOW(),
-                                estado_seguimiento = %s
-                        """, (numero, tipo_interes_calculado, tipo_interes_calculado))
-                        conn2.commit()
-                        cur2.close()
-                        conn2.close()
-                        
-                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
-
-def start_followup_scheduler():
-    """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
-    def _worker():
-        app.logger.info("⏰ Scheduler de Seguimiento (Interés Medio) INICIADO.")
-        while True:
-            try:
-                time.sleep(60) # Esperar un poco al inicio
-                
-                # Iterar por todos los tenants
-                for tenant_key, config in NUMEROS_CONFIG.items():
-                    try:
-                        _ensure_chat_meta_followup_columns(config) # Asegurar DB
-                        procesar_followups_automaticos(config)
-                    except Exception as e:
-                        app.logger.error(f"Error en scheduler tenant {tenant_key}: {e}")
-                
-                app.logger.info("💤 Scheduler durmiendo 30 minutos...")
-                time.sleep(1800) # 1800 segundos = 30 minutos
-                
-            except Exception as e:
-                app.logger.error(f"🔴 Error fatal en hilo scheduler: {e}")
-                time.sleep(60) # Esperar 1 min antes de reintentar si falla
-
-    t = threading.Thread(target=_worker, daemon=True, name="followup_scheduler")
-    t.start()
 
 def procesar_fecha_relativa(fecha_str):
     """
@@ -8983,66 +9112,6 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
     except Exception as e:
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
 
-def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
-    """Genera un mensaje de seguimiento. Prioriza mensaje configurado, sino usa IA."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    
-    try:
-        # 1. Cargar configuración para ver si hay mensaje personalizado
-        cfg = load_config(config)
-        leads_cfg = cfg.get('leads', {})
-        
-        mensaje_personalizado = ""
-        if tipo_interes == 'tibio':
-            mensaje_personalizado = leads_cfg.get('mensaje_tibio')
-        elif tipo_interes == 'frio':
-            mensaje_personalizado = leads_cfg.get('mensaje_frio')
-        elif tipo_interes == 'dormido':
-            mensaje_personalizado = leads_cfg.get('mensaje_dormido')
-            
-        # Si existe un mensaje configurado por el usuario, USARLO DIRECTAMENTE
-        if mensaje_personalizado and mensaje_personalizado.strip():
-            app.logger.info(f"✅ Usando mensaje personalizado de Leads ({tipo_interes}) para {numero}")
-            return mensaje_personalizado.strip()
-
-        # 2. Si no hay mensaje configurado, usar IA (Lógica existente)
-        historial = obtener_historial(numero, limite=6, config=config)
-        if not historial:
-            return None 
-            
-        contexto = "\n".join([f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" for msg in historial])
-
-        # Prompt para la IA
-        prompt = f"""
-        Eres un asistente de ventas amable y profesional.
-        El usuario dejó de responder (Estado: {tipo_interes}). Tu objetivo es reactivar la conversación SIN ser molesto.
-        
-        HISTORIAL RECIENTE:
-        {contexto}
-        
-        Genera un mensaje corto (máximo 2 frases) para preguntar si sigue interesado.
-        Responde SOLO con el texto del mensaje.
-        """
-        
-        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": "deepseek-chat",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.4,
-            "max_tokens": 100
-        }
-        
-        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=20)
-        response.raise_for_status()
-        mensaje_seguimiento = response.json()['choices'][0]['message']['content'].strip().replace('"', '')
-        
-        return mensaje_seguimiento
-
-    except Exception as e:
-        app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
-        return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
-
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
@@ -10750,78 +10819,168 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
-
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
+    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
     config = obtener_configuracion_por_host()
-    conn = get_db_connection(config)
+    
     try:
-        numero = request.form['numero']
-        texto = request.form['texto'].strip()
-    
-        # Validar que el mensaje no esté vacío
-        if not texto:
-            flash('❌ El mensaje no puede estar vacío', 'error')
+        numero = request.form.get('numero', '').strip()
+        texto = request.form.get('texto', '').strip()
+        archivo = request.files.get('archivo')
+        
+        if not numero:
+            flash('❌ Número de destino requerido', 'error')
             return redirect(url_for('ver_chat', numero=numero))
-    
-        app.logger.info(f"📤 Enviando mensaje manual a {numero}: {texto[:50]}...")
-    
-        # --- CORRECCIÓN: DETECCIÓN DE PLATAFORMA ---
-        enviado_ok = False
-
-        if numero.startswith('tg_'):
-            # Lógica para Telegram
-            telegram_token = config.get('telegram_token')
-            if telegram_token:
-                chat_id = numero.replace('tg_', '')
-                enviado_ok = send_telegram_message(chat_id, texto, telegram_token)
-                if not enviado_ok:
-                    app.logger.error(f"❌ Falló envío manual a Telegram {numero}")
+        
+        # Validar que hay al menos texto O archivo
+        if not texto and not archivo:
+            flash('❌ Escribe un mensaje o selecciona un archivo', 'error')
+            return redirect(url_for('ver_chat', numero=numero))
+        
+        mensaje_enviado = False
+        respuesta_texto = ""
+        archivo_info = ""
+        filepath = None
+        
+        # 1. Manejar archivo si existe
+        if archivo and archivo.filename:
+            app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
+            
+            if allowed_file(archivo.filename):
+                # Guardar archivo temporalmente
+                filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
+                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                archivo.save(filepath)
+                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
+                
+                # Determinar tipo de archivo
+                file_ext = os.path.splitext(filename)[1].lower()
+                
+                try:
+                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
+                    dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio}"
+                    public_url = f"{dominio}/uploads/{filename}"
+                    
+                    app.logger.info(f"🌐 URL pública generada: {public_url}")
+                    
+                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
+                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                        # Es imagen - enviar como imagen
+                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
+                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                        archivo_info = f"📷 Imagen: {archivo.filename}"
+                        
+                    else:
+                        # Para todos los demás tipos, enviar como documento
+                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
+                        enviar_documento(numero, public_url, archivo.filename, config)
+                        
+                        # Determinar el tipo para el mensaje informativo
+                        if file_ext == '.pdf':
+                            archivo_info = f"📕 PDF: {archivo.filename}"
+                        elif file_ext in ['.doc', '.docx']:
+                            archivo_info = f"📘 Documento Word: {archivo.filename}"
+                        elif file_ext in ['.xls', '.xlsx', '.csv']:
+                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
+                        elif file_ext in ['.ppt', '.pptx']:
+                            archivo_info = f"📙 Presentación: {archivo.filename}"
+                        elif file_ext in ['.zip', '.rar', '.7z']:
+                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
+                        elif file_ext in ['.txt', '.rtf']:
+                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
+                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
+                            archivo_info = f"🎬 Video: {archivo.filename}"
+                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
+                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                        else:
+                            archivo_info = f"📎 Archivo: {archivo.filename}"
+                    
+                    mensaje_enviado = True
+                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
+                    
+                except Exception as file_error:
+                    app.logger.error(f"🔴 Error enviando archivo: {file_error}")
+                    app.logger.error(traceback.format_exc())
+                    flash('❌ Error al enviar el archivo', 'error')
+                    # Limpiar archivo temporal en caso de error
+                    try:
+                        if filepath and os.path.exists(filepath):
+                            os.remove(filepath)
+                    except:
+                        pass
+                    return redirect(url_for('ver_chat', numero=numero))
+                
+                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
+                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
+                
             else:
-                app.logger.error(f"❌ No hay token de Telegram configurado para envío manual a {numero}")
-
+                flash('❌ Tipo de archivo no permitido', 'error')
+                return redirect(url_for('ver_chat', numero=numero))
+        
+        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
+        if texto:
+            try:
+                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
+                enviar_mensaje(numero, texto, config)
+                respuesta_texto = texto
+                if archivo_info:
+                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                mensaje_enviado = True
+                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
+            except Exception as text_error:
+                app.logger.error(f"🔴 Error enviando texto: {text_error}")
+                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
+                    flash('❌ Error al enviar el mensaje', 'error')
+                    return redirect(url_for('ver_chat', numero=numero))
+        
+        # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        if mensaje_enviado:
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            # Preparar el texto para el historial
+            mensaje_historial = "[Mensaje manual desde web]"
+            respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
+            
+            cursor.execute(
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
+                (numero, mensaje_historial, respuesta_historial)
+            )
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            try:
+                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
+            except Exception as e:
+                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+            
+            # 5. MENSAJE DE CONFIRMACIÓN
+            if archivo and texto:
+                flash('✅ Archivo y mensaje enviados correctamente', 'success')
+            elif archivo:
+                flash('✅ Archivo enviado correctamente', 'success')
+            else:
+                flash('✅ Mensaje enviado correctamente', 'success')
+                
+            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+            
         else:
-            # Lógica para WhatsApp (Por defecto)
-            # Asegúrate de pasar 'config' si tu función enviar_mensaje lo requiere
-            enviado_ok = enviar_mensaje(numero, texto, config) 
-    
-        if not enviado_ok:
-            flash('⚠️ Hubo un problema al enviar el mensaje a la API, pero se guardará en el historial.', 'warning')
-
-        # 2. GUARDAR EN BASE DE DATOS (como mensaje manual)
-        # Se guarda igual para ambas plataformas
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-    
-        cursor.execute(
-            "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-            (numero, '[Mensaje manual desde web]', texto) 
-        )
-    
-        conn.commit()
-        cursor.close()
-        conn.close()
-        
-        # 3. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
-        try:
-            actualizar_columna_chat(numero, 3, config)  # 3 = Esperando Respuesta
-            app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-        except Exception as e:
-            app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
-        
-        # 4. MENSAJE DE CONFIRMACIÓN
-        flash('✅ Mensaje enviado correctamente', 'success')
-        app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
-        
-    except KeyError:
-        flash('❌ Error: Número de teléfono no proporcionado', 'error')
-        app.logger.error("🔴 Error: Falta parámetro 'numero' en enviar_manual")
+            flash('❌ No se pudo enviar el mensaje', 'error')
+            
     except Exception as e:
         flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
+        app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero))
-        
+    return redirect(url_for('ver_chat', numero=numero)) 
+
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
@@ -10919,7 +11078,7 @@ def continuar_proceso_pedido(numero, mensaje, estado_actual, config=None):
             if clabe_match and not datos_obtenidos.get('transferencia_numero'):
                 datos_obtenidos['transferencia_numero'] = clabe_match.group(1)
                 app.logger.info(f"🔢 CLABE/numero detectado para {numero}: {datos_obtenidos['transferencia_numero']}")
-
+                 
             # Extraer banco por palabras clave comunes
             bancos = ['bbva', 'banorte', 'banamex', 'santander', 'scotiabank', 'hsbc', 'inbursa', 'bajio', 'afirme']
             for b in bancos:
@@ -11232,7 +11391,6 @@ def configuracion_tab(tab):
                 'telefono':       request.form.get('telefono'),
                 'correo':         request.form.get('correo'),
                 'que_hace':       request.form.get('que_hace'),
-                'contexto_adicional': request.form.get('contexto_adicional'),
                 'calendar_email': request.form.get('calendar_email'),
                 'transferencia_numero': request.form.get('transferencia_numero'),
                 'transferencia_nombre': request.form.get('transferencia_nombre'),
@@ -11242,12 +11400,6 @@ def configuracion_tab(tab):
             cfg['personalizacion'] = {
                 'tono':     request.form.get('tono'),
                 'lenguaje': request.form.get('lenguaje')
-            }
-        elif tab == 'leads':
-            cfg['leads'] = {
-                'mensaje_tibio': request.form.get('mensaje_tibio', ''),
-                'mensaje_frio': request.form.get('mensaje_frio', ''),
-                'mensaje_dormido': request.form.get('mensaje_dormido', '')
             }
         elif tab == 'restricciones':
             cfg['restricciones'] = {
@@ -11361,10 +11513,19 @@ def negocio_transfer_block(negocio):
         parts.append(f"• Banco: {banco}")
     return "\n".join(parts)
 
+# app.py (Reemplazar en línea 4057)
+
 @app.route('/configuracion/precios', methods=['GET'])
 def configuracion_precios():
     config = obtener_configuracion_por_host()
-    precios = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    page = request.args.get('page', 1, type=int)
+    search_query = request.args.get('search', None) # Obtener el término de búsqueda
+    
+    # Obtener los datos paginados y filtrados
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    # --- FIN DE LA MODIFICACIÓN ---
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
     au = session.get('auth_user') or {}
@@ -11373,15 +11534,25 @@ def configuracion_precios():
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=None,
         is_admin=is_admin,
         master_columns=MASTER_COLUMNS
     )
+# app.py (Reemplazar en línea 4086)
+
 @app.route('/configuracion/precios/editar/<int:pid>', methods=['GET'])
 def configuracion_precio_editar(pid):
     config = obtener_configuracion_por_host()
-    precios     = obtener_todos_los_precios(config)
+    
+    # --- INICIO DE LA MODIFICACIÓN ---
+    page = request.args.get('page', 1, type=int)
+    search_query = request.args.get('search', None)
+    
+    pagination_data = obtener_precios_paginados(config, page=page, page_size=100, search_query=search_query)
+    # --- FIN DE LA MODIFICACIÓN ---
+    
     precio_edit = obtener_precio_por_id(pid, config)
 
     # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
@@ -11391,9 +11562,11 @@ def configuracion_precio_editar(pid):
     return render_template('configuracion/precios.html',
         tabs=SUBTABS, active='precios',
         guardado=False,
-        precios=precios,
+        precios=pagination_data['items'], # <-- Usar 'items'
+        pagination=pagination_data,      # <-- Pasar todos los datos de paginación
         precio_edit=precio_edit,
-        is_admin=is_admin
+        is_admin=is_admin,
+        master_columns=MASTER_COLUMNS  # <-- ESTA LÍNEA FALTABA
     )
 
 @app.route('/configuracion/precios/guardar', methods=['POST'])
@@ -11918,12 +12091,15 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
-    
     # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
     col_asesores_id = obtener_id_columna_asesores(config)
     numeros_asesores = obtener_numeros_asesores_db(config)
 
-    # 2) CONSULTA DEFINITIVA
+    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
+    columnas_totales = cursor.fetchall()
+
+    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
+    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -11935,14 +12111,14 @@ def ver_kanban(config=None):
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             MAX(cont.imagen_url) AS avatar,
             MAX(cont.plataforma) AS canal,
+            -- PRIORIDAD: alias > nombre de perfil > número
             COALESCE(
                 MAX(cont.alias), 
                 MAX(cont.nombre), 
                 cm.numero
             ) AS nombre_mostrado,
             (SELECT COUNT(*) FROM conversaciones 
-             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
-            MAX(cont.interes) as interes_db 
+             WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         LEFT JOIN conversaciones c ON c.numero = cm.numero
@@ -11950,61 +12126,25 @@ def ver_kanban(config=None):
         ORDER BY ultima_fecha DESC;
     """)
     chats = cursor.fetchall()
-    
+
+    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
+    for chat in chats:
+        if chat.get('ultima_fecha'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+
     cursor.close()
     conn.close()
-
-    # --- 3. CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
-    # Esto asegura que el HTML inicial ya tenga el estado correcto
-    ahora = datetime.now(tz_mx)
-    
-    for chat in chats:
-        # Interés base de la DB
-        interes_final = chat.get('interes_db') or 'Frío'
-        
-        if chat.get('ultima_fecha'):
-            try:
-                # Normalizar zona horaria
-                if chat['ultima_fecha'].tzinfo is not None:
-                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
-                else:
-                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
-                
-                fecha_msg = chat['ultima_fecha']
-                
-                # Calcular diferencia
-                diferencia = ahora - fecha_msg
-                minutos_pasados = diferencia.total_seconds() / 60
-                horas_pasadas = minutos_pasados / 60
-                
-                # --- APLICACIÓN DE REGLAS (Idéntico a kanban_data) ---
-                if horas_pasadas >= 20:
-                    interes_final = 'Dormido'
-                elif horas_pasadas >= 5:
-                    interes_final = 'Frío'
-                elif minutos_pasados <= 30:
-                    interes_final = 'Caliente'
-                else:
-                    # Zona intermedia: Respetar lo que diga la DB (Tibio o Frío)
-                    # Si la DB dice 'Caliente' pero ya pasaron 30 mins, baja a Tibio/Frio
-                    if interes_final == 'Caliente': 
-                        interes_final = 'Tibio' 
-                    # Si la DB dice Tibio, se mantiene. Si dice Frío, se mantiene.
-
-            except Exception as e:
-                app.logger.error(f"Error procesando fecha en ver_kanban: {e}")
-        else:
-            interes_final = 'Dormido'
-            
-        # INYECTAR EL DATO CALCULADO EN EL OBJETO CHAT
-        chat['interes'] = interes_final
-
-
-    # Determinar si el usuario autenticado tiene servicio == 'admin'
+    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
+
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
@@ -12361,14 +12501,15 @@ def actualizar_columna_chat(numero, columna_id, config=None):
             if conn: conn.close()
         except: pass
 
-
 def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
+    # Asegurar que las columnas existan
     _ensure_contactos_conversaciones_columns(config)
     _ensure_interes_column(config)
-    _ensure_columna_interaccion_usuario(config) # <--- AGREGAR ESTO
+    _ensure_columna_interaccion_usuario(config)
+    _ensure_created_at_column(config) # <--- NUEVA VALIDACIÓN
 
     conn = None
     cursor = None
@@ -12379,34 +12520,46 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         nombre_a_usar = nombre_perfil
         plataforma_a_usar = plataforma or 'WhatsApp'
         
-        # Lógica: Al llegar un mensaje del USUARIO (webhook), actualizamos 'ultima_interaccion_usuario'
+        # 1. Obtener hora actual de México
+        ahora_mx = datetime.now(tz_mx)
+
+        # 2. SQL Modificado: 
+        # - Inserta 'created_at' con hora MX.
+        # - Reemplaza UTC_TIMESTAMP() por %s (ahora_mx).
+        # - Usa VALUES(columna) para usar el valor pasado desde Python en la lógica de actualización.
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario) 
-            VALUES (%s, %s, %s, UTC_TIMESTAMP(), 
-                    1, UTC_TIMESTAMP(), 'Frío', UTC_TIMESTAMP()) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at) 
+            VALUES (%s, %s, %s, %s, 
+                    1, %s, 'Frío', %s, %s) 
             ON DUPLICATE KEY UPDATE 
+                -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
-                fecha_actualizacion = UTC_TIMESTAMP(),
-                ultima_interaccion_usuario = UTC_TIMESTAMP(), -- 👈 AQUÍ GUARDAMOS LA HORA REAL DEL USUARIO
+                fecha_actualizacion = VALUES(fecha_actualizacion),
+                ultima_interaccion_usuario = VALUES(ultima_interaccion_usuario),
                 
+                -- Lógica condicional para actualizar el contador de conversaciones
+                -- Compara contra el valor nuevo que estamos intentando insertar (VALUES(timestamp)) que es hora MX
                 conversaciones = conversaciones + 
                                  CASE 
                                      WHEN timestamp IS NULL THEN 1
-                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN 1
+                                     WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN 1
                                      ELSE 0
                                  END,
+                -- Lógica condicional para actualizar el timestamp
                 timestamp = CASE 
-                                WHEN timestamp IS NULL THEN UTC_TIMESTAMP()
-                                WHEN TIMESTAMPDIFF(SECOND, timestamp, UTC_TIMESTAMP()) > 86400 THEN UTC_TIMESTAMP()
+                                WHEN timestamp IS NULL THEN VALUES(timestamp)
+                                WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN VALUES(timestamp)
                                 ELSE timestamp
                             END
         """
         
-        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar))
+        # Pasar ahora_mx para todos los campos de tiempo (fecha_actualizacion, timestamp, ultima_interaccion, created_at)
+        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar, ahora_mx, ahora_mx, ahora_mx, ahora_mx))
+        
         conn.commit()
-        app.logger.info(f"✅ Información de contacto y conteo de conversaciones actualizado para {numero}")
+        app.logger.info(f"✅ Información de contacto actualizada (Hora MX: {ahora_mx}) para {numero}")
         
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto {numero}: {e}")
@@ -12484,7 +12637,7 @@ def obtener_contexto_consulta(numero, config=None):
 
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
-    inicializar_kanban_multitenant() 
+    inicializar_kanban_multitenant()
     start_good_morning_scheduler()
     # Verificar tablas en todas las bases de datos 
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
@@ -12497,4 +12650,4 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5003, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
     app.run(host='0.0.0.0', port=5003)
-       
+      
