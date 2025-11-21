@@ -220,6 +220,7 @@ NUMEROS_CONFIG = {
         'db_name': os.getenv("SUPAG_DB_NAME"),                  
         'dominio': 'supagcopia.mektia.com',
         # Claves de Messenger
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SUPAG"),
         'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
         'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
     },
