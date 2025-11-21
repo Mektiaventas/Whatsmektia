@@ -201,11 +201,11 @@ NUMEROS_CONFIG = {
     '000': {  # Número de Drasgo
         'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
         'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
-        'db_host': os.getenv("SUPAG_DB_HOST"), # Nota: Tienes un typo aquí (DRASCO)                 
+        'db_host': os.getenv("SUPAG_DB_HOST"),                 
         'db_user': os.getenv("SUPAG_DB_USER"),                
         'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
         'db_name': os.getenv("SUPAG_DB_NAME"),                  
-        'dominio': 'supag.mektia.com',
+        'dominio': 'supagcopia.mektia.com',
         # Claves de Messenger
         'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
         'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
