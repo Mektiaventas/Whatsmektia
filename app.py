@@ -3699,12 +3699,14 @@ def kanban_data(config=None):
         columnas = cursor.fetchall()
 
         # --- CONSULTA OPTIMIZADA (VELOCIDAD EXTREMA) ---
-        # Eliminamos el JOIN a 'conversaciones' y el GROUP BY.
+        # 1. Eliminamos 'LEFT JOIN conversaciones'
+        # 2. Eliminamos 'GROUP BY'
+        # 3. Usamos 'cont.timestamp' directo
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
-                cont.timestamp AS ultima_fecha,  -- Usamos el timestamp del contacto (RÁPIDO)
+                cont.timestamp AS ultima_fecha,
                 cont.interes as interes_db,
                 cont.imagen_url,
                 cont.plataforma as canal,
@@ -3728,23 +3730,21 @@ def kanban_data(config=None):
         """)
         chats = cursor.fetchall()
 
-        # --- PROCESAMIENTO PYTHON (Rápido para <2000 contactos) ---
+        # --- PROCESAMIENTO PYTHON ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # 1. Calcular estado "Dormido" basado en tiempo
             interes_final = chat.get('interes_db') or 'Frío'
             
             if chat.get('ultima_fecha'):
                 try:
-                    # Normalizar fecha
                     fecha_msg = chat['ultima_fecha']
                     if fecha_msg.tzinfo is None:
                         fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # REGLA DE TIEMPO: > 20 horas = Dormido
+                    # Regla: > 20 horas = Dormido
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
@@ -12132,12 +12132,13 @@ def ver_kanban(config=None):
     columnas = cursor.fetchall()
 
     # --- CONSULTA OPTIMIZADA ---
+    # Eliminamos 'LEFT JOIN conversaciones' y 'GROUP BY'
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
-            cont.timestamp AS ultima_fecha, -- Timestamp directo
-            cont.interes as interes,       -- Interés directo
+            cont.timestamp AS ultima_fecha,
+            cont.interes as interes,
             cont.imagen_url AS avatar,
             cont.plataforma AS canal,
             
@@ -12168,7 +12169,6 @@ def ver_kanban(config=None):
             else:
                 fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
             
-            # Aplicar lógica visual de "Dormido" también en la carga inicial
             horas = (ahora - fecha_obj).total_seconds() / 3600
             if horas > 20:
                 interes_db = 'Dormido'
