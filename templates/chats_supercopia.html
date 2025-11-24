@@ -1,4 +1,4 @@
-﻿{% extends "base.html" %}
+﻿ {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -282,7 +282,7 @@
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
 
-            <!-- Preview de archivo seleccionado -->
+            <!-- Preview de archivo seleccionado (ARRIBA como WhatsApp) -->
             <div id="file-preview-container" style="width: 100%; order: -1;">
                 <div id="file-preview" class="file-preview" style="display: none; padding: 12px; background: #f0f0f0; border-radius: 8px; margin: 0 10px 10px 10px; border: 1px dashed #ccc;">
                     <div class="file-preview-content" style="display: flex; align-items: center; justify-content: space-between;">
@@ -306,6 +306,14 @@
                 <input type="file" id="file-input" name="archivo" style="display: none;"
                        accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
+                <!-- botón de emoji más grande -->
+                <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
+
+                <!-- Emoji Picker Container -->
+                <div id="emoji-picker-list" class="emoji-picker-list" style="display:none; position:absolute; z-index:1000; background:white; border:1px solid #ccc; border-radius:8px; padding:8px;">
+                    <!-- Los emojis se llenan por JS -->
+                </div>
+
                 <!-- textarea -->
                 <textarea name="texto"
                           id="mensaje-texto"
@@ -315,8 +323,7 @@
                           rows="1"
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
-                          style="resize: none; overflow-y: auto;"
-                          required></textarea>
+                          style="resize: none; overflow-y: auto;"></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
@@ -463,10 +470,11 @@
                         const textarea = document.getElementById('mensaje-texto');
                         const fileInput = document.getElementById('file-input');
 
-                        // Validar que haya contenido para enviar
+                        // Validar que haya contenido para enviar - CORREGIDO
                         const hasText = textarea.value.trim() !== '';
                         const hasFile = fileInput.files.length > 0;
 
+                        // SOLO validar si no hay absolutamente nada
                         if (!hasText && !hasFile) {
                             // No hay nada que enviar
                             return;
@@ -597,6 +605,7 @@
         height: calc(100vh - 120px); /* leave room for header/footer */
         padding: 12px;
         box-sizing: border-box;
+        overflow: hidden; /* ← AÑADIR ESTA LÍNEA */
     }
 
     .chat-list-v2 {
@@ -720,22 +729,13 @@
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
+        overflow-x: hidden; /* ← AÑADIR ESTA LÍNEA */
         padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 4px; /* Reducir de 8px si es necesario */
+        gap: 4px;
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    }
-
-    .msg-box {
-        max-width: 70%;
-        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
-        border-radius: 18px;
-        box-sizing: border-box;
-        margin: 1px 0; /* Reducir de 2px a 1px */
-        position: relative;
-        word-wrap: break-word;
     }
 
     .msg-user {
@@ -809,22 +809,12 @@
             display: none;
         }
 
-        /* make list a fixed overlay off-canvas by default */
+        /* FIX: mantener el panel izquierdo visible siempre */
         .chat-list-v2 {
-            position: fixed;
-            left: -100%;
-            top: 0;
-            height: 100vh;
-            z-index: 1000;
-            background: var(--bg-card);
-            transition: left 0.3s ease;
+            position: relative;
+            left: 0;
             width: var(--left-width);
         }
-
-            .chat-list-v2.mobile-visible {
-                left: 0;
-                transform: translateX(0);
-            }
 
         .chat-panel-v2 {
             margin-left: 0;
@@ -833,10 +823,9 @@
         }
 
         .mobile-chat-toggle {
-            display: block;
+            display: none; /* Ocultar el toggle ya que no se necesita */
         }
     }
-
     /* Small phones: full screen single panel */
     @media (max-width: 480px) {
         .chat-layout-v2 {
@@ -1080,7 +1069,6 @@
             padding: 2px 4px;
         }
     /* ===== SOLUCIÓN DEFINITIVA PARA ELIMINAR ESPACIOS INICIALES ===== */
-
     /* SOLUCIÓN RADICAL PARA ELIMINAR ESPACIOS INICIALES */
     .msg-ai .text-message,
     .msg-manual .text-message {
@@ -1114,6 +1102,7 @@
     .msg-ai .text-message {
         transform: translateX(-2px) !important;
     }
+
     /* === AÑADE AQUÍ LA NUEVA CLASE === */
     .text-message.no-initial-space {
         margin: 0 !important;
@@ -1126,6 +1115,7 @@
             margin-left: 0 !important;
             padding-left: 0 !important;
         }
+
     /* Estilos mejorados para adjuntar archivos */
     .file-attach-btn {
         background: none;
@@ -1180,6 +1170,30 @@
         background: #cc0000;
         transform: scale(1.1);
         transition: all 0.2s ease;
+    }
+
+    /* SOLUCIÓN NUCLEAR PARA SCROLL LATERAL */
+    html, body {
+        overflow-x: hidden !important;
+        max-width: 100vw !important;
+        width: 100% !important;
+    }
+
+    .chat-layout-v2 {
+        overflow: hidden !important;
+        width: 100% !important;
+        max-width: 100% !important;
+    }
+
+    .chat-panel-v2, .chat-list-v2, .sidebar-right {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Forzar eliminación de cualquier overflow horizontal */
+    * {
+        max-width: 100% !important;
+        box-sizing: border-box !important;
     }
 </style>
 <script>
@@ -1329,35 +1343,38 @@ const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
         </div>
     </a>`.trim();
     }
-function actualizarIncrementalChats(chats) {
-    const container = document.querySelector('.chat-items');
-    if (!container) return;
-    const existing = new Map();
-    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+    function actualizarIncrementalChats(chats) {
+        const container = document.querySelector('.chat-items');
+        if (!container) return;
+        const existing = new Map();
+        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-    for (let i = chats.length - 1; i >= 0; i--) {
-        const chat = chats[i];
-        const num = chat.numero;
-        const node = existing.get(num);
-        if (node) {
-            actualizarChatExistente(node, chat);
-            existing.delete(num);
-            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                container.insertBefore(node, container.firstElementChild);
-            }
-        } else {
-            const tmp = document.createElement('div');
-            const hasBuilder = typeof crearNuevoChatHTML === 'function';
-            tmp.innerHTML = hasBuilder
-                ? crearNuevoChatHTML(chat)
-                : `
+        // PREVENIR PARPADEO: mantener visibilidad durante actualización
+        container.style.opacity = '0.99';
+
+        for (let i = chats.length - 1; i >= 0; i--) {
+            const chat = chats[i];
+            const num = chat.numero;
+            const node = existing.get(num);
+            if (node) {
+                actualizarChatExistente(node, chat);
+                existing.delete(num);
+                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                    container.insertBefore(node, container.firstElementChild);
+                }
+            } else {
+                const tmp = document.createElement('div');
+                const hasBuilder = typeof crearNuevoChatHTML === 'function';
+                tmp.innerHTML = hasBuilder
+                    ? crearNuevoChatHTML(chat)
+                    : `
             <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                 <div class="card-content">
                     <div class="card-title-row">
                         <div class="card-avatar-section">
                             <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
                         </div>
-                        <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
+                        <span class="alias-view">${chat.nombre_mostrado || chat.numero}</span>
                     </div>
                     <div class="card-meta-row">
                         <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
@@ -1365,16 +1382,21 @@ function actualizarIncrementalChats(chats) {
                     <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                 </div>
             </a>`;
-            const el = tmp.firstElementChild;
-            if (!el) continue;
-            container.insertBefore(el, container.firstElementChild);
-            el.classList.add('new-message');
-            setTimeout(() => el.classList.remove('new-message'), 1400);
+                const el = tmp.firstElementChild;
+                if (!el) continue;
+                container.insertBefore(el, container.firstElementChild);
+                el.classList.add('new-message');
+                setTimeout(() => el.classList.remove('new-message'), 1400);
+            }
         }
-    }
 
-    existing.forEach((node) => node.remove());
-}
+        existing.forEach((node) => node.remove());
+
+        // Restaurar opacidad
+        setTimeout(() => {
+            container.style.opacity = '1';
+        }, 100);
+    }
 
 try {
     const msgsEl = document.getElementById('msgs');
@@ -2054,6 +2076,8 @@ function normalizeText(s) {
 
     /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
 
+    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
     function setupFileUpload() {
         const fileInput = document.getElementById('file-input');
         const fileAttachBtn = document.getElementById('file-attach-btn');
@@ -2065,8 +2089,13 @@ function normalizeText(s) {
         const messageForm = document.getElementById('messageForm');
         const textarea = document.getElementById('mensaje-texto');
 
-        // Variable para almacenar el archivo seleccionado
-        let selectedFile = null;
+        if (!fileInput || !fileAttachBtn) {
+            console.warn('File upload elements not found');
+            return;
+        }
+
+        // ELIMINAR cualquier validación HTML5
+        textarea.removeAttribute('required');
 
         // Abrir selector de archivos al hacer clic en el botón
         fileAttachBtn.addEventListener('click', function () {
@@ -2077,7 +2106,43 @@ function normalizeText(s) {
         fileInput.addEventListener('change', function (e) {
             const file = e.target.files[0];
             if (file) {
-                selectedFile = file;
+                // Validar tamaño máximo (50MB)
+                const maxSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxSize) {
+                    alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
+                    clearFileSelection();
+                    return;
+                }
+
+                // Validar tipo de archivo
+                const allowedTypes = [
+                    'application/pdf',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'image/jpeg',
+                    'image/jpg',
+                    'image/png',
+                    'image/gif',
+                    'video/mp4',
+                    'video/quicktime',
+                    'video/webm',
+                    'video/x-msvideo',
+                    'video/x-matroska',
+                    'audio/mpeg',
+                    'audio/wav',
+                    'application/zip',
+                    'application/x-rar-compressed'
+                ];
+
+                if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                    alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
+                    clearFileSelection();
+                    return;
+                }
+
                 showFilePreview(file);
             }
         });
@@ -2098,7 +2163,6 @@ function normalizeText(s) {
 
             // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
             textarea.placeholder = "Añade un mensaje (opcional)...";
-            textarea.required = false; // Ya no es requerido porque hay archivo
 
             // Hacer scroll para mostrar la previsualización
             filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -2106,40 +2170,154 @@ function normalizeText(s) {
 
         function clearFileSelection() {
             fileInput.value = '';
-            selectedFile = null;
             filePreview.style.display = 'none';
             fileName.textContent = '';
             fileSize.textContent = '';
             fileIcon.textContent = '';
             textarea.placeholder = "Escribe un mensaje manual...";
-            textarea.required = true; // Vuelve a ser requerido
         }
 
-        // Validar antes de enviar
-        messageForm.addEventListener('submit', function (e) {
-            const hasText = textarea.value.trim() !== '';
-            const hasFile = selectedFile !== null;
+        function getFileType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
 
-            if (!hasText && !hasFile) {
-                e.preventDefault();
-                alert('Por favor escribe un mensaje o selecciona un archivo');
-                return false;
+            // Imágenes
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext))
+                return 'image';
+
+            // Videos
+            if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext))
+                return 'video';
+
+            // Audio
+            if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext))
+                return 'audio';
+
+            // Documentos
+            if (['pdf'].includes(ext))
+                return 'pdf';
+
+            // Word
+            if (['doc', 'docx'].includes(ext))
+                return 'word';
+
+            // Excel
+            if (['xls', 'xlsx', 'csv'].includes(ext))
+                return 'excel';
+
+            // PowerPoint
+            if (['ppt', 'pptx'].includes(ext))
+                return 'powerpoint';
+
+            // Archivos comprimidos
+            if (['zip', 'rar', '7z'].includes(ext))
+                return 'zip';
+
+            // Texto
+            if (['txt', 'rtf'].includes(ext))
+                return 'text';
+
+            return 'other';
+        }
+
+        function getFileIcon(fileType) {
+            const icons = {
+                'image': '🖼️',
+                'video': '🎬',
+                'audio': '🎵',
+                'pdf': '📕',
+                'word': '📘',
+                'excel': '📗',
+                'powerpoint': '📙',
+                'zip': '📦',
+                'text': '📄',
+                'other': '📎'
+            };
+            return icons[fileType] || '📎';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // 🔥 SOLUCIÓN DEFINITIVA - REEMPLAZAR FORMULARIO COMPLETAMENTE
+        setTimeout(function () {
+            const originalForm = document.getElementById('messageForm');
+            if (originalForm) {
+                const newForm = originalForm.cloneNode(true);
+                originalForm.parentNode.replaceChild(newForm, originalForm);
+
+                // Actualizar referencias
+                const newTextarea = document.getElementById('mensaje-texto');
+                const newFileInput = document.getElementById('file-input');
+
+                // ELIMINAR required del textarea
+                if (newTextarea) {
+                    newTextarea.removeAttribute('required');
+                }
+
+                // Validación ULTRA SIMPLE
+                newForm.addEventListener('submit', function (e) {
+                    const hasText = newTextarea.value.trim() !== '';
+                    const hasFile = newFileInput.files.length > 0;
+
+                    console.log('🚀 Validación final:', { hasText, hasFile });
+
+                    if (!hasText && !hasFile) {
+                        e.preventDefault();
+                        alert('Por favor escribe un mensaje o selecciona un archivo');
+                        return false;
+                    }
+
+                    console.log('✅ Enviando formulario...');
+                    return true;
+                });
+
+                console.log('✅ Formulario reemplazado y validación aplicada');
             }
+        }, 1000);
 
-            // Mostrar indicador de envío
-            const sendBtn = document.querySelector('.send-btn');
-            const originalText = sendBtn.innerHTML;
-            sendBtn.innerHTML = '⏳';
-            sendBtn.disabled = true;
-
-            // Restaurar después de 3 segundos por si hay error
-            setTimeout(() => {
-                sendBtn.innerHTML = originalText;
-                sendBtn.disabled = false;
-            }, 3000);
-        });
-
-        console.debug('File upload functionality initialized - WhatsApp style');
+        console.debug('File upload functionality initialized - SOLUCIÓN DEFINITIVA');
     }
+    // SOLUCIÓN NUCLEAR - Aplicar después de que todo cargue
+    setTimeout(function () {
+        console.log('🎯 Aplicando solución nuclear...');
+
+        // 1. Eliminar scroll horizontal
+        document.documentElement.style.overflowX = 'hidden';
+        document.body.style.overflowX = 'hidden';
+
+        // 2. Eliminar required del textarea
+        const textarea = document.getElementById('mensaje-texto');
+        if (textarea) {
+            textarea.removeAttribute('required');
+            console.log('✅ Textarea required eliminado');
+        }
+
+        // 3. Forzar validación simple
+        const form = document.getElementById('messageForm');
+        if (form) {
+            form.onsubmit = function (e) {
+                const textarea = document.getElementById('mensaje-texto');
+                const fileInput = document.getElementById('file-input');
+
+                const hasText = textarea.value.trim() !== '';
+                const hasFile = fileInput.files.length > 0;
+
+                if (!hasText && !hasFile) {
+                    e.preventDefault();
+                    alert('Por favor escribe un mensaje o selecciona un archivo');
+                    return false;
+                }
+                return true;
+            };
+            console.log('✅ Validación simplificada aplicada');
+        }
+
+        console.log('🎉 Solución nuclear completada');
+    }, 2000);
 </script>
-{% endblock %}       
+{% endblock %}   

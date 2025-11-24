@@ -1,4 +1,4 @@
-asi {% extends "base.html" %}
+ {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -485,7 +485,7 @@ asi {% extends "base.html" %}
                         form.submit();
                     }
                 }
-            } 
+            }
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -607,7 +607,8 @@ asi {% extends "base.html" %}
         padding: 12px;
         box-sizing: border-box;
         overflow: hidden; /* ← AÑADIR ESTA LÍNEA */
-    } 
+    }
+
     .chat-list-v2 {
         width: var(--left-width);
         min-width: 220px;
@@ -736,7 +737,7 @@ asi {% extends "base.html" %}
         gap: 4px;
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    } 
+    }
 
     .msg-user {
         align-self: flex-end;
@@ -825,7 +826,7 @@ asi {% extends "base.html" %}
         .mobile-chat-toggle {
             display: none; /* Ocultar el toggle ya que no se necesita */
         }
-    } 
+    }
     /* Small phones: full screen single panel */
     @media (max-width: 480px) {
         .chat-layout-v2 {
@@ -1371,7 +1372,7 @@ const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
         setTimeout(() => {
             container.style.opacity = '1';
         }, 100);
-    } 
+    }
 
 try {
     const msgsEl = document.getElementById('msgs');
@@ -2241,9 +2242,9 @@ function normalizeText(s) {
                 sendBtn.innerHTML = originalText;
                 sendBtn.disabled = false;
             }, 3000);
-        });  
+        });
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
 </script>
-{% endblock %}  
+{% endblock %}     

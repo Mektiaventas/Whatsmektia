@@ -1,4 +1,4 @@
-﻿asi {% extends "base.html" %}
+﻿ {% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -471,10 +471,11 @@
                         const textarea = document.getElementById('mensaje-texto');
                         const fileInput = document.getElementById('file-input');
 
-                        // Validar que haya contenido para enviar
+                        // Validar que haya contenido para enviar - CORREGIDO
                         const hasText = textarea.value.trim() !== '';
                         const hasFile = fileInput.files.length > 0;
 
+                        // SOLO validar si no hay absolutamente nada
                         if (!hasText && !hasFile) {
                             // No hay nada que enviar
                             return;
@@ -605,6 +606,7 @@
         height: calc(100vh - 120px); /* leave room for header/footer */
         padding: 12px;
         box-sizing: border-box;
+        overflow: hidden; /* ← AÑADIR ESTA LÍNEA */
     }
 
     .chat-list-v2 {
@@ -728,22 +730,13 @@
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
+        overflow-x: hidden; /* ← AÑADIR ESTA LÍNEA */
         padding: 8px;
         display: flex;
         flex-direction: column;
-        gap: 4px; /* Reducir de 8px si es necesario */
+        gap: 4px;
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    }
-
-    .msg-box {
-        max-width: 70%;
-        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
-        border-radius: 18px;
-        box-sizing: border-box;
-        margin: 1px 0; /* Reducir de 2px a 1px */
-        position: relative;
-        word-wrap: break-word;
     }
 
     .msg-user {
@@ -817,22 +810,12 @@
             display: none;
         }
 
-        /* make list a fixed overlay off-canvas by default */
+        /* FIX: mantener el panel izquierdo visible siempre */
         .chat-list-v2 {
-            position: fixed;
-            left: -100%;
-            top: 0;
-            height: 100vh;
-            z-index: 1000;
-            background: var(--bg-card);
-            transition: left 0.3s ease;
+            position: relative;
+            left: 0;
             width: var(--left-width);
         }
-
-            .chat-list-v2.mobile-visible {
-                left: 0;
-                transform: translateX(0);
-            }
 
         .chat-panel-v2 {
             margin-left: 0;
@@ -841,10 +824,9 @@
         }
 
         .mobile-chat-toggle {
-            display: block;
+            display: none; /* Ocultar el toggle ya que no se necesita */
         }
     }
-
     /* Small phones: full screen single panel */
     @media (max-width: 480px) {
         .chat-layout-v2 {
@@ -1337,35 +1319,38 @@ const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
         </div>
     </a>`.trim();
     }
-function actualizarIncrementalChats(chats) {
-    const container = document.querySelector('.chat-items');
-    if (!container) return;
-    const existing = new Map();
-    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+    function actualizarIncrementalChats(chats) {
+        const container = document.querySelector('.chat-items');
+        if (!container) return;
+        const existing = new Map();
+        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-    for (let i = chats.length - 1; i >= 0; i--) {
-        const chat = chats[i];
-        const num = chat.numero;
-        const node = existing.get(num);
-        if (node) {
-            actualizarChatExistente(node, chat);
-            existing.delete(num);
-            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                container.insertBefore(node, container.firstElementChild);
-            }
-        } else {
-            const tmp = document.createElement('div');
-            const hasBuilder = typeof crearNuevoChatHTML === 'function';
-            tmp.innerHTML = hasBuilder
-                ? crearNuevoChatHTML(chat)
-                : `
+        // PREVENIR PARPADEO: mantener visibilidad durante actualización
+        container.style.opacity = '0.99';
+
+        for (let i = chats.length - 1; i >= 0; i--) {
+            const chat = chats[i];
+            const num = chat.numero;
+            const node = existing.get(num);
+            if (node) {
+                actualizarChatExistente(node, chat);
+                existing.delete(num);
+                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                    container.insertBefore(node, container.firstElementChild);
+                }
+            } else {
+                const tmp = document.createElement('div');
+                const hasBuilder = typeof crearNuevoChatHTML === 'function';
+                tmp.innerHTML = hasBuilder
+                    ? crearNuevoChatHTML(chat)
+                    : `
             <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
                 <div class="card-content">
                     <div class="card-title-row">
                         <div class="card-avatar-section">
                             <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
                         </div>
-                        <span class="alias-view">${chat.nombre_mostrado||chat.numero}</span>
+                        <span class="alias-view">${chat.nombre_mostrado || chat.numero}</span>
                     </div>
                     <div class="card-meta-row">
                         <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
@@ -1373,16 +1358,21 @@ function actualizarIncrementalChats(chats) {
                     <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
                 </div>
             </a>`;
-            const el = tmp.firstElementChild;
-            if (!el) continue;
-            container.insertBefore(el, container.firstElementChild);
-            el.classList.add('new-message');
-            setTimeout(() => el.classList.remove('new-message'), 1400);
+                const el = tmp.firstElementChild;
+                if (!el) continue;
+                container.insertBefore(el, container.firstElementChild);
+                el.classList.add('new-message');
+                setTimeout(() => el.classList.remove('new-message'), 1400);
+            }
         }
-    }
 
-    existing.forEach((node) => node.remove());
-}
+        existing.forEach((node) => node.remove());
+
+        // Restaurar opacidad
+        setTimeout(() => {
+            container.style.opacity = '1';
+        }, 100);
+    }
 
 try {
     const msgsEl = document.getElementById('msgs');
@@ -2226,15 +2216,20 @@ function normalizeText(s) {
 
 
         // Validar antes de enviar
+        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
+        // Validar antes de enviar - SOLO verificar que haya algo
+        // Validar antes de enviar - CORREGIDO DEFINITIVO
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
             const hasFile = fileInput.files.length > 0;
 
+            // SOLO validar si no hay absolutamente nada
             if (!hasText && !hasFile) {
                 e.preventDefault();
                 alert('Por favor escribe un mensaje o selecciona un archivo');
                 return false;
             }
+            // Si hay archivo, puede enviarse SIN texto - ESTO YA ESTÁ CORRECTO
 
             // Mostrar indicador de envío
             const sendBtn = document.querySelector('.send-btn');
@@ -2252,4 +2247,4 @@ function normalizeText(s) {
         console.debug('File upload functionality initialized - WhatsApp style');
     }
 </script>
-{% endblock %}  
+{% endblock %}    
