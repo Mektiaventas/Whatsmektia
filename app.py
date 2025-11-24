@@ -3678,31 +3678,25 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar índices la primera vez que se carga (por si acaso)
         _ensure_performance_indexes(config)
-        _ensure_interes_column(config)
+        _ensure_interes_column(config) 
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # Mover chats de asesores
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
-        
-        # Mover chats de asesores si es necesario
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
-            cursor.execute(f"""
-                UPDATE chat_meta
-                SET columna_id = %s
-                WHERE numero IN ({placeholders}) AND columna_id != %s
-            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+            cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", 
+                           (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
             
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA ULTRARÁPIDA ---
-        # 1. Eliminamos el 'NOT LIKE' que es lento.
-        # 2. Los sub-queries ahora usarán el índice 'idx_conv_num_ts'.
+        # --- CONSULTA CORREGIDA CON CASE WHEN ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3712,37 +3706,33 @@ def kanban_data(config=None):
                 cont.imagen_url,
                 cont.plataforma as canal,
                 
-                -- Subconsulta optimizada por índice (trae el último mensaje real)
-                (SELECT mensaje FROM conversaciones 
+                (SELECT 
+                    CASE 
+                        WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                        ELSE mensaje 
+                    END
+                 FROM conversaciones 
                  WHERE numero = cm.numero
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                  
                 COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
                 
-                -- Subconsulta optimizada para contador
                 (SELECT COUNT(*) FROM conversaciones 
                  WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
                  
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             ORDER BY cont.timestamp DESC
-            LIMIT 250
+            LIMIT 300
         """)
         chats = cursor.fetchall()
-
         cursor.close()
         conn.close()
 
-        # --- PROCESAMIENTO EN MEMORIA (MUCHO MÁS RÁPIDO QUE SQL) ---
         ahora = datetime.now(tz_mx)
-
         for chat in chats:
-            # Limpiar mensaje manual visualmente aquí (Python es más rápido para esto que SQL 'NOT LIKE')
-            msg = chat.get('ultimo_mensaje') or ""
-            if "[Mensaje manual" in msg:
-                chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
+            # --- ELIMINADO EL BLOQUE QUE REEMPLAZABA EL TEXTO POR "NOTA INTERNA" ---
             
-            # Lógica de tiempo "Dormido"
             interes_final = chat.get('interes_db') or 'Frío'
             if chat.get('ultima_fecha'):
                 try:
@@ -3752,16 +3742,13 @@ def kanban_data(config=None):
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
-                    if horas_pasadas > 20:
+                    if (ahora - fecha_msg).total_seconds() / 3600 > 20:
                         interes_final = 'Dormido'
-                    
                     chat['ultima_fecha'] = fecha_msg.isoformat()
-                except Exception:
+                except:
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
                 interes_final = 'Dormido'
-                chat['ultima_fecha'] = None
             
             chat['interes'] = interes_final
 
@@ -10613,26 +10600,34 @@ def _ensure_contactos_conversaciones_columns(config=None):
     finally:
         cursor.close()
         conn.close()
+
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
-    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocido')}")
+    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocida')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
+    # --- CORRECCIÓN: Mostrar mensaje manual usando CASE WHEN ---
     cursor.execute("""
         SELECT 
           conv.numero, 
           COUNT(*) AS total_mensajes, 
           cont.imagen_url, 
-          -- PRIORIDAD: alias > nombre > número
           COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
           cont.alias,
           cont.nombre,
-          (SELECT mensaje FROM conversaciones 
+          
+          (SELECT 
+                CASE 
+                    WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                    ELSE mensaje 
+                END
+           FROM conversaciones 
            WHERE numero = conv.numero
-           AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%'
+           -- ELIMINADO EL FILTRO: AND mensaje NOT LIKE ...
            ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+           
           MAX(conv.timestamp) AS ultima_fecha
         FROM conversaciones conv
         LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
@@ -10640,25 +10635,22 @@ def ver_chats():
         ORDER BY MAX(conv.timestamp) DESC
     """)
     chats = cursor.fetchall()
-    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
+    
     for chat in chats:
-        if chat.get('numero') is None:
-            chat['numero'] = ''
+        if chat.get('numero') is None: chat['numero'] = ''
         if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
                 chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+    
     cursor.close()
     conn.close()
 
-    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats_supercopia.html',
+    return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10671,113 +10663,101 @@ def ver_chats():
 def ver_chat(numero):
     try:
         config = obtener_configuracion_por_host()
-        app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
-        
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Check if number exists in IA_ESTADOS
         if numero not in IA_ESTADOS:
-            cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
-            result = cursor.fetchone()
-            ia_active = True if result is None or result.get('ia_activada') is None else bool(result.get('ia_activada'))
-            IA_ESTADOS[numero] = {'activa': ia_active}
-            app.logger.info(f"🔍 IA state loaded from database for {numero}: {IA_ESTADOS[numero]}")
-        else:
-            app.logger.info(f"🔍 Using existing IA state for {numero}: {IA_ESTADOS[numero]}")
+            try:
+                cursor.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+                result = cursor.fetchone()
+                ia_active = True if result is None or result.get('ia_activada') is None else bool(result.get('ia_activada'))
+                IA_ESTADOS[numero] = {'activa': ia_active}
+            except:
+                IA_ESTADOS[numero] = {'activa': True}
         
-        app.logger.info(f"🔍 IA state for {numero}: {IA_ESTADOS[numero]}")
-        # Consulta para los datos del chat
+        # --- CORRECCIÓN: Cargar LISTA COMPLETA para la sidebar con mensajes manuales visibles ---
         cursor.execute("""
-            SELECT DISTINCT
+            SELECT 
                 conv.numero, 
+                COUNT(*) AS total_mensajes, 
                 cont.imagen_url, 
                 COALESCE(cont.alias, cont.nombre, conv.numero) AS nombre_mostrado,
                 cont.alias,
-                cont.nombre
+                cont.nombre,
+                
+                (SELECT 
+                    CASE 
+                        WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                        ELSE mensaje 
+                    END
+                 FROM conversaciones 
+                 WHERE numero = conv.numero 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                 
+                MAX(conv.timestamp) AS ultima_fecha
             FROM conversaciones conv
             LEFT JOIN contactos cont ON conv.numero = cont.numero_telefono
-            WHERE conv.numero = %s
-            LIMIT 1;
-        """, (numero,))
+            GROUP BY conv.numero, cont.imagen_url, cont.alias, cont.nombre
+            ORDER BY MAX(conv.timestamp) DESC
+        """)
         chats = cursor.fetchall()
-        last_message_ts_ms = 0
-        # Consulta para mensajes - INCLUYENDO IMÁGENES
+        
+        # Cargar mensajes individuales del chat seleccionado
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
-                   -- Incluir la transcripción si está en el campo 'mensaje' y es un audio
                    CASE 
                        WHEN tipo_mensaje = 'audio' THEN mensaje 
                        ELSE NULL 
                    END AS transcripcion_audio,
-                   
-                   -- Nuevas columnas para la respuesta del BOT
                    respuesta_tipo_mensaje,
                    respuesta_contenido_extra
-                   
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp ASC;
         """, (numero,))
         msgs = cursor.fetchall()
 
-        # Convertir timestamps
+        # Procesar Fechas
+        for chat in chats:
+            if chat.get('ultima_fecha'):
+                if chat['ultima_fecha'].tzinfo is None:
+                    chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                else:
+                    chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+
         for msg in msgs:
             if msg.get('timestamp'):
-                # Si el timestamp ya tiene timezone info, convertirlo
-                if msg['timestamp'].tzinfo is not None:
-                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
-                else:
-                    # Si no tiene timezone, asumir que es UTC y luego convertir
+                if msg['timestamp'].tzinfo is None:
                     msg['timestamp'] = pytz.utc.localize(msg['timestamp']).astimezone(tz_mx)
-
-            
+                else:
+                    msg['timestamp'] = msg['timestamp'].astimezone(tz_mx)
 
         cursor.close()
         conn.close()
         
-        app.logger.info(f"✅ Chat cargado: {len(chats)} chats, {len(msgs)} mensajes")
-
-        # Ensure chat_meta exists and move the chat to "En Conversación" when user opens it.
-        # This makes opening the chat immediately reflect the agent activity in the kanban.
+        # Mover a "En Conversación" al abrir
         try:
             inicializar_chat_meta(numero, config)
-            actualizar_columna_chat(numero, 2, config)  # 2 = "En Conversación"
-            app.logger.info(f"📊 Chat {numero} movido a 'En Conversación' (columna 2) al abrir la vista")
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo mover chat a 'En Conversación' al abrir: {e}")
+            actualizar_columna_chat(numero, 2, config)
+        except: pass
 
-        # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats_supercopia.html',
+        return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
             IA_ESTADOS=IA_ESTADOS,
             tenant_config=config,
             is_admin=is_admin,
-            lastMessageTimestamp=last_message_ts_ms
+            lastMessageTimestamp=0
         )
         
     except Exception as e:
-        # Log full traceback and provide a safe inline error page (do not rely on error.html template)
-        import traceback as _tb, hashlib as _hash, time as _time
-        tb = _tb.format_exc()
-        err_id = _hash.md5(f"{_time.time()}_{numero}_{str(e)}".encode()).hexdigest()[:8]
-        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat (id={err_id}): {e}")
-        app.logger.error(tb)
-        # Avoid rendering a missing template — return a minimal safe page with error id
-        html = """
-        <html><head><title>Error</title></head><body>
-          <h1>Internal server error</h1>
-          <p>An internal error occurred while loading the chat. Error ID: <strong>{{ err_id }}</strong></p>
-          <p>Please check server logs for details (search for the same Error ID).</p>
-        </body></html>
-        """
-        return render_template_string(html, err_id=err_id), 500
+        app.logger.error(f"🔴 ERROR CRÍTICO en ver_chat: {e}")
+        return f"Error cargando el chat: {str(e)}", 500
        
 @app.route('/debug-calendar-email')
 def debug_calendar_email():
@@ -10886,6 +10866,7 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
+
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
     """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
@@ -10900,11 +10881,14 @@ def enviar_manual():
             flash('❌ Número de destino requerido', 'error')
             return redirect(url_for('ver_chat', numero=numero))
         
-        # Validar que hay al menos texto O archivo
         if not texto and not archivo:
             flash('❌ Escribe un mensaje o selecciona un archivo', 'error')
             return redirect(url_for('ver_chat', numero=numero))
         
+        # --- CORRECCIÓN CRÍTICA: Actualizar fecha del contacto ---
+        actualizar_info_contacto(numero, config)
+        # ---------------------------------------------------------
+
         mensaje_enviado = False
         respuesta_texto = ""
         archivo_info = ""
@@ -10913,97 +10897,60 @@ def enviar_manual():
         # 1. Manejar archivo si existe
         if archivo and archivo.filename:
             app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
-            
             if allowed_file(archivo.filename):
-                # Guardar archivo temporalmente
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
                 archivo.save(filepath)
-                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
-                
-                # Determinar tipo de archivo
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
                     dominio = config.get('dominio') or request.url_root.rstrip('/')
-                    if not dominio.startswith('http'):
-                        dominio = f"https://{dominio}"
+                    if not dominio.startswith('http'): dominio = f"https://{dominio}"
                     public_url = f"{dominio}/uploads/{filename}"
                     
-                    app.logger.info(f"🌐 URL pública generada: {public_url}")
-                    
-                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
-                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                        # Es imagen - enviar como imagen
-                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
-                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
-                        archivo_info = f"📷 Imagen: {archivo.filename}"
-                        
+                    # Lógica de envío (Telegram / WhatsApp)
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            enviado = enviar_telegram_documento(chat_id, filepath, telegram_token, caption=texto)
+                            if enviado:
+                                mensaje_enviado = True
+                                archivo_info = f"📎 Archivo Telegram: {archivo.filename}"
                     else:
-                        # Para todos los demás tipos, enviar como documento
-                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        
-                        # Determinar el tipo para el mensaje informativo
-                        if file_ext == '.pdf':
-                            archivo_info = f"📕 PDF: {archivo.filename}"
-                        elif file_ext in ['.doc', '.docx']:
-                            archivo_info = f"📘 Documento Word: {archivo.filename}"
-                        elif file_ext in ['.xls', '.xlsx', '.csv']:
-                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
-                        elif file_ext in ['.ppt', '.pptx']:
-                            archivo_info = f"📙 Presentación: {archivo.filename}"
-                        elif file_ext in ['.zip', '.rar', '.7z']:
-                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
-                        elif file_ext in ['.txt', '.rtf']:
-                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
-                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
-                            archivo_info = f"🎬 Video: {archivo.filename}"
-                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
-                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                        # WhatsApp
+                        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                            enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                            archivo_info = f"📷 Imagen: {archivo.filename}"
                         else:
+                            enviar_documento(numero, public_url, archivo.filename, config)
                             archivo_info = f"📎 Archivo: {archivo.filename}"
+                        mensaje_enviado = True
                     
-                    mensaje_enviado = True
-                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
-                    
-                except Exception as file_error:
-                    app.logger.error(f"🔴 Error enviando archivo: {file_error}")
-                    app.logger.error(traceback.format_exc())
+                except Exception as e:
+                    app.logger.error(f"🔴 Error enviando archivo: {e}")
                     flash('❌ Error al enviar el archivo', 'error')
-                    # Limpiar archivo temporal en caso de error
-                    try:
-                        if filepath and os.path.exists(filepath):
-                            os.remove(filepath)
-                    except:
-                        pass
                     return redirect(url_for('ver_chat', numero=numero))
-                
-                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
-                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
-                
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
-        if texto:
+        # 2. Manejar texto (si no se envió ya como caption de imagen)
+        if texto and (not mensaje_enviado or not archivo):
             try:
-                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
-                enviar_mensaje(numero, texto, config)
+                if numero.startswith('tg_'):
+                    token = config.get('telegram_token')
+                    if token: send_telegram_message(numero.replace('tg_', ''), texto, token)
+                else:
+                    enviar_mensaje(numero, texto, config)
+                
                 respuesta_texto = texto
-                if archivo_info:
-                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                if archivo_info: respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
                 mensaje_enviado = True
-                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
-            except Exception as text_error:
-                app.logger.error(f"🔴 Error enviando texto: {text_error}")
-                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
-                    flash('❌ Error al enviar el mensaje', 'error')
-                    return redirect(url_for('ver_chat', numero=numero))
+            except Exception as e:
+                app.logger.error(f"🔴 Error enviando texto: {e}")
         
-        # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
+        # 3. GUARDAR EN BASE DE DATOS
         if mensaje_enviado:
             conn = get_db_connection(config)
             cursor = conn.cursor()
@@ -11011,10 +10958,8 @@ def enviar_manual():
             mensaje_historial = "[Mensaje manual desde web]"
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
-            # --- CAMBIO: Extraer solo el subdominio ---
             raw_domain = config.get('dominio', '')
             dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
-            # ------------------------------------------
             
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
@@ -11025,32 +10970,20 @@ def enviar_manual():
             cursor.close()
             conn.close()
             
-            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            # Actualizar Kanban a "Esperando Respuesta"
             try:
-                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
-            except Exception as e:
-                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+                actualizar_columna_chat(numero, 3, config)
+            except: pass
             
-            # 5. MENSAJE DE CONFIRMACIÓN
-            if archivo and texto:
-                flash('✅ Archivo y mensaje enviados correctamente', 'success')
-            elif archivo:
-                flash('✅ Archivo enviado correctamente', 'success')
-            else:
-                flash('✅ Mensaje enviado correctamente', 'success')
-                
-            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
-            
+            flash('✅ Enviado correctamente', 'success')
         else:
-            flash('❌ No se pudo enviar el mensaje', 'error')
+            flash('❌ No se pudo enviar', 'error')
             
     except Exception as e:
-        flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
-        app.logger.error(traceback.format_exc())
+        flash(f'❌ Error: {str(e)}', 'error')
     
-    return redirect(url_for('ver_chat', numero=numero)) 
+    return redirect(url_for('ver_chat', numero=numero))
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
@@ -12156,7 +12089,7 @@ def verificar_todas_tablas():
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
-    # Asegurar índices aquí también por si entran directo
+    # Asegurar índices
     _ensure_performance_indexes(config)
     
     conn = get_db_connection(config)
@@ -12165,7 +12098,7 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # --- CONSULTA OPTIMIZADA ---
+    # --- CONSULTA CORREGIDA ---
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -12175,7 +12108,12 @@ def ver_kanban(config=None):
             cont.imagen_url AS avatar,
             cont.plataforma AS canal,
             
-            (SELECT mensaje FROM conversaciones 
+            (SELECT 
+                CASE 
+                    WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                    ELSE mensaje 
+                END
+             FROM conversaciones 
              WHERE numero = cm.numero
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             
@@ -12186,17 +12124,17 @@ def ver_kanban(config=None):
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         ORDER BY cont.timestamp DESC
-        LIMIT 250;
+        LIMIT 400;
     """)
     chats = cursor.fetchall()
 
-    # Procesamiento rápido en Python
+    # Procesamiento
     ahora = datetime.now(tz_mx)
     for chat in chats:
-        # Filtro visual manual
+        # Limpieza visual
         msg = chat.get('ultimo_mensaje') or ""
-        if "[Mensaje manual" in msg:
-            chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
+        if msg == '[Mensaje manual desde web]':
+            chat['ultimo_mensaje'] = "📝 Mensaje enviado"
 
         interes_db = chat.get('interes') or 'Frío'
         if chat.get('ultima_fecha'):
@@ -12218,7 +12156,7 @@ def ver_kanban(config=None):
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban_supercopia.html', columnas=columnas, chats=chats, is_admin=is_admin)
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
@@ -12720,5 +12658,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5000, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    app.run(host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=args.port)
       
