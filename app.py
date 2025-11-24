@@ -424,7 +424,7 @@ def descargar_template():
     return "Error generando el archivo", 500
 
 def _find_cliente_in_clientes_by_domain(dominio):
-    """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
+    """Helper: intenta encontrar la fila en la tabla usuarios de CLIENTES_DB por dominio/subdominio."""
     try:
         if not dominio:
             return None
@@ -437,6 +437,7 @@ def _find_cliente_in_clientes_by_domain(dominio):
         cur = conn.cursor(dictionary=True)
         for c in candidates:
             try:
+                # Busca en la tabla usuarios
                 cur.execute("""
                     SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
                     FROM usuarios
@@ -466,8 +467,6 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
-
-
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
@@ -4636,11 +4635,11 @@ def publicar_pdf_configuracion():
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
 def _ensure_cliente_plan_columns():
-    """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
+    """Asegura que la tabla `usuarios` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
     try:
         conn = get_clientes_conn()
         cur = conn.cursor()
-        # Crear columnas si no existen
+        # Crear columnas si no existen en la tabla usuarios
         cur.execute("SHOW COLUMNS FROM usuarios LIKE 'plan_id'")
         if cur.fetchone() is None:
             cur.execute("ALTER TABLE usuarios ADD COLUMN plan_id INT DEFAULT NULL")
@@ -4651,7 +4650,7 @@ def _ensure_cliente_plan_columns():
         cur.close()
         conn.close()
     except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en usuarios: {e}")
 
 def _ensure_precios_subscription_columns(config=None):
     """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
@@ -4687,25 +4686,25 @@ def _ensure_precios_plan_column(config=None):
 
 def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
     """
-    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
-    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro usuarios.mensajes_incluidos.
+    Asigna un plan (planes.plan_id en CLIENTES_DB) al usuario identificado por `username`.
+    Lee mensajes_incluidos desde la tabla 'planes' y lo copia al registro usuarios.mensajes_incluidos.
     """
     try:
         # asegurar columnas en usuarios
         _ensure_cliente_plan_columns()
 
-        # 1) Obtener cliente en CLIENTES_DB
+        # 1) Obtener usuario en CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-        # CAMBIO: cliente -> usuarios
+        
         cur_cli.execute("SELECT id_cliente, telefono FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         cliente = cur_cli.fetchone()
         if not cliente:
             cur_cli.close(); conn_cli.close()
-            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
+            app.logger.error(f"🔴 Usuario no encontrado para user={username}")
             return False
 
-        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
+        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes'
         mensajes_incluidos = 0
         plan_name = None
         try:
@@ -4714,15 +4713,13 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             plan_row = cur_pl.fetchone()
             if plan_row:
                 mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
-                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
                 plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
             cur_pl.close()
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
 
-        # 3) Actualizar cliente en CLIENTES_DB
+        # 3) Actualizar tabla usuarios
         try:
-            # CAMBIO: UPDATE cliente -> UPDATE usuarios
             cur_cli.execute("""
                 UPDATE usuarios
                    SET plan_id = %s, mensajes_incluidos = %s
@@ -4730,13 +4727,13 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
             conn_cli.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error actualizando usuarios con plan: {e}")
+            app.logger.error(f"🔴 Error actualizando tabla usuarios con plan: {e}")
             conn_cli.rollback()
             cur_cli.close(); conn_cli.close()
             return False
 
         cur_cli.close(); conn_cli.close()
-        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes={mensajes_incluidos}) en tabla usuarios")
         return True
 
     except Exception as e:
@@ -6961,18 +6958,17 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
 
 def obtener_asesores_por_user(username, default=2, cap=20):
     """
-    Retorna el número de asesores permitido para el cliente identificado por `username`.
-    - Lee usuarios en CLIENTES_DB para obtener plan_id.
-    - Lee la fila correspondiente en `planes` y retorna el campo `asesores` si existe.
-    - Si falla, devuelve `default`. Aplica un cap por seguridad.
+    Retorna el número de asesores permitido para el usuario identificado por `username`.
+    - Lee la tabla usuarios en CLIENTES_DB para obtener plan_id.
+    - Lee la fila correspondiente en `planes`.
     """
     try:
         if not username:
             return default
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
-        # Obtener plan_id del cliente
-        # CAMBIO: cliente -> usuarios
+        
+        # Obtener plan_id del usuario
         cur.execute("SELECT plan_id FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         row = cur.fetchone()
         plan_id = row.get('plan_id') if row else None
