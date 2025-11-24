@@ -304,7 +304,7 @@
                     📎
                 </button>
                 <input type="file" id="file-input" name="archivo" style="display: none;"
-                       accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
+                       accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar,image/*,video/*,audio/*"> 
 
                 <!-- botón de emoji más grande -->
                 <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
@@ -449,6 +449,7 @@
 
         <script>
             // Funciones para manejar el textarea mejorado
+            // BUSCAR Y REEMPLAZAR ESTA FUNCIÓN COMPLETA:
             function handleMessageKeyDown(event) {
                 if (event.key === 'Enter') {
                     if (event.shiftKey) {
@@ -471,11 +472,11 @@
                         const textarea = document.getElementById('mensaje-texto');
                         const fileInput = document.getElementById('file-input');
 
-                        // Validar que haya contenido para enviar - CORREGIDO
+                        // Validar que haya contenido para enviar - CORREGIDO DEFINITIVAMENTE
                         const hasText = textarea.value.trim() !== '';
                         const hasFile = fileInput.files.length > 0;
 
-                        // SOLO validar si no hay absolutamente nada
+                        // PERMITIR ENVÍO SI HAY ARCHIVO, AUNQUE NO HAYA TEXTO
                         if (!hasText && !hasFile) {
                             // No hay nada que enviar
                             return;
@@ -485,7 +486,7 @@
                         form.submit();
                     }
                 }
-            }
+            } 
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -2219,6 +2220,7 @@ function normalizeText(s) {
         // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
         // Validar antes de enviar - SOLO verificar que haya algo
         // Validar antes de enviar - CORREGIDO DEFINITIVO
+        // BUSCAR Y REEMPLAZAR ESTA SECCIÓN DE VALIDACIÓN:
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
             const hasFile = fileInput.files.length > 0;
@@ -2242,7 +2244,7 @@ function normalizeText(s) {
                 sendBtn.innerHTML = originalText;
                 sendBtn.disabled = false;
             }, 3000);
-        });
+        }); 
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
