@@ -458,7 +458,7 @@ def _find_cliente_in_clientes_by_domain(dominio):
             try:
                 cur.execute("""
                     SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
-                    FROM cliente
+                    FROM usuarios
                     WHERE shema = %s OR entorno = %s OR servicio = %s OR `user` = %s
                     LIMIT 1
                 """, (c, c, c, c))
@@ -478,7 +478,7 @@ def obtener_cliente_por_user(username):
     cur = conn.cursor(dictionary=True)
     cur.execute("""
         SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
-        FROM cliente
+        FROM usuarios
         WHERE `user` = %s
         LIMIT 1
     """, (username,))
@@ -4642,12 +4642,12 @@ def _ensure_cliente_plan_columns():
         conn = get_clientes_conn()
         cur = conn.cursor()
         # Crear columnas si no existen
-        cur.execute("SHOW COLUMNS FROM cliente LIKE 'plan_id'")
+        cur.execute("SHOW COLUMNS FROM usuarios LIKE 'plan_id'")
         if cur.fetchone() is None:
             cur.execute("ALTER TABLE cliente ADD COLUMN plan_id INT DEFAULT NULL")
-        cur.execute("SHOW COLUMNS FROM cliente LIKE 'mensajes_incluidos'")
+        cur.execute("SHOW COLUMNS FROM usuarios LIKE 'mensajes_incluidos'")
         if cur.fetchone() is None:
-            cur.execute("ALTER TABLE cliente ADD COLUMN mensajes_incluidos INT DEFAULT 0")
+            cur.execute("ALTER TABLE usuarios ADD COLUMN mensajes_incluidos INT DEFAULT 0")
         conn.commit()
         cur.close()
         conn.close()
@@ -4698,7 +4698,7 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
         # 1) Obtener cliente en CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-        cur_cli.execute("SELECT id_cliente, telefono FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cur_cli.execute("SELECT id_cliente, telefono FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         cliente = cur_cli.fetchone()
         if not cliente:
             cur_cli.close(); conn_cli.close()
@@ -6387,7 +6387,7 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
             candidates = (cfg.get('db_name'), cfg.get('dominio'), cfg.get('dominio'))
             cur.execute("""
                 SELECT `user`
-                  FROM cliente
+                  FROM usuarios
                  WHERE shema = %s OR entorno = %s OR servicio = %s
                  LIMIT 1
             """, candidates)
@@ -6970,7 +6970,7 @@ def obtener_asesores_por_user(username, default=2, cap=20):
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
         # Obtener plan_id del cliente
-        cur.execute("SELECT plan_id FROM cliente WHERE `user` = %s LIMIT 1", (username,))
+        cur.execute("SELECT plan_id FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         row = cur.fetchone()
         plan_id = row.get('plan_id') if row else None
         cur.close(); conn.close()
