@@ -7330,35 +7330,31 @@ def registrar_nueva_conversacion(numero, mensaje, config=None):
         if conn: conn.close()
 
 def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, respuesta_tipo='texto', respuesta_media_url=None):
-    """Función compatible con la estructura actual de la base de datos.
-    Sanitiza el texto entrante para eliminar artefactos como 'excel_unzip_img_...'
-    antes de guardarlo."""
     if config is None:
         config = obtener_configuracion_por_host()
 
+    dominio_actual = config.get('dominio', '')
+
     try:
-        # Sanitize inputs
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Primero asegurar que el contacto existe con su información actualizada
-        timestamp_local = datetime.now(tz_mx)
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Usar los nombres de columna existentes en tu BD
+        # Agregamos columna 'dominio'
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen)
-            VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s)
-        """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen))
+            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen, dominio)
+            VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s, %s)
+        """, (numero, mensaje_limpio, respuesta_limpia, respuesta_tipo, respuesta_media_url, imagen_url, es_imagen, dominio_actual))
 
         conn.commit()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 Conversación guardada para {numero}")
+        app.logger.info(f"💾 Conversación guardada para {numero} en {dominio_actual}")
         return True
 
     except Exception as e:
@@ -9766,24 +9762,24 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
         return False
 
 def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='alerta_interna', respuesta_media_url=None):
-    """Guarda una entrada en conversaciones como respuesta del sistema (columna derecha)."""
     if config is None:
         config = obtener_configuracion_por_host()
+
+    dominio_actual = config.get('dominio', '')
 
     try:
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
 
-        # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Insertar como respuesta del BOT/Sistema: mensaje nulo, respuesta = texto, timestamp
+        # Agregamos columna 'dominio'
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp)
-            VALUES (%s, NULL, %s, %s, %s, UTC_TIMESTAMP())
-        """, (numero, respuesta_limpia, respuesta_tipo, respuesta_media_url))
+            INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio)
+            VALUES (%s, NULL, %s, %s, %s, UTC_TIMESTAMP(), %s)
+        """, (numero, respuesta_limpia, respuesta_tipo, respuesta_media_url, dominio_actual))
 
         conn.commit()
         cursor.close()
@@ -10035,15 +10031,12 @@ def enviar_datos_transferencia(numero, config=None):
         return False
 
 def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
-    """Guarda el mensaje del usuario inmediatamente, sin respuesta.
-    Aplica sanitización para que la UI muestre el mismo texto legible que llega por WhatsApp.
-    Además, fuerza una actualización inmediata del Kanban tras insertar el mensaje.
-    """
     if config is None:
         config = obtener_configuracion_por_host()
 
+    dominio_actual = config.get('dominio', '')
+
     try:
-        # Sanitize incoming text
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
 
         # Asegurar que el contacto existe
@@ -10052,25 +10045,21 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Add detailed logging before saving the message
         app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
 
-        # --- MODIFICADO ---
-        # Determinar el tipo de mensaje correcto
         if es_imagen:
             tipo_mensaje = 'imagen'
-        elif tipo_mensaje == 'audio': # Si ya se marcó como audio
+        elif tipo_mensaje == 'audio':
             pass
         else:
-            tipo_mensaje = 'texto' # Default 
+            tipo_mensaje = 'texto'
 
+        # Agregamos columna 'dominio'
         cursor.execute("""
-            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra)
-            VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s)
-        """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra))
-        # --- FIN MODIFICADO ---
+            INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra, dominio)
+            VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s, %s)
+        """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra, dominio_actual))
 
-        # Get the ID of the inserted message for tracking
         cursor.execute("SELECT LAST_INSERT_ID()")
         row = cursor.fetchone()
         msg_id = row[0] if row else None
@@ -10079,9 +10068,8 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero}")
+        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (Dominio: {dominio_actual})")
 
-        # Ensure Kanban reflects the new incoming message immediately.
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
@@ -10999,13 +10987,14 @@ def enviar_manual():
             conn = get_db_connection(config)
             cursor = conn.cursor()
             
-            # Preparar el texto para el historial
             mensaje_historial = "[Mensaje manual desde web]"
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
+            dominio_actual = config.get('dominio', '')
             
+            # Agregamos columna 'dominio'
             cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp) VALUES (%s, %s, %s, UTC_TIMESTAMP());",
-                (numero, mensaje_historial, respuesta_historial)
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
+                (numero, mensaje_historial, respuesta_historial, dominio_actual)
             )
             
             conn.commit()
@@ -12567,7 +12556,10 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
     _ensure_contactos_conversaciones_columns(config)
     _ensure_interes_column(config)
     _ensure_columna_interaccion_usuario(config)
-    _ensure_created_at_column(config) # <--- NUEVA VALIDACIÓN
+    _ensure_created_at_column(config)
+
+    # Obtener el dominio actual
+    dominio_actual = config.get('dominio', '')
 
     conn = None
     cursor = None
@@ -12581,31 +12573,25 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         # 1. Obtener hora actual de México
         ahora_mx = datetime.now(tz_mx)
 
-        # 2. SQL Modificado: 
-        # - Inserta 'created_at' con hora MX.
-        # - Reemplaza UTC_TIMESTAMP() por %s (ahora_mx).
-        # - Usa VALUES(columna) para usar el valor pasado desde Python en la lógica de actualización.
+        # 2. SQL Modificado: Agregamos 'dominio'
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
             VALUES (%s, %s, %s, %s, 
-                    1, %s, 'Frío', %s, %s) 
+                    1, %s, 'Frío', %s, %s, %s) 
             ON DUPLICATE KEY UPDATE 
-                -- Actualiza campos de perfil
                 nombre = COALESCE(VALUES(nombre), nombre), 
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = VALUES(fecha_actualizacion),
                 ultima_interaccion_usuario = VALUES(ultima_interaccion_usuario),
+                dominio = VALUES(dominio), -- Actualizamos el dominio si cambia
                 
-                -- Lógica condicional para actualizar el contador de conversaciones
-                -- Compara contra el valor nuevo que estamos intentando insertar (VALUES(timestamp)) que es hora MX
                 conversaciones = conversaciones + 
                                  CASE 
                                      WHEN timestamp IS NULL THEN 1
                                      WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN 1
                                      ELSE 0
                                  END,
-                -- Lógica condicional para actualizar el timestamp
                 timestamp = CASE 
                                 WHEN timestamp IS NULL THEN VALUES(timestamp)
                                 WHEN TIMESTAMPDIFF(SECOND, timestamp, VALUES(timestamp)) > 86400 THEN VALUES(timestamp)
@@ -12613,11 +12599,11 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
                             END
         """
         
-        # Pasar ahora_mx para todos los campos de tiempo (fecha_actualizacion, timestamp, ultima_interaccion, created_at)
-        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar, ahora_mx, ahora_mx, ahora_mx, ahora_mx))
+        # Pasamos dominio_actual al final de los parámetros
+        cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar, ahora_mx, ahora_mx, ahora_mx, ahora_mx, dominio_actual))
         
         conn.commit()
-        app.logger.info(f"✅ Información de contacto actualizada (Hora MX: {ahora_mx}) para {numero}")
+        app.logger.info(f"✅ Información de contacto actualizada (Dominio: {dominio_actual}) para {numero}")
         
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto {numero}: {e}")
