@@ -211,7 +211,7 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
-    '000': {  # Número de Drasgo
+    '000': {  # Número de SUPAGPRUEBAS
         'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
         'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
         'db_host': os.getenv("SUPAG_DB_HOST"),                 
