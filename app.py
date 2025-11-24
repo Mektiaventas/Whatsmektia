@@ -3678,16 +3678,16 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar índices la primera vez que se carga (por si acaso)
+        # Asegurar índices y columnas
         _ensure_performance_indexes(config)
-        _ensure_interes_column(config)
+        _ensure_interes_column(config) 
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         
-        # Mover chats de asesores si es necesario
+        # Mover chats de asesores
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
             cursor.execute(f"""
@@ -3700,9 +3700,9 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA ULTRARÁPIDA ---
-        # 1. Eliminamos el 'NOT LIKE' que es lento.
-        # 2. Los sub-queries ahora usarán el índice 'idx_conv_num_ts'.
+        # --- CONSULTA CORREGIDA ---
+        # 1. Quitamos el filtro "NOT LIKE" para que el mensaje aparezca.
+        # 2. Usamos un CASE para mostrar la 'respuesta' (tu texto) si el 'mensaje' es el marcador manual.
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3712,38 +3712,38 @@ def kanban_data(config=None):
                 cont.imagen_url,
                 cont.plataforma as canal,
                 
-                -- Subconsulta optimizada por índice (trae el último mensaje real)
-                (SELECT mensaje FROM conversaciones 
+                (SELECT 
+                    CASE 
+                        WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                        ELSE mensaje 
+                    END
+                 FROM conversaciones 
                  WHERE numero = cm.numero
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                  
                 COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
                 
-                -- Subconsulta optimizada para contador
                 (SELECT COUNT(*) FROM conversaciones 
                  WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
                  
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             ORDER BY cont.timestamp DESC
-            LIMIT 250
+            LIMIT 400
         """)
         chats = cursor.fetchall()
 
-        cursor.close()
-        conn.close()
-
-        # --- PROCESAMIENTO EN MEMORIA (MUCHO MÁS RÁPIDO QUE SQL) ---
+        # --- PROCESAMIENTO PYTHON ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # Limpiar mensaje manual visualmente aquí (Python es más rápido para esto que SQL 'NOT LIKE')
+            # Limpieza visual extra por si acaso
             msg = chat.get('ultimo_mensaje') or ""
-            if "[Mensaje manual" in msg:
-                chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
-            
-            # Lógica de tiempo "Dormido"
+            if msg == '[Mensaje manual desde web]':
+                chat['ultimo_mensaje'] = "📝 Mensaje enviado"
+
             interes_final = chat.get('interes_db') or 'Frío'
+            
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
@@ -3764,6 +3764,9 @@ def kanban_data(config=None):
                 chat['ultima_fecha'] = None
             
             chat['interes'] = interes_final
+
+        cursor.close()
+        conn.close()
 
         return jsonify({
             'columnas': columnas,
@@ -12156,7 +12159,7 @@ def verificar_todas_tablas():
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
-    # Asegurar índices aquí también por si entran directo
+    # Asegurar índices
     _ensure_performance_indexes(config)
     
     conn = get_db_connection(config)
@@ -12165,7 +12168,7 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # --- CONSULTA OPTIMIZADA ---
+    # --- CONSULTA CORREGIDA ---
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -12175,7 +12178,12 @@ def ver_kanban(config=None):
             cont.imagen_url AS avatar,
             cont.plataforma AS canal,
             
-            (SELECT mensaje FROM conversaciones 
+            (SELECT 
+                CASE 
+                    WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                    ELSE mensaje 
+                END
+             FROM conversaciones 
              WHERE numero = cm.numero
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
             
@@ -12186,17 +12194,17 @@ def ver_kanban(config=None):
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
         ORDER BY cont.timestamp DESC
-        LIMIT 250;
+        LIMIT 400;
     """)
     chats = cursor.fetchall()
 
-    # Procesamiento rápido en Python
+    # Procesamiento
     ahora = datetime.now(tz_mx)
     for chat in chats:
-        # Filtro visual manual
+        # Limpieza visual
         msg = chat.get('ultimo_mensaje') or ""
-        if "[Mensaje manual" in msg:
-            chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
+        if msg == '[Mensaje manual desde web]':
+            chat['ultimo_mensaje'] = "📝 Mensaje enviado"
 
         interes_db = chat.get('interes') or 'Frío'
         if chat.get('ultima_fecha'):
