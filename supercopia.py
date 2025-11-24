@@ -11825,7 +11825,7 @@ def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
         return False
 
 # --- Endpoint Multi-Tenant para Webhook de Telegram ---
-@app.route('/telegram_webhook/<token_bot>', methods=['POST'], endpoint='telegram_webhook_multitenant'))
+@app.route('/telegram_webhook/<token_bot>', methods=['POST'], endpoint='telegram_webhook_multitenant')
 def telegram_webhook_multitenant(token_bot):
     try:
         # 1. Detectar Configuración por Token
