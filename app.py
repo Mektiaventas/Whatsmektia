@@ -3684,7 +3684,7 @@ def kanban_data(config=None):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Mover chats de asesores (lógica existente)
+        # Mover chats de asesores
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         if col_asesores_id and numeros_asesores:
@@ -3696,7 +3696,7 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA CORREGIDA ---
+        # --- CONSULTA CORREGIDA CON CASE WHEN ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3729,13 +3729,10 @@ def kanban_data(config=None):
         cursor.close()
         conn.close()
 
-        # Procesamiento Python (Fechas y limpieza visual)
         ahora = datetime.now(tz_mx)
         for chat in chats:
-            msg = chat.get('ultimo_mensaje') or ""
-            if msg == '[Mensaje manual desde web]': 
-                chat['ultimo_mensaje'] = "📝 Mensaje enviado" # Fallback por si acaso
-
+            # --- ELIMINADO EL BLOQUE QUE REEMPLAZABA EL TEXTO POR "NOTA INTERNA" ---
+            
             interes_final = chat.get('interes_db') or 'Frío'
             if chat.get('ultima_fecha'):
                 try:
@@ -10607,10 +10604,11 @@ def _ensure_contactos_conversaciones_columns(config=None):
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
+    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocida')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # --- CORRECCIÓN: Mostrar mensaje manual ---
+    # --- CORRECCIÓN: Mostrar mensaje manual usando CASE WHEN ---
     cursor.execute("""
         SELECT 
           conv.numero, 
@@ -10677,7 +10675,7 @@ def ver_chat(numero):
             except:
                 IA_ESTADOS[numero] = {'activa': True}
         
-        # --- CORRECCIÓN: Lista lateral con mensaje manual visible ---
+        # --- CORRECCIÓN: Cargar LISTA COMPLETA para la sidebar con mensajes manuales visibles ---
         cursor.execute("""
             SELECT 
                 conv.numero, 
@@ -10704,11 +10702,16 @@ def ver_chat(numero):
         """)
         chats = cursor.fetchall()
         
-        # Cargar mensajes individuales
+        # Cargar mensajes individuales del chat seleccionado
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
-                   respuesta_tipo_mensaje, respuesta_contenido_extra
+                   CASE 
+                       WHEN tipo_mensaje = 'audio' THEN mensaje 
+                       ELSE NULL 
+                   END AS transcripcion_audio,
+                   respuesta_tipo_mensaje,
+                   respuesta_contenido_extra
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp ASC;
