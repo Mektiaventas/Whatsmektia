@@ -3683,22 +3683,20 @@ def kanban_data(config=None):
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # Mover chats de asesores (lógica existente)
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
-        
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
-            cursor.execute(f"""
-                UPDATE chat_meta
-                SET columna_id = %s
-                WHERE numero IN ({placeholders}) AND columna_id != %s
-            """, (col_asesores_id, *numeros_asesores, col_asesores_id))
+            cursor.execute(f"UPDATE chat_meta SET columna_id = %s WHERE numero IN ({placeholders}) AND columna_id != %s", 
+                           (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
             
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA CORREGIDA: CASE WHEN para mensajes manuales ---
+        # --- CONSULTA CORREGIDA ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3725,23 +3723,20 @@ def kanban_data(config=None):
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
             ORDER BY cont.timestamp DESC
-            LIMIT 400
+            LIMIT 300
         """)
         chats = cursor.fetchall()
-
         cursor.close()
         conn.close()
 
+        # Procesamiento Python (Fechas y limpieza visual)
         ahora = datetime.now(tz_mx)
-
         for chat in chats:
             msg = chat.get('ultimo_mensaje') or ""
-            # Fallback visual por si acaso
-            if msg == '[Mensaje manual desde web]':
-                chat['ultimo_mensaje'] = "📝 Mensaje enviado"
+            if msg == '[Mensaje manual desde web]': 
+                chat['ultimo_mensaje'] = "📝 Mensaje enviado" # Fallback por si acaso
 
             interes_final = chat.get('interes_db') or 'Frío'
-            
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
@@ -3750,16 +3745,13 @@ def kanban_data(config=None):
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
-                    if horas_pasadas > 20:
+                    if (ahora - fecha_msg).total_seconds() / 3600 > 20:
                         interes_final = 'Dormido'
-                    
                     chat['ultima_fecha'] = fecha_msg.isoformat()
-                except Exception:
+                except:
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
                 interes_final = 'Dormido'
-                chat['ultima_fecha'] = None
             
             chat['interes'] = interes_final
 
@@ -10615,11 +10607,10 @@ def _ensure_contactos_conversaciones_columns(config=None):
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
-    app.logger.info(f"🔧 Configuración detectada para chats: {config.get('dominio', 'desconocido')}")
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
     
-    # --- CONSULTA CORREGIDA: CASE WHEN y eliminado el filtro NOT LIKE ---
+    # --- CORRECCIÓN: Mostrar mensaje manual ---
     cursor.execute("""
         SELECT 
           conv.numero, 
@@ -10630,12 +10621,13 @@ def ver_chats():
           cont.nombre,
           
           (SELECT 
-            CASE 
-                WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
-                ELSE mensaje 
-            END
+                CASE 
+                    WHEN mensaje = '[Mensaje manual desde web]' THEN respuesta 
+                    ELSE mensaje 
+                END
            FROM conversaciones 
            WHERE numero = conv.numero
+           -- ELIMINADO EL FILTRO: AND mensaje NOT LIKE ...
            ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
            
           MAX(conv.timestamp) AS ultima_fecha
@@ -10647,20 +10639,20 @@ def ver_chats():
     chats = cursor.fetchall()
     
     for chat in chats:
-        if chat.get('numero') is None:
-            chat['numero'] = ''
+        if chat.get('numero') is None: chat['numero'] = ''
         if chat.get('ultima_fecha'):
             if chat['ultima_fecha'].tzinfo is not None:
                 chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             else:
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+    
     cursor.close()
     conn.close()
 
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats.html',
+    return render_template('chats_supercopia.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10673,8 +10665,6 @@ def ver_chats():
 def ver_chat(numero):
     try:
         config = obtener_configuracion_por_host()
-        app.logger.info(f"🔧 Configuración para chat {numero}: {config.get('db_name', 'desconocida')}")
-        
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
@@ -10687,7 +10677,7 @@ def ver_chat(numero):
             except:
                 IA_ESTADOS[numero] = {'activa': True}
         
-        # --- CONSULTA CORREGIDA: CASE WHEN y eliminado el filtro NOT LIKE ---
+        # --- CORRECCIÓN: Lista lateral con mensaje manual visible ---
         cursor.execute("""
             SELECT 
                 conv.numero, 
@@ -10714,21 +10704,18 @@ def ver_chat(numero):
         """)
         chats = cursor.fetchall()
         
+        # Cargar mensajes individuales
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
-                   CASE 
-                       WHEN tipo_mensaje = 'audio' THEN mensaje 
-                       ELSE NULL 
-                   END AS transcripcion_audio,
-                   respuesta_tipo_mensaje,
-                   respuesta_contenido_extra
+                   respuesta_tipo_mensaje, respuesta_contenido_extra
             FROM conversaciones 
             WHERE numero = %s 
             ORDER BY timestamp ASC;
         """, (numero,))
         msgs = cursor.fetchall()
 
+        # Procesar Fechas
         for chat in chats:
             if chat.get('ultima_fecha'):
                 if chat['ultima_fecha'].tzinfo is None:
@@ -10746,16 +10733,16 @@ def ver_chat(numero):
         cursor.close()
         conn.close()
         
+        # Mover a "En Conversación" al abrir
         try:
             inicializar_chat_meta(numero, config)
             actualizar_columna_chat(numero, 2, config)
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo mover chat a 'En Conversación' al abrir: {e}")
+        except: pass
 
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats.html',
+        return render_template('chats_supercopia.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
@@ -10891,14 +10878,13 @@ def enviar_manual():
             flash('❌ Número de destino requerido', 'error')
             return redirect(url_for('ver_chat', numero=numero))
         
-        # Validar que hay al menos texto O archivo
         if not texto and not archivo:
             flash('❌ Escribe un mensaje o selecciona un archivo', 'error')
             return redirect(url_for('ver_chat', numero=numero))
         
-        # --- CORRECCIÓN 1: Actualizar timestamp para que suba al inicio ---
+        # --- CORRECCIÓN CRÍTICA: Actualizar fecha del contacto ---
         actualizar_info_contacto(numero, config)
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------
 
         mensaje_enviado = False
         respuesta_texto = ""
@@ -10908,78 +10894,58 @@ def enviar_manual():
         # 1. Manejar archivo si existe
         if archivo and archivo.filename:
             app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
-            
             if allowed_file(archivo.filename):
-                # Guardar archivo temporalmente
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
                 archivo.save(filepath)
-                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
-                
-                # Determinar tipo de archivo
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
                     dominio = config.get('dominio') or request.url_root.rstrip('/')
-                    if not dominio.startswith('http'):
-                        dominio = f"https://{dominio}"
+                    if not dominio.startswith('http'): dominio = f"https://{dominio}"
                     public_url = f"{dominio}/uploads/{filename}"
                     
-                    app.logger.info(f"🌐 URL pública generada: {public_url}")
-                    
-                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
-                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                        # Es imagen - enviar como imagen
-                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
-                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
-                        archivo_info = f"📷 Imagen: {archivo.filename}"
-                        
+                    # Lógica de envío (Telegram / WhatsApp)
+                    if numero.startswith('tg_'):
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            enviado = enviar_telegram_documento(chat_id, filepath, telegram_token, caption=texto)
+                            if enviado:
+                                mensaje_enviado = True
+                                archivo_info = f"📎 Archivo Telegram: {archivo.filename}"
                     else:
-                        # Para todos los demás tipos, enviar como documento
-                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        
-                        # Determinar el tipo para el mensaje informativo
-                        if file_ext == '.pdf':
-                            archivo_info = f"📕 PDF: {archivo.filename}"
-                        # ... (resto de validaciones de tipo) ...
+                        # WhatsApp
+                        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                            enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                            archivo_info = f"📷 Imagen: {archivo.filename}"
                         else:
+                            enviar_documento(numero, public_url, archivo.filename, config)
                             archivo_info = f"📎 Archivo: {archivo.filename}"
+                        mensaje_enviado = True
                     
-                    mensaje_enviado = True
-                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
-                    
-                except Exception as file_error:
-                    app.logger.error(f"🔴 Error enviando archivo: {file_error}")
-                    app.logger.error(traceback.format_exc())
+                except Exception as e:
+                    app.logger.error(f"🔴 Error enviando archivo: {e}")
                     flash('❌ Error al enviar el archivo', 'error')
-                    # Limpiar archivo temporal en caso de error
-                    try:
-                        if filepath and os.path.exists(filepath):
-                            os.remove(filepath)
-                    except:
-                        pass
                     return redirect(url_for('ver_chat', numero=numero))
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar texto si existe
-        if texto:
+        # 2. Manejar texto (si no se envió ya como caption de imagen)
+        if texto and (not mensaje_enviado or not archivo):
             try:
-                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
-                enviar_mensaje(numero, texto, config)
+                if numero.startswith('tg_'):
+                    token = config.get('telegram_token')
+                    if token: send_telegram_message(numero.replace('tg_', ''), texto, token)
+                else:
+                    enviar_mensaje(numero, texto, config)
+                
                 respuesta_texto = texto
-                if archivo_info:
-                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                if archivo_info: respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
                 mensaje_enviado = True
-                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
-            except Exception as text_error:
-                app.logger.error(f"🔴 Error enviando texto: {text_error}")
-                if not mensaje_enviado:
-                    flash('❌ Error al enviar el mensaje', 'error')
-                    return redirect(url_for('ver_chat', numero=numero))
+            except Exception as e:
+                app.logger.error(f"🔴 Error enviando texto: {e}")
         
         # 3. GUARDAR EN BASE DE DATOS
         if mensaje_enviado:
@@ -11001,20 +10967,18 @@ def enviar_manual():
             cursor.close()
             conn.close()
             
-            # 4. ACTUALIZAR KANBAN
+            # Actualizar Kanban a "Esperando Respuesta"
             try:
-                actualizar_columna_chat(numero, 3, config)  # 3 = Esperando Respuesta
-            except Exception as e:
-                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+                actualizar_columna_chat(numero, 3, config)
+            except: pass
             
             flash('✅ Enviado correctamente', 'success')
-            
         else:
-            flash('❌ No se pudo enviar el mensaje', 'error')
+            flash('❌ No se pudo enviar', 'error')
             
     except Exception as e:
-        flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
+        flash(f'❌ Error: {str(e)}', 'error')
     
     return redirect(url_for('ver_chat', numero=numero))
 
