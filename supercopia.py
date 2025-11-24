@@ -150,19 +150,6 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'UNILOVA_MESSENGER_PAGE_ID',
         'messenger_token_env': 'UNILOVA_PAGE_ACCESS_TOKEN'
     },
-    '003': {  # Número de Unilova
-        'phone_number_id': os.getenv("SOIN3_PHONE_NUMBER_ID"),
-        'whatsapp_token': os.getenv("SOIN3_WHATSAPP_TOKEN"),
-        'db_host': os.getenv("SOIN3_DB_HOST"),
-        'db_user': os.getenv("SOIN3_DB_USER"),
-        'db_password': os.getenv("SOIN3_DB_PASSWORD"),
-        'db_name': os.getenv("SOIN3_DB_NAME"),
-        'dominio': 'SOIN3.mektia.com',
-        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SOIN3"),
-        # Claves de Messenger
-        'messenger_page_id_env': 'SOIN3_MESSENGER_PAGE_ID',
-        'messenger_token_env': 'SOIN3_PAGE_ACCESS_TOKEN'
-    },
     '524812372326': {  # Número de La Porfirianna
         'phone_number_id': os.getenv("LAPORFIRIANNA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("LAPORFIRIANNA_WHATSAPP_TOKEN"),
@@ -174,6 +161,19 @@ NUMEROS_CONFIG = {
         # Claves de Messenger
         'messenger_page_id_env': 'LAPORFIRIANNA_MESSENGER_PAGE_ID',
         'messenger_token_env': 'LAPORFIRIANNA_PAGE_ACCESS_TOKEN'
+    },
+    '000': {  # Número de SUPAGPRUEBAS
+        'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
+        'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("SUPAG_DB_HOST"),                 
+        'db_user': os.getenv("SUPAG_DB_USER"),                
+        'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
+        'db_name': os.getenv("SUPAG_DB_NAME"),                  
+        'dominio': 'supagcopia.mektia.com',
+        # Claves de Messenger
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SUPAG"),
+        'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
     },
     '524495486324': {  # Número de Ofitodo
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
@@ -199,6 +199,19 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'MAINDSTEEL_MESSENGER_PAGE_ID',
         'messenger_token_env': 'MAINDSTEEL_PAGE_ACCESS_TOKEN'
     },
+    '003': {  
+        'phone_number_id': os.getenv("SOIN3_PHONE_NUMBER_ID"),
+        'whatsapp_token': os.getenv("SOIN3_WHATSAPP_TOKEN"),
+        'db_host': os.getenv("SOIN3_DB_HOST"),
+        'db_user': os.getenv("SOIN3_DB_USER"),
+        'db_password': os.getenv("SOIN3_DB_PASSWORD"),
+        'db_name': os.getenv("SOIN3_DB_NAME"),
+        'dominio': 'SOIN3.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SOIN3"),
+        # Claves de Messenger
+        'messenger_page_id_env': 'SOIN3_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SOIN3_PAGE_ACCESS_TOKEN'
+    },
     '1012': {  # Número de Drasgo
         'phone_number_id': os.getenv("DRASGO_PHONE_NUMBER_ID"), 
         'whatsapp_token': os.getenv("DRASGO_WHATSAPP_TOKEN"),   
@@ -210,19 +223,6 @@ NUMEROS_CONFIG = {
         # Claves de Messenger
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
-    },
-    '000': {  # Número de SUPAGPRUEBAS
-        'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
-        'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
-        'db_host': os.getenv("SUPAG_DB_HOST"),                 
-        'db_user': os.getenv("SUPAG_DB_USER"),                
-        'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
-        'db_name': os.getenv("SUPAG_DB_NAME"),                  
-        'dominio': 'supagcopia.mektia.com',
-        # Claves de Messenger
-        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SUPAG"),
-        'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
-        'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
     },
     '1013': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
@@ -367,25 +367,6 @@ def get_clientes_conn():
         password=os.getenv("CLIENTES_DB_PASSWORD"),
         database=os.getenv("CLIENTES_DB_NAME")
     )
-
-def _ensure_created_at_column(config=None):
-    """Asegura que la tabla contactos tenga la columna created_at"""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'created_at'")
-        if cursor.fetchone() is None:
-            # Crear columna por defecto con timestamp actual
-            cursor.execute("ALTER TABLE contactos ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
-            conn.commit()
-            app.logger.info("🔧 Columna 'created_at' creada en tabla 'contactos'")
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columna created_at: {e}")
-
 def descargar_template_excel(columnas):
     """Genera un archivo Excel con los encabezados de columna dados y sin datos."""
     try:
@@ -4511,6 +4492,24 @@ def extraer_fecha_del_mensaje(mensaje):
 
     return None
 
+def _ensure_created_at_column(config=None):
+    """Asegura que la tabla contactos tenga la columna created_at"""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'created_at'")
+        if cursor.fetchone() is None:
+            # Crear columna por defecto con timestamp actual
+            cursor.execute("ALTER TABLE contactos ADD COLUMN created_at DATETIME DEFAULT CURRENT_TIMESTAMP")
+            conn.commit()
+            app.logger.info("🔧 Columna 'created_at' creada en tabla 'contactos'")
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columna created_at: {e}")
+
 def extraer_nombre_del_mensaje(mensaje):
     """Intenta extraer un nombre del mensaje"""
     # Patrón simple para nombres (2-3 palabras)
@@ -4644,7 +4643,7 @@ def _ensure_cliente_plan_columns():
         # Crear columnas si no existen
         cur.execute("SHOW COLUMNS FROM usuarios LIKE 'plan_id'")
         if cur.fetchone() is None:
-            cur.execute("ALTER TABLE cliente ADD COLUMN plan_id INT DEFAULT NULL")
+            cur.execute("ALTER TABLE usuarios ADD COLUMN plan_id INT DEFAULT NULL")
         cur.execute("SHOW COLUMNS FROM usuarios LIKE 'mensajes_incluidos'")
         if cur.fetchone() is None:
             cur.execute("ALTER TABLE usuarios ADD COLUMN mensajes_incluidos INT DEFAULT 0")
@@ -4689,15 +4688,16 @@ def _ensure_precios_plan_column(config=None):
 def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
     """
     Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
-    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro cliente.mensajes_incluidos.
+    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro usuarios.mensajes_incluidos.
     """
     try:
-        # asegurar columnas en cliente
+        # asegurar columnas en usuarios
         _ensure_cliente_plan_columns()
 
         # 1) Obtener cliente en CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
+        # CAMBIO: cliente -> usuarios
         cur_cli.execute("SELECT id_cliente, telefono FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         cliente = cur_cli.fetchone()
         if not cliente:
@@ -4722,14 +4722,15 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
 
         # 3) Actualizar cliente en CLIENTES_DB
         try:
+            # CAMBIO: UPDATE cliente -> UPDATE usuarios
             cur_cli.execute("""
-                UPDATE cliente
+                UPDATE usuarios
                    SET plan_id = %s, mensajes_incluidos = %s
                  WHERE id_cliente = %s
             """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
             conn_cli.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error actualizando cliente con plan: {e}")
+            app.logger.error(f"🔴 Error actualizando usuarios con plan: {e}")
             conn_cli.rollback()
             cur_cli.close(); conn_cli.close()
             return False
@@ -6385,6 +6386,7 @@ def asignar_asesor_a_cliente(numero_cliente, asesor, config=None):
             cur = conn_cli.cursor(dictionary=True)
             # Heurísticas: buscar por shema/db_name, por dominio (entorno) o por servicio
             candidates = (cfg.get('db_name'), cfg.get('dominio'), cfg.get('dominio'))
+            # CAMBIO: cliente -> usuarios
             cur.execute("""
                 SELECT `user`
                   FROM usuarios
@@ -6960,7 +6962,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
 def obtener_asesores_por_user(username, default=2, cap=20):
     """
     Retorna el número de asesores permitido para el cliente identificado por `username`.
-    - Lee cliente en CLIENTES_DB para obtener plan_id.
+    - Lee usuarios en CLIENTES_DB para obtener plan_id.
     - Lee la fila correspondiente en `planes` y retorna el campo `asesores` si existe.
     - Si falla, devuelve `default`. Aplica un cap por seguridad.
     """
@@ -6970,6 +6972,7 @@ def obtener_asesores_por_user(username, default=2, cap=20):
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
         # Obtener plan_id del cliente
+        # CAMBIO: cliente -> usuarios
         cur.execute("SELECT plan_id FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         row = cur.fetchone()
         plan_id = row.get('plan_id') if row else None
@@ -10251,20 +10254,6 @@ def test_calendar():
         <pre>{str(e)}</pre>
         """
 
-@app.route('/test-contacto')
-def test_contacto(numero = '5214493432744'):
-    """Endpoint para probar la obtención de información de contacto"""
-    config = obtener_configuracion_por_host()
-    nombre, imagen = obtener_nombre_perfil_whatsapp(numero, config)
-    nombre, imagen = obtener_imagen_perfil_whatsapp(numero, config)
-    return jsonify({
-        'numero': numero,
-        'nombre': nombre,
-        'imagen': imagen,
-        'config': config.get('dominio')
-    })
-
-# app.py (Añadir esta nueva función cerca de la línea 4300)
 
 def obtener_nombre_perfil_messenger(sender_id, config):
     """
@@ -10361,11 +10350,12 @@ def obtener_configuracion_por_host():
 
         # DETECCIÓN SUPAGPRUEBA
         if 'supagprueba' in host:
-            app.logger.info("✅ Configuración detectada: Maindsteel")
+            app.logger.info("✅ Configuración detectada: Supagprueba")
             return NUMEROS_CONFIG['000']
 
+        # DETECCIÓN SOIN3
         if 'soin3' in host:
-            app.logger.info("✅ Configuración detectada: Maindsteel")
+            app.logger.info("✅ Configuración detectada: Soin3")
             return NUMEROS_CONFIG['003']
 
         # DETECCIÓN DRASGO
@@ -10645,7 +10635,7 @@ def ver_chats():
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats_copia.html',
+    return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10739,7 +10729,7 @@ def ver_chat(numero):
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats_copia.html',
+        return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
@@ -11825,7 +11815,7 @@ def send_telegram_voice(chat_id, audio_file_path, token_bot, caption=None):
         return False
 
 # --- Endpoint Multi-Tenant para Webhook de Telegram ---
-@app.route('/telegram_webhook/<token_bot>', methods=['POST'], endpoint='telegram_webhook_multitenant')
+@app.route('/telegram_webhook/<token_bot>', methods=['POST'])
 def telegram_webhook_multitenant(token_bot):
     try:
         # 1. Detectar Configuración por Token
@@ -12197,7 +12187,7 @@ def ver_kanban(config=None):
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban_copia.html', columnas=columnas, chats=chats, is_admin=is_admin)     
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
 
 
 @app.route('/kanban/mover', methods=['POST'])
@@ -12703,5 +12693,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5003, help='Puerto para ejecutar la aplicación')# Puerto para ejecutar la aplicación puede ser
     args = parser.parse_args()
-    app.run(host='0.0.0.0', port=5003)
+    app.run(host='0.0.0.0', port=args.port)
       

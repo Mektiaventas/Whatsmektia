@@ -162,6 +162,19 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'LAPORFIRIANNA_MESSENGER_PAGE_ID',
         'messenger_token_env': 'LAPORFIRIANNA_PAGE_ACCESS_TOKEN'
     },
+    '000': {  # Número de SUPAGPRUEBAS
+        'phone_number_id': os.getenv("SUPAG_PHONE_NUMBER_ID"), 
+        'whatsapp_token': os.getenv("SUPAG_WHATSAPP_TOKEN"),   
+        'db_host': os.getenv("SUPAG_DB_HOST"),                 
+        'db_user': os.getenv("SUPAG_DB_USER"),                
+        'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
+        'db_name': os.getenv("SUPAG_DB_NAME"),                  
+        'dominio': 'supagcopia.mektia.com',
+        # Claves de Messenger
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SUPAG"),
+        'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'SUPAG_PAGE_ACCESS_TOKEN'
+    },
     '524495486324': {  # Número de Ofitodo
         'phone_number_id': os.getenv("FITO_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("FITO_WHATSAPP_TOKEN"),    
@@ -10349,9 +10362,14 @@ def obtener_configuracion_por_host():
             app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['1011']
 
+        # DETECCIÓN SUPAGPRUEBA
+        if 'supagprueba' in host:
+            app.logger.info("✅ Configuración detectada: Supagprueba")
+            return NUMEROS_CONFIG['000']
+
         # DETECCIÓN SOIN3
         if 'soin3' in host:
-            app.logger.info("✅ Configuración detectada: Maindsteel")
+            app.logger.info("✅ Configuración detectada: Soin3")
             return NUMEROS_CONFIG['003']
 
         # DETECCIÓN DRASGO
