@@ -10650,7 +10650,7 @@ def ver_chats():
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats_supercopia.html',
+    return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10745,7 +10745,7 @@ def ver_chat(numero):
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats_supercopia.html',
+        return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
