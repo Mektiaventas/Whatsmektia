@@ -9765,17 +9765,18 @@ def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='al
     if config is None:
         config = obtener_configuracion_por_host()
 
-    dominio_actual = config.get('dominio', '')
+    # --- CAMBIO: Extraer solo el subdominio ---
+    raw_domain = config.get('dominio', '')
+    dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+    # ------------------------------------------
 
     try:
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
-
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Agregamos columna 'dominio'
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio)
             VALUES (%s, NULL, %s, %s, %s, UTC_TIMESTAMP(), %s)
@@ -9785,10 +9786,10 @@ def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='al
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 Alerta registrada como respuesta del sistema para {numero}")
+        app.logger.info(f"💾 Alerta sistema guardada para {numero} en {dominio_actual}")
         return True
     except Exception as e:
-        app.logger.error(f"❌ Error al guardar respuesta del sistema para {numero}: {e}")
+        app.logger.error(f"❌ Error al guardar respuesta del sistema: {e}")
         return False
 
 def cotizar_proyecto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
@@ -10034,18 +10035,19 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
     if config is None:
         config = obtener_configuracion_por_host()
 
-    dominio_actual = config.get('dominio', '')
+    # --- CAMBIO: Extraer solo el subdominio ---
+    raw_domain = config.get('dominio', '')
+    dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+    # ------------------------------------------
 
     try:
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
-
-        # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"📥 TRACKING: Guardando mensaje de {numero} en {dominio_actual}")
 
         if es_imagen:
             tipo_mensaje = 'imagen'
@@ -10054,26 +10056,19 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
         else:
             tipo_mensaje = 'texto'
 
-        # Agregamos columna 'dominio'
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, imagen_url, es_imagen, tipo_mensaje, contenido_extra, dominio)
             VALUES (%s, %s, NULL, UTC_TIMESTAMP(), %s, %s, %s, %s, %s)
         """, (numero, texto_limpio, imagen_url, es_imagen, tipo_mensaje, contenido_extra, dominio_actual))
 
-        cursor.execute("SELECT LAST_INSERT_ID()")
-        row = cursor.fetchone()
-        msg_id = row[0] if row else None
-
         conn.commit()
         cursor.close()
         conn.close()
 
-        app.logger.info(f"💾 TRACKING: Mensaje ID {msg_id} guardado para {numero} (Dominio: {dominio_actual})")
-
         try:
             actualizar_kanban_inmediato(numero, config)
         except Exception as e:
-            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló tras guardar mensaje: {e}")
+            app.logger.warning(f"⚠️ actualizar_kanban_inmediato falló: {e}")
 
         return True
 
@@ -10989,9 +10984,12 @@ def enviar_manual():
             
             mensaje_historial = "[Mensaje manual desde web]"
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
-            dominio_actual = config.get('dominio', '')
             
-            # Agregamos columna 'dominio'
+            # --- CAMBIO: Extraer solo el subdominio ---
+            raw_domain = config.get('dominio', '')
+            dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+            # ------------------------------------------
+            
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
                 (numero, mensaje_historial, respuesta_historial, dominio_actual)
@@ -12552,14 +12550,16 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Asegurar que las columnas existan
+    # Asegurar columnas
     _ensure_contactos_conversaciones_columns(config)
     _ensure_interes_column(config)
     _ensure_columna_interaccion_usuario(config)
     _ensure_created_at_column(config)
 
-    # Obtener el dominio actual
-    dominio_actual = config.get('dominio', '')
+    # --- CAMBIO: Extraer solo el subdominio ---
+    raw_domain = config.get('dominio', '')
+    dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+    # ------------------------------------------
 
     conn = None
     cursor = None
@@ -12569,11 +12569,8 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
         
         nombre_a_usar = nombre_perfil
         plataforma_a_usar = plataforma or 'WhatsApp'
-        
-        # 1. Obtener hora actual de México
         ahora_mx = datetime.now(tz_mx)
 
-        # 2. SQL Modificado: Agregamos 'dominio'
         sql = """
             INSERT INTO contactos 
                 (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
@@ -12584,7 +12581,7 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
                 plataforma = VALUES(plataforma),
                 fecha_actualizacion = VALUES(fecha_actualizacion),
                 ultima_interaccion_usuario = VALUES(ultima_interaccion_usuario),
-                dominio = VALUES(dominio), -- Actualizamos el dominio si cambia
+                dominio = VALUES(dominio), -- Se actualiza con el subdominio
                 
                 conversaciones = conversaciones + 
                                  CASE 
@@ -12599,11 +12596,10 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
                             END
         """
         
-        # Pasamos dominio_actual al final de los parámetros
         cursor.execute(sql, (numero, nombre_a_usar, plataforma_a_usar, ahora_mx, ahora_mx, ahora_mx, ahora_mx, dominio_actual))
         
         conn.commit()
-        app.logger.info(f"✅ Información de contacto actualizada (Dominio: {dominio_actual}) para {numero}")
+        app.logger.info(f"✅ Información de contacto actualizada (Subdominio: {dominio_actual}) para {numero}")
         
     except Exception as e:
         app.logger.error(f"🔴 Error actualizando contacto {numero}: {e}")
