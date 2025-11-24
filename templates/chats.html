@@ -323,7 +323,8 @@ asi {% extends "base.html" %}
                           rows="1"
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
-                          style="resize: none; overflow-y: auto;"></textarea> 
+                          style="resize: none; overflow-y: auto;"
+                          required></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
@@ -605,11 +606,8 @@ asi {% extends "base.html" %}
         height: calc(100vh - 120px); /* leave room for header/footer */
         padding: 12px;
         box-sizing: border-box;
-        overflow: hidden !important; /* ← MÁS FUERTE */
-        width: 100%;
-        max-width: 100%;
-    }
-
+        overflow: hidden; /* ← AÑADIR ESTA LÍNEA */
+    } 
     .chat-list-v2 {
         width: var(--left-width);
         min-width: 220px;
@@ -738,7 +736,7 @@ asi {% extends "base.html" %}
         gap: 4px;
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    }
+    } 
 
     .msg-user {
         align-self: flex-end;
@@ -827,7 +825,7 @@ asi {% extends "base.html" %}
         .mobile-chat-toggle {
             display: none; /* Ocultar el toggle ya que no se necesita */
         }
-    }
+    } 
     /* Small phones: full screen single panel */
     @media (max-width: 480px) {
         .chat-layout-v2 {
@@ -1172,56 +1170,6 @@ asi {% extends "base.html" %}
         transform: scale(1.1);
         transition: all 0.2s ease;
     }
-    /* ELIMINAR SCROLL LATERAL DEFINITIVAMENTE */
-    body, html {
-        overflow-x: hidden !important;
-        max-width: 100vw !important;
-    }
-
-    .chat-layout-v2 * {
-        max-width: 100% !important;
-    }
-    /* Efecto de hover en el botón de eliminar */
-    #remove-file:hover {
-        background: #cc0000;
-        transform: scale(1.1);
-        transition: all 0.2s ease;
-    }
-    /* ELIMINAR SCROLL LATERAL DEFINITIVAMENTE */
-    body, html {
-        overflow-x: hidden !important;
-        max-width: 100vw !important;
-    }
-
-    .chat-layout-v2 * {
-        max-width: 100% !important;
-    }
-
-    /* SOLUCIÓN NUCLEAR PARA SCROLL LATERAL */
-    html, body {
-        overflow-x: hidden !important;
-        max-width: 100vw !important;
-        width: 100% !important;
-    }
-
-    .chat-layout-v2 {
-        overflow: hidden !important;
-        width: 100% !important;
-        max-width: 100% !important;
-    }
-
-    .chat-panel-v2, .chat-list-v2, .sidebar-right {
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-    }
-
-    /* Forzar eliminación de cualquier overflow horizontal */
-    * {
-        max-width: 100% !important;
-        box-sizing: border-box !important;
-    }
-</style> 
-
 </style>
 <script>
 /* Small helpers */
@@ -2103,10 +2051,6 @@ function normalizeText(s) {
 
     /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
 
-    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
-
-    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
-
     function setupFileUpload() {
         const fileInput = document.getElementById('file-input');
         const fileAttachBtn = document.getElementById('file-attach-btn');
@@ -2122,9 +2066,6 @@ function normalizeText(s) {
             console.warn('File upload elements not found');
             return;
         }
-
-        // ELIMINAR cualquier validación HTML5
-        textarea.removeAttribute('required');
 
         // Abrir selector de archivos al hacer clic en el botón
         fileAttachBtn.addEventListener('click', function () {
@@ -2272,105 +2213,37 @@ function normalizeText(s) {
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-        // 🔥 SOLUCIÓN DEFINITIVA - REEMPLAZAR FORMULARIO COMPLETAMENTE
-        setTimeout(function () {
-            const originalForm = document.getElementById('messageForm');
-            if (originalForm) {
-                const newForm = originalForm.cloneNode(true);
-                originalForm.parentNode.replaceChild(newForm, originalForm);
 
-                // Actualizar referencias
-                const newTextarea = document.getElementById('mensaje-texto');
-                const newFileInput = document.getElementById('file-input');
+        // Validar antes de enviar
+        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
+        // Validar antes de enviar - SOLO verificar que haya algo
+        // Validar antes de enviar - CORREGIDO DEFINITIVO
+        messageForm.addEventListener('submit', function (e) {
+            const hasText = textarea.value.trim() !== '';
+            const hasFile = fileInput.files.length > 0;
 
-                // ELIMINAR required del textarea
-                if (newTextarea) {
-                    newTextarea.removeAttribute('required');
-                }
-
-                // Validación ULTRA SIMPLE
-                newForm.addEventListener('submit', function (e) {
-                    const hasText = newTextarea.value.trim() !== '';
-                    const hasFile = newFileInput.files.length > 0;
-
-                    console.log('🚀 Validación final:', { hasText, hasFile });
-
-                    if (!hasText && !hasFile) {
-                        e.preventDefault();
-                        alert('Por favor escribe un mensaje o selecciona un archivo');
-                        return false;
-                    }
-
-                    console.log('✅ Enviando formulario...');
-                    return true;
-                });
-
-                console.log('✅ Formulario reemplazado y validación aplicada');
+            // SOLO validar si no hay absolutamente nada
+            if (!hasText && !hasFile) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje o selecciona un archivo');
+                return false;
             }
-        }, 1000);
+            // Si hay archivo, puede enviarse SIN texto - ESTO YA ESTÁ CORRECTO
 
-        console.debug('File upload functionality initialized - SOLUCIÓN DEFINITIVA');
-    } 
-    // DEBUG: Monitorear envío de archivos
-    function debugFileUpload() {
-        const messageForm = document.getElementById('messageForm');
-        const fileInput = document.getElementById('file-input');
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '⏳';
+            sendBtn.disabled = true;
 
-        if (messageForm && fileInput) {
-            messageForm.addEventListener('submit', function (e) {
-                const formData = new FormData(this);
-                console.log('📤 DEBUG - Enviando formulario:');
-                console.log('📁 Archivo:', fileInput.files[0]);
-                console.log('📝 Texto:', document.getElementById('mensaje-texto').value);
-                console.log('🔢 Número:', this.querySelector('input[name="numero"]').value);
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });  
 
-                // Verificar FormData
-                for (let [key, value] of formData.entries()) {
-                    console.log(`FormData: ${key} =`, value);
-                }
-            });
-        }
+        console.debug('File upload functionality initialized - WhatsApp style');
     }
-
-    // Ejecutar debug
-    setTimeout(debugFileUpload, 2000); 
-    // SOLUCIÓN NUCLEAR - Aplicar después de que todo cargue
-    setTimeout(function () {
-        console.log('🎯 Aplicando solución nuclear...');
-
-        // 1. Eliminar scroll horizontal
-        document.documentElement.style.overflowX = 'hidden';
-        document.body.style.overflowX = 'hidden';
-
-        // 2. Eliminar required del textarea
-        const textarea = document.getElementById('mensaje-texto');
-        if (textarea) {
-            textarea.removeAttribute('required');
-            console.log('✅ Textarea required eliminado');
-        }
-
-        // 3. Forzar validación simple
-        const form = document.getElementById('messageForm');
-        if (form) {
-            form.onsubmit = function (e) {
-                const textarea = document.getElementById('mensaje-texto');
-                const fileInput = document.getElementById('file-input');
-
-                const hasText = textarea.value.trim() !== '';
-                const hasFile = fileInput.files.length > 0;
-
-                if (!hasText && !hasFile) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje o selecciona un archivo');
-                    return false;
-                }
-                return true;
-            };
-            console.log('✅ Validación simplificada aplicada');
-        }
-
-        console.log('🎉 Solución nuclear completada');
-    }, 2000); 
-
 </script>
 {% endblock %}  
