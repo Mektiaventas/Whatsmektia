@@ -3686,7 +3686,7 @@ def kanban_data(config=None):
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         
-        # Lógica para mover chats de asesores a la columna "Asesores" si existe
+        # Lógica para mover chats de asesores
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
             cursor.execute(f"""
@@ -3695,42 +3695,48 @@ def kanban_data(config=None):
                 WHERE numero IN ({placeholders}) AND columna_id != %s
             """, (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
-            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
             
         # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Obtener chats con nombres de contactos
+        # --- CONSULTA OPTIMIZADA ---
+        # 1. Eliminamos el LEFT JOIN con 'conversaciones' (causante de la lentitud).
+        # 2. Usamos cont.timestamp en lugar de MAX(c.timestamp).
+        # 3. Eliminamos el GROUP BY (ya no es necesario sin el join masivo).
+        # 4. Agregamos un LIMIT para seguridad.
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha,
+                cont.timestamp AS ultima_fecha,
+                
+                -- Subconsulta optimizada para el último mensaje
                 (SELECT mensaje FROM conversaciones 
-                WHERE numero = cm.numero
-                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
-                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                 WHERE numero = cm.numero
+                 AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                 
+                COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
+                
+                -- Subconsulta para sin leer
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
-                MAX(cont.interes) as interes_db -- 🔥 NUEVA COLUMNA DE INTERÉS
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
+                 
+                cont.interes as interes_db
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-            LEFT JOIN conversaciones c ON c.numero = cm.numero
-            GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC
+            ORDER BY cont.timestamp DESC
+            LIMIT 300 -- Limitamos a los 300 chats más recientes para velocidad
         """)
         chats = cursor.fetchall()
 
-        # --- CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
+        # --- CÁLCULO DE ESTADOS ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # 1. Interés base de la DB
             interes_final = chat.get('interes_db') or 'Frío'
             
-            # 2. Aplicar Regla de TIEMPO (Dormidos)
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
@@ -3739,24 +3745,19 @@ def kanban_data(config=None):
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # Calcular horas pasadas desde la última interacción
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     
-                    # REGLA: Si pasan más de 20 horas -> DORMIDO 😴
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
                     
-                    # Formato ISO para frontend
                     chat['ultima_fecha'] = fecha_msg.isoformat()
                     
                 except Exception as e:
-                    app.logger.error(f"Error fecha {chat['numero']}: {e}")
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
                 interes_final = 'Dormido'
                 chat['ultima_fecha'] = None
             
-            # Asignar el resultado final para el Frontend
             chat['interes'] = interes_final
 
         cursor.close()
@@ -12132,59 +12133,48 @@ def ver_kanban(config=None):
     # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
-    # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
-    col_asesores_id = obtener_id_columna_asesores(config)
-    numeros_asesores = obtener_numeros_asesores_db(config)
 
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-    columnas_totales = cursor.fetchall()
-
-    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
+    # 2) CONSULTA OPTIMIZADA (Sin JOIN masivo a conversaciones)
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
-            MAX(c.timestamp) AS ultima_fecha,
+            cont.timestamp AS ultima_fecha,
+            
             (SELECT mensaje FROM conversaciones 
              WHERE numero = cm.numero
              AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            MAX(cont.imagen_url) AS avatar,
-            MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre de perfil > número
-            COALESCE(
-                MAX(cont.alias), 
-                MAX(cont.nombre), 
-                cm.numero
-            ) AS nombre_mostrado,
+             
+            cont.imagen_url AS avatar,
+            cont.plataforma AS canal,
+            
+            COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
+            
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-        LEFT JOIN conversaciones c ON c.numero = cm.numero
-        GROUP BY cm.numero, cm.columna_id
-        ORDER BY ultima_fecha DESC;
+        ORDER BY cont.timestamp DESC
+        LIMIT 300;
     """)
     chats = cursor.fetchall()
 
-    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
+    # Convertir timestamps
     for chat in chats:
         if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
                 chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
 
     cursor.close()
     conn.close()
-    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)     
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)   
 
 
 @app.route('/kanban/mover', methods=['POST'])
