@@ -605,7 +605,8 @@ asi {% extends "base.html" %}
         height: calc(100vh - 120px); /* leave room for header/footer */
         padding: 12px;
         box-sizing: border-box;
-    }
+        overflow: hidden; /* EVITAR SCROLL LATERAL */
+    } 
 
     .chat-list-v2 {
         width: var(--left-width);
@@ -728,23 +729,14 @@ asi {% extends "base.html" %}
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
+        overflow-x: hidden; /* EVITAR SCROLL HORIZONTAL */
         padding: 8px;
         display: flex;
         flex-direction: column;
         gap: 4px; /* Reducir de 8px si es necesario */
         background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
         border-radius: 8px;
-    }
-
-    .msg-box {
-        max-width: 70%;
-        padding: 6px 12px; /* Reducir padding vertical de 8px a 6px */
-        border-radius: 18px;
-        box-sizing: border-box;
-        margin: 1px 0; /* Reducir de 2px a 1px */
-        position: relative;
-        word-wrap: break-word;
-    }
+    } 
 
     .msg-user {
         align-self: flex-end;
@@ -817,22 +809,12 @@ asi {% extends "base.html" %}
             display: none;
         }
 
-        /* make list a fixed overlay off-canvas by default */
+        /* FIX: mantener el panel izquierdo visible siempre */
         .chat-list-v2 {
-            position: fixed;
-            left: -100%;
-            top: 0;
-            height: 100vh;
-            z-index: 1000;
-            background: var(--bg-card);
-            transition: left 0.3s ease;
+            position: relative;
+            left: 0;
             width: var(--left-width);
         }
-
-            .chat-list-v2.mobile-visible {
-                left: 0;
-                transform: translateX(0);
-            }
 
         .chat-panel-v2 {
             margin-left: 0;
@@ -841,10 +823,9 @@ asi {% extends "base.html" %}
         }
 
         .mobile-chat-toggle {
-            display: block;
+            display: none; /* Ocultar el toggle ya que no se necesita */
         }
-    }
-
+    } 
     /* Small phones: full screen single panel */
     @media (max-width: 480px) {
         .chat-layout-v2 {
@@ -2226,15 +2207,18 @@ function normalizeText(s) {
 
 
         // Validar antes de enviar
+        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
             const hasFile = fileInput.files.length > 0;
 
+            // SOLO validar si no hay ni texto ni archivo
             if (!hasText && !hasFile) {
                 e.preventDefault();
                 alert('Por favor escribe un mensaje o selecciona un archivo');
                 return false;
             }
+            // Si hay archivo, el texto es OPCIONAL
 
             // Mostrar indicador de envío
             const sendBtn = document.querySelector('.send-btn');
@@ -2244,10 +2228,10 @@ function normalizeText(s) {
 
             // Restaurar después de 3 segundos por si hay error
             setTimeout(() => {
-                sendBtn.innerHTML = originalText;
+                sendBtn.innerHTML = originalText; 
                 sendBtn.disabled = false;
             }, 3000);
-        });
+        }); 
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
