@@ -10862,7 +10862,7 @@ def toggle_ai(numero, config=None):
     return redirect(url_for('ver_chat', numero=numero))
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
+    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto (WhatsApp y Telegram)"""
     config = obtener_configuracion_por_host()
     
     try:
@@ -10899,53 +10899,54 @@ def enviar_manual():
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
-                    dominio = config.get('dominio') or request.url_root.rstrip('/')
-                    if not dominio.startswith('http'):
-                        dominio = f"https://{dominio}"
-                    public_url = f"{dominio}/uploads/{filename}"
-                    
-                    app.logger.info(f"🌐 URL pública generada: {public_url}")
-                    
-                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
-                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                        # Es imagen - enviar como imagen
-                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
-                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
-                        archivo_info = f"📷 Imagen: {archivo.filename}"
-                        
-                    else:
-                        # Para todos los demás tipos, enviar como documento
-                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
-                        enviar_documento(numero, public_url, archivo.filename, config)
-                        
-                        # Determinar el tipo para el mensaje informativo
-                        if file_ext == '.pdf':
-                            archivo_info = f"📕 PDF: {archivo.filename}"
-                        elif file_ext in ['.doc', '.docx']:
-                            archivo_info = f"📘 Documento Word: {archivo.filename}"
-                        elif file_ext in ['.xls', '.xlsx', '.csv']:
-                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
-                        elif file_ext in ['.ppt', '.pptx']:
-                            archivo_info = f"📙 Presentación: {archivo.filename}"
-                        elif file_ext in ['.zip', '.rar', '.7z']:
-                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
-                        elif file_ext in ['.txt', '.rtf']:
-                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
-                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
-                            archivo_info = f"🎬 Video: {archivo.filename}"
-                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
-                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                    # --- DETECCIÓN DE PLATAFORMA ---
+                    if numero.startswith('tg_'):
+                        # === LÓGICA PARA TELEGRAM ===
+                        telegram_token = config.get('telegram_token')
+                        if telegram_token:
+                            chat_id = numero.replace('tg_', '')
+                            # Usamos la función auxiliar para enviar documentos a Telegram
+                            # Pasamos 'filepath' (ruta local) para que Python lo suba
+                            exito = enviar_telegram_documento(chat_id, filepath, telegram_token, caption=texto)
+                            
+                            if exito:
+                                mensaje_enviado = True
+                                archivo_info = f"📎 Archivo Telegram: {archivo.filename}"
+                                app.logger.info(f"✅ Archivo enviado a Telegram {numero}")
+                            else:
+                                raise Exception("Fallo al enviar documento a Telegram")
                         else:
+                            raise Exception("No hay token de Telegram configurado para este entorno")
+
+                    else:
+                        # === LÓGICA PARA WHATSAPP (Original) ===
+                        
+                        # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
+                        dominio = config.get('dominio') or request.url_root.rstrip('/')
+                        if not dominio.startswith('http'):
+                            dominio = f"https://{dominio}"
+                        public_url = f"{dominio}/uploads/{filename}"
+                        
+                        app.logger.info(f"🌐 URL pública generada: {public_url}")
+                        
+                        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                            # Es imagen - enviar como imagen
+                            app.logger.info(f"🖼️ Enviando imagen WA: {archivo.filename}")
+                            enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                            archivo_info = f"📷 Imagen: {archivo.filename}"
+                        else:
+                            # Para todos los demás tipos, enviar como documento
+                            app.logger.info(f"📄 Enviando documento WA: {archivo.filename}")
+                            enviar_documento(numero, public_url, archivo.filename, config)
                             archivo_info = f"📎 Archivo: {archivo.filename}"
-                    
-                    mensaje_enviado = True
-                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
+                        
+                        mensaje_enviado = True
+                        app.logger.info(f"✅ Archivo enviado exitosamente a WA {numero}")
                     
                 except Exception as file_error:
                     app.logger.error(f"🔴 Error enviando archivo: {file_error}")
                     app.logger.error(traceback.format_exc())
-                    flash('❌ Error al enviar el archivo', 'error')
+                    flash(f'❌ Error al enviar el archivo: {str(file_error)}', 'error')
                     # Limpiar archivo temporal en caso de error
                     try:
                         if filepath and os.path.exists(filepath):
@@ -10954,28 +10955,43 @@ def enviar_manual():
                         pass
                     return redirect(url_for('ver_chat', numero=numero))
                 
-                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
-                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
+                # Nota: Para WhatsApp NO limpiamos inmediatamente porque necesita descargarlo.
+                # Para Telegram ya se envió el stream, pero por seguridad lo dejamos para la limpieza automática o el OS.
                 
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
-        if texto:
-            try:
-                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
-                enviar_mensaje(numero, texto, config)
-                respuesta_texto = texto
-                if archivo_info:
-                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
-                mensaje_enviado = True
-                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
-            except Exception as text_error:
-                app.logger.error(f"🔴 Error enviando texto: {text_error}")
-                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
-                    flash('❌ Error al enviar el mensaje', 'error')
-                    return redirect(url_for('ver_chat', numero=numero))
+        # 2. Manejar texto si existe (y no se envió ya junto con el archivo en Telegram)
+        # En Telegram el caption va con el archivo. En WhatsApp va separado si es documento, o junto si es imagen.
+        # Si mensaje_enviado es True significa que ya enviamos el archivo (posiblemente con caption).
+        
+        # Si solo hay texto (sin archivo), o si es WhatsApp y queremos enviar texto aparte:
+        if texto and (not mensaje_enviado or (not numero.startswith('tg_') and not file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])):
+             # Si ya enviamos archivo en Telegram, el texto fue como caption, no lo enviamos de nuevo.
+             if numero.startswith('tg_') and mensaje_enviado:
+                 pass # Ya se envió como caption
+             else:
+                try:
+                    app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
+                    
+                    if numero.startswith('tg_'):
+                        token = config.get('telegram_token')
+                        chat_id = numero.replace('tg_', '')
+                        send_telegram_message(chat_id, texto, token)
+                    else:
+                        enviar_mensaje(numero, texto, config)
+                        
+                    respuesta_texto = texto
+                    if archivo_info:
+                        respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                    mensaje_enviado = True
+                    app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
+                except Exception as text_error:
+                    app.logger.error(f"🔴 Error enviando texto: {text_error}")
+                    if not mensaje_enviado:
+                        flash('❌ Error al enviar el mensaje', 'error')
+                        return redirect(url_for('ver_chat', numero=numero))
         
         # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
         if mensaje_enviado:
@@ -10983,12 +10999,15 @@ def enviar_manual():
             cursor = conn.cursor()
             
             mensaje_historial = "[Mensaje manual desde web]"
+            
+            # Si solo enviamos archivo y es Telegram, el caption ya se usó, pero guardamos el texto en respuesta para el historial
+            if not respuesta_texto and archivo_info:
+                 respuesta_texto = f"{archivo_info} {texto}"
+
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
-            # --- CAMBIO: Extraer solo el subdominio ---
             raw_domain = config.get('dominio', '')
             dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
-            # ------------------------------------------
             
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
@@ -10999,32 +11018,23 @@ def enviar_manual():
             cursor.close()
             conn.close()
             
-            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
+            # 4. ACTUALIZAR KANBAN
             try:
                 actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
             except Exception as e:
                 app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
             
-            # 5. MENSAJE DE CONFIRMACIÓN
-            if archivo and texto:
-                flash('✅ Archivo y mensaje enviados correctamente', 'success')
-            elif archivo:
-                flash('✅ Archivo enviado correctamente', 'success')
-            else:
-                flash('✅ Mensaje enviado correctamente', 'success')
-                
-            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+            flash('✅ Enviado correctamente', 'success')
             
         else:
             flash('❌ No se pudo enviar el mensaje', 'error')
             
     except Exception as e:
-        flash('❌ Error al enviar el mensaje', 'error')
+        flash(f'❌ Error al enviar: {str(e)}', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero)) 
+    return redirect(url_for('ver_chat', numero=numero))
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
