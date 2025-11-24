@@ -424,7 +424,7 @@ def descargar_template():
     return "Error generando el archivo", 500
 
 def _find_cliente_in_clientes_by_domain(dominio):
-    """Helper: try heuristics to find cliente row in CLIENTES_DB by domain/subdomain."""
+    """Helper: intenta encontrar la fila en la tabla usuarios de CLIENTES_DB por dominio/subdominio."""
     try:
         if not dominio:
             return None
@@ -437,6 +437,7 @@ def _find_cliente_in_clientes_by_domain(dominio):
         cur = conn.cursor(dictionary=True)
         for c in candidates:
             try:
+                # Busca en la tabla usuarios
                 cur.execute("""
                     SELECT id_cliente, telefono, entorno, shema, servicio, `user`, password
                     FROM usuarios
@@ -466,8 +467,6 @@ def obtener_cliente_por_user(username):
     row = cur.fetchone()
     cur.close(); conn.close()
     return row
-
-
 
 def verificar_password(password_plano, password_guardado):
     return password_plano == password_guardado
@@ -3679,15 +3678,16 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar columna de interés
-        _ensure_interes_column(config) 
+        # Asegurar índices la primera vez que se carga (por si acaso)
+        _ensure_performance_indexes(config)
+        _ensure_interes_column(config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         
-        # Lógica para mover chats de asesores a la columna "Asesores" si existe
+        # Mover chats de asesores si es necesario
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
             cursor.execute(f"""
@@ -3696,42 +3696,54 @@ def kanban_data(config=None):
                 WHERE numero IN ({placeholders}) AND columna_id != %s
             """, (col_asesores_id, *numeros_asesores, col_asesores_id))
             conn.commit()
-            app.logger.info(f"📊 {cursor.rowcount} chats de asesores movidos a columna {col_asesores_id}")
             
-        # Obtener columnas
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # Obtener chats con nombres de contactos
+        # --- CONSULTA ULTRARÁPIDA ---
+        # 1. Eliminamos el 'NOT LIKE' que es lento.
+        # 2. Los sub-queries ahora usarán el índice 'idx_conv_num_ts'.
         cursor.execute("""
             SELECT 
                 cm.numero,
                 cm.columna_id,
-                MAX(c.timestamp) AS ultima_fecha,
+                cont.timestamp AS ultima_fecha,
+                cont.interes as interes_db,
+                cont.imagen_url,
+                cont.plataforma as canal,
+                
+                -- Subconsulta optimizada por índice (trae el último mensaje real)
                 (SELECT mensaje FROM conversaciones 
-                WHERE numero = cm.numero
-                AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
-                ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-                COALESCE(MAX(cont.alias), MAX(cont.nombre), cm.numero) AS nombre_mostrado,
+                 WHERE numero = cm.numero
+                 ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
+                 
+                COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
+                
+                -- Subconsulta optimizada para contador
                 (SELECT COUNT(*) FROM conversaciones 
-                WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer,
-                MAX(cont.interes) as interes_db -- 🔥 NUEVA COLUMNA DE INTERÉS
+                 WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
+                 
             FROM chat_meta cm
             LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-            LEFT JOIN conversaciones c ON c.numero = cm.numero
-            GROUP BY cm.numero, cm.columna_id
-            ORDER BY ultima_fecha DESC
+            ORDER BY cont.timestamp DESC
+            LIMIT 250
         """)
         chats = cursor.fetchall()
 
-        # --- CÁLCULO DE ESTADOS (LÓGICA DE TIEMPO AÑADIDA) ---
+        cursor.close()
+        conn.close()
+
+        # --- PROCESAMIENTO EN MEMORIA (MUCHO MÁS RÁPIDO QUE SQL) ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # 1. Interés base de la DB
-            interes_final = chat.get('interes_db') or 'Frío'
+            # Limpiar mensaje manual visualmente aquí (Python es más rápido para esto que SQL 'NOT LIKE')
+            msg = chat.get('ultimo_mensaje') or ""
+            if "[Mensaje manual" in msg:
+                chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
             
-            # 2. Aplicar Regla de TIEMPO (Dormidos)
+            # Lógica de tiempo "Dormido"
+            interes_final = chat.get('interes_db') or 'Frío'
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
@@ -3740,28 +3752,18 @@ def kanban_data(config=None):
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
-                    # Calcular horas pasadas desde la última interacción
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
-                    
-                    # REGLA: Si pasan más de 20 horas -> DORMIDO 😴
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
                     
-                    # Formato ISO para frontend
                     chat['ultima_fecha'] = fecha_msg.isoformat()
-                    
-                except Exception as e:
-                    app.logger.error(f"Error fecha {chat['numero']}: {e}")
+                except Exception:
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
             else:
                 interes_final = 'Dormido'
                 chat['ultima_fecha'] = None
             
-            # Asignar el resultado final para el Frontend
             chat['interes'] = interes_final
-
-        cursor.close()
-        conn.close()
 
         return jsonify({
             'columnas': columnas,
@@ -4636,11 +4638,11 @@ def publicar_pdf_configuracion():
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
 def _ensure_cliente_plan_columns():
-    """Asegura que la tabla `cliente` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
+    """Asegura que la tabla `usuarios` en la BD de clientes tenga columnas para plan_id y mensajes_incluidos."""
     try:
         conn = get_clientes_conn()
         cur = conn.cursor()
-        # Crear columnas si no existen
+        # Crear columnas si no existen en la tabla usuarios
         cur.execute("SHOW COLUMNS FROM usuarios LIKE 'plan_id'")
         if cur.fetchone() is None:
             cur.execute("ALTER TABLE usuarios ADD COLUMN plan_id INT DEFAULT NULL")
@@ -4651,7 +4653,7 @@ def _ensure_cliente_plan_columns():
         cur.close()
         conn.close()
     except Exception as e:
-        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en cliente: {e}")
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas plan en usuarios: {e}")
 
 def _ensure_precios_subscription_columns(config=None):
     """Asegura que la tabla `precios` tenga las columnas para suscripciones: inscripcion y mensualidad."""
@@ -4671,6 +4673,33 @@ def _ensure_precios_subscription_columns(config=None):
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
 
+def _ensure_performance_indexes(config=None):
+    """Crea índices críticos para que el Kanban cargue rápido."""
+    if config is None:
+        config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Índice para ordenar contactos por fecha rápidamente
+        try:
+            cursor.execute("CREATE INDEX idx_contactos_ts ON contactos(timestamp DESC);")
+        except Exception:
+            pass # Probablemente ya existe
+
+        # 2. Índice para buscar mensajes de un número por fecha (CRÍTICO)
+        try:
+            cursor.execute("CREATE INDEX idx_conv_num_ts ON conversaciones(numero, timestamp DESC);")
+        except Exception:
+            pass
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        app.logger.info("🚀 Índices de rendimiento verificados.")
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudieron crear índices: {e}")
+
 def _ensure_precios_plan_column(config=None):
     """Asegura que la tabla `precios` del tenant tenga la columna mensajes_incluidos (opcional para definir planes)."""
     try:
@@ -4687,25 +4716,25 @@ def _ensure_precios_plan_column(config=None):
 
 def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
     """
-    Asigna un plan (planes.plan_id en CLIENTES_DB) al cliente identificado por `username`.
-    Lee mensajes_incluidos desde la tabla 'planes' en la BD de clientes y lo copia al registro usuarios.mensajes_incluidos.
+    Asigna un plan (planes.plan_id en CLIENTES_DB) al usuario identificado por `username`.
+    Lee mensajes_incluidos desde la tabla 'planes' y lo copia al registro usuarios.mensajes_incluidos.
     """
     try:
         # asegurar columnas en usuarios
         _ensure_cliente_plan_columns()
 
-        # 1) Obtener cliente en CLIENTES_DB
+        # 1) Obtener usuario en CLIENTES_DB
         conn_cli = get_clientes_conn()
         cur_cli = conn_cli.cursor(dictionary=True)
-        # CAMBIO: cliente -> usuarios
+        
         cur_cli.execute("SELECT id_cliente, telefono FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         cliente = cur_cli.fetchone()
         if not cliente:
             cur_cli.close(); conn_cli.close()
-            app.logger.error(f"🔴 Cliente no encontrado para user={username}")
+            app.logger.error(f"🔴 Usuario no encontrado para user={username}")
             return False
 
-        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes' en la BD de clientes
+        # 2) Obtener mensajes_incluidos y nombre de plan desde tabla 'planes'
         mensajes_incluidos = 0
         plan_name = None
         try:
@@ -4714,15 +4743,13 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             plan_row = cur_pl.fetchone()
             if plan_row:
                 mensajes_incluidos = int(plan_row.get('mensajes_incluidos') or 0)
-                # Preferir modelo como nombre representativo, sino categoria, sino plan_id
                 plan_name = (plan_row.get('modelo') or plan_row.get('categoria') or f"Plan {plan_id}")
             cur_pl.close()
         except Exception as e:
             app.logger.warning(f"⚠️ No se pudo leer plan desde CLIENTES_DB. Error: {e}")
 
-        # 3) Actualizar cliente en CLIENTES_DB
+        # 3) Actualizar tabla usuarios
         try:
-            # CAMBIO: UPDATE cliente -> UPDATE usuarios
             cur_cli.execute("""
                 UPDATE usuarios
                    SET plan_id = %s, mensajes_incluidos = %s
@@ -4730,13 +4757,13 @@ def asignar_plan_a_cliente_por_user(username, plan_id, config=None):
             """, (plan_id, mensajes_incluidos, cliente['id_cliente']))
             conn_cli.commit()
         except Exception as e:
-            app.logger.error(f"🔴 Error actualizando usuarios con plan: {e}")
+            app.logger.error(f"🔴 Error actualizando tabla usuarios con plan: {e}")
             conn_cli.rollback()
             cur_cli.close(); conn_cli.close()
             return False
 
         cur_cli.close(); conn_cli.close()
-        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes_incluidos={mensajes_incluidos}) plan_name={plan_name}")
+        app.logger.info(f"✅ Plan id={plan_id} asignado a user={username} (mensajes={mensajes_incluidos}) en tabla usuarios")
         return True
 
     except Exception as e:
@@ -6961,18 +6988,17 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
 
 def obtener_asesores_por_user(username, default=2, cap=20):
     """
-    Retorna el número de asesores permitido para el cliente identificado por `username`.
-    - Lee usuarios en CLIENTES_DB para obtener plan_id.
-    - Lee la fila correspondiente en `planes` y retorna el campo `asesores` si existe.
-    - Si falla, devuelve `default`. Aplica un cap por seguridad.
+    Retorna el número de asesores permitido para el usuario identificado por `username`.
+    - Lee la tabla usuarios en CLIENTES_DB para obtener plan_id.
+    - Lee la fila correspondiente en `planes`.
     """
     try:
         if not username:
             return default
         conn = get_clientes_conn()
         cur = conn.cursor(dictionary=True)
-        # Obtener plan_id del cliente
-        # CAMBIO: cliente -> usuarios
+        
+        # Obtener plan_id del usuario
         cur.execute("SELECT plan_id FROM usuarios WHERE `user` = %s LIMIT 1", (username,))
         row = cur.fetchone()
         plan_id = row.get('plan_id') if row else None
@@ -10632,7 +10658,7 @@ def ver_chats():
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats_supercopia.html',
+    return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10726,7 +10752,7 @@ def ver_chat(numero):
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats_supercopia.html',
+        return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
@@ -10862,7 +10888,7 @@ def toggle_ai(numero, config=None):
     return redirect(url_for('ver_chat', numero=numero))
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto (WhatsApp y Telegram)"""
+    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
     config = obtener_configuracion_por_host()
     
     try:
@@ -10899,54 +10925,53 @@ def enviar_manual():
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # --- DETECCIÓN DE PLATAFORMA ---
-                    if numero.startswith('tg_'):
-                        # === LÓGICA PARA TELEGRAM ===
-                        telegram_token = config.get('telegram_token')
-                        if telegram_token:
-                            chat_id = numero.replace('tg_', '')
-                            # Usamos la función auxiliar para enviar documentos a Telegram
-                            # Pasamos 'filepath' (ruta local) para que Python lo suba
-                            exito = enviar_telegram_documento(chat_id, filepath, telegram_token, caption=texto)
-                            
-                            if exito:
-                                mensaje_enviado = True
-                                archivo_info = f"📎 Archivo Telegram: {archivo.filename}"
-                                app.logger.info(f"✅ Archivo enviado a Telegram {numero}")
-                            else:
-                                raise Exception("Fallo al enviar documento a Telegram")
-                        else:
-                            raise Exception("No hay token de Telegram configurado para este entorno")
-
+                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
+                    dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio}"
+                    public_url = f"{dominio}/uploads/{filename}"
+                    
+                    app.logger.info(f"🌐 URL pública generada: {public_url}")
+                    
+                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
+                    if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
+                        # Es imagen - enviar como imagen
+                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
+                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
+                        archivo_info = f"📷 Imagen: {archivo.filename}"
+                        
                     else:
-                        # === LÓGICA PARA WHATSAPP (Original) ===
+                        # Para todos los demás tipos, enviar como documento
+                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         
-                        # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
-                        dominio = config.get('dominio') or request.url_root.rstrip('/')
-                        if not dominio.startswith('http'):
-                            dominio = f"https://{dominio}"
-                        public_url = f"{dominio}/uploads/{filename}"
-                        
-                        app.logger.info(f"🌐 URL pública generada: {public_url}")
-                        
-                        if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                            # Es imagen - enviar como imagen
-                            app.logger.info(f"🖼️ Enviando imagen WA: {archivo.filename}")
-                            enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
-                            archivo_info = f"📷 Imagen: {archivo.filename}"
+                        # Determinar el tipo para el mensaje informativo
+                        if file_ext == '.pdf':
+                            archivo_info = f"📕 PDF: {archivo.filename}"
+                        elif file_ext in ['.doc', '.docx']:
+                            archivo_info = f"📘 Documento Word: {archivo.filename}"
+                        elif file_ext in ['.xls', '.xlsx', '.csv']:
+                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
+                        elif file_ext in ['.ppt', '.pptx']:
+                            archivo_info = f"📙 Presentación: {archivo.filename}"
+                        elif file_ext in ['.zip', '.rar', '.7z']:
+                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
+                        elif file_ext in ['.txt', '.rtf']:
+                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
+                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
+                            archivo_info = f"🎬 Video: {archivo.filename}"
+                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
+                            archivo_info = f"🎵 Audio: {archivo.filename}"
                         else:
-                            # Para todos los demás tipos, enviar como documento
-                            app.logger.info(f"📄 Enviando documento WA: {archivo.filename}")
-                            enviar_documento(numero, public_url, archivo.filename, config)
                             archivo_info = f"📎 Archivo: {archivo.filename}"
-                        
-                        mensaje_enviado = True
-                        app.logger.info(f"✅ Archivo enviado exitosamente a WA {numero}")
+                    
+                    mensaje_enviado = True
+                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
                     
                 except Exception as file_error:
                     app.logger.error(f"🔴 Error enviando archivo: {file_error}")
                     app.logger.error(traceback.format_exc())
-                    flash(f'❌ Error al enviar el archivo: {str(file_error)}', 'error')
+                    flash('❌ Error al enviar el archivo', 'error')
                     # Limpiar archivo temporal en caso de error
                     try:
                         if filepath and os.path.exists(filepath):
@@ -10955,43 +10980,28 @@ def enviar_manual():
                         pass
                     return redirect(url_for('ver_chat', numero=numero))
                 
-                # Nota: Para WhatsApp NO limpiamos inmediatamente porque necesita descargarlo.
-                # Para Telegram ya se envió el stream, pero por seguridad lo dejamos para la limpieza automática o el OS.
+                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
+                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
                 
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar texto si existe (y no se envió ya junto con el archivo en Telegram)
-        # En Telegram el caption va con el archivo. En WhatsApp va separado si es documento, o junto si es imagen.
-        # Si mensaje_enviado es True significa que ya enviamos el archivo (posiblemente con caption).
-        
-        # Si solo hay texto (sin archivo), o si es WhatsApp y queremos enviar texto aparte:
-        if texto and (not mensaje_enviado or (not numero.startswith('tg_') and not file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp'])):
-             # Si ya enviamos archivo en Telegram, el texto fue como caption, no lo enviamos de nuevo.
-             if numero.startswith('tg_') and mensaje_enviado:
-                 pass # Ya se envió como caption
-             else:
-                try:
-                    app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
-                    
-                    if numero.startswith('tg_'):
-                        token = config.get('telegram_token')
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, texto, token)
-                    else:
-                        enviar_mensaje(numero, texto, config)
-                        
-                    respuesta_texto = texto
-                    if archivo_info:
-                        respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
-                    mensaje_enviado = True
-                    app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
-                except Exception as text_error:
-                    app.logger.error(f"🔴 Error enviando texto: {text_error}")
-                    if not mensaje_enviado:
-                        flash('❌ Error al enviar el mensaje', 'error')
-                        return redirect(url_for('ver_chat', numero=numero))
+        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
+        if texto:
+            try:
+                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
+                enviar_mensaje(numero, texto, config)
+                respuesta_texto = texto
+                if archivo_info:
+                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                mensaje_enviado = True
+                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
+            except Exception as text_error:
+                app.logger.error(f"🔴 Error enviando texto: {text_error}")
+                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
+                    flash('❌ Error al enviar el mensaje', 'error')
+                    return redirect(url_for('ver_chat', numero=numero))
         
         # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
         if mensaje_enviado:
@@ -10999,15 +11009,12 @@ def enviar_manual():
             cursor = conn.cursor()
             
             mensaje_historial = "[Mensaje manual desde web]"
-            
-            # Si solo enviamos archivo y es Telegram, el caption ya se usó, pero guardamos el texto en respuesta para el historial
-            if not respuesta_texto and archivo_info:
-                 respuesta_texto = f"{archivo_info} {texto}"
-
             respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
+            # --- CAMBIO: Extraer solo el subdominio ---
             raw_domain = config.get('dominio', '')
             dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+            # ------------------------------------------
             
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
@@ -11018,23 +11025,32 @@ def enviar_manual():
             cursor.close()
             conn.close()
             
-            # 4. ACTUALIZAR KANBAN
+            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
             try:
                 actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
             except Exception as e:
                 app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
             
-            flash('✅ Enviado correctamente', 'success')
+            # 5. MENSAJE DE CONFIRMACIÓN
+            if archivo and texto:
+                flash('✅ Archivo y mensaje enviados correctamente', 'success')
+            elif archivo:
+                flash('✅ Archivo enviado correctamente', 'success')
+            else:
+                flash('✅ Mensaje enviado correctamente', 'success')
+                
+            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
             
         else:
             flash('❌ No se pudo enviar el mensaje', 'error')
             
     except Exception as e:
-        flash(f'❌ Error al enviar: {str(e)}', 'error')
+        flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero))
+    return redirect(url_for('ver_chat', numero=numero)) 
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
@@ -12140,66 +12156,69 @@ def verificar_todas_tablas():
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
+    # Asegurar índices aquí también por si entran directo
+    _ensure_performance_indexes(config)
+    
     conn = get_db_connection(config)
     cursor = conn.cursor(dictionary=True)
 
-    # 1) Cargamos las columnas Kanban
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
-    # OBTENER ID DE COLUMNA ASESORES Y NÚMEROS
-    col_asesores_id = obtener_id_columna_asesores(config)
-    numeros_asesores = obtener_numeros_asesores_db(config)
 
-    cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
-    columnas_totales = cursor.fetchall()
-
-    # 2) CONSULTA DEFINITIVA - compatible con only_full_group_by
-    # En ver_kanban(), modifica la consulta para mejor manejo de nombres: 
+    # --- CONSULTA OPTIMIZADA ---
     cursor.execute("""
         SELECT 
             cm.numero,
             cm.columna_id,
-            MAX(c.timestamp) AS ultima_fecha,
+            cont.timestamp AS ultima_fecha,
+            cont.interes as interes,
+            cont.imagen_url AS avatar,
+            cont.plataforma AS canal,
+            
             (SELECT mensaje FROM conversaciones 
              WHERE numero = cm.numero
-             AND mensaje NOT LIKE '%%[Mensaje manual desde web]%%' 
              ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
-            MAX(cont.imagen_url) AS avatar,
-            MAX(cont.plataforma) AS canal,
-            -- PRIORIDAD: alias > nombre de perfil > número
-            COALESCE(
-                MAX(cont.alias), 
-                MAX(cont.nombre), 
-                cm.numero
-            ) AS nombre_mostrado,
+            
+            COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
+            
             (SELECT COUNT(*) FROM conversaciones 
              WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
         FROM chat_meta cm
         LEFT JOIN contactos cont ON cont.numero_telefono = cm.numero
-        LEFT JOIN conversaciones c ON c.numero = cm.numero
-        GROUP BY cm.numero, cm.columna_id
-        ORDER BY ultima_fecha DESC;
+        ORDER BY cont.timestamp DESC
+        LIMIT 250;
     """)
     chats = cursor.fetchall()
 
-    # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO (igual que en conversaciones)
+    # Procesamiento rápido en Python
+    ahora = datetime.now(tz_mx)
     for chat in chats:
+        # Filtro visual manual
+        msg = chat.get('ultimo_mensaje') or ""
+        if "[Mensaje manual" in msg:
+            chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
+
+        interes_db = chat.get('interes') or 'Frío'
         if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
             if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+                fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
             else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+            
+            if (ahora - fecha_obj).total_seconds() / 3600 > 20:
+                interes_db = 'Dormido'
+            chat['ultima_fecha'] = fecha_obj
+        else:
+            interes_db = 'Dormido'
+        chat['interes'] = interes_db
 
     cursor.close()
     conn.close()
-    # Determinar si el usuario autenticado tiene servicio == 'admin' en la tabla cliente
+    
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban_supercopia.html', columnas=columnas, chats=chats, is_admin=is_admin)     
-
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
@@ -12694,6 +12713,8 @@ with app.app_context():
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
     start_followup_scheduler()
+    for nombre, config in NUMEROS_CONFIG.items():
+            _ensure_performance_indexes(config)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
