@@ -183,6 +183,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("FITO_DB_PASSWORD"),          
         'db_name': os.getenv("FITO_DB_NAME"),                  
         'dominio': 'ofitodo.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_FITO"),
         # Claves de Messenger (usando el prefijo FITO_ o OFITODO_ según tu .env)
         'messenger_page_id_env': 'OFITODO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'OFITODO_PAGE_ACCESS_TOKEN'
