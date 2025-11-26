@@ -11,7 +11,6 @@ from mysql.connector import pooling
 from flask import render_template_string
 import pytz
 import os
-import UPLOAD_FOLDER
 import logging
 import json  
 import base64 
