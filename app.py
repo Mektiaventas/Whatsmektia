@@ -39,6 +39,7 @@ from flask import session, g
 from flask import url_for
 from urllib.parse import urlparse
 import threading
+import UPLOAD_FOLDER 
 from urllib.parse import urlparse 
 from os.path import basename, join 
 import os # Asegurar que 'os' también esté importado/disponible
@@ -9681,12 +9682,6 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     
                     if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
                         filename_only = basename(urlparse(audio_url_publica).path)
-                        try:
-                            from app import UPLOAD_FOLDER 
-                        except ImportError:
-                            app.logger.error("🔴 UPLOAD_FOLDER no accesible. Asumiendo ruta relativa.")
-                            UPLOAD_FOLDER = 'uploads' 
-                            
                         audio_path_local = os.path.join(UPLOAD_FOLDER, filename_only)
                         app.logger.info(f"💾 Audio Ruta Local deducida: {audio_path_local}")
                     
@@ -12198,9 +12193,6 @@ def proxy_audio(filename):
     from werkzeug.exceptions import abort
     
     try:
-        # Asegúrate de que UPLOAD_FOLDER sea accesible (ya está importado globalmente)
-        from app import UPLOAD_FOLDER
-        
         # Servir el archivo directamente desde la carpeta de subidas
         # El nombre del archivo ya está 'secured' por texto_a_voz
         return send_from_directory(
