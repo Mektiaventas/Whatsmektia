@@ -8178,37 +8178,23 @@ def webhook():
             app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
 
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
-        kwargs = {
-            'msg': msg,
-            'numero': numero,
-            'texto': texto,
-            'es_imagen': es_imagen,
-            'es_audio': es_audio,
-            'config': config, # Es CRÍTICO pasar la config explícitamente
-            'imagen_base64': imagen_base64,
-            'public_url': public_url,
-            'transcripcion': transcripcion,
-            'incoming_saved': True
-        }
+        # Indicar a la función que el mensaje ya fue guardado (incoming_saved=True)
+        processed_ok = procesar_mensaje_unificado(
+            msg=msg,
+            numero=numero,
+            texto=texto,
+            es_imagen=es_imagen,
+            es_audio=es_audio,
+            config=config,
+            imagen_base64=imagen_base64,
+            public_url=public_url,
+            transcripcion=transcripcion,
+            incoming_saved=True
+        )
 
-        # LANZAR LA IA EN UN HILO SEPARADO (NO BLOQUEA)
-        # Usamos app.app_context() para asegurar que la DB funcione dentro del hilo
-        @copy_current_request_context # Opcional si usas datos del request, pero mejor pasar config explícita
-        def run_async_process(app_instance, **kwargs):
-            with app_instance.app_context():
-                try:
-                    procesar_mensaje_unificado(**kwargs)
-                except Exception as e:
-                    app_instance.logger.error(f"🔴 Error en hilo de IA: {e}")
-
-        # Iniciar el hilo pasando la instancia actual de 'app'
-        thread = threading.Thread(target=run_async_process, args=(app._get_current_object(),), kwargs=kwargs)
-        thread.start()
-
-        app.logger.info(f"🚀 Hilo de IA iniciado para {numero} (Response inmediata)")
-        
-        # RETORNAR OK INMEDIATAMENTE PARA QUE LA INTERFAZ SE ACTUALICE
-        return 'OK', 200
+        if processed_ok:
+            app.logger.info(f"✅ procesar_mensaje_unificado handled message {message_id} for {numero}")
+            return 'OK', 200
 
         # If processing failed, we already saved the incoming message earlier; nothing more to do.
         app.logger.info(f"⚠️ procesar_mensaje_unificado returned False for {message_id}; message already persisted.")
