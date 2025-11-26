@@ -149,15 +149,14 @@
             <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
-                    <div class="image-message" style="max-width: 300px; margin: 4px 0;">
-                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image"
-                             style="max-width: 100%; border-radius: 8px; display: block;">
+                    <div class="image-message">
+                        <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
-                        <div class="image-caption" style="padding: 8px 12px; background: rgba(0,0,0,0.05); border-radius: 0 0 8px 8px; margin-top: -4px;">
-                            {{ msg.mensaje | whatsapp_format | safe }}
+                        <div class="image-caption">
+                            {{ msg.mensaje }}
                         </div>
                         {% endif %}
-                    </div> 
+                    </div>
                     {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
                     <div class="audio-player">
                         <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
@@ -189,8 +188,8 @@
                     </div>
                     {% else %}
                     <div class="text-message" style="white-space: normal; line-height: 1.2;">
-                        {{ msg.mensaje | whatsapp_format | safe }}
-                    </div> 
+                        {{ msg.mensaje | safe }}
+                    </div>
                     {% endif %}
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
@@ -207,7 +206,7 @@
                     <div class="manual-indicator">📤 Mensaje enviado:</div>
                     <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
                         {{ msg.respuesta | whatsapp_format | safe }}
-                    </div> 
+                    </div>
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
                     {% if msg.timestamp %}
@@ -226,8 +225,8 @@
                         <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
                         {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
                         <div class="image-caption">
-                            {{ msg.mensaje | whatsapp_format | safe }}
-                        </div> 
+                            {{ msg.respuesta }}
+                        </div>
                         {% endif %}
                     </div>
                     {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %}
@@ -248,7 +247,7 @@
                             <a href="{{ msg.respuesta_contenido_extra }}" download="audio-respuesta.mp3" class="audio-download-btn" title="Descargar audio">
                                 ⬇️
                             </a>
-                        </div> 
+                        </div>
                         {% if msg.respuesta %}
                         <div class="audio-transcription">
                             <strong>Respuesta:</strong> {{ msg.respuesta }}
@@ -258,7 +257,7 @@
                     {% else %}
                     <div class="text-message" style="white-space: pre-wrap; line-height: 1.3;">
                         {{ msg.respuesta | whatsapp_format | safe }}
-                    </div> 
+                    </div>
                     {% endif %}
 
                 </div>
@@ -1485,66 +1484,37 @@ function buildMessageKeyFor(m) {
     const rounded = Math.floor(ts / 1000);
     return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
 }
-    function pollSelectedMessages() {
-        if (!selectedChatId) return;
 
-        const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
+function pollSelectedMessages() {
+    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
 
-        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, {
-            cache: 'no-store',
-            headers: {
-                'Cache-Control': 'no-cache',
-                'Pragma': 'no-cache'
-            }
-        })
-            .then(r => {
-                if (!r.ok) throw new Error(`HTTP ${r.status}`);
-                return r.json();
-            })
-            .then(data => {
-                if (!data || !Array.isArray(data.messages)) return;
+    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
+        .then(r => r.json())
+        .then(data => {
+            if (!data || !Array.isArray(data.messages)) return;
+            if (data.messages.length === 0) return;
 
-                let newMessages = false;
-                let maxTs = lastMessageTimestamp;
+            let maxTs = lastMessageTimestamp;
 
-                // Procesar todos los mensajes nuevos
-                data.messages.forEach(m => {
-                    let ts = 0;
-                    if (m.timestamp) {
-                        ts = Date.parse(m.timestamp);
-                        if (!isNaN(ts)) {
-                            maxTs = Math.max(maxTs, ts);
-                        }
-                    }
-
-                    // Verificar si es un mensaje nuevo
-                    const key = buildMessageKeyFor(m);
-                    if (!seenMessageKeys.has(key)) {
-                        newMessages = true;
-                    }
-                });
-
-                if (newMessages) {
-                    // ACTUALIZAR INMEDIATAMENTE - procesar mensajes de usuario y respuestas IA
-                    appendUserMessagesToPanel(data.messages);
-                    appendAIResponsesToPanel(data.messages);
-
-                    // Actualizar timestamp
-                    if (maxTs > lastMessageTimestamp) {
-                        lastMessageTimestamp = maxTs + 1;
-                    }
-
-                    // Forzar scroll al final si hay nuevos mensajes
-                    const container = document.getElementById('msgs');
-                    if (container) {
-                        setTimeout(() => {
-                            container.scrollTop = container.scrollHeight;
-                        }, 100);
+            data.messages.forEach(m => {
+                let ts = 0;
+                if (m.timestamp) {
+                    ts = Date.parse(m.timestamp);
+                    if (!isNaN(ts)) {
+                        maxTs = Math.max(maxTs, ts);
                     }
                 }
-            })
-            .catch(err => console.error('Error polling messages:', err));
-    } 
+            });
+
+            if (maxTs > lastMessageTimestamp) {
+                lastMessageTimestamp = maxTs + 1;
+            }
+
+            appendUserMessagesToPanel(data.messages);
+            appendAIResponsesToPanel(data.messages);
+        })
+        .catch(err => console.error('Error polling messages:', err));
+}
     /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
 
     function setupChatSearch() {
@@ -1644,11 +1614,10 @@ function buildMessageKeyFor(m) {
         }
 
         if (appended) {
-            // Siempre hacer scroll al final cuando hay nuevos mensajes
-            setTimeout(() => {
-                container.scrollTop = container.scrollHeight;
-            }, 50);
-        } 
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
     function appendUserMessagesToPanel(messages) {
         const container = document.getElementById('msgs');
         if (!container) return;
@@ -1701,11 +1670,10 @@ function buildMessageKeyFor(m) {
         }
 
         if (appended) {
-            // Siempre hacer scroll al final cuando hay nuevos mensajes
-            setTimeout(() => {
-                container.scrollTop = container.scrollHeight;
-            }, 50);
-        } 
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        }
+    }
 /* ===================== ALIAS EDITING & EMOJI ===================== */
 
     function enhanceAliasButtons() {
@@ -1975,12 +1943,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (selectedChatId) {
         initMessagesStateFromDOM();
-        // Iniciar polling inmediatamente y más frecuente
-        pollSelectedMessages();
         if (!messagesIntervalHandle) {
+            pollSelectedMessages();
             messagesIntervalHandle = setInterval(() => {
-                if (!document.hidden && selectedChatId) pollSelectedMessages();
-            }, 2000); // Reducir a 2 segundos para mayor responsividad
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
         }
     }
 
