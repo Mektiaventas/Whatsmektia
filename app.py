@@ -9682,7 +9682,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
                         filename_only = basename(urlparse(audio_url_publica).path)
                         try:
-                            from app 
+                            from app import UPLOAD_FOLDER 
                         except ImportError:
                             app.logger.error("🔴 UPLOAD_FOLDER no accesible. Asumiendo ruta relativa.")
                             UPLOAD_FOLDER = 'uploads' 
