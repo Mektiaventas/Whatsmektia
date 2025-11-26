@@ -149,15 +149,15 @@
             <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
-                    <div class="image-message">
+                    <div class="whatsapp-image-container">
                         <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                         <div class="image-caption">
-                            {{ msg.mensaje }}
+                            {{ msg.mensaje | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
-                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %}
+                    {% elif msg.tipo_mensaje == 'audio' and msg.contenido_extra %} 
                     <div class="audio-player">
                         <audio id="audio-{{ loop.index }}" class="whatsapp-audio">
                             <source src="{{ msg.contenido_extra }}" type="audio/ogg">
@@ -178,18 +178,18 @@
                         </div>
                         {% if msg.transcripcion_audio %}
                         <div class="audio-transcription">
-                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
-                        </div>
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio | whatsapp_format | safe }}
+                        </div> 
                         {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
                         <div class="audio-transcription">
-                            <strong>Mensaje:</strong> {{ msg.mensaje }}
-                        </div>
+                            <strong>Mensaje:</strong> {{ msg.mensaje | whatsapp_format | safe }}
+                        </div> 
                         {% endif %}
                     </div>
                     {% else %}
                     <div class="text-message" style="white-space: normal; line-height: 1.2;">
-                        {{ msg.mensaje | safe }}
-                    </div>
+                        {{ msg.mensaje | whatsapp_format | safe }}
+                    </div> 
                     {% endif %}
                 </div>
                 <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
@@ -221,15 +221,15 @@
                 <div class="message-content">
 
                     {% if msg.respuesta_tipo_mensaje == 'imagen' and msg.respuesta_contenido_extra %}
-                    <div class="image-message">
+                    <div class="whatsapp-image-container">
                         <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
                         {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
                         <div class="image-caption">
-                            {{ msg.respuesta }}
+                            {{ msg.respuesta | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
-                    {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %}
+                    {% elif msg.respuesta_tipo_mensaje == 'audio' and msg.respuesta_contenido_extra %} 
                     <div class="audio-player">
                         <audio id="audio-bot-{{ loop.index }}" class="whatsapp-audio">
                             <source src="{{ msg.respuesta_contenido_extra }}" type="audio/mpeg">
@@ -250,8 +250,8 @@
                         </div>
                         {% if msg.respuesta %}
                         <div class="audio-transcription">
-                            <strong>Respuesta:</strong> {{ msg.respuesta }}
-                        </div>
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio | whatsapp_format | safe }}
+                        </div>  
                         {% endif %}
                     </div>
                     {% else %}
@@ -1171,6 +1171,44 @@
         transform: scale(1.1);
         transition: all 0.2s ease;
     }
+    /* ===== ESTILOS WHATSAPP PARA IMÁGENES ===== */
+    .whatsapp-image-container {
+        max-width: 300px;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        margin: 4px 0;
+    }
+
+    .whatsapp-image {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 8px 8px 0 0;
+    }
+
+    .image-caption {
+        padding: 8px 12px;
+        background: rgba(0,0,0,0.05);
+        font-size: 14px;
+        line-height: 1.4;
+        color: inherit;
+        border-radius: 0 0 8px 8px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
+    }
+
+    /* Asegurar que las imágenes dentro de mensajes tengan el estilo correcto */
+    .msg-user .whatsapp-image-container,
+    .msg-ai .whatsapp-image-container {
+        max-width: 300px;
+    }
+
+    /* Eliminar estilos viejos de image-message */
+    .image-message {
+        display: none;
+    } 
+
 </style>
 <script>
 /* Small helpers */
@@ -1243,8 +1281,8 @@ function truncate(str, n) {
 /* State */
 let chatAutoRefresh = true;
 let refreshIntervalMs = 5000;
-let messagePollIntervalMs = 5000;
-let selectedChatId = {{ selected|tojson }};
+let messagePollIntervalMs = 2000;
+let selectedChatId = {{ selected|tojson }}; 
 let lastChatsTimestamp = 0;
 let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
 let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
@@ -1484,37 +1522,69 @@ function buildMessageKeyFor(m) {
     const rounded = Math.floor(ts / 1000);
     return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
 }
+    function pollSelectedMessages() {
+        if (!selectedChatId || !chatAutoRefresh) return;
 
-function pollSelectedMessages() {
-    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
+        const after = Number(lastMessageTimestamp) || (Date.now() - 30000); // Solo últimos 30 segundos
 
-    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(data => {
-            if (!data || !Array.isArray(data.messages)) return;
-            if (data.messages.length === 0) return;
-
-            let maxTs = lastMessageTimestamp;
-
-            data.messages.forEach(m => {
-                let ts = 0;
-                if (m.timestamp) {
-                    ts = Date.parse(m.timestamp);
-                    if (!isNaN(ts)) {
-                        maxTs = Math.max(maxTs, ts);
-                    }
-                }
-            });
-
-            if (maxTs > lastMessageTimestamp) {
-                lastMessageTimestamp = maxTs + 1;
+        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
             }
-
-            appendUserMessagesToPanel(data.messages);
-            appendAIResponsesToPanel(data.messages);
         })
-        .catch(err => console.error('Error polling messages:', err));
-}
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (!data || !Array.isArray(data.messages)) return;
+
+                let hasNewMessages = false;
+                let maxTs = lastMessageTimestamp;
+
+                // Procesar mensajes
+                data.messages.forEach(m => {
+                    const key = buildMessageKeyFor(m);
+                    if (!seenMessageKeys.has(key)) {
+                        hasNewMessages = true;
+
+                        // Actualizar timestamp máximo
+                        let ts = 0;
+                        if (m.timestamp) {
+                            ts = Date.parse(m.timestamp);
+                            if (!isNaN(ts)) {
+                                maxTs = Math.max(maxTs, ts);
+                            }
+                        }
+                    }
+                });
+
+                if (hasNewMessages) {
+                    // Procesar todos los mensajes nuevos
+                    appendUserMessagesToPanel(data.messages);
+                    appendAIResponsesToPanel(data.messages);
+                    appendImageMessagesToPanel(data.messages); // ← AGREGAR PARA IMÁGENES
+
+                    // Actualizar timestamp
+                    if (maxTs > lastMessageTimestamp) {
+                        lastMessageTimestamp = maxTs + 1;
+                    }
+
+                    // Scroll automático al final
+                    const container = document.getElementById('msgs');
+                    if (container) {
+                        setTimeout(() => {
+                            container.scrollTop = container.scrollHeight;
+                        }, 100);
+                    }
+
+                    console.log('Nuevos mensajes recibidos:', data.messages.length);
+                }
+            })
+            .catch(err => console.error('Error polling messages:', err));
+    } 
     /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
 
     function setupChatSearch() {
@@ -1566,58 +1636,59 @@ function pollSelectedMessages() {
 
         console.debug('Chat search functionality initialized');
     }
-    function appendAIResponsesToPanel(messages) {
+    function appendImageMessagesToPanel(messages) {
         const container = document.getElementById('msgs');
         if (!container) return;
+
         let appended = false;
 
         for (const m of messages) {
-            let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
+            // Solo procesar mensajes con imágenes que no hayamos visto
+            const key = buildMessageKeyFor(m);
+            if (seenMessageKeys.has(key)) continue;
 
-            // ELIMINACIÓN MÁS AGRESIVA DE ESPACIOS
-            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios iniciales
-            aiText = aiText.replace(/\n\s*\n/g, '\n\n'); // Normaliza saltos múltiples
-            aiText = aiText.trim(); // Trim general
+            if ((m.es_imagen && m.imagen_url) || (m.respuesta_tipo_mensaje === 'imagen' && m.respuesta_contenido_extra)) {
+                const isAIResponse = m.respuesta_tipo_mensaje === 'imagen';
+                const imageUrl = isAIResponse ? m.respuesta_contenido_extra : m.imagen_url;
+                const caption = isAIResponse ? m.respuesta : m.mensaje;
 
-            if (!aiText) continue;
+                const div = document.createElement('div');
+                div.className = isAIResponse ? 'msg-box msg-ai' : 'msg-box msg-user';
+                if (m.id) div.setAttribute('data-msg-id', String(m.id));
 
-            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            let key;
-            if (id) {
-                key = 'ai:id:' + id;
-                if (seenMessageKeys.has(key)) continue;
-            } else {
-                let ts = Number(coalesce(m.ts_ms, 0));
-                if (!ts && m.timestamp) {
-                    const parsed = Date.parse(m.timestamp);
-                    ts = isNaN(parsed) ? Date.now() : parsed;
+                const tsVal = Number(m.ts_ms) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+                const fechaFormateada = formatClientTime(tsVal);
+
+                let captionHTML = '';
+                if (caption && caption !== 'Analiza esta imagen' && caption !== 'El usuario envió una imagen') {
+                    captionHTML = `<div class="image-caption">${escapeHtml(caption)}</div>`;
                 }
-                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
-                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
-                if (seenMessageKeys.has(key)) continue;
+
+                div.innerHTML = `
+                <div class="message-content">
+                    <div class="whatsapp-image-container">
+                        <img src="${imageUrl}" alt="Imagen" class="whatsapp-image">
+                        ${captionHTML}
+                    </div>
+                </div>
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+                    ${fechaFormateada}
+                </div>
+            `;
+
+                container.appendChild(div);
+                appended = true;
+                seenMessageKeys.add(key);
             }
-
-            const div = document.createElement('div');
-            div.className = 'msg-box msg-ai';
-            if (id) div.setAttribute('data-msg-id', String(id));
-            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-            const fechaFormateada = formatClientTime(tsVal);
-
-            // Aplicar clase especial para evitar espacios
-            div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
-
-            container.appendChild(div);
-            appended = true;
-
-            seenMessageKeys.add(key);
-            if (id) seenMessageKeys.add('id:' + id);
         }
 
         if (appended) {
-            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+            const container = document.getElementById('msgs');
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
+            }, 50);
         }
-    }
+    } 
     function appendUserMessagesToPanel(messages) {
         const container = document.getElementById('msgs');
         if (!container) return;
