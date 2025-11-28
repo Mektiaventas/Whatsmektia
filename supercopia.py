@@ -2428,19 +2428,17 @@ def enviar_plantilla_comodin(numero, nombre_cliente, mensaje_libre, config):
 
 def procesar_followups_automaticos(config):
     """
-    Busca chats que necesiten seguimiento basado en TIEMPO.
-    Reglas actualizadas:
-    - Tibio: > 30 minutos
-    - Frío: > 15 horas
-    - Dormido: > 48 horas (Requiere Plantilla)
+    Busca chats que necesiten seguimiento.
+    Regla de Oro: Si es 'Caliente', NO SE TOCA (es permanente).
+    Si no es caliente, aplica degradación por tiempo.
     """
     try:
-        # Asegurar columnas en cada ejecución para robustez
         _ensure_chat_meta_followup_columns(config) 
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
+        # Obtenemos el estado actual
         query = """
             SELECT 
                 c.numero_telefono as numero,
@@ -2472,6 +2470,12 @@ def procesar_followups_automaticos(config):
             last_followup = chat['ultimo_followup']
             ultimo_estado_db = chat.get('estado_seguimiento')
             
+            # --- 🛡️ CANDADO DE SEGURIDAD PARA 'CALIENTE' ---
+            # Si ya es caliente, no dejamos que el tiempo lo cambie.
+            if ultimo_estado_db and ultimo_estado_db.lower() == 'caliente':
+                continue
+            # -----------------------------------------------
+
             # Normalizar zonas horarias
             if last_msg:
                 if last_msg.tzinfo is None:
@@ -2486,8 +2490,6 @@ def procesar_followups_automaticos(config):
                     last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
                 else:
                     last_followup = last_followup.astimezone(tz_mx)
-                
-                # Si ya enviamos followup después del último mensaje, saltar
                 if last_followup >= last_msg:
                     continue
 
@@ -2498,58 +2500,47 @@ def procesar_followups_automaticos(config):
             
             tipo_interes_calculado = None
             
-            # --- NUEVAS REGLAS DE TIEMPO (SOLICITADAS) ---
+            # --- REGLAS DE DEGRADACIÓN (Solo si NO era Caliente) ---
             if horas >= 48:
-                tipo_interes_calculado = 'dormido' # > 48 horas (Plantilla requerida)
+                tipo_interes_calculado = 'dormido'
             elif horas >= 15:
-                tipo_interes_calculado = 'frio'    # > 15 horas
+                tipo_interes_calculado = 'frio'
             elif minutos >= 30:
-                tipo_interes_calculado = 'tibio'   # > 30 minutos
+                tipo_interes_calculado = 'tibio'
             
-            # Nota: 'Caliente' no se calcula por tiempo aquí, 
-            # se asigna al recibir el mensaje y el scheduler lo degradará a 'Tibio' a los 30 min.
-
-            # 🛑 LÓGICA ANTI-REPETICIÓN 
             if tipo_interes_calculado == ultimo_estado_db:
                 continue
 
             if tipo_interes_calculado:
-                app.logger.info(f"💡 Actualizando estado ({tipo_interes_calculado}) para {numero}...")
+                app.logger.info(f"💡 Actualizando estado por tiempo ({tipo_interes_calculado}) para {numero}...")
                 
                 enviado = False
                 es_plantilla = False
                 texto_guardado = ""
 
-                # Solo enviamos mensaje automático si NO es tibio (para no spamear a los 30 min)
-                # O si prefieres enviar mensaje a los 30 min, quita la condición 'and tipo_interes_calculado != 'tibio''
-                if tipo_interes_calculado: 
+                # Lógica de envío (Frio/Dormido)
+                if tipo_interes_calculado in ['frio', 'dormido']:
+                    texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
                     
-                    # Generar mensaje solo si vamos a enviarlo (puedes ajustar lógica aquí para enviar o solo marcar en DB)
-                    # Por ejemplo, enviar mensaje solo si es Frio o Dormido
-                    if tipo_interes_calculado in ['frio', 'dormido']:
-                        texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
-                        
-                        if texto_followup:
-                            if tipo_interes_calculado == 'dormido':
-                                # 🚀 USAR PLANTILLA (Rompe ventana 24h/48h)
-                                enviado = enviar_plantilla_comodin(numero, nombre_cliente, texto_followup, config)
-                                es_plantilla = True
-                                texto_guardado = f"[Plantilla Reactivación]: {texto_followup}"
+                    if texto_followup:
+                        if tipo_interes_calculado == 'dormido':
+                            enviado = enviar_plantilla_comodin(numero, nombre_cliente, texto_followup, config)
+                            es_plantilla = True
+                            texto_guardado = f"[Plantilla Reactivación]: {texto_followup}"
+                        else:
+                            # Enviar mensaje normal si es Frio
+                            if numero.startswith('tg_'):
+                                token = config.get('telegram_token')
+                                if token:
+                                    enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
                             else:
-                                # 🚀 MENSAJE NORMAL
-                                if numero.startswith('tg_'):
-                                    token = config.get('telegram_token')
-                                    if token:
-                                        enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
-                                else:
-                                    enviado = enviar_mensaje(numero, texto_followup, config)
-                                texto_guardado = texto_followup
+                                enviado = enviar_mensaje(numero, texto_followup, config)
+                            texto_guardado = texto_followup
 
-                # Actualizar DB (incluso si no enviamos mensaje, actualizamos el estado)
+                # Actualizar DB
                 conn2 = get_db_connection(config)
                 cur2 = conn2.cursor()
                 
-                # Si enviamos mensaje, actualizamos ultimo_followup, si no, solo el estado
                 if enviado:
                     guardar_respuesta_sistema(numero, texto_guardado, config, respuesta_tipo='followup')
                     cur2.execute("""
@@ -2560,7 +2551,7 @@ def procesar_followups_automaticos(config):
                             estado_seguimiento = %s
                     """, (numero, tipo_interes_calculado, tipo_interes_calculado))
                 else:
-                    # Solo actualizamos la etiqueta de estado sin marcar que enviamos un mensaje
+                    # Solo cambiar estado sin mensaje (ej. paso a Tibio)
                     cur2.execute("""
                         INSERT INTO chat_meta (numero, estado_seguimiento) 
                         VALUES (%s, %s)
@@ -2574,7 +2565,6 @@ def procesar_followups_automaticos(config):
 
     except Exception as e:
         app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
-        app.logger.error(traceback.format_exc())
 
 def start_followup_scheduler():
     """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
@@ -2610,9 +2600,8 @@ def start_followup_scheduler():
 def recalcular_interes_lead(numero, nivel_interes_ia, config):
     """
     Define el interés BASE al recibir un mensaje.
-    Reglas nuevas:
-    - Caliente: Pregunta específica O es el primer mensaje (y < 30 min por definición al llegar).
-    - Tibio: Default para interacciones generales.
+    REGLA: Si ya era 'Caliente', se mantiene 'Caliente' para siempre.
+    Si no, evalúa reglas normales.
     """
     try:
         _ensure_interes_column(config) 
@@ -2620,27 +2609,35 @@ def recalcular_interes_lead(numero, nivel_interes_ia, config):
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # Contar mensajes del usuario para saber si es el primero
-        cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
-        count_msgs = cursor.fetchone()[0]
-        
-        nuevo_interes_db = 'Tibio' # Default
-        
-        # REGLA: CALIENTE
-        # 1. Si la IA detecta interés ESPECIFICO (pregunta precios, info concreta)
-        # 2. O Si es el PRIMER mensaje del usuario (count_msgs <= 1)
-        if nivel_interes_ia == 'ESPECIFICO' or count_msgs <= 1:
+        # 1. Verificar estado ACTUAL antes de calcular nada
+        cursor.execute("SELECT interes FROM contactos WHERE numero_telefono = %s", (numero,))
+        row = cursor.fetchone()
+        estado_actual = row[0] if row else None
+
+        # --- 🛡️ CANDADO DE SEGURIDAD ---
+        if estado_actual and str(estado_actual).capitalize() == 'Caliente':
+            # Ya es caliente, no hacemos nada, solo cerramos y nos vamos.
+            # O forzamos 'Caliente' de nuevo para asegurar consistencia.
             nuevo_interes_db = 'Caliente'
         else:
-            nuevo_interes_db = 'Tibio'
+            # --- LÓGICA DE CÁLCULO NORMAL (Si no era caliente) ---
+            
+            # Contar mensajes para saber si es el primero
+            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
+            count_msgs = cursor.fetchone()[0]
+            
+            nuevo_interes_db = 'Tibio' # Default
+            
+            # REGLA PARA SER CALIENTE POR PRIMERA VEZ
+            if nivel_interes_ia == 'ESPECIFICO' or count_msgs <= 1:
+                nuevo_interes_db = 'Caliente'
+            else:
+                nuevo_interes_db = 'Tibio'
         
-        # Nota: No asignamos 'Frio' o 'Dormido' aquí porque esos dependen del tiempo
-        # y serán asignados por el scheduler (procesar_followups_automaticos)
-        
-        # Actualizar en DB
+        # Actualizar en Tablas
         cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
         
-        # También actualizamos el estado_seguimiento en chat_meta para que el scheduler tenga la base correcta
+        # Sincronizar chat_meta para que el scheduler lo sepa
         cursor.execute("""
             INSERT INTO chat_meta (numero, estado_seguimiento) 
             VALUES (%s, %s)
