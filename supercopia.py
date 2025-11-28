@@ -8284,7 +8284,8 @@ def webhook():
                 guardar_mensaje_inmediato(
                     numero, texto, config, 
                     imagen_url=public_url, es_imagen=es_imagen,
-                    tipo_mensaje='imagen' if es_imagen else 'texto', contenido_extra=None
+                    tipo_mensaje='imagen' if es_imagen else 'texto', contenido_extra=None,
+                    nombre_perfil=nombre_whatsapp
                 )
             # --- FIN MODIFICADO ---
         except Exception as e:
@@ -10152,7 +10153,7 @@ def enviar_datos_transferencia(numero, config=None):
         app.logger.error(f"🔴 Error en enviar_datos_transferencia: {e}")
         return False
 
-def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None):
+def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_imagen=False, tipo_mensaje='texto', contenido_extra=None, nombre_perfil=None):
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -10163,7 +10164,7 @@ def guardar_mensaje_inmediato(numero, texto, config=None, imagen_url=None, es_im
 
     try:
         texto_limpio = sanitize_whatsapp_text(texto) if texto else texto
-        actualizar_info_contacto(numero, config)
+        actualizar_info_contacto(numero, config, nombre_perfil=nombre_perfil)
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
