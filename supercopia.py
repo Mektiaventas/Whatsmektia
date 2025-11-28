@@ -12801,12 +12801,12 @@ def obtener_contexto_consulta(numero, config=None):
 with app.app_context():
     # Crear tablas Kanban para todos los tenants
     inicializar_kanban_multitenant()
-    start_good_morning_scheduler()
+    #start_good_morning_scheduler()
     # Verificar tablas en todas las bases de datos 
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
-    start_followup_scheduler()
+    #start_followup_scheduler()
     for nombre, config in NUMEROS_CONFIG.items():
             _ensure_performance_indexes(config)
 
