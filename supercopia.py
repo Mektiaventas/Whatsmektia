@@ -8168,26 +8168,15 @@ def webhook():
             return 'OK', 200
 
         # Try to persist contact info if provided (contacts structure)
+        # 1. Extraer nombre del contacto (si viene en el payload) para usarlo después
+        nombre_whatsapp = None
         try:
-            if ('contacts' in entry['changes'][0]['value']):
-                contact = entry['changes'][0]['value']['contacts'][0]
-                wa_id = contact.get('wa_id')
-                name = (contact.get('profile') or {}).get('name')
-                if wa_id:
-                    cfg_tmp = obtener_configuracion_por_host()
-                    conn = get_db_connection(cfg_tmp)
-                    cur = conn.cursor()
-                    cur.execute("""
-                        INSERT INTO contactos (numero_telefono, nombre, plataforma)
-                        VALUES (%s, %s, 'WhatsApp')
-                        ON DUPLICATE KEY UPDATE
-                            nombre = COALESCE(%s, nombre),
-                            fecha_actualizacion = CURRENT_TIMESTAMP
-                    """, (wa_id, name, name))
-                    conn.commit(); cur.close(); conn.close()
-                    app.logger.info(f"✅ Contact saved from webhook: {wa_id} - {name}")
+            if 'contacts' in change:
+                contact = change['contacts'][0]
+                nombre_whatsapp = (contact.get('profile') or {}).get('name')
+                app.logger.info(f"👤 Nombre detectado en webhook: {nombre_whatsapp}")
         except Exception as e:
-            app.logger.warning(f"⚠️ Could not save contact from webhook: {e}")
+            app.logger.warning(f"⚠️ No se pudo extraer nombre del contacto: {e}")
 
         # Main message
         msg = mensajes[0]
@@ -8205,10 +8194,10 @@ def webhook():
         # Ensure kanban/chat meta/contact are present (quick pre-check)
         try:
             inicializar_chat_meta(numero, config)
-            actualizar_info_contacto(numero, config)
+            # 2. Pasamos el nombre extraído a la función de actualización
+            actualizar_info_contacto(numero, config, nombre_perfil=nombre_whatsapp) 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
-
         # Deduplication by message id
         message_id = msg.get('id')
         if not message_id:
