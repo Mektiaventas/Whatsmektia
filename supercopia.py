@@ -8279,7 +8279,7 @@ def webhook():
                     numero, texto, config, 
                     imagen_url=None, es_imagen=False, 
                     tipo_mensaje='audio', contenido_extra=audio_url,
-                    nombre_perfil=nombre_whatsapp
+                    nombre_perfil=nombre_whatsapp  # <--- AGREGAR AQUÍ
                 )
             else:
                 guardar_mensaje_inmediato(
@@ -12696,7 +12696,7 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
 
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre_a_usar, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
+                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
             VALUES (%s, %s, %s, %s, 
                     1, %s, 'Frío', %s, %s, %s) 
             ON DUPLICATE KEY UPDATE 
