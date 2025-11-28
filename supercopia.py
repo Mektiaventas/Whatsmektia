@@ -7893,10 +7893,22 @@ def obtener_configuracion_por_page_id(page_id):
 
 def obtener_configuracion_por_phone_number_id(phone_number_id):
     """Detecta automáticamente la configuración basada en el phone_number_id recibido"""
+    # 1. Limpiar el ID entrante de espacios
+    id_buscado = str(phone_number_id).strip()
+    
     for numero, config in NUMEROS_CONFIG.items():
-        if str(config['phone_number_id']) == str(phone_number_id):
+        # 2. Limpiar el ID de la configuración también
+        id_config = str(config.get('phone_number_id', '')).strip()
+        
+        if id_config == id_buscado:
+            # app.logger.info(f"✅ Configuración encontrada para ID: {id_buscado} -> {config.get('dominio')}")
             return config
-    # Fallback to default
+            
+    # 3. Si llegamos aquí, NO SE ENCONTRÓ. 
+    # Logueamos el error para que sepas qué pasó en vez de cambiarlo en silencio.
+    app.logger.error(f"⚠️ ALERTA: ID de WhatsApp '{id_buscado}' no encontrado en NUMEROS_CONFIG. Usando Mektia por defecto.")
+    
+    # Fallback to default (Mektia)
     return NUMEROS_CONFIG['524495486142']
 
 @app.route('/reparar-kanban')
