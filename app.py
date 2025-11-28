@@ -642,6 +642,62 @@ def _ensure_sesiones_table(conn):
     conn.commit()
     cur.close()
 
+def recalcular_interes_lead(numero, nivel_interes_ia, config):
+    """
+    Define el interés BASE al recibir un mensaje.
+    REGLA: Si ya era 'Caliente', se mantiene 'Caliente' para siempre.
+    Si no, evalúa reglas normales.
+    """
+    try:
+        # Aseguramos que la columna exista (función auxiliar)
+        _ensure_interes_column(config) 
+
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # 1. Verificar estado ACTUAL antes de calcular nada
+        cursor.execute("SELECT interes FROM contactos WHERE numero_telefono = %s", (numero,))
+        row = cursor.fetchone()
+        estado_actual = row[0] if row else None
+
+        # --- 🛡️ CANDADO DE SEGURIDAD ---
+        if estado_actual and str(estado_actual).capitalize() == 'Caliente':
+            # Ya es caliente, no hacemos nada, solo cerramos y nos vamos.
+            nuevo_interes_db = 'Caliente'
+        else:
+            # --- LÓGICA DE CÁLCULO NORMAL (Si no era caliente) ---
+            
+            # Contar mensajes para saber si es el primero
+            cursor.execute("SELECT COUNT(*) FROM conversaciones WHERE numero = %s AND mensaje IS NOT NULL AND mensaje != '' AND mensaje NOT LIKE '%%[Mensaje manual%%'", (numero,))
+            count_msgs = cursor.fetchone()[0]
+            
+            nuevo_interes_db = 'Tibio' # Default
+            
+            # REGLA PARA SER CALIENTE POR PRIMERA VEZ
+            if nivel_interes_ia == 'ESPECIFICO' or count_msgs <= 1:
+                nuevo_interes_db = 'Caliente'
+            else:
+                nuevo_interes_db = 'Tibio'
+        
+        # Actualizar en Tablas
+        cursor.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_db, numero))
+        
+        # Sincronizar chat_meta para que el scheduler lo sepa (aunque el scheduler esté apagado, esto mantiene la data limpia)
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, estado_seguimiento) 
+            VALUES (%s, %s)
+            ON DUPLICATE KEY UPDATE estado_seguimiento = %s
+        """, (numero, nuevo_interes_db.lower(), nuevo_interes_db.lower()))
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+        
+        return nuevo_interes_db
+    except Exception as e:
+        app.logger.error(f"Error recalculando interés: {e}")
+        return 'Tibio'
+
 def registrar_sesion_activa(username):
     try:
         conn = get_clientes_conn()
