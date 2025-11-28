@@ -40,6 +40,12 @@
         </button>
         {% endif %}
         <div class="spacer" aria-hidden="true"></div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="width: 12px; height: 12px; background-color: #007bff; border-radius: 50%;"></div>
+            <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+                🔁 Restablecer columnas
+            </button>
+        </div>
         <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
             <div class="tab-icon">📊</div>
             <div>
@@ -50,10 +56,8 @@
             <div class="tab-icon">✏️</div>
             <div>
                 <span class="tab-title">Carga manual</span>
-
             </div>
         </button>
-
         <button class="btn btn-primary mt-3" id="btn-pdf-upload" onclick="showSection('pdf-upload')">
             <div class="tab-icon">📄</div>
             <div>
@@ -66,10 +70,7 @@
             <div>
                 <span class="tab-title">Template Columnas</span>
             </div>
-        </button>
-        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
-            🔁 Restablecer columnas
-        </button>
+        </button> 
     </div>
 </div>
 <br />
