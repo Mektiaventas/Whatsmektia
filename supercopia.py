@@ -12696,7 +12696,7 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
 
         sql = """
             INSERT INTO contactos 
-                (numero_telefono, nombre, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
+                (numero_telefono, nombre_a_usar, plataforma, fecha_actualizacion, conversaciones, timestamp, interes, ultima_interaccion_usuario, created_at, dominio) 
             VALUES (%s, %s, %s, %s, 
                     1, %s, 'Frío', %s, %s, %s) 
             ON DUPLICATE KEY UPDATE 
