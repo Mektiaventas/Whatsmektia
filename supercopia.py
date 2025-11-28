@@ -8278,7 +8278,8 @@ def webhook():
                 guardar_mensaje_inmediato(
                     numero, texto, config, 
                     imagen_url=None, es_imagen=False, 
-                    tipo_mensaje='audio', contenido_extra=audio_url
+                    tipo_mensaje='audio', contenido_extra=audio_url,
+                    nombre_perfil=nombre_whatsapp
                 )
             else:
                 guardar_mensaje_inmediato(
