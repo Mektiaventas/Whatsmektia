@@ -2368,10 +2368,68 @@ def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
         app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
         return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
 
+def enviar_plantilla_comodin(numero, nombre_cliente, mensaje_libre, config):
+    """
+    Envía una plantilla de utilidad/marketing para reactivar usuarios fuera de las 24h.
+    Rellena {{1}} con el nombre y {{2}} con el mensaje generado por IA.
+    """
+    NOMBRE_PLANTILLA = "notificacion_general_v2"  # <--- ASEGURA QUE ESTE NOMBRE COINCIDA EN META
+    
+    try:
+        url = f"https://graph.facebook.com/v17.0/{config['phone_number_id']}/messages"
+        headers = {
+            "Authorization": f"Bearer {config['whatsapp_token']}",
+            "Content-Type": "application/json"
+        }
+        
+        # Limpiar datos para evitar errores de la API
+        nombre_final = nombre_cliente if nombre_cliente else "Cliente"
+        mensaje_final = mensaje_libre if mensaje_libre else "Hola, ¿seguimos en contacto?"
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "template",
+            "template": {
+                "name": NOMBRE_PLANTILLA,
+                "language": {
+                    "code": "es_MX" 
+                },
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            {
+                                "type": "text",
+                                "text": nombre_final  # Variable {{1}}
+                            },
+                            {
+                                "type": "text",
+                                "text": mensaje_final # Variable {{2}} (El mensaje de la IA)
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        response = requests.post(url, headers=headers, json=data)
+        
+        if response.status_code in [200, 201]:
+            app.logger.info(f"✅ Plantilla comodín enviada a {numero} (Estado: Dormido)")
+            return True
+        else:
+            app.logger.error(f"🔴 Error enviando plantilla: {response.text}")
+            return False
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Excepción en enviar_plantilla_comodin: {e}")
+        return False
+
 def procesar_followups_automaticos(config):
     """
     Busca chats que necesiten seguimiento.
-    SOLUCIÓN APLICADA: Verifica el 'estado_seguimiento' previo para no repetir mensajes de la misma categoría.
+    Usa Plantillas para leads 'dormidos' (>24h) y mensajes normales para recientes.
     """
     try:
         # Asegurar columnas en cada ejecución para robustez
@@ -2380,10 +2438,12 @@ def procesar_followups_automaticos(config):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # Consulta actualizada para traer también el estado_seguimiento
+        # --- CAMBIO 1: Traer nombre y alias para la plantilla ---
         query = """
             SELECT 
                 c.numero_telefono as numero,
+                c.nombre,
+                c.alias,
                 COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
                 cm.ultimo_followup,
                 cm.estado_seguimiento
@@ -2404,10 +2464,14 @@ def procesar_followups_automaticos(config):
 
         for chat in candidatos:
             numero = chat['numero']
+            # Obtener nombre para la plantilla
+            nombre_cliente = chat.get('alias') or chat.get('nombre') or 'Cliente'
+            
             last_msg = chat['ultima_msg']
             last_followup = chat['ultimo_followup']
             ultimo_estado_db = chat.get('estado_seguimiento')
             
+            # Normalizar zonas horarias
             if last_msg:
                 if last_msg.tzinfo is None:
                     last_msg = pytz.utc.localize(last_msg).astimezone(tz_mx)
@@ -2416,13 +2480,13 @@ def procesar_followups_automaticos(config):
             else:
                 continue
 
-            # Validación de seguridad: Si ya enviamos un followup DESPUÉS del último mensaje del usuario
             if last_followup:
                 if last_followup.tzinfo is None:
                     last_followup = pytz.utc.localize(last_followup).astimezone(tz_mx)
                 else:
                     last_followup = last_followup.astimezone(tz_mx)
                 
+                # Si ya enviamos followup después del último mensaje del usuario, saltar
                 if last_followup >= last_msg:
                     continue
 
@@ -2434,37 +2498,50 @@ def procesar_followups_automaticos(config):
             tipo_interes_calculado = None
             
             # --- REGLAS DE TIEMPO ---
-            if horas >= 20:
-                tipo_interes_calculado = 'dormido'
+            if horas >= 24:
+                tipo_interes_calculado = 'dormido' # Requiere Plantilla
+            elif horas >= 20:
+                # Opcional: tratar como dormido preventivo o frio
+                tipo_interes_calculado = 'dormido' 
             elif horas >= 5:
-                tipo_interes_calculado = 'frio'
+                tipo_interes_calculado = 'frio'    # Mensaje normal
             elif minutos >= 30:
-                tipo_interes_calculado = 'tibio'
+                tipo_interes_calculado = 'tibio'   # Mensaje normal
             
-            # 🛑 LÓGICA ANTI-REPETICIÓN 🛑
+            # 🛑 LÓGICA ANTI-REPETICIÓN 
             if tipo_interes_calculado == ultimo_estado_db:
                 continue
 
-            # Si cumple condición y es un estado NUEVO, enviamos
             if tipo_interes_calculado:
-                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero} (Estado previo: {ultimo_estado_db})...")
+                app.logger.info(f"💡 Generando seguimiento ({tipo_interes_calculado}) para {numero}...")
                 
+                # Generar el texto con la IA (Tu función existente)
                 texto_followup = generar_mensaje_seguimiento_ia(numero, config, tipo_interes_calculado)
                 
                 if texto_followup:
                     enviado = False
-                    if numero.startswith('tg_'):
-                        token = config.get('telegram_token')
-                        if token:
-                            enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                    es_plantilla = False
+                    
+                    # --- CAMBIO 2: Decidir cómo enviar ---
+                    if tipo_interes_calculado == 'dormido':
+                        # 🚀 USAR PLANTILLA COMODÍN (Rompe ventana 24h)
+                        enviado = enviar_plantilla_comodin(numero, nombre_cliente, texto_followup, config)
+                        es_plantilla = True
                     else:
-                        enviado = enviar_mensaje(numero, texto_followup, config)
+                        # 🚀 MENSAJE NORMAL (Dentro de ventana)
+                        if numero.startswith('tg_'):
+                            token = config.get('telegram_token')
+                            if token:
+                                enviado = send_telegram_message(numero.replace('tg_',''), texto_followup, token)
+                        else:
+                            enviado = enviar_mensaje(numero, texto_followup, config)
                     
                     if enviado:
-                        # Guardar respuesta (al bot mismo como respuesta del sistema)
-                        guardar_respuesta_sistema(numero, texto_followup, config, respuesta_tipo='followup')
+                        # Guardar en historial
+                        texto_guardado = f"[Plantilla Reactivación]: {texto_followup}" if es_plantilla else texto_followup
+                        guardar_respuesta_sistema(numero, texto_guardado, config, respuesta_tipo='followup')
                         
-                        # Actualizar DB con fecha Y EL NUEVO ESTADO
+                        # Actualizar DB
                         conn2 = get_db_connection(config)
                         cur2 = conn2.cursor()
                         cur2.execute("""
@@ -2478,10 +2555,11 @@ def procesar_followups_automaticos(config):
                         cur2.close()
                         conn2.close()
                         
-                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero} y estado actualizado.")
+                        app.logger.info(f"✅ Seguimiento ({tipo_interes_calculado}) enviado a {numero}")
 
     except Exception as e:
         app.logger.error(f"🔴 Error en procesar_followups_automaticos: {e}")
+        app.logger.error(traceback.format_exc())
 
 def start_followup_scheduler():
     """Ejecuta la revisión de seguimientos cada 30 minutos en segundo plano."""
