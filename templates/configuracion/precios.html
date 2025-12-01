@@ -1122,27 +1122,33 @@
             .tabs li a {
                 display: block;
                 padding: 10px 20px;
-                background: #f3f4f6;
-                color: #4b5563;
+                background: linear-gradient(135deg, #fbbf24, #f59e0b); /* ← COLOR AMARILLO/NARANJA */
+                color: #111827; /* Texto oscuro para mejor contraste */
                 text-decoration: none;
                 border-radius: 6px;
-                font-weight: 500;
+                font-weight: 600; /* Un poco más grueso */
                 transition: all 0.2s;
                 font-size: 14px;
+                border: 1px solid #f59e0b; /* Borde sutil */
+                box-shadow: 0 2px 4px rgba(245, 158, 11, 0.2); /* Sombra suave */
             }
 
             .tabs li.active a {
-                background: #3b82f6;
+                background: linear-gradient(135deg, #f59e0b, #d97706); /* ← NARANJA MÁS FUERTE */
                 color: white;
+                border-color: #d97706;
+                box-shadow: 0 4px 6px rgba(217, 119, 6, 0.3);
             }
-
             .tabs li a:hover {
-                background: #e5e7eb;
+                background: linear-gradient(135deg, #fcd34d, #f59e0b);
+                transform: translateY(-1px);
+                box-shadow: 0 4px 6px rgba(245, 158, 11, 0.3);
             }
 
-            .tabs li.active a:hover {
-                background: #2563eb;
-            }
+    ..tabs li.active a:hover {
+        background: linear-gradient(135deg, #d97706, #b45309);
+        transform: translateY(-1px);
+    } 
 
     /* Botón de Restablecer columnas - AL LADO DE LOS TABS */
     .tab-action-item {
