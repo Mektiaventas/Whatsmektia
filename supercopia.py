@@ -11052,8 +11052,9 @@ def enviar_manual():
         respuesta_texto = ""
         archivo_info = ""
         filepath = None
+        audio_enviado = False  # Nueva bandera para audio
         
-        # 1. MANEJAR AUDIO GRABADO (NUEVO)
+        # 1. MANEJAR AUDIO GRABADO (NUEVO) - CAMBIADO: if en lugar de elif
         if audio_data:
             try:
                 app.logger.info(f"🎤 Procesando audio grabado para {numero}")
@@ -11122,6 +11123,7 @@ def enviar_manual():
                     
                     archivo_info = f"🎤 Audio grabado ({int(len(audio_bytes)/1024)} KB)"
                     mensaje_enviado = True
+                    audio_enviado = True  # Marcamos que el audio se envió
                     app.logger.info(f"✅ Audio grabado enviado a {numero}")
                     
                 except Exception as send_error:
@@ -11140,8 +11142,8 @@ def enviar_manual():
                     os.remove(filepath)
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar archivo si existe (código existente)
-        elif archivo and archivo.filename:
+        # 2. Manejar archivo si existe (código existente) - CAMBIADO: if en lugar de elif
+        if archivo and archivo.filename:
             app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
             
             if allowed_file(archivo.filename):
@@ -11220,8 +11222,10 @@ def enviar_manual():
                 app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
                 enviar_mensaje(numero, texto, config)
                 respuesta_texto = texto
-                if archivo_info:
+                if archivo_info and not audio_enviado:  # Si se envió archivo pero NO audio
                     respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                elif archivo_info and audio_enviado:  # Si se envió audio también
+                    respuesta_texto = f"🎤 Audio y {archivo_info}\n\n💬 {texto}"
                 mensaje_enviado = True
                 app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
             except Exception as text_error:
@@ -11259,11 +11263,13 @@ def enviar_manual():
                 app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
             
             # 6. MENSAJE DE CONFIRMACIÓN
-            if audio_data:
+            if audio_data and archivo and archivo.filename:
+                flash('✅ Audio y archivo enviados correctamente', 'success')
+            elif audio_data:
                 flash('✅ Audio grabado enviado correctamente', 'success')
-            elif archivo and texto:
+            elif archivo and archivo.filename and texto:
                 flash('✅ Archivo y mensaje enviados correctamente', 'success')
-            elif archivo:
+            elif archivo and archivo.filename:
                 flash('✅ Archivo enviado correctamente', 'success')
             else:
                 flash('✅ Mensaje enviado correctamente', 'success')
