@@ -12264,7 +12264,7 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # --- CONSULTA OPTIMIZADA ---
+    # --- CONSULTA ---
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -12292,40 +12292,38 @@ def ver_kanban(config=None):
     cursor.close()
     conn.close()
 
-    # --- PROCESAMIENTO EN MEMORIA UNIFICADO ---
+    # --- PROCESAMIENTO UNIFICADO ---
     ahora = datetime.now(tz_mx)
     
     for chat in chats:
-        # 1. Asegurar que numero no sea None
+        # 1. Asegurar string en número
         if chat.get('numero') is None:
             chat['numero'] = ''
 
-        # 2. Filtro visual manual para mensajes internos
+        # 2. Filtro visual manual
         msg = chat.get('ultimo_mensaje') or ""
         if "[Mensaje manual" in msg:
             chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
 
-        # 3. Lógica de Fecha y Hora (IGUAL QUE EN VER_CHATS)
+        # 3. Lógica de Fecha CORRECTA para tabla 'contactos'
+        interes_db = chat.get('interes') or 'Frío'
+        
         if chat.get('ultima_fecha'):
-            # Si tiene timezone info, convertir a tz_mx
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            # La tabla 'contactos' guarda la fecha usando 'ahora_mx', es decir, YA está en hora México.
+            # No debemos convertir de UTC a MX (restar 6h), solo decirle a Python que esa fecha es MX.
+            if chat['ultima_fecha'].tzinfo is None:
+                chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
             else:
-                # Si es naive (UTC en DB), localizar y convertir a tz_mx
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             
-            # 4. Calcular estado "Dormido" basado en la fecha YA convertida
-            fecha_obj = chat['ultima_fecha']
-            interes_db = chat.get('interes') or 'Frío'
-            
-            # Si pasaron más de 20 horas
-            if (ahora - fecha_obj).total_seconds() / 3600 > 20:
+            # Calcular si está dormido (ahora sí compara MX con MX)
+            if (ahora - chat['ultima_fecha']).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
-            
-            chat['interes'] = interes_db
         else:
-            chat['interes'] = 'Dormido'
+            interes_db = 'Dormido'
             chat['ultima_fecha'] = None
+            
+        chat['interes'] = interes_db
     
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
