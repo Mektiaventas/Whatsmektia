@@ -397,7 +397,7 @@
             </form>
         </div>
         {% endif %}  <!-- Este cierra el IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
-        {% endif %}  <!-- Este cierra el IF "selected" --> 
+        {% endif %}  <!-- Este cierra el IF "selected" -->
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -1291,8 +1291,7 @@
 
     #audio-progress {
         transition: width 0.1s linear;
-    } 
-
+    }
 </style>
 <script>
 /* Small helpers */
@@ -1366,9 +1365,9 @@ function truncate(str, n) {
 let chatAutoRefresh = true;
 let refreshIntervalMs = 5000;
 let messagePollIntervalMs = 5000;
-let selectedChatId = {{ selected|tojson }};
+let selectedChatId = {% if selected %}{{ selected|tojson }}{% else %}null{% endif %};
 let lastChatsTimestamp = 0;
-let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
+let lastMessageTimestamp = {% if mensajes and mensajes[-1].timestamp %}{{ (mensajes[-1].timestamp.timestamp() * 1000) }}{% else %}0{% endif %};
 let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
 let isEditingAlias = false;
 let aliasTimers = new Map();
@@ -1889,11 +1888,6 @@ function pollSelectedMessages() {
         };
     }
 
-
-
-    /* ===================== EMOJI PICKER COMPLETO ===================== */
-
-    // chats.html (Cerca de la línea 602)
     /* ===================== EMOJI PICKER COMPLETO ===================== */
 
     function setupEmojiPicker() {
@@ -1982,12 +1976,13 @@ function pollSelectedMessages() {
         console.debug('setupEmojiPicker initialized');
     }
 
-
 /* ===================== AUDIO & UI HELPERS ===================== */
 
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-}function toggleAudio(id, btn) {
+}
+
+function toggleAudio(id, btn) {
     const audio = document.getElementById(id);
     const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
     const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
@@ -2021,144 +2016,6 @@ function seekAudio(id, progressBar, evt) {
         audio.currentTime = (clickX / rect.width) * audio.duration;
         if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
     }
-}
-
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado - inicializando componentes');
-    enhanceAliasButtons();
-
-    // INICIALIZACIÓN DIRECTA DE EMOJIS
-    setupEmojiPicker();
-    setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
-    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
-    console.log('Emoji picker inicializado');
-    console.log('Búsqueda de chats inicializada');
-    console.log('File upload inicializado');
-
-    // Start automatic chat-list refresh
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats();
-        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
-            if (!document.hidden) actualizarListaChats();
-        }, refreshIntervalMs);
-    }
-
-    // Initialize message polling if chat is selected
-    function initMessagesStateFromDOM() {
-        try {
-            const msgsContainer = document.getElementById('msgs');
-            if (!msgsContainer) return;
-            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
-            let maxTs = Number(lastMessageTimestamp) || 0;
-            nodes.forEach(n => {
-                const idAttr = n.getAttribute('data-msg-id');
-                const id = Number(idAttr) || 0;
-                if (id) {
-                    seenMessageKeys.add('id:' + String(id));
-                }
-            });
-            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
-        } catch (e) {
-            console.warn('initMessagesStateFromDOM failed', e);
-        }
-    }
-
-    if (selectedChatId) {
-        initMessagesStateFromDOM();
-        if (!messagesIntervalHandle) {
-            pollSelectedMessages();
-            messagesIntervalHandle = setInterval(() => {
-                if (!document.hidden) pollSelectedMessages();
-            }, messagePollIntervalMs);
-        }
-    }
-
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            chatAutoRefresh = false;
-        } else {
-            chatAutoRefresh = true;
-            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                chatsIntervalHandle = setInterval(() => {
-                    if (!document.hidden) actualizarListaChats();
-                }, refreshIntervalMs);
-            }
-            if (selectedChatId && !messagesIntervalHandle) {
-                initMessagesStateFromDOM();
-                messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages();
-                }, messagePollIntervalMs);
-            }
-        }
-    });
-});
-// Función mejorada para la búsqueda de chats
-function setupChatSearch() {
-    const searchInput = document.getElementById('search-chats-input');
-
-    if (!searchInput) {
-        console.warn('Search input not found');
-        return;
-    }
-
-    function performSearch() {
-        const searchTerm = normalizeText(searchInput.value);
-        const chatItems = document.querySelectorAll('.chat-item');
-
-        let foundAny = false;
-
-        chatItems.forEach(chatItem => {
-            const aliasElement = chatItem.querySelector('.alias-view');
-
-            if (!aliasElement) return;
-
-            const chatName = normalizeText(aliasElement.textContent);
-            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
-
-            const matchesSearch = chatName.includes(searchTerm) ||
-                                chatNumber.includes(searchTerm) ||
-                                (searchTerm === '');
-
-            chatItem.style.display = matchesSearch ? 'block' : 'none';
-
-            if (matchesSearch && searchTerm !== '') {
-                foundAny = true;
-            }
-        });
-
-        // Opcional: Mostrar mensaje si no se encontraron resultados
-        const noResultsMsg = document.getElementById('no-search-results');
-        if (searchTerm !== '' && !foundAny) {
-            if (!noResultsMsg) {
-                const msg = document.createElement('div');
-                msg.id = 'no-search-results';
-                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
-                msg.style.padding = '10px';
-                msg.style.textAlign = 'center';
-                msg.style.color = '#999';
-                document.querySelector('.chat-items').appendChild(msg);
-            }
-        } else if (noResultsMsg) {
-            noResultsMsg.remove();
-        }
-    }
-
-    searchInput.addEventListener('input', performSearch);
-
-    // También aplicar búsqueda cuando se actualicen los chats dinámicamente
-    const observer = new MutationObserver(function(mutations) {
-        const currentSearch = normalizeText(searchInput.value);
-        if (currentSearch) {
-            performSearch();
-        }
-    });
-
-    const chatContainer = document.querySelector('.chat-items');
-    if (chatContainer) {
-        observer.observe(chatContainer, { childList: true, subtree: true });
-    }
-
-    console.debug('Chat search functionality initialized - insensible a tildes');
 }
 
 // Función normalizadora mejorada (insensible a tildes)
@@ -2336,11 +2193,7 @@ function normalizeText(s) {
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-
         // Validar antes de enviar
-        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
-        // Validar antes de enviar - SOLO verificar que haya algo
-        // Validar antes de enviar - CORREGIDO DEFINITIVO
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
             const hasFile = fileInput.files.length > 0;
@@ -2351,7 +2204,6 @@ function normalizeText(s) {
                 alert('Por favor escribe un mensaje o selecciona un archivo');
                 return false;
             }
-            // Si hay archivo, puede enviarse SIN texto - ESTO YA ESTÁ CORRECTO
 
             // Mostrar indicador de envío
             const sendBtn = document.querySelector('.send-btn');
@@ -2368,7 +2220,7 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
-    /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
+
     /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
 
     function setupAudioRecorder() {
@@ -2764,7 +2616,7 @@ function normalizeText(s) {
                 sendBtn.disabled = false;
             }, 5000);
         }
-    }); 
+    });
 
 </script>
-{% endblock %}      
+{% endblock %}       
