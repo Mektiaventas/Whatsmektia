@@ -382,6 +382,7 @@
             </div>
         </form>
         {% else %}
+        <!-- Este es el bloque ELSE del IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
         <div class="ia-active-message">
             <div class="ia-indicator">
                 <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
@@ -395,8 +396,8 @@
                 {% endif %}
             </form>
         </div>
-        {% endif %}
-        {% endif %} 
+        {% endif %}  <!-- Este cierra el IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
+        {% endif %}  <!-- Este cierra el IF "selected" --> 
 
         <style>
             /* Estilos para el textarea mejorado */
