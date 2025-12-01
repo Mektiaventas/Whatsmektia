@@ -82,31 +82,28 @@
 
 <form class="config-form" method="POST" enctype="multipart/form-data">
     <!-- AÑADE EL CAMPO AQUÍ AL INICIO DEL FORMULARIO -->
-    <div class="form-card">
+   <!--<div class="form-card">
         <label>Correo para notificaciones de Calendar</label>
         <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
                placeholder="ejemplo@gmail.com">
         <small class="form-text text-muted">
             Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
         </small>
-    </div>
-
-    <div class="form-card">
+    </div>--> 
+    <div class="form-row">
+        <div class="form-card">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
         <small class="form-text text-muted">
             Este nombre se mostrará en el sidebar y título de la página
         </small>
+        </div>
+        <div class="form-card">
+            <label>Nombre de tu Negocio</label>
+            <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
+        </div>
     </div>
-    <div class="form-card">
-        <label>Nombre de tu Negocio</label>
-        <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
-    </div>
-    <div class="form-card">
-        <label>Descripción del Negocio</label>
-        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
-    </div>
-    <div class="form-row">
+        <div class="form-row">
         <div class="form-card">
             <label>URL del Negocio</label>
             <input type="url" name="url" value="{{ datos.url or '' }}">
@@ -116,6 +113,11 @@
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
     </div>
+    <div class="form-card">
+        <label>Descripción del Negocio</label>
+        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
+    </div>
+
 
     <div class="form-row">
         <div class="form-card">
