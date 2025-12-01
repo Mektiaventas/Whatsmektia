@@ -10789,7 +10789,7 @@ def ver_chats():
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('chats_supercopia.html',
+    return render_template('chats.html',
         chats=chats, 
         mensajes=None,
         selected=None, 
@@ -10883,7 +10883,7 @@ def ver_chat(numero):
         au = session.get('auth_user') or {}
         is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
         
-        return render_template('chats_supercopia.html',
+        return render_template('chats.html',
             chats=chats, 
             mensajes=msgs,
             selected=numero, 
@@ -12361,7 +12361,7 @@ def ver_kanban(config=None):
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
-    return render_template('kanban_supercopia.html', columnas=columnas, chats=chats, is_admin=is_admin)
+    return render_template('kanban.html', columnas=columnas, chats=chats, is_admin=is_admin)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():
