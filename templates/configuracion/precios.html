@@ -20,7 +20,6 @@
     </li>
     {% endfor %}
 </ul>
-
 <div class="tab-navigation mb-6">
     <div class="tab-buttons">
         <div class="tab-buttons-left">
@@ -42,7 +41,7 @@
         </div>
 
         <div class="tab-buttons-right">
-            <div class="upload-buttons">
+            <div class="upload-buttons-group">
                 <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
                     <div class="tab-icon">📊</div>
                     <div>
@@ -67,15 +66,13 @@
                         <span class="tab-title">Template Columnas</span>
                     </div>
                 </button>
-            </div>
-            <div class="reset-button-container">
-                <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+                <button class="btn btn-reset-small" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
                     🔁 Restablecer columnas
                 </button>
             </div>
         </div>
     </div>
-</div> 
+</div>
 <br />
 <br />
 <div class="section" id="pdf-upload" style="display:none;">
@@ -794,6 +791,7 @@
         transition: all 0.3s ease;
         cursor: pointer;
     }
+
     /* Add near other CSS rules in the same <style> block */
     .spacer {
         display: inline-block;
@@ -970,6 +968,7 @@
         .search-form .input {
             flex-grow: 1; /* El input toma el espacio disponible */
         }
+
     /* Slightly different heights for client vs admin views */
     .table-scroll-client {
         max-height: 600px;
@@ -987,6 +986,7 @@
         background: linear-gradient(#ffffff, #f8fafc); /* matches header background */
         box-shadow: 0 2px 4px rgba(0,0,0,0.04);
     }
+
     /* Añadir al bloque <style> (Línea 882 aprox) */
     .pagination-controls .disabled {
         opacity: 0.4;
@@ -999,6 +999,7 @@
     .pagination-controls .btn.small.secondary {
         text-decoration: none;
     }
+
     /* Optional: give the header cells a bit more weight */
     .table thead th {
         font-weight: 600;
@@ -1022,6 +1023,7 @@
     .desc-cell {
         font-size: xx-small;
     }
+
     /* prioritize wrapping for long columns (Descripción, Categoría, etc.) */
     .table th:nth-child(6), .table td:nth-child(6) {
         max-width: 180px;
@@ -1032,6 +1034,7 @@
     .table th:nth-child(4), .table td:nth-child(4) {
         max-width: 120px;
     }
+
     /* Tooltip styles (floating element appended to body) */
     .floating-tooltip {
         position: fixed;
@@ -1063,6 +1066,7 @@
             left: 12px;
             top: -6px;
         }
+
     /* responsive tweaks */
     @media (max-width: 1200px) {
         .table th, .table td {
@@ -1090,11 +1094,14 @@
         width: 50%;
         height: 50%;
     }
+
+    /* NUEVOS ESTILOS PARA LOS BOTONES SUPERIORES */
     .tab-buttons {
         display: flex;
         justify-content: space-between;
-        align-items: flex-start;
+        align-items: center;
         gap: 20px;
+        width: 100%;
     }
 
     .tab-buttons-left {
@@ -1106,28 +1113,99 @@
 
     .tab-buttons-right {
         display: flex;
-        flex-direction: column;
-        align-items: flex-end;
-        gap: 10px;
+        justify-content: flex-end;
+        align-items: center;
     }
 
-    .upload-buttons {
+    .upload-buttons-group {
         display: flex;
         flex-wrap: wrap;
-        gap: 10px;
+        gap: 8px;
+        align-items: center;
         justify-content: flex-end;
     }
 
-    .reset-button-container {
+    /* Botón de restablecer más pequeño y compacto */
+    .btn-reset-small {
+        background: #f59e0b;
+        color: #111;
+        border: none;
+        padding: 6px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 12px;
+        height: 32px;
         display: flex;
-        justify-content: flex-end;
-        width: 100%;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        margin-top: 12px !important; /* Para alinear con los otros botones */
     }
 
-    /* Elimina el spacer anterior */
+        .btn-reset-small:hover {
+            background: #d97706;
+            transform: translateY(-1px);
+        }
+
+    /* Mantener el botón btn-reset original para otros usos si es necesario */
+    .btn-reset {
+        background: #f59e0b;
+        color: #111;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+    }
+
+        .btn-reset:hover {
+            background: #d97706;
+            transform: translateY(-1px);
+        }
+
+    /* Ajustar altura de botones para que todos coincidan */
+    .btn.btn-primary, .btn-reset-small {
+        height: 32px;
+        min-height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+
+        /* Ajustar contenido interno de los botones */
+        .btn.btn-primary .tab-icon {
+            font-size: 14px;
+            margin-right: 4px;
+        }
+
+        .btn.btn-primary .tab-title {
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+    /* Eliminar el spacer anterior */
     .spacer {
         display: none;
-    } 
+    }
+
+    /* Ajuste responsive */
+    @media (max-width: 1200px) {
+        .tab-buttons {
+            flex-direction: column;
+            align-items: stretch;
+            gap: 10px;
+        }
+
+        .tab-buttons-right {
+            justify-content: flex-start;
+        }
+
+        .upload-buttons-group {
+            justify-content: flex-start;
+        }
+    }  
 </style>
 <script>
 
