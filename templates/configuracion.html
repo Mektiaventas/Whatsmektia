@@ -175,6 +175,7 @@
     </div>
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
+<div class="form-row">
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
     <div class="form-card" style="width: 30%;">
         <label>Publicar PDF (Catálogo / Documento)</label>
@@ -227,6 +228,7 @@
     {% else %}
     <div class="text-muted">No hay catálogos publicados.</div>
     {% endif %}
+</div>
 </div>
 {% elif active == 'leads' %}
 <form class="config-form" method="POST">
