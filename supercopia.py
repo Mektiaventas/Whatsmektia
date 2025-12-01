@@ -12300,7 +12300,7 @@ def ver_kanban(config=None):
             if chat['ultima_fecha'].tzinfo is not None:
                 fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
             else:
-                fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
             
             if (ahora - fecha_obj).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
@@ -12308,7 +12308,17 @@ def ver_kanban(config=None):
         else:
             interes_db = 'Dormido'
         chat['interes'] = interes_db
-
+        # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
+    for chat in chats:
+        if chat.get('numero') is None:
+            chat['numero'] = ''
+        if chat.get('ultima_fecha'):
+            # Si el timestamp ya tiene timezone info, convertirlo
+            if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            else:
+                # Si no tiene timezone, asumir que es UTC y luego convertir
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
     cursor.close()
     conn.close()
     
