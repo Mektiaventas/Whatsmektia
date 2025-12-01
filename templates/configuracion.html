@@ -176,7 +176,7 @@
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-    <div class="form-card" style="width: 30%;">
+    <div class="form-card" style="width: 70%;">
         <label>Publicar PDF (Catálogo / Documento)</label>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
             <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
@@ -188,7 +188,7 @@
         <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
     </div>
 </form>
-<div class="form-card" style="margin-top:12px;">
+<div class="form-card" style="margin-top:12px;" style="width: 70%;">
     <h4>📚 Catálogos publicados</h4>
     {% if documents_publicos and documents_publicos|length > 0 %}
     <div class="table-responsive">
