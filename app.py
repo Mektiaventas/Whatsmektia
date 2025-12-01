@@ -3489,16 +3489,17 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar índices la primera vez que se carga (por si acaso)
+        # Asegurar índices e interese
         _ensure_performance_indexes(config)
         _ensure_interes_column(config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # Lógica de asesores (sin cambios)
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         
-        # Mover chats de asesores si es necesario
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
             cursor.execute(f"""
@@ -3511,9 +3512,7 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA ULTRARÁPIDA ---
-        # 1. Eliminamos el 'NOT LIKE' que es lento.
-        # 2. Los sub-queries ahora usarán el índice 'idx_conv_num_ts'.
+        # --- CONSULTA ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3523,14 +3522,12 @@ def kanban_data(config=None):
                 cont.imagen_url,
                 cont.plataforma as canal,
                 
-                -- Subconsulta optimizada por índice (trae el último mensaje real)
                 (SELECT mensaje FROM conversaciones 
                  WHERE numero = cm.numero
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                  
                 COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
                 
-                -- Subconsulta optimizada para contador
                 (SELECT COUNT(*) FROM conversaciones 
                  WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
                  
@@ -3544,29 +3541,34 @@ def kanban_data(config=None):
         cursor.close()
         conn.close()
 
-        # --- PROCESAMIENTO EN MEMORIA (MUCHO MÁS RÁPIDO QUE SQL) ---
+        # --- PROCESAMIENTO CORREGIDO (IGUAL QUE VER_KANBAN) ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # Limpiar mensaje manual visualmente aquí (Python es más rápido para esto que SQL 'NOT LIKE')
+            # 1. Filtro visual manual
             msg = chat.get('ultimo_mensaje') or ""
             if "[Mensaje manual" in msg:
                 chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
             
-            # Lógica de tiempo "Dormido"
+            # 2. Lógica de Fecha para CONTACTOS (Ya viene en MX, solo localizar)
             interes_final = chat.get('interes_db') or 'Frío'
+            
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
+                    
+                    # CORRECCIÓN AQUÍ: Si es naive, es hora MX (no UTC)
                     if fecha_msg.tzinfo is None:
-                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
+                        fecha_msg = tz_mx.localize(fecha_msg)
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
+                    # Calcular Dormido
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
                     
+                    # Convertir a ISO format para que el JavaScript lo entienda correctamente
                     chat['ultima_fecha'] = fecha_msg.isoformat()
                 except Exception:
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
@@ -11982,7 +11984,7 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # --- CONSULTA OPTIMIZADA ---
+    # --- CONSULTA ---
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -12010,40 +12012,38 @@ def ver_kanban(config=None):
     cursor.close()
     conn.close()
 
-    # --- PROCESAMIENTO EN MEMORIA UNIFICADO ---
+    # --- PROCESAMIENTO UNIFICADO ---
     ahora = datetime.now(tz_mx)
     
     for chat in chats:
-        # 1. Asegurar que numero no sea None
+        # 1. Asegurar string en número
         if chat.get('numero') is None:
             chat['numero'] = ''
 
-        # 2. Filtro visual manual para mensajes internos
+        # 2. Filtro visual manual
         msg = chat.get('ultimo_mensaje') or ""
         if "[Mensaje manual" in msg:
             chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
 
-        # 3. Lógica de Fecha y Hora (IGUAL QUE EN VER_CHATS)
+        # 3. Lógica de Fecha CORRECTA para tabla 'contactos'
+        interes_db = chat.get('interes') or 'Frío'
+        
         if chat.get('ultima_fecha'):
-            # Si tiene timezone info, convertir a tz_mx
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
+            # La tabla 'contactos' guarda la fecha usando 'ahora_mx', es decir, YA está en hora México.
+            # No debemos convertir de UTC a MX (restar 6h), solo decirle a Python que esa fecha es MX.
+            if chat['ultima_fecha'].tzinfo is None:
+                chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
             else:
-                # Si es naive (UTC en DB), localizar y convertir a tz_mx
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             
-            # 4. Calcular estado "Dormido" basado en la fecha YA convertida
-            fecha_obj = chat['ultima_fecha']
-            interes_db = chat.get('interes') or 'Frío'
-            
-            # Si pasaron más de 20 horas
-            if (ahora - fecha_obj).total_seconds() / 3600 > 20:
+            # Calcular si está dormido (ahora sí compara MX con MX)
+            if (ahora - chat['ultima_fecha']).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
-            
-            chat['interes'] = interes_db
         else:
-            chat['interes'] = 'Dormido'
+            interes_db = 'Dormido'
             chat['ultima_fecha'] = None
+            
+        chat['interes'] = interes_db
     
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
