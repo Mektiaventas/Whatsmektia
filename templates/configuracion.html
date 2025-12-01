@@ -92,36 +92,35 @@
         </small>
     </div>--> 
     <div class="form-row">
-        <div class="form-card" style="width: 50%;">
+        <div class="form-card" style="width: 30%;">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
         <small class="form-text text-muted">
             Este nombre se mostrará en el sidebar y título de la página
         </small>
         </div>
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Nombre de tu Negocio</label>
             <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
         </div>
     </div>
         <div class="form-row">
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>URL del Negocio</label>
             <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Dirección</label>
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
     </div>
-    <div class="form-card">
+    <div class="form-card" style="width: 60%;">
         <label>Descripción del Negocio</label>
         <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
     </div>
 
-
     <div class="form-row">
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Logo de la Aplicación</label>
             <input type="file" name="app_logo" accept="image/png, image/jpeg, image/svg+xml">
             <small class="form-text text-muted">
@@ -134,40 +133,40 @@
             </div>
             {% endif %}
         </div>
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Teléfono</label>
             <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
     </div>
     <div class="form-row">
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">
         </div>
     </div>
     <div class="form-row">
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Datos para transferencia - Número de cuenta</label>
             <input type="text" name="transferencia_numero" value="{{ datos.transferencia_numero or '' }}"
                    placeholder="1123 3454 2344 2343">
             <small class="form-text text-muted">Número de cuenta o CLABE (según corresponda).</small>
         </div>
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Nombre en la cuenta</label>
             <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
                    placeholder="Jonas">
         </div>
-        <div class="form-card">
+        <div class="form-card" style="width: 30%;">
             <label>Banco</label>
             <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
                    placeholder="BBVA">
         </div>
     </div>
-    <div class="form-card">
+    <div class="form-card" style="width: 30%;">
         <label>¿Qué quieres que haga tu IA?</label>
         <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
     </div>
-    <div class="form-card">
+    <div class="form-card" style="width: 30%;">
         <label>Leads, temas a los que avisar a un asesor</label>
         <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
         <small class="form-text text-muted">
@@ -177,7 +176,7 @@
     <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-    <div class="form-card">
+    <div class="form-card" style="width: 30%;">
         <label>Publicar PDF (Catálogo / Documento)</label>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
             <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
