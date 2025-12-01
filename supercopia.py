@@ -3778,16 +3778,17 @@ def kanban_data(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     try:
-        # Asegurar índices la primera vez que se carga (por si acaso)
+        # Asegurar índices e interese
         _ensure_performance_indexes(config)
         _ensure_interes_column(config)
 
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
+        
+        # Lógica de asesores (sin cambios)
         col_asesores_id = obtener_id_columna_asesores(config)
         numeros_asesores = obtener_numeros_asesores_db(config)
         
-        # Mover chats de asesores si es necesario
         if col_asesores_id and numeros_asesores:
             placeholders = ', '.join(['%s'] * len(numeros_asesores))
             cursor.execute(f"""
@@ -3800,9 +3801,7 @@ def kanban_data(config=None):
         cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden")
         columnas = cursor.fetchall()
 
-        # --- CONSULTA ULTRARÁPIDA ---
-        # 1. Eliminamos el 'NOT LIKE' que es lento.
-        # 2. Los sub-queries ahora usarán el índice 'idx_conv_num_ts'.
+        # --- CONSULTA ---
         cursor.execute("""
             SELECT 
                 cm.numero,
@@ -3812,14 +3811,12 @@ def kanban_data(config=None):
                 cont.imagen_url,
                 cont.plataforma as canal,
                 
-                -- Subconsulta optimizada por índice (trae el último mensaje real)
                 (SELECT mensaje FROM conversaciones 
                  WHERE numero = cm.numero
                  ORDER BY timestamp DESC LIMIT 1) AS ultimo_mensaje,
                  
                 COALESCE(cont.alias, cont.nombre, cm.numero) AS nombre_mostrado,
                 
-                -- Subconsulta optimizada para contador
                 (SELECT COUNT(*) FROM conversaciones 
                  WHERE numero = cm.numero AND respuesta IS NULL) AS sin_leer
                  
@@ -3833,29 +3830,34 @@ def kanban_data(config=None):
         cursor.close()
         conn.close()
 
-        # --- PROCESAMIENTO EN MEMORIA (MUCHO MÁS RÁPIDO QUE SQL) ---
+        # --- PROCESAMIENTO CORREGIDO (IGUAL QUE VER_KANBAN) ---
         ahora = datetime.now(tz_mx)
 
         for chat in chats:
-            # Limpiar mensaje manual visualmente aquí (Python es más rápido para esto que SQL 'NOT LIKE')
+            # 1. Filtro visual manual
             msg = chat.get('ultimo_mensaje') or ""
             if "[Mensaje manual" in msg:
                 chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
             
-            # Lógica de tiempo "Dormido"
+            # 2. Lógica de Fecha para CONTACTOS (Ya viene en MX, solo localizar)
             interes_final = chat.get('interes_db') or 'Frío'
+            
             if chat.get('ultima_fecha'):
                 try:
                     fecha_msg = chat['ultima_fecha']
+                    
+                    # CORRECCIÓN AQUÍ: Si es naive, es hora MX (no UTC)
                     if fecha_msg.tzinfo is None:
-                        fecha_msg = pytz.utc.localize(fecha_msg).astimezone(tz_mx)
+                        fecha_msg = tz_mx.localize(fecha_msg)
                     else:
                         fecha_msg = fecha_msg.astimezone(tz_mx)
                     
+                    # Calcular Dormido
                     horas_pasadas = (ahora - fecha_msg).total_seconds() / 3600
                     if horas_pasadas > 20:
                         interes_final = 'Dormido'
                     
+                    # Convertir a ISO format para que el JavaScript lo entienda correctamente
                     chat['ultima_fecha'] = fecha_msg.isoformat()
                 except Exception:
                     chat['ultima_fecha'] = str(chat['ultima_fecha'])
