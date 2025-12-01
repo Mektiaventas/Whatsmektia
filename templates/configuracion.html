@@ -165,7 +165,7 @@
             <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
         </div>
     </div>
-    
+    <div class="form-row">
     <div class="form-card" style="width: 30%;">
         <label>Leads, temas a los que avisar a un asesor</label>
         <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
@@ -176,6 +176,7 @@
     <div class="form-card" style="width: 30%;">
         <button type="submit" class="btn-primary">Guardar Negocio</button>
      </div>
+    </div>
 </form>
 <div class="form-row">
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
