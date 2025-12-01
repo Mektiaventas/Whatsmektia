@@ -3772,7 +3772,38 @@ SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores',
 app.add_template_filter(get_country_flag, 'bandera')
 
 # app.py (Reemplazar kanban_data)
-
+@app.route('/debug-hora')
+def debug_hora():
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Consultamos la hora del servidor y la configuración de zona horaria
+        cursor.execute("SELECT NOW(), UTC_TIMESTAMP(), @@global.time_zone, @@session.time_zone")
+        row = cursor.fetchone()
+        
+        cursor.close()
+        conn.close()
+        
+        ahora_server = row[0]
+        ahora_utc = row[1]
+        zona_global = row[2]
+        zona_sesion = row[3]
+        
+        return f"""
+        <h1>Diagnóstico de Hora BD</h1>
+        <p><strong>Base de datos:</strong> {config.get('db_name')}</p>
+        <p><strong>Hora Local del Server (NOW):</strong> {ahora_server}</p>
+        <p><strong>Hora UTC del Server:</strong> {ahora_utc}</p>
+        <p><strong>Config Zona Global:</strong> {zona_global}</p>
+        <p><strong>Config Zona Sesión:</strong> {zona_sesion}</p>
+        <hr>
+        <p><strong>Hora Python (Servidor App):</strong> {datetime.now()}</p>
+        """
+    except Exception as e:
+        return f"Error: {str(e)}"
+    
 @app.route('/kanban/data')
 def kanban_data(config=None):
     if config is None:
