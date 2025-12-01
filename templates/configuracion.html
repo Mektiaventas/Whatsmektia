@@ -165,7 +165,7 @@
             <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
         </div>
     </div>
-    
+    <div class="form-row">
     <div class="form-card" style="width: 30%;">
         <label>Leads, temas a los que avisar a un asesor</label>
         <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
@@ -173,10 +173,14 @@
             Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
         </small>
     </div>
-    <button type="submit" class="btn-primary">Guardar Negocio</button>
+    <div class="form-card" style="width: 30%;">
+        <button type="submit" class="btn-primary" style="width: 100%; height: 100%;">Guardar Negocio</button>
+     </div>
+    </div>
 </form>
+<div class="form-row" style="margin-top: 25px;"> 
 <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-    <div class="form-card" style="width: 70%;">
+    <div class="form-card" style="width: 50%;">
         <label>Publicar PDF (Catálogo / Documento)</label>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
             <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
@@ -188,7 +192,7 @@
         <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
     </div>
 </form>
-<div class="form-card" style="margin-top:12px;" style="width: 70%;">
+<div class="form-card" style="width:50%;">
     <h4>📚 Catálogos publicados</h4>
     {% if documents_publicos and documents_publicos|length > 0 %}
     <div class="table-responsive">
@@ -227,6 +231,7 @@
     {% else %}
     <div class="text-muted">No hay catálogos publicados.</div>
     {% endif %}
+</div>
 </div>
 {% elif active == 'leads' %}
 <form class="config-form" method="POST">
