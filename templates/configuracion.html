@@ -1,6 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Configuración – {{ active|capitalize }}{% endblock %}
 {% block content %}
+<link rel="stylesheet" href="C:\Users\jedua\OneDrive\Documents\GitHub\Whatsmektia\static\css\styles.css">
 <style>
     .form-text text-muted {
         color: white;
@@ -91,7 +92,7 @@
         </small>
     </div>--> 
     <div class="form-row">
-        <div class="form-card">
+        <div class="form-card" style="width: 50%;">
         <label>Nombre de tu IA personalizada</label>
         <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
         <small class="form-text text-muted">
