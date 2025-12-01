@@ -276,6 +276,7 @@
             {% endif %}
         </div>
 
+
         {% if selected %}
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
@@ -574,18 +575,11 @@
             }
 
             // Función para enviar el formulario
-            // Función para enviar el formulario
             function submitForm() {
                 const form = document.getElementById('messageForm');
                 const textarea = document.getElementById('mensaje-texto');
                 const fileInput = document.getElementById('file-input');
                 const audioDataInput = document.getElementById('audio-data-input');
-
-                // DEBUG en consola
-                console.log('📤 ENVIANDO FORMULARIO:');
-                console.log('📝 Texto:', textarea.value);
-                console.log('📎 Archivo:', fileInput.files.length > 0 ? fileInput.files[0].name : 'Ninguno');
-                console.log('🎤 Audio:', audioDataInput.value ? 'SÍ (' + audioDataInput.value.length + ' chars)' : 'NO');
 
                 // Verificar si hay algo para enviar
                 const hasText = textarea.value.trim() !== '';
@@ -597,16 +591,9 @@
                     return;
                 }
 
-                // Mostrar indicador
-                const sendBtn = document.querySelector('.send-btn');
-                const originalText = sendBtn.innerHTML;
-                sendBtn.innerHTML = '⏳';
-                sendBtn.disabled = true;
-
                 // Enviar el formulario
-                console.log('🚀 Enviando formulario...');
                 form.submit();
-            } 
+            }
 
             // Inicializar altura del textarea al cargar
             document.addEventListener('DOMContentLoaded', function () {
