@@ -11576,7 +11576,7 @@ Gracias por tu pedido. Te avisaremos cuando esté en camino.
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al procesarlo. Por favor, contacta directamente al negocio."
 
-@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
+
 @login_required
 def enviar_audio(numero, url_audio, config, caption=""):
     """Envía un audio por WhatsApp"""
@@ -11622,6 +11622,7 @@ def enviar_audio(numero, url_audio, config, caption=""):
         app.logger.error(traceback.format_exc())
         raise 
 
+@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
 def borrar_pdf_configuracion(doc_id):
     config = obtener_configuracion_por_host()
     try:
