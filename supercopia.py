@@ -11028,6 +11028,17 @@ def enviar_manual():
         archivo = request.files.get('archivo')
         audio_data = request.form.get('audio_data')  # NUEVO: Audio grabado en base64
         
+        # DEBUG: Ver qué está llegando
+        app.logger.info(f"🔍 DEBUG enviar_manual - Datos recibidos:")
+        app.logger.info(f"  Número: {numero}")
+        app.logger.info(f"  Texto: {texto[:50] if texto else 'Vacío'}")
+        app.logger.info(f"  Archivo: {'Sí' if archivo else 'No'}")
+        app.logger.info(f"  Audio data recibido: {'SÍ' if audio_data else 'NO'}")
+        if audio_data:
+            app.logger.info(f"  Longitud audio_data: {len(audio_data)}")
+            app.logger.info(f"  ¿Empieza con 'data:'?: {'Sí' if audio_data.startswith('data:') else 'No'}")
+            app.logger.info(f"  Primeros 100 chars: {audio_data[:100]}")
+        
         if not numero:
             flash('❌ Número de destino requerido', 'error')
             return redirect(url_for('ver_chat', numero=numero))
@@ -11050,13 +11061,43 @@ def enviar_manual():
                 import base64
                 import uuid
                 
-                # Decodificar audio base64
-                audio_bytes = base64.b64decode(audio_data.split(',')[1] if ',' in audio_data else audio_data)
+                # DEBUG: Verificar formato del audio
+                if not audio_data.startswith('data:audio/'):
+                    app.logger.warning(f"⚠️ Audio no tiene prefijo data:audio/: {audio_data[:50]}")
+                
+                # Decodificar audio base64 (remover el prefijo si existe)
+                base64_content = audio_data
+                if ',' in audio_data:
+                    # Separar el prefijo del base64
+                    header, base64_content = audio_data.split(',', 1)
+                    app.logger.info(f"  Header del audio: {header[:50]}")
+                else:
+                    app.logger.warning("⚠️ Audio no tiene formato data:..., usando directamente")
+                
+                app.logger.info(f"  Longitud base64 a decodificar: {len(base64_content)}")
+                
+                try:
+                    audio_bytes = base64.b64decode(base64_content)
+                    app.logger.info(f"✅ Audio decodificado: {len(audio_bytes)} bytes")
+                except Exception as decode_error:
+                    app.logger.error(f"🔴 Error decodificando base64: {decode_error}")
+                    # Intentar decodificar sin separar
+                    try:
+                        audio_bytes = base64.b64decode(audio_data)
+                        app.logger.info(f"✅ Audio decodificado sin separar: {len(audio_bytes)} bytes")
+                    except:
+                        flash('❌ Error decodificando el audio grabado', 'error')
+                        return redirect(url_for('ver_chat', numero=numero))
+                
+                # Verificar que el audio no esté vacío
+                if len(audio_bytes) < 100:
+                    flash('❌ El audio grabado está vacío o es demasiado corto', 'error')
+                    return redirect(url_for('ver_chat', numero=numero))
                 
                 # Generar nombre único para el archivo
                 timestamp = int(time.time())
                 unique_id = str(uuid.uuid4())[:8]
-                filename = f"audio_grabado_{numero}_{timestamp}_{unique_id}.ogg"
+                filename = f"audio_grabado_{numero}_{timestamp}_{unique_id}.webm"
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
                 
                 # Guardar archivo de audio
@@ -11075,14 +11116,9 @@ def enviar_manual():
                 
                 # Enviar audio por WhatsApp
                 try:
-                    # NOTA: Necesitas tener una función enviar_audio en tu código
-                    # Si no la tienes, puedes usar enviar_documento o adaptarla
-                    
-                    # Opción A: Usar enviar_documento (si no tienes enviar_audio)
-                    enviar_documento(numero, public_url, f"audio_{timestamp}.ogg", config)
-                    
-                    # Opción B: Si tienes una función específica para audio
-                    # enviar_audio(numero, public_url, config)
+                    # Primero intentar enviar como documento
+                    app.logger.info(f"📤 Enviando audio como documento a {numero}")
+                    enviar_documento(numero, public_url, f"audio_{timestamp}.webm", config)
                     
                     archivo_info = f"🎤 Audio grabado ({int(len(audio_bytes)/1024)} KB)"
                     mensaje_enviado = True
@@ -11090,17 +11126,11 @@ def enviar_manual():
                     
                 except Exception as send_error:
                     app.logger.error(f"🔴 Error enviando audio: {send_error}")
-                    # Intentar enviar como documento si falla como audio
-                    try:
-                        enviar_documento(numero, public_url, f"audio_{timestamp}.ogg", config)
-                        archivo_info = f"🎤 Audio grabado ({int(len(audio_bytes)/1024)} KB)"
-                        mensaje_enviado = True
-                        app.logger.info(f"✅ Audio enviado como documento a {numero}")
-                    except:
-                        flash('❌ Error al enviar el audio grabado', 'error')
-                        if filepath and os.path.exists(filepath):
-                            os.remove(filepath)
-                        return redirect(url_for('ver_chat', numero=numero))
+                    app.logger.error(traceback.format_exc())
+                    flash('❌ Error al enviar el audio grabado', 'error')
+                    if filepath and os.path.exists(filepath):
+                        os.remove(filepath)
+                    return redirect(url_for('ver_chat', numero=numero))
                 
             except Exception as audio_error:
                 app.logger.error(f"🔴 Error procesando audio grabado: {audio_error}")
@@ -11249,7 +11279,6 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
-
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()

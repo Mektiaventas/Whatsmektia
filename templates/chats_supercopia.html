@@ -299,7 +299,7 @@
                 </div>
             </div>
 
-            <!-- AÑADE EL GRABADOR DE AUDIO AQUÍ FUERA, NO DENTRO -->
+            <!-- Grabador de audio estilo WhatsApp -->
             <div id="audio-recorder-container" style="display: none; width: 100%; order: -1;">
                 <div class="audio-recorder-whatsapp" style="background: #f0f0f0; border-radius: 8px; padding: 12px; margin: 0 10px 10px 10px; display: flex; align-items: center; gap: 10px;">
                     <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
@@ -341,18 +341,16 @@
                         </button>
                     </div>
                 </div>
-            </div> 
-</div>
-                        <button type="button" id="remove-file" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">×</button>
-                    </div>
-                </div>
             </div>
 
+            <!-- Input group para escribir y enviar -->
             <div class="input-group">
                 <!-- Botón para adjuntar archivos -->
                 <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
                     📎
                 </button>
+
+                <!-- Botón para grabar audio -->
                 <button type="button" id="record-audio-btn" class="record-audio-btn" style="font-size: 24px;" title="Grabar audio">
                     🎤
                 </button>
@@ -383,6 +381,22 @@
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form>
+        {% else %}
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}
+        {% endif %} 
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -2354,6 +2368,7 @@ function normalizeText(s) {
         console.debug('File upload functionality initialized - WhatsApp style');
     }
     /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
+    /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
 
     function setupAudioRecorder() {
         const recordBtn = document.getElementById('record-audio-btn');
@@ -2412,25 +2427,57 @@ function normalizeText(s) {
             audioRecorderContainer.style.display = 'none';
         });
 
-        // Enviar audio
+        // Enviar audio - ¡CORRECCIÓN IMPORTANTE!
         sendAudioBtn.addEventListener('click', function () {
             if (audioChunks.length === 0) {
                 alert('No hay audio para enviar');
                 return;
             }
 
+            console.log('Preparando audio para enviar...');
+
             // Crear Blob del audio
             const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            console.log('Tamaño del audio:', audioBlob.size, 'bytes');
 
             // Convertir a base64 para enviar
             const reader = new FileReader();
             reader.onloadend = function () {
-                const base64Audio = reader.result.split(',')[1];
-                audioDataInput.value = base64Audio;
+                // Obtener el base64 COMPLETO (con el prefijo data:audio/webm;base64,)
+                const base64Audio = reader.result;
+                console.log('Base64 obtenido, longitud:', base64Audio.length);
 
-                // Enviar el formulario
-                messageForm.submit();
+                if (!base64Audio || base64Audio.length < 100) {
+                    alert('Error: El audio está vacío o corrupto');
+                    return;
+                }
+
+                // IMPORTANTE: Guardar el base64 COMPLETO
+                audioDataInput.value = base64Audio;
+                console.log('Audio guardado en input oculto');
+
+                // Cambiar el botón para indicar que se está enviando
+                sendAudioBtn.innerHTML = '⏳';
+                sendAudioBtn.disabled = true;
+
+                // Pequeña pausa y luego enviar
+                setTimeout(() => {
+                    console.log('Enviando formulario...');
+
+                    // Forzar el envío del formulario
+                    if (messageForm.requestSubmit) {
+                        messageForm.requestSubmit();
+                    } else {
+                        messageForm.submit();
+                    }
+                }, 300);
             };
+
+            reader.onerror = function (error) {
+                console.error('Error convirtiendo audio a base64:', error);
+                alert('Error procesando el audio');
+            };
+
             reader.readAsDataURL(audioBlob);
         });
 
@@ -2619,14 +2666,103 @@ function normalizeText(s) {
     }
 
     // Llama a esta función en DOMContentLoaded
-    // Busca esto en tu código existente:
     document.addEventListener('DOMContentLoaded', () => {
-        // ... código existente ...
+        console.log('DOM cargado - inicializando componentes');
+        enhanceAliasButtons();
 
-        // AÑADE ESTA LÍNEA:
-        setupAudioRecorder();
+        // INICIALIZACIÓN DIRECTA DE EMOJIS
+        setupEmojiPicker();
+        setupChatSearch();
+        setupFileUpload();
+        setupAudioRecorder(); // <-- AÑADE ESTA LÍNEA
 
-        // ... resto del código ...
+        console.log('Emoji picker inicializado');
+        console.log('Búsqueda de chats inicializada');
+        console.log('File upload inicializado');
+        console.log('Audio recorder inicializado');
+
+        // Start automatic chat-list refresh
+        if (document.querySelector('.chat-items')) {
+            actualizarListaChats();
+            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+                if (!document.hidden) actualizarListaChats();
+            }, refreshIntervalMs);
+        }
+
+        // Initialize message polling if chat is selected
+        function initMessagesStateFromDOM() {
+            try {
+                const msgsContainer = document.getElementById('msgs');
+                if (!msgsContainer) return;
+                const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+                let maxTs = Number(lastMessageTimestamp) || 0;
+                nodes.forEach(n => {
+                    const idAttr = n.getAttribute('data-msg-id');
+                    const id = Number(idAttr) || 0;
+                    if (id) {
+                        seenMessageKeys.add('id:' + String(id));
+                    }
+                });
+                console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+            } catch (e) {
+                console.warn('initMessagesStateFromDOM failed', e);
+            }
+        }
+
+        if (selectedChatId) {
+            initMessagesStateFromDOM();
+            if (!messagesIntervalHandle) {
+                pollSelectedMessages();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                chatAutoRefresh = false;
+            } else {
+                chatAutoRefresh = true;
+                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                    chatsIntervalHandle = setInterval(() => {
+                        if (!document.hidden) actualizarListaChats();
+                    }, refreshIntervalMs);
+                }
+                if (selectedChatId && !messagesIntervalHandle) {
+                    initMessagesStateFromDOM();
+                    messagesIntervalHandle = setInterval(() => {
+                        if (!document.hidden) pollSelectedMessages();
+                    }, messagePollIntervalMs);
+                }
+            }
+        });
+    });
+
+    // Agrega esta validación al final de tu JavaScript
+    document.getElementById('messageForm').addEventListener('submit', function (e) {
+        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+        const hasFile = document.getElementById('file-input').files.length > 0;
+        const hasAudio = document.getElementById('audio-data-input').value !== '';
+
+        console.log('Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+
+        // Si hay audio, asegurarse de que se envíe correctamente
+        if (hasAudio) {
+            console.log('Enviando audio...');
+
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '🎤⏳';
+            sendBtn.disabled = true;
+
+            // Restaurar después de 5 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 5000);
+        }
     }); 
 
 </script>
