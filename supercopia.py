@@ -16,7 +16,7 @@ import json
 import base64 
 import argparse
 import math
-import mysql.connector
+import mysql.connector 
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
 from dotenv import load_dotenv
@@ -10710,6 +10710,7 @@ def _ensure_contactos_conversaciones_columns(config=None):
     finally:
         cursor.close()
         conn.close()
+        
 @app.route('/chats')
 def ver_chats():
     config = obtener_configuracion_por_host()
@@ -12250,6 +12251,7 @@ def verificar_todas_tablas():
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
 
+
 @app.route('/kanban')
 def ver_kanban(config=None):
     config = obtener_configuracion_por_host()
@@ -12262,7 +12264,7 @@ def ver_kanban(config=None):
     cursor.execute("SELECT * FROM kanban_columnas ORDER BY orden;")
     columnas = cursor.fetchall()
 
-    # --- CONSULTA OPTIMIZADA ---
+    # --- CONSULTA ---
     cursor.execute("""
         SELECT 
             cm.numero,
@@ -12287,40 +12289,41 @@ def ver_kanban(config=None):
     """)
     chats = cursor.fetchall()
 
-    # Procesamiento rápido en Python
+    cursor.close()
+    conn.close()
+
+    # --- PROCESAMIENTO UNIFICADO ---
     ahora = datetime.now(tz_mx)
+    
     for chat in chats:
-        # Filtro visual manual
+        # 1. Asegurar string en número
+        if chat.get('numero') is None:
+            chat['numero'] = ''
+
+        # 2. Filtro visual manual
         msg = chat.get('ultimo_mensaje') or ""
         if "[Mensaje manual" in msg:
             chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
 
+        # 3. Lógica de Fecha CORRECTA para tabla 'contactos'
         interes_db = chat.get('interes') or 'Frío'
+        
         if chat.get('ultima_fecha'):
-            if chat['ultima_fecha'].tzinfo is not None:
-                fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
+            # La tabla 'contactos' guarda la fecha usando 'ahora_mx', es decir, YA está en hora México.
+            # No debemos convertir de UTC a MX (restar 6h), solo decirle a Python que esa fecha es MX.
+            if chat['ultima_fecha'].tzinfo is None:
+                chat['ultima_fecha'] = tz_mx.localize(chat['ultima_fecha'])
             else:
-                fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             
-            if (ahora - fecha_obj).total_seconds() / 3600 > 20:
+            # Calcular si está dormido (ahora sí compara MX con MX)
+            if (ahora - chat['ultima_fecha']).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
-            chat['ultima_fecha'] = fecha_obj
         else:
             interes_db = 'Dormido'
+            chat['ultima_fecha'] = None
+            
         chat['interes'] = interes_db
-        # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
-    for chat in chats:
-        if chat.get('numero') is None:
-            chat['numero'] = ''
-        if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
-    cursor.close()
-    conn.close()
     
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
