@@ -16,7 +16,7 @@ import json
 import base64 
 import argparse
 import math
-import mysql.connector
+import mysql.connector 
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
 from dotenv import load_dotenv
@@ -12298,8 +12298,10 @@ def ver_kanban(config=None):
         interes_db = chat.get('interes') or 'Frío'
         if chat.get('ultima_fecha'):
             if chat['ultima_fecha'].tzinfo is not None:
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
                 fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
             else:
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
                 fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
             
             if (ahora - fecha_obj).total_seconds() / 3600 > 20:
@@ -12309,16 +12311,7 @@ def ver_kanban(config=None):
             interes_db = 'Dormido'
         chat['interes'] = interes_db
         # 🔥 CONVERTIR TIMESTAMPS A HORA DE MÉXICO - AQUÍ ESTÁ EL FIX
-    for chat in chats:
-        if chat.get('numero') is None:
-            chat['numero'] = ''
-        if chat.get('ultima_fecha'):
-            # Si el timestamp ya tiene timezone info, convertirlo
-            if chat['ultima_fecha'].tzinfo is not None:
-                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
-            else:
-                # Si no tiene timezone, asumir que es UTC y luego convertir
-                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
+
     cursor.close()
     conn.close()
     
