@@ -12007,30 +12007,43 @@ def ver_kanban(config=None):
     """)
     chats = cursor.fetchall()
 
-    # Procesamiento rápido en Python
+    cursor.close()
+    conn.close()
+
+    # --- PROCESAMIENTO EN MEMORIA UNIFICADO ---
     ahora = datetime.now(tz_mx)
+    
     for chat in chats:
-        # Filtro visual manual
+        # 1. Asegurar que numero no sea None
+        if chat.get('numero') is None:
+            chat['numero'] = ''
+
+        # 2. Filtro visual manual para mensajes internos
         msg = chat.get('ultimo_mensaje') or ""
         if "[Mensaje manual" in msg:
             chat['ultimo_mensaje'] = "📝 Nota interna / Manual"
 
-        interes_db = chat.get('interes') or 'Frío'
+        # 3. Lógica de Fecha y Hora (IGUAL QUE EN VER_CHATS)
         if chat.get('ultima_fecha'):
+            # Si tiene timezone info, convertir a tz_mx
             if chat['ultima_fecha'].tzinfo is not None:
-                fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
+                chat['ultima_fecha'] = chat['ultima_fecha'].astimezone(tz_mx)
             else:
-                fecha_obj = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
+                # Si es naive (UTC en DB), localizar y convertir a tz_mx
+                chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx)
             
+            # 4. Calcular estado "Dormido" basado en la fecha YA convertida
+            fecha_obj = chat['ultima_fecha']
+            interes_db = chat.get('interes') or 'Frío'
+            
+            # Si pasaron más de 20 horas
             if (ahora - fecha_obj).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
-            chat['ultima_fecha'] = fecha_obj
+            
+            chat['interes'] = interes_db
         else:
-            interes_db = 'Dormido'
-        chat['interes'] = interes_db
-
-    cursor.close()
-    conn.close()
+            chat['interes'] = 'Dormido'
+            chat['ultima_fecha'] = None
     
     au = session.get('auth_user') or {}
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
