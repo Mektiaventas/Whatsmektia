@@ -103,6 +103,10 @@
             <label>Nombre de tu Negocio</label>
             <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
         </div>
+            <div class="form-card" style="width: 30%;">
+        <label>Descripción del Negocio</label>
+        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
+    </div>
     </div>
         <div class="form-row">
         <div class="form-card" style="width: 30%;">
@@ -113,13 +117,6 @@
             <label>Dirección</label>
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
-    </div>
-    <div class="form-card" style="width: 60%;">
-        <label>Descripción del Negocio</label>
-        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
-    </div>
-
-    <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>Logo de la Aplicación</label>
             <input type="file" name="app_logo" accept="image/png, image/jpeg, image/svg+xml">
@@ -133,6 +130,10 @@
             </div>
             {% endif %}
         </div>
+    </div>
+
+    <div class="form-row">
+        
         <div class="form-card" style="width: 30%;">
             <label>Teléfono</label>
             <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
@@ -143,14 +144,15 @@
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">
         </div>
-    </div>
-    <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>Datos para transferencia - Número de cuenta</label>
             <input type="text" name="transferencia_numero" value="{{ datos.transferencia_numero or '' }}"
                    placeholder="1123 3454 2344 2343">
             <small class="form-text text-muted">Número de cuenta o CLABE (según corresponda).</small>
         </div>
+    </div>
+    <div class="form-row">
+        
         <div class="form-card" style="width: 30%;">
             <label>Nombre en la cuenta</label>
             <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
@@ -161,11 +163,12 @@
             <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
                    placeholder="BBVA">
         </div>
+        <div class="form-card" style="width: 30%;">
+            <label>¿Qué quieres que haga tu IA?</label>
+            <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
+        </div>
     </div>
-    <div class="form-card" style="width: 30%;">
-        <label>¿Qué quieres que haga tu IA?</label>
-        <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
-    </div>
+    
     <div class="form-card" style="width: 30%;">
         <label>Leads, temas a los que avisar a un asesor</label>
         <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
