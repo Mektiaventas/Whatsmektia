@@ -12303,7 +12303,7 @@ def ver_kanban(config=None):
                 fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
             else:
                 chat['ultima_fecha'] = pytz.utc.localize(chat['ultima_fecha']).astimezone(tz_mx) 
-                fecha_obj = pytz.utc.localize(chat['ultima_fecha'].replace(tzinfo=None)).astimezone(tz_mx)
+                fecha_obj = chat['ultima_fecha'].astimezone(tz_mx)
             
             if (ahora - fecha_obj).total_seconds() / 3600 > 20:
                 interes_db = 'Dormido'
