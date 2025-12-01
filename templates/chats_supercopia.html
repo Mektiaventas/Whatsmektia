@@ -397,7 +397,6 @@
             </form>
         </div>
         {% endif %}  <!-- Este cierra el IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
-        {% endif %}  <!-- Este cierra el IF "selected" -->
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -603,23 +602,9 @@
                 }
             });
         </script>
-        {% else %}
-        <div class="ia-active-message">
-            <div class="ia-indicator">
-                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
-                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
-            </div>
-            <form action="/toggle_ai/{{ selected }}" method="POST">
-                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
-                <button type="submit" class="toggle-btn off">Desactivar IA</button>
-                {% else %}
-                <button type="submit" class="toggle-btn on">Activar IA</button>
-                {% endif %}
-            </form>
-        </div>
-        {% endif %}
-        {% endif %}
-    </section>
+        {% endif %}  <!-- Este cierra el IF "selected" -->
+
+    </section>  <!-- ¡IMPORTANTE! Esto cierra la sección -->
 
     <aside class="sidebar-right" style="color: white;text-align: center;padding: inherit;border-top: blue;border-start-start-radius: revert-layer;">
         {% if selected %}
@@ -658,7 +643,8 @@
 </div>
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
-<style>
+
+<style> 
     :root {
         --left-width: 340px;
         --right-width: 320px;
