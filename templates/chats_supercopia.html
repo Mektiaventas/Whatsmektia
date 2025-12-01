@@ -281,6 +281,7 @@
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
+            <input type="hidden" name="audio_data" id="audio-data-input">
 
             <!-- Preview de archivo seleccionado (ARRIBA como WhatsApp) -->
             <div id="file-preview-container" style="width: 100%; order: -1;">
@@ -298,11 +299,64 @@
                 </div>
             </div>
 
+            <!-- AÑADE EL GRABADOR DE AUDIO AQUÍ FUERA, NO DENTRO -->
+            <div id="audio-recorder-container" style="display: none; width: 100%; order: -1;">
+                <div class="audio-recorder-whatsapp" style="background: #f0f0f0; border-radius: 8px; padding: 12px; margin: 0 10px 10px 10px; display: flex; align-items: center; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
+                        <!-- Controles de grabación -->
+                        <button type="button" id="start-record-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">
+                            ●
+                        </button>
+
+                        <div id="recording-timer" style="font-size: 14px; font-weight: bold; color: #333;">
+                            0:00
+                        </div>
+
+                        <div id="recording-visualizer" style="flex: 1; height: 20px; background: #ddd; border-radius: 10px; overflow: hidden;">
+                            <div id="recording-level" style="height: 100%; width: 0%; background: #25D366; transition: width 0.1s;"></div>
+                        </div>
+                    </div>
+
+                    <!-- Controles de audio grabado -->
+                    <div id="audio-playback-controls" style="display: none; align-items: center; gap: 10px; flex: 1;">
+                        <audio id="recorded-audio-preview" style="display: none;"></audio>
+                        <button type="button" id="play-recorded-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 12px;">
+                            ▶️
+                        </button>
+                        <div style="flex: 1;">
+                            <div id="audio-duration" style="font-size: 12px; color: #666;">0:00</div>
+                            <div id="audio-waveform" style="height: 4px; background: #ccc; border-radius: 2px; margin-top: 4px;">
+                                <div id="audio-progress" style="height: 100%; width: 0%; background: #25D366; border-radius: 2px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Botones de acción -->
+                    <div style="display: flex; gap: 8px;">
+                        <button type="button" id="delete-audio-btn" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 14px;">
+                            🗑️
+                        </button>
+                        <button type="button" id="send-audio-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 14px;">
+                            ✓
+                        </button>
+                    </div>
+                </div>
+            </div> 
+</div>
+                        <button type="button" id="remove-file" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 24px; height: 24px; cursor: pointer; font-size: 14px; display: flex; align-items: center; justify-content: center;">×</button>
+                    </div>
+                </div>
+            </div>
+
             <div class="input-group">
                 <!-- Botón para adjuntar archivos -->
                 <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
                     📎
                 </button>
+                <button type="button" id="record-audio-btn" class="record-audio-btn" style="font-size: 24px;" title="Grabar audio">
+                    🎤
+                </button>
+
                 <input type="file" id="file-input" name="archivo" style="display: none;"
                        accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
@@ -1171,6 +1225,59 @@
         transform: scale(1.1);
         transition: all 0.2s ease;
     }
+    /* ESTILOS PARA GRABADOR DE AUDIO WHATSAPP */
+    .audio-recorder-whatsapp {
+        animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-10px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+
+    #start-record-btn.recording {
+        background: #ff4444 !important;
+        animation: pulse 1s infinite;
+    }
+
+    @keyframes pulse {
+        0% {
+            transform: scale(1);
+        }
+
+        50% {
+            transform: scale(1.1);
+        }
+
+        100% {
+            transform: scale(1);
+        }
+    }
+
+    #recording-visualizer {
+        position: relative;
+    }
+
+    #recording-level {
+        transition: width 0.05s linear;
+    }
+
+    #audio-waveform {
+        position: relative;
+        cursor: pointer;
+    }
+
+    #audio-progress {
+        transition: width 0.1s linear;
+    } 
+
 </style>
 <script>
 /* Small helpers */
@@ -2246,5 +2353,281 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
+    /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
+
+    function setupAudioRecorder() {
+        const recordBtn = document.getElementById('record-audio-btn');
+        const startRecordBtn = document.getElementById('start-record-btn');
+        const audioRecorderContainer = document.getElementById('audio-recorder-container');
+        const recordingTimer = document.getElementById('recording-timer');
+        const recordingLevel = document.getElementById('recording-level');
+        const deleteAudioBtn = document.getElementById('delete-audio-btn');
+        const sendAudioBtn = document.getElementById('send-audio-btn');
+        const audioPlaybackControls = document.getElementById('audio-playback-controls');
+        const playRecordedBtn = document.getElementById('play-recorded-btn');
+        const recordedAudioPreview = document.getElementById('recorded-audio-preview');
+        const audioDuration = document.getElementById('audio-duration');
+        const audioProgress = document.getElementById('audio-progress');
+        const audioWaveform = document.getElementById('audio-waveform');
+        const audioDataInput = document.getElementById('audio-data-input');
+        const messageForm = document.getElementById('messageForm');
+
+        if (!recordBtn || !audioRecorderContainer) {
+            console.warn('Audio recorder elements not found');
+            return;
+        }
+
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let recordingInterval = null;
+        let recordingTime = 0;
+        let audioContext = null;
+        let analyser = null;
+        let dataArray = null;
+        let isRecording = false;
+
+        // Mostrar/ocultar grabador
+        recordBtn.addEventListener('click', function () {
+            if (audioRecorderContainer.style.display === 'none' || !audioRecorderContainer.style.display) {
+                audioRecorderContainer.style.display = 'block';
+                audioPlaybackControls.style.display = 'none';
+                resetRecorder();
+            } else {
+                audioRecorderContainer.style.display = 'none';
+            }
+        });
+
+        // Iniciar grabación
+        startRecordBtn.addEventListener('click', async function () {
+            if (!isRecording) {
+                await startRecording();
+            } else {
+                stopRecording();
+            }
+        });
+
+        // Eliminar audio grabado
+        deleteAudioBtn.addEventListener('click', function () {
+            resetRecorder();
+            audioRecorderContainer.style.display = 'none';
+        });
+
+        // Enviar audio
+        sendAudioBtn.addEventListener('click', function () {
+            if (audioChunks.length === 0) {
+                alert('No hay audio para enviar');
+                return;
+            }
+
+            // Crear Blob del audio
+            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+
+            // Convertir a base64 para enviar
+            const reader = new FileReader();
+            reader.onloadend = function () {
+                const base64Audio = reader.result.split(',')[1];
+                audioDataInput.value = base64Audio;
+
+                // Enviar el formulario
+                messageForm.submit();
+            };
+            reader.readAsDataURL(audioBlob);
+        });
+
+        // Reproducir audio grabado
+        playRecordedBtn.addEventListener('click', function () {
+            if (recordedAudioPreview.src) {
+                if (recordedAudioPreview.paused) {
+                    recordedAudioPreview.play();
+                    playRecordedBtn.textContent = '⏸️';
+                } else {
+                    recordedAudioPreview.pause();
+                    playRecordedBtn.textContent = '▶️';
+                }
+            }
+        });
+
+        // Control de progreso al hacer clic en la barra
+        audioWaveform.addEventListener('click', function (e) {
+            const rect = audioWaveform.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = (clickX / rect.width) * 100;
+
+            if (recordedAudioPreview.duration) {
+                recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
+            }
+        });
+
+        // Actualizar progreso durante reproducción
+        recordedAudioPreview.addEventListener('timeupdate', function () {
+            if (recordedAudioPreview.duration) {
+                const progress = (recordedAudioPreview.currentTime / recordedAudioPreview.duration) * 100;
+                audioProgress.style.width = progress + '%';
+
+                // Actualizar tiempo
+                const currentTime = formatTime(recordedAudioPreview.currentTime);
+                const totalTime = formatTime(recordedAudioPreview.duration);
+                audioDuration.textContent = `${currentTime} / ${totalTime}`;
+            }
+        });
+
+        // Cuando termina la reproducción
+        recordedAudioPreview.addEventListener('ended', function () {
+            playRecordedBtn.textContent = '▶️';
+            audioProgress.style.width = '0%';
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+                // Configurar audio context para visualización
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+                analyser.fftSize = 256;
+                const bufferLength = analyser.frequencyBinCount;
+                dataArray = new Uint8Array(bufferLength);
+
+                // Configurar MediaRecorder
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    recordedAudioPreview.src = audioUrl;
+
+                    // Mostrar controles de reproducción
+                    audioPlaybackControls.style.display = 'flex';
+
+                    // Obtener duración
+                    recordedAudioPreview.onloadedmetadata = () => {
+                        audioDuration.textContent = formatTime(recordedAudioPreview.duration);
+                    };
+                };
+
+                // Iniciar grabación
+                mediaRecorder.start();
+                isRecording = true;
+                startRecordBtn.classList.add('recording');
+                startRecordBtn.textContent = '⏹️';
+                recordingTime = 0;
+
+                // Iniciar temporizador
+                recordingInterval = setInterval(() => {
+                    recordingTime++;
+                    recordingTimer.textContent = formatTime(recordingTime);
+                }, 1000);
+
+                // Iniciar visualizador de nivel
+                visualizeRecording();
+
+            } catch (err) {
+                console.error('Error al acceder al micrófono:', err);
+                alert('No se pudo acceder al micrófono. Por favor, revisa los permisos.');
+            }
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                mediaRecorder.stop();
+                isRecording = false;
+                startRecordBtn.classList.remove('recording');
+                startRecordBtn.textContent = '●';
+
+                // Detener visualización
+                if (audioContext) {
+                    audioContext.close();
+                }
+
+                // Limpiar intervalos
+                clearInterval(recordingInterval);
+                recordingInterval = null;
+
+                // Detener todas las pistas
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            }
+        }
+
+        function visualizeRecording() {
+            if (!analyser || !isRecording) return;
+
+            function draw() {
+                if (!isRecording) return;
+
+                requestAnimationFrame(draw);
+                analyser.getByteFrequencyData(dataArray);
+
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    sum += dataArray[i];
+                }
+                const average = sum / dataArray.length;
+
+                // Convertir a porcentaje (0-100)
+                const level = Math.min(100, (average / 128) * 100);
+                recordingLevel.style.width = level + '%';
+            }
+
+            draw();
+        }
+
+        function resetRecorder() {
+            if (isRecording) {
+                stopRecording();
+            }
+
+            if (recordingInterval) {
+                clearInterval(recordingInterval);
+                recordingInterval = null;
+            }
+
+            audioChunks = [];
+            recordingTime = 0;
+            recordingTimer.textContent = '0:00';
+            recordingLevel.style.width = '0%';
+            startRecordBtn.classList.remove('recording');
+            startRecordBtn.textContent = '●';
+            audioPlaybackControls.style.display = 'none';
+
+            if (recordedAudioPreview.src) {
+                URL.revokeObjectURL(recordedAudioPreview.src);
+                recordedAudioPreview.src = '';
+            }
+
+            if (audioDataInput) {
+                audioDataInput.value = '';
+            }
+        }
+
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+
+        // Limpiar al cambiar de chat o recargar
+        window.addEventListener('beforeunload', resetRecorder);
+
+        console.debug('Audio recorder initialized - WhatsApp style');
+    }
+
+    // Llama a esta función en DOMContentLoaded
+    // Busca esto en tu código existente:
+    document.addEventListener('DOMContentLoaded', () => {
+        // ... código existente ...
+
+        // AÑADE ESTA LÍNEA:
+        setupAudioRecorder();
+
+        // ... resto del código ...
+    }); 
+
 </script>
 {% endblock %}      
