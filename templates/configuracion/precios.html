@@ -9,18 +9,28 @@
     {% endif %}
 </div>
 
-<ul class="tabs">
-    {% for tab in tabs %}
-    <li class="{% if tab == active %}active{% endif %}">
-        {% if tab == 'precios' %}
-        <a href="{{ url_for('configuracion_precios') }}">{{ tab|capitalize }}</a>
-        {% else %}
-        <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
-        {% endif %}
-    </li>
-    {% endfor %}
-</ul>
+<div class="tabs-container">
+    <ul class="tabs">
+        {% for tab in tabs %}
+        <li class="{% if tab == active %}active{% endif %}">
+            {% if tab == 'precios' %}
+            <a href="{{ url_for('configuracion_precios') }}">{{ tab|capitalize }}</a>
+            {% else %}
+            <a href="{{ url_for('configuracion_tab', tab=tab) }}">{{ tab|capitalize }}</a>
+            {% endif %}
+        </li>
+        {% endfor %}
 
+        <!-- Botón de Restablecer columnas AL LADO DE LOS TABS -->
+        <li class="tab-action-item">
+            <button class="btn-reset-inline" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+                🔁 Restablecer columnas
+            </button>
+        </li>
+    </ul>
+</div>
+
+<!-- Botones de funcionalidad NORMALES (estos mantienen su tamaño) -->
 <div class="tab-navigation mb-6">
     <div class="tab-buttons">
         <div class="tab-buttons-left">
@@ -67,16 +77,12 @@
                         <span class="tab-title">Template Columnas</span>
                     </div>
                 </button>
-                <button class="btn btn-reset-small" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
-                    <span class="tab-icon">🔁</span>
-                    <span class="tab-title">Restablecer columnas</span>
-                </button>
             </div>
         </div>
     </div>
 </div>
 <br />
-<br />
+<br /> 
 
 <div class="section" id="pdf-upload" style="display:none;">
     <div class="section-header">
@@ -1086,6 +1092,122 @@
     }
 
     /* NUEVOS ESTILOS PARA LOS BOTONES SUPERIORES */
+    /* ===== NUEVOS ESTILOS PARA TABS + BOTÓN "RESTABLECER COLUMNAS" ===== */
+
+    /* Contenedor para tabs y botón */
+    .tabs-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+    }
+
+    /* Tabs normales */
+    .tabs {
+        display: flex;
+        list-style: none;
+        padding: 0;
+        margin: 0;
+        flex-wrap: wrap;
+        align-items: center;
+        flex-grow: 1;
+    }
+
+        .tabs li {
+            margin-right: 5px;
+            margin-bottom: 5px;
+        }
+
+            .tabs li a {
+                display: block;
+                padding: 10px 20px;
+                background: #f3f4f6;
+                color: #4b5563;
+                text-decoration: none;
+                border-radius: 6px;
+                font-weight: 500;
+                transition: all 0.2s;
+                font-size: 14px;
+            }
+
+            .tabs li.active a {
+                background: #3b82f6;
+                color: white;
+            }
+
+            .tabs li a:hover {
+                background: #e5e7eb;
+            }
+
+            .tabs li.active a:hover {
+                background: #2563eb;
+            }
+
+    /* Botón de Restablecer columnas - AL LADO DE LOS TABS */
+    .tab-action-item {
+        margin-left: 10px;
+    }
+
+    .btn-reset-inline {
+        background: #f59e0b;
+        color: #111;
+        border: none;
+        padding: 8px 14px;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 13px;
+        height: 38px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        white-space: nowrap;
+        transition: all 0.2s;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+        .btn-reset-inline:hover {
+            background: #d97706;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+    /* ===== ESTILOS ORIGINALES PARA LOS BOTONES DE FUNCIONALIDAD ===== */
+
+    /* Los botones normales mantienen su tamaño ORIGINAL */
+    .btn.btn-primary {
+        font-size: 14px;
+        height: 44px;
+        padding: 0 20px;
+        background: #3b82f6;
+        color: white;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: 500;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.2s;
+    }
+
+        .btn.btn-primary:hover {
+            background: #2563eb;
+            transform: translateY(-1px);
+        }
+
+        .btn.btn-primary .tab-icon {
+            font-size: 16px;
+            margin-right: 8px;
+        }
+
+        .btn.btn-primary .tab-title {
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+    /* Contenedores para botones de funcionalidad */
     .tab-buttons {
         display: flex;
         justify-content: space-between;
@@ -1110,71 +1232,44 @@
     .upload-buttons-group {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: 10px;
         align-items: center;
         justify-content: flex-end;
     }
 
-    /* Botón de restablecer columnas COMPLETO */
-    .btn-reset-small {
-        background: #f59e0b;
-        color: #111;
-        border: none;
-        padding: 5px 10px !important;
-        border-radius: 4px;
-        cursor: pointer;
-        font-weight: 600;
-        font-size: 11px;
-        height: 30px;
-        min-width: 120px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        white-space: nowrap;
-        margin: 0;
-        line-height: 1;
-        text-align: center;
-        flex-shrink: 0;
-    }
-
-        .btn-reset-small:hover {
-            background: #d97706;
-            transform: translateY(-1px);
-        }
-
-        /* Icono dentro del botón de restablecer */
-        .btn-reset-small .tab-icon {
-            font-size: 11px;
-            margin-right: 4px;
-        }
-
-    /* Asegurar que todos los botones tengan altura consistente */
-    .upload-buttons-group .btn.btn-primary,
-    .upload-buttons-group .btn-reset-small {
-        height: 30px;
-        min-height: 30px;
-        padding-top: 0;
-        padding-bottom: 0;
-        align-items: center;
-    }
-
-        /* Ajustar tamaño de fuente de los botones principales */
-        .upload-buttons-group .btn.btn-primary .tab-title {
-            font-size: 11px;
-        }
-
-    .btn-reset-small .tab-title {
-        font-size: 11px;
-        font-weight: 600;
-    }
-
-    /* Eliminar el spacer anterior */
-    .spacer {
-        display: none;
-    }
-
-    /* Ajuste responsive */
+    /* Responsive */
     @media (max-width: 1200px) {
+        .tabs-container {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .tabs {
+            margin-bottom: 10px;
+        }
+
+        .tab-action-item {
+            margin-left: 0;
+            width: 100%;
+        }
+
+        .btn-reset-inline {
+            width: 100%;
+            justify-content: center;
+            margin-top: 5px;
+        }
+
+        .tabs li {
+            margin-right: 3px;
+            margin-bottom: 3px;
+        }
+
+            .tabs li a {
+                padding: 8px 12px;
+                font-size: 13px;
+            }
+
+        /* Responsive para botones de funcionalidad */
         .tab-buttons {
             flex-direction: column;
             align-items: stretch;
@@ -1187,16 +1282,10 @@
 
         .upload-buttons-group {
             justify-content: flex-start;
-            gap: 5px;
+            gap: 8px;
         }
-
-        .btn-reset-small {
-            min-width: 110px;
-            font-size: 10px;
-            padding: 4px 8px !important;
-        }
-    }
-</style> 
+    } 
+</style>
 <script>
 
     // --- INICIO: Lógica de Paginación ---
