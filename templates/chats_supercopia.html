@@ -282,7 +282,6 @@
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
             <input type="hidden" name="audio_data" id="audio-data-input">
-            <input type="hidden" name="audio_file_name" id="audio-file-name" value="">
 
             <!-- Preview de archivo seleccionado (ARRIBA como WhatsApp) -->
             <div id="file-preview-container" style="width: 100%; order: -1;">
@@ -376,7 +375,8 @@
                           rows="1"
                           onkeydown="handleMessageKeyDown(event)"
                           oninput="autoResizeTextarea(this)"
-                          style="resize: none; overflow-y: auto;"></textarea>
+                          style="resize: none; overflow-y: auto;"
+                          required></textarea>
 
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
@@ -516,21 +516,6 @@
         </style>
 
         <script>
-            // Variables globales para el grabador de audio
-            let mediaRecorder = null;
-            let audioChunks = [];
-            let isRecording = false;
-            let recordingTimer = null;
-            let recordingSeconds = 0;
-            let recordedAudioBlob = null;
-
-            // Variables para el reproductor de audio
-            let audioPlayer = null;
-            let audioDuration = 0;
-            let isPlaying = false;
-            let playbackTimer = null;
-            let playbackSeconds = 0;
-
             // Funciones para manejar el textarea mejorado
             function handleMessageKeyDown(event) {
                 if (event.key === 'Enter') {
@@ -550,7 +535,22 @@
                     } else {
                         // Enter solo: Enviar mensaje inmediatamente
                         event.preventDefault();
-                        submitForm();
+                        const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
+                        const fileInput = document.getElementById('file-input');
+
+                        // Validar que haya contenido para enviar - CORREGIDO
+                        const hasText = textarea.value.trim() !== '';
+                        const hasFile = fileInput.files.length > 0;
+
+                        // SOLO validar si no hay absolutamente nada
+                        if (!hasText && !hasFile) {
+                            // No hay nada que enviar
+                            return;
+                        }
+
+                        // Enviar el formulario inmediatamente
+                        form.submit();
                     }
                 }
             }
@@ -574,340 +574,13 @@
                 }
             }
 
-            // Función para enviar el formulario
-            function submitForm() {
-                const form = document.getElementById('messageForm');
-                const textarea = document.getElementById('mensaje-texto');
-                const fileInput = document.getElementById('file-input');
-                const audioDataInput = document.getElementById('audio-data-input');
-
-                // Verificar si hay algo para enviar
-                const hasText = textarea.value.trim() !== '';
-                const hasFile = fileInput.files.length > 0;
-                const hasAudio = audioDataInput.value !== '';
-
-                if (!hasText && !hasFile && !hasAudio) {
-                    alert('Por favor, escribe un mensaje, adjunta un archivo o graba un audio.');
-                    return;
-                }
-
-                // Enviar el formulario
-                form.submit();
-            }
-
             // Inicializar altura del textarea al cargar
             document.addEventListener('DOMContentLoaded', function () {
                 const textarea = document.getElementById('mensaje-texto');
                 if (textarea) {
                     autoResizeTextarea(textarea);
                 }
-
-                // Inicializar eventos para adjuntar archivos
-                const fileInput = document.getElementById('file-input');
-                const fileAttachBtn = document.getElementById('file-attach-btn');
-                const removeFileBtn = document.getElementById('remove-file');
-                const filePreview = document.getElementById('file-preview');
-
-                fileAttachBtn.addEventListener('click', function () {
-                    fileInput.click();
-                });
-
-                fileInput.addEventListener('change', function () {
-                    if (this.files.length > 0) {
-                        const file = this.files[0];
-                        showFilePreview(file);
-                    }
-                });
-
-                removeFileBtn.addEventListener('click', function () {
-                    fileInput.value = '';
-                    filePreview.style.display = 'none';
-                });
-
-                // Inicializar grabador de audio
-                initAudioRecorder();
             });
-
-            // Función para mostrar preview de archivo
-            function showFilePreview(file) {
-                const filePreview = document.getElementById('file-preview');
-                const fileName = document.getElementById('file-name');
-                const fileSize = document.getElementById('file-size');
-                const fileIcon = document.getElementById('file-icon');
-
-                // Obtener icono según extensión
-                const extension = file.name.split('.').pop().toLowerCase();
-                const icon = getFileIcon(extension);
-
-                // Obtener tamaño formateado
-                const size = formatFileSize(file.size);
-
-                // Mostrar preview
-                fileIcon.textContent = icon;
-                fileName.textContent = file.name;
-                fileSize.textContent = size;
-                filePreview.style.display = 'block';
-            }
-
-            function getFileIcon(extension) {
-                const icons = {
-                    'pdf': '📕',
-                    'doc': '📄', 'docx': '📄',
-                    'xls': '📊', 'xlsx': '📊',
-                    'txt': '📝',
-                    'jpg': '🖼️', 'jpeg': '🖼️', 'png': '🖼️', 'gif': '🖼️',
-                    'mp4': '🎬', 'mov': '🎬', 'avi': '🎬', 'mkv': '🎬',
-                    'mp3': '🎵', 'wav': '🎵', 'ogg': '🎵',
-                    'zip': '📦', 'rar': '📦'
-                };
-                return icons[extension] || '📎';
-            }
-
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-
-            // Funciones para el grabador de audio
-            function initAudioRecorder() {
-                const recordAudioBtn = document.getElementById('record-audio-btn');
-                const startRecordBtn = document.getElementById('start-record-btn');
-                const deleteAudioBtn = document.getElementById('delete-audio-btn');
-                const sendAudioBtn = document.getElementById('send-audio-btn');
-                const playRecordedBtn = document.getElementById('play-recorded-btn');
-                const audioRecorderContainer = document.getElementById('audio-recorder-container');
-                const audioPlaybackControls = document.getElementById('audio-playback-controls');
-                const recordedAudioPreview = document.getElementById('recorded-audio-preview');
-
-                // Mostrar/ocultar grabador de audio
-                recordAudioBtn.addEventListener('click', function () {
-                    audioRecorderContainer.style.display = audioRecorderContainer.style.display === 'none' ? 'block' : 'none';
-                    if (audioRecorderContainer.style.display === 'block') {
-                        audioPlaybackControls.style.display = 'none';
-                        resetRecordingUI();
-                    }
-                });
-
-                // Iniciar grabación
-                startRecordBtn.addEventListener('click', async function () {
-                    if (!isRecording) {
-                        await startRecording();
-                    } else {
-                        stopRecording();
-                    }
-                });
-
-                // Eliminar audio grabado
-                deleteAudioBtn.addEventListener('click', function () {
-                    deleteRecordedAudio();
-                });
-
-                // Enviar audio
-                sendAudioBtn.addEventListener('click', function () {
-                    sendRecordedAudio();
-                });
-
-                // Reproducir audio grabado
-                playRecordedBtn.addEventListener('click', function () {
-                    toggleAudioPlayback();
-                });
-
-                // Inicializar el reproductor de audio
-                audioPlayer = recordedAudioPreview;
-                audioPlayer.addEventListener('timeupdate', updateAudioProgress);
-                audioPlayer.addEventListener('ended', function () {
-                    isPlaying = false;
-                    playRecordedBtn.textContent = '▶️';
-                    clearInterval(playbackTimer);
-                    playbackSeconds = 0;
-                    updatePlaybackTimer();
-                });
-            }
-
-            async function startRecording() {
-                try {
-                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    mediaRecorder = new MediaRecorder(stream);
-                    audioChunks = [];
-
-                    mediaRecorder.ondataavailable = function (event) {
-                        if (event.data.size > 0) {
-                            audioChunks.push(event.data);
-                        }
-                    };
-
-                    mediaRecorder.onstop = function () {
-                        recordedAudioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-
-                        // Actualizar UI para mostrar controles de reproducción
-                        document.getElementById('audio-playback-controls').style.display = 'flex';
-                        document.getElementById('recording-timer').style.display = 'none';
-                        document.getElementById('start-record-btn').style.display = 'none';
-
-                        // Crear URL para el audio
-                        const audioUrl = URL.createObjectURL(recordedAudioBlob);
-                        audioPlayer.src = audioUrl;
-
-                        // Obtener duración del audio
-                        audioPlayer.addEventListener('loadedmetadata', function () {
-                            audioDuration = audioPlayer.duration;
-                            updateAudioDuration();
-                        });
-
-                        // Detener todos los tracks del stream
-                        stream.getTracks().forEach(track => track.stop());
-                    };
-
-                    mediaRecorder.start();
-                    isRecording = true;
-                    startRecordBtn.style.background = '#ff4444';
-                    startRecordBtn.textContent = '⏹️';
-
-                    // Iniciar temporizador
-                    recordingSeconds = 0;
-                    recordingTimer = setInterval(function () {
-                        recordingSeconds++;
-                        updateRecordingTimer();
-                        updateRecordingVisualizer();
-                    }, 1000);
-
-                } catch (error) {
-                    console.error('Error al acceder al micrófono:', error);
-                    alert('No se pudo acceder al micrófono. Por favor, asegúrate de permitir el acceso.');
-                }
-            }
-
-            function stopRecording() {
-                if (mediaRecorder && isRecording) {
-                    mediaRecorder.stop();
-                    isRecording = false;
-                    startRecordBtn.style.background = '#25D366';
-                    startRecordBtn.textContent = '●';
-
-                    // Detener temporizador
-                    clearInterval(recordingTimer);
-
-                    // Ocultar visualizador
-                    document.getElementById('recording-level').style.width = '0%';
-                }
-            }
-
-            function updateRecordingTimer() {
-                const minutes = Math.floor(recordingSeconds / 60);
-                const seconds = recordingSeconds % 60;
-                document.getElementById('recording-timer').textContent =
-                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-
-            function updateRecordingVisualizer() {
-                // Simular nivel de grabación aleatorio
-                const level = Math.random() * 100;
-                document.getElementById('recording-level').style.width = level + '%';
-            }
-
-            function deleteRecordedAudio() {
-                recordedAudioBlob = null;
-                audioPlayer.src = '';
-
-                // Resetear UI
-                document.getElementById('audio-playback-controls').style.display = 'none';
-                document.getElementById('recording-timer').style.display = 'block';
-                document.getElementById('start-record-btn').style.display = 'flex';
-
-                // Resetear valores
-                document.getElementById('recording-timer').textContent = '0:00';
-                document.getElementById('audio-duration').textContent = '0:00';
-                document.getElementById('audio-progress').style.width = '0%';
-
-                // Limpiar input de audio
-                document.getElementById('audio-data-input').value = '';
-                document.getElementById('audio-file-name').value = '';
-            }
-
-            function sendRecordedAudio() {
-                if (!recordedAudioBlob) {
-                    alert('No hay audio grabado para enviar.');
-                    return;
-                }
-
-                // Convertir blob a base64
-                const reader = new FileReader();
-                reader.readAsDataURL(recordedAudioBlob);
-                reader.onloadend = function () {
-                    const base64Audio = reader.result;
-
-                    // Establecer el nombre del archivo de audio
-                    const timestamp = new Date().getTime();
-                    const audioFileName = `audio_${timestamp}.webm`;
-
-                    // Asignar valores a los inputs ocultos
-                    document.getElementById('audio-data-input').value = base64Audio;
-                    document.getElementById('audio-file-name').value = audioFileName;
-
-                    // Limpiar el textarea para forzar el envío solo del audio
-                    document.getElementById('mensaje-texto').value = '';
-
-                    // Enviar el formulario automáticamente
-                    submitForm();
-                };
-            }
-
-            function toggleAudioPlayback() {
-                if (!recordedAudioBlob) return;
-
-                if (!isPlaying) {
-                    audioPlayer.play();
-                    isPlaying = true;
-                    playRecordedBtn.textContent = '⏸️';
-
-                    // Iniciar temporizador de reproducción
-                    playbackTimer = setInterval(function () {
-                        if (isPlaying) {
-                            playbackSeconds = audioPlayer.currentTime;
-                            updatePlaybackTimer();
-                            updateAudioProgress();
-                        }
-                    }, 100);
-                } else {
-                    audioPlayer.pause();
-                    isPlaying = false;
-                    playRecordedBtn.textContent = '▶️';
-                    clearInterval(playbackTimer);
-                }
-            }
-
-            function updateAudioDuration() {
-                const minutes = Math.floor(audioDuration / 60);
-                const seconds = Math.floor(audioDuration % 60);
-                document.getElementById('audio-duration').textContent =
-                    `${minutes}:${seconds.toString().padStart(2, '0')}`;
-            }
-
-            function updatePlaybackTimer() {
-                const minutes = Math.floor(playbackSeconds / 60);
-                const seconds = Math.floor(playbackSeconds % 60);
-                // No mostramos este temporizador en la UI, solo para control interno
-            }
-
-            function updateAudioProgress() {
-                if (audioDuration > 0) {
-                    const progress = (audioPlayer.currentTime / audioDuration) * 100;
-                    document.getElementById('audio-progress').style.width = progress + '%';
-                }
-            }
-
-            function resetRecordingUI() {
-                document.getElementById('recording-timer').textContent = '0:00';
-                document.getElementById('recording-level').style.width = '0%';
-                document.getElementById('audio-playback-controls').style.display = 'none';
-                document.getElementById('recording-timer').style.display = 'block';
-                document.getElementById('start-record-btn').style.display = 'flex';
-                startRecordBtn.style.background = '#25D366';
-                startRecordBtn.textContent = '●';
-            }
 
             // Función para resetear el textarea si está vacío
             function resetTextareaIfEmpty() {
