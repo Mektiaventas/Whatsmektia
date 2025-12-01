@@ -23,55 +23,59 @@
 
 <div class="tab-navigation mb-6">
     <div class="tab-buttons">
+        <div class="tab-buttons-left">
+            <button class="btn btn-primary mt-3" id="btn-user-list" onclick="showSection('user-list')">
+                <div class="tab-icon">👥</div>
+                <div>
+                    <span class="tab-title">Precios vista cliente</span>
+                </div>
+            </button>
 
-        <button class="btn btn-primary mt-3" id="btn-user-list" onclick="showSection('user-list')">
-            <div class="tab-icon">👥</div>
-            <div>
-                <span class="tab-title">Precios vista cliente</span>
-            </div>
-        </button>
+            {% if is_admin %}
+            <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
+                <div class="tab-icon">🔒</div>
+                <div>
+                    <span class="tab-title">Precios vista Admin</span>
+                </div>
+            </button>
+            {% endif %}
+        </div>
 
-        {% if is_admin %}
-        <button class="btn btn-primary mt-3" id="btn-admin-list" onclick="showSection('admin-list')">
-            <div class="tab-icon">🔒</div>
-            <div>
-                <span class="tab-title">Precios vista Admin</span>
+        <div class="tab-buttons-right">
+            <div class="upload-buttons">
+                <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
+                    <div class="tab-icon">📊</div>
+                    <div>
+                        <span class="tab-title">Carga Template</span>
+                    </div>
+                </button>
+                <button class="btn btn-primary mt-3" id="btn-manual-upload" onclick="showSection('manual-upload')">
+                    <div class="tab-icon">✏️</div>
+                    <div>
+                        <span class="tab-title">Carga manual</span>
+                    </div>
+                </button>
+                <button class="btn btn-primary mt-3" id="btn-pdf-upload" onclick="showSection('pdf-upload')">
+                    <div class="tab-icon">📄</div>
+                    <div>
+                        <span class="tab-title">Carga con IA</span>
+                    </div>
+                </button>
+                <button class="btn btn-primary mt-3" id="btn-column-template" onclick="showSection('column-template')">
+                    <div class="tab-icon">📝</div>
+                    <div>
+                        <span class="tab-title">Template Columnas</span>
+                    </div>
+                </button>
             </div>
-        </button>
-        {% endif %}
-        <div class="spacer" aria-hidden="true"></div>
-        <button class="btn btn-primary mt-3" id="btn-batch-upload" onclick="showSection('batch-upload')">
-            <div class="tab-icon">📊</div>
-            <div>
-                <span class="tab-title">Carga Template</span>
+            <div class="reset-button-container">
+                <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
+                    🔁 Restablecer columnas
+                </button>
             </div>
-        </button>
-        <button class="btn btn-primary mt-3" id="btn-manual-upload" onclick="showSection('manual-upload')">
-            <div class="tab-icon">✏️</div>
-            <div>
-                <span class="tab-title">Carga manual</span>
-
-            </div>
-        </button>
-
-        <button class="btn btn-primary mt-3" id="btn-pdf-upload" onclick="showSection('pdf-upload')">
-            <div class="tab-icon">📄</div>
-            <div>
-                <span class="tab-title">Carga con IA</span>
-            </div>
-        </button>
-        <br /><br />
-        <button class="btn btn-primary mt-3" id="btn-column-template" onclick="showSection('column-template')">
-            <div class="tab-icon">📝</div>
-            <div>
-                <span class="tab-title">Template Columnas</span>
-            </div>
-        </button>
-        <button class="btn btn-reset mt-3" id="btn-reset-columns" onclick="resetColumns()" title="Restablecer columnas ocultas">
-            🔁 Restablecer columnas
-        </button>
+        </div>
     </div>
-</div>
+</div> 
 <br />
 <br />
 <div class="section" id="pdf-upload" style="display:none;">
@@ -956,6 +960,7 @@
         padding-right: 6px; /* avoid cutting last column behind scrollbar */
         background: transparent;
     }
+
     .search-form {
         display: flex;
         gap: 10px;
@@ -1085,6 +1090,44 @@
         width: 50%;
         height: 50%;
     }
+    .tab-buttons {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 20px;
+    }
+
+    .tab-buttons-left {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        flex: 1;
+    }
+
+    .tab-buttons-right {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-end;
+        gap: 10px;
+    }
+
+    .upload-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+    }
+
+    .reset-button-container {
+        display: flex;
+        justify-content: flex-end;
+        width: 100%;
+    }
+
+    /* Elimina el spacer anterior */
+    .spacer {
+        display: none;
+    } 
 </style>
 <script>
 
