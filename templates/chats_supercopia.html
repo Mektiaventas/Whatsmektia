@@ -149,11 +149,11 @@
             <div class="msg-box msg-user" data-msg-id="{{ msg.id if msg.id else '' }}">
                 <div class="message-content">
                     {% if msg.es_imagen and msg.imagen_url %}
-                    <div class="image-message">
+                    <div class="whatsapp-image-container">
                         <img src="{{ msg.imagen_url | public_img }}" alt="Imagen" class="whatsapp-image">
                         {% if msg.mensaje and msg.mensaje != 'Analiza esta imagen' %}
                         <div class="image-caption">
-                            {{ msg.mensaje }}
+                            {{ msg.mensaje | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
@@ -178,17 +178,17 @@
                         </div>
                         {% if msg.transcripcion_audio %}
                         <div class="audio-transcription">
-                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio }}
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio | whatsapp_format | safe }}
                         </div>
                         {% elif msg.mensaje and msg.mensaje != '[Mensaje manual desde web]' %}
                         <div class="audio-transcription">
-                            <strong>Mensaje:</strong> {{ msg.mensaje }}
+                            <strong>Mensaje:</strong> {{ msg.mensaje | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
                     {% else %}
                     <div class="text-message" style="white-space: normal; line-height: 1.2;">
-                        {{ msg.mensaje | safe }}
+                        {{ msg.mensaje | whatsapp_format | safe }}
                     </div>
                     {% endif %}
                 </div>
@@ -221,11 +221,11 @@
                 <div class="message-content">
 
                     {% if msg.respuesta_tipo_mensaje == 'imagen' and msg.respuesta_contenido_extra %}
-                    <div class="image-message">
+                    <div class="whatsapp-image-container">
                         <img src="{{ msg.respuesta_contenido_extra | public_img }}" alt="Imagen IA" class="whatsapp-image">
                         {% if msg.respuesta and msg.respuesta != 'Analiza esta imagen' and msg.respuesta != 'El usuario envió una imagen' %}
                         <div class="image-caption">
-                            {{ msg.respuesta }}
+                            {{ msg.respuesta | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
@@ -250,7 +250,7 @@
                         </div>
                         {% if msg.respuesta %}
                         <div class="audio-transcription">
-                            <strong>Respuesta:</strong> {{ msg.respuesta }}
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio | whatsapp_format | safe }}
                         </div>
                         {% endif %}
                     </div>
@@ -281,7 +281,6 @@
         {% if not IA_ESTADOS.get(selected, {}).get('activa', True) %}
         <form method="POST" action="/send-manual" class="reply-form" id="messageForm" enctype="multipart/form-data" style="display: flex; flex-direction: column; width: 100%;">
             <input type="hidden" name="numero" value="{{ selected }}">
-            <input type="hidden" name="audio_data" id="audio-data-input">
 
             <!-- Preview de archivo seleccionado (ARRIBA como WhatsApp) -->
             <div id="file-preview-container" style="width: 100%; order: -1;">
@@ -299,62 +298,11 @@
                 </div>
             </div>
 
-            <!-- Grabador de audio estilo WhatsApp -->
-            <div id="audio-recorder-container" style="display: none; width: 100%; order: -1;">
-                <div class="audio-recorder-whatsapp" style="background: #f0f0f0; border-radius: 8px; padding: 12px; margin: 0 10px 10px 10px; display: flex; align-items: center; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 12px; flex: 1;">
-                        <!-- Controles de grabación -->
-                        <button type="button" id="start-record-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 40px; height: 40px; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center;">
-                            ●
-                        </button>
-
-                        <div id="recording-timer" style="font-size: 14px; font-weight: bold; color: #333;">
-                            0:00
-                        </div>
-
-                        <div id="recording-visualizer" style="flex: 1; height: 20px; background: #ddd; border-radius: 10px; overflow: hidden;">
-                            <div id="recording-level" style="height: 100%; width: 0%; background: #25D366; transition: width 0.1s;"></div>
-                        </div>
-                    </div>
-
-                    <!-- Controles de audio grabado -->
-                    <div id="audio-playback-controls" style="display: none; align-items: center; gap: 10px; flex: 1;">
-                        <audio id="recorded-audio-preview" style="display: none;"></audio>
-                        <button type="button" id="play-recorded-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 12px;">
-                            ▶️
-                        </button>
-                        <div style="flex: 1;">
-                            <div id="audio-duration" style="font-size: 12px; color: #666;">0:00</div>
-                            <div id="audio-waveform" style="height: 4px; background: #ccc; border-radius: 2px; margin-top: 4px;">
-                                <div id="audio-progress" style="height: 100%; width: 0%; background: #25D366; border-radius: 2px;"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Botones de acción -->
-                    <div style="display: flex; gap: 8px;">
-                        <button type="button" id="delete-audio-btn" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 14px;">
-                            🗑️
-                        </button>
-                        <button type="button" id="send-audio-btn" style="background: #25D366; color: white; border: none; border-radius: 50%; width: 32px; height: 32px; cursor: pointer; font-size: 14px;">
-                            ✓
-                        </button>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Input group para escribir y enviar -->
             <div class="input-group">
                 <!-- Botón para adjuntar archivos -->
                 <button type="button" id="file-attach-btn" class="file-attach-btn" style="font-size: 24px;" title="Adjuntar archivo">
                     📎
                 </button>
-
-                <!-- Botón para grabar audio -->
-                <button type="button" id="record-audio-btn" class="record-audio-btn" style="font-size: 24px;" title="Grabar audio">
-                    🎤
-                </button>
-
                 <input type="file" id="file-input" name="archivo" style="display: none;"
                        accept=".pdf,.xlsx,.xls,.docx,.doc,.txt,.jpg,.jpeg,.png,.gif,.mp4,.mov,.webm,.avi,.mkv,.ogg,.mpeg,.mp3,.wav,.zip,.rar">
 
@@ -381,22 +329,6 @@
                 <button type="submit" class="send-btn">Enviar</button>
             </div>
         </form>
-        {% else %}
-        <!-- Este es el bloque ELSE del IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
-        <div class="ia-active-message">
-            <div class="ia-indicator">
-                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
-                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
-            </div>
-            <form action="/toggle_ai/{{ selected }}" method="POST">
-                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
-                <button type="submit" class="toggle-btn off">Desactivar IA</button>
-                {% else %}
-                <button type="submit" class="toggle-btn on">Activar IA</button>
-                {% endif %}
-            </form>
-        </div>
-        {% endif %}  <!-- Este cierra el IF "not IA_ESTADOS.get(selected, {}).get('activa', True)" -->
 
         <style>
             /* Estilos para el textarea mejorado */
@@ -554,27 +486,6 @@
                     }
                 }
             }
-            messageForm.addEventListener('submit', function (e) {
-                const hasText = textarea.value.trim() !== '';
-                const hasFile = fileInput.files.length > 0;
-                const hasAudio = document.getElementById('audio-data-input').value !== '';
-
-                if (!hasText && !hasFile && !hasAudio) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                    return false;
-                }
-
-                const sendBtn = document.querySelector('.send-btn');
-                const originalText = sendBtn.innerHTML;
-                sendBtn.innerHTML = '⏳';
-                sendBtn.disabled = true;
-
-                setTimeout(() => {
-                    sendBtn.innerHTML = originalText;
-                    sendBtn.disabled = false;
-                }, 3000);
-            });
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -623,9 +534,23 @@
                 }
             });
         </script>
-        {% endif %}  <!-- Este cierra el IF "selected" -->
-
-    </section>  <!-- ¡IMPORTANTE! Esto cierra la sección -->
+        {% else %}
+        <div class="ia-active-message">
+            <div class="ia-indicator">
+                <span class="ia-icon">{{ '🤖' if IA_ESTADOS.get(selected, {}).get('activa', True) else '👤' }}</span>
+                <span>{{ 'La IA está respondiendo automáticamente' if IA_ESTADOS.get(selected, {}).get('activa', True) else 'Modo manual activado' }}</span>
+            </div>
+            <form action="/toggle_ai/{{ selected }}" method="POST">
+                {% if IA_ESTADOS.get(selected, {}).get('activa', True) %}
+                <button type="submit" class="toggle-btn off">Desactivar IA</button>
+                {% else %}
+                <button type="submit" class="toggle-btn on">Activar IA</button>
+                {% endif %}
+            </form>
+        </div>
+        {% endif %}
+        {% endif %}
+    </section>
 
     <aside class="sidebar-right" style="color: white;text-align: center;padding: inherit;border-top: blue;border-start-start-radius: revert-layer;">
         {% if selected %}
@@ -664,7 +589,6 @@
 </div>
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
-
 <style>
     :root {
         --left-width: 340px;
@@ -1247,57 +1171,42 @@
         transform: scale(1.1);
         transition: all 0.2s ease;
     }
-    /* ESTILOS PARA GRABADOR DE AUDIO WHATSAPP */
-    .audio-recorder-whatsapp {
-        animation: slideIn 0.3s ease-out;
+    /* ===== ESTILOS WHATSAPP PARA IMÁGENES ===== */
+    .whatsapp-image-container {
+        max-width: 300px;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        margin: 4px 0;
     }
 
-    @keyframes slideIn {
-        from {
-            opacity: 0;
-            transform: translateY(-10px);
-        }
-
-        to {
-            opacity: 1;
-            transform: translateY(0);
-        }
+    .whatsapp-image {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 8px 8px 0 0;
     }
 
-    #start-record-btn.recording {
-        background: #ff4444 !important;
-        animation: pulse 1s infinite;
+    .image-caption {
+        padding: 8px 12px;
+        background: rgba(0,0,0,0.05);
+        font-size: 14px;
+        line-height: 1.4;
+        color: inherit;
+        border-radius: 0 0 8px 8px;
+        white-space: pre-wrap;
+        word-wrap: break-word;
     }
 
-    @keyframes pulse {
-        0% {
-            transform: scale(1);
-        }
-
-        50% {
-            transform: scale(1.1);
-        }
-
-        100% {
-            transform: scale(1);
-        }
+    /* Asegurar que las imágenes dentro de mensajes tengan el estilo correcto */
+    .msg-user .whatsapp-image-container,
+    .msg-ai .whatsapp-image-container {
+        max-width: 300px;
     }
 
-    #recording-visualizer {
-        position: relative;
-    }
-
-    #recording-level {
-        transition: width 0.05s linear;
-    }
-
-    #audio-waveform {
-        position: relative;
-        cursor: pointer;
-    }
-
-    #audio-progress {
-        transition: width 0.1s linear;
+    /* Eliminar estilos viejos de image-message */
+    .image-message {
+        display: none;
     }
 </style>
 <script>
@@ -1318,11 +1227,11 @@ function normalizeText(s) {
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return String(unsafe)
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#039;");
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
 }
 
 function truncate(str, n) {
@@ -1330,43 +1239,62 @@ function truncate(str, n) {
     return str.length > n ? str.substring(0, n) + '...' : str;
 }
 
-function formatClientTime(serverTs) {
-    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
-    if (isNaN(d.getTime())) d = new Date();
+    // chats.html (Línea ~334)
+    function formatClientTime(serverTs) {
+        // Asumimos que serverTs ya está en UTC o es un timestamp numérico válido
+        let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+        if (isNaN(d.getTime())) d = new Date();
 
-    const day = d.getDate();
-    const month = d.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
-    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
+        // Formato IDÉNTICO al Kanban: día-mes hora:minuto
+        const day = d.getDate();
 
-    return `${day}-${month}   ${time}`;
-}
+        // 🚨 CORRECCIÓN CLAVE: Eliminar la zona horaria y usar el TZ del cliente/servidor.
+        // Asumimos que el objeto 'd' ya fue creado a partir de un timestamp de México
+        // o que el navegador lo ajusta correctamente a la hora local del cliente.
+        const month = d.toLocaleString('es-MX', {
+            month: 'short',
+            // ELIMINADO: timeZone: 'America/Mexico_City'
+        }).toLowerCase().replace('.', '').trim();
 
-function getCountryFlag(numero) {
-    if (!numero) return null;
-    const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
-    const numStr = numero.toString().replace('+', '');
-    for (let i = 3; i > 0; i--) {
-        const pref = numStr.substring(0, i);
-        if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        const time = d.toLocaleTimeString('es-MX', {
+            // ELIMINADO: timeZone: 'America/Mexico_City',
+            hour: '2-digit',
+            minute: '2-digit',
+            hour12: false
+        });
+
+        // Formato exacto igual a Kanban: "d-mes   hh:mm"
+        return `${day}-${month}   ${time}`;
     }
-    return null;
-}
-
+    // Función para obtener bandera (igual que en kanban)
+    function getCountryFlag(numero) {
+        if (!numero) return null;
+        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+        const numStr = numero.toString().replace('+', '');
+        for (let i = 3; i > 0; i--) {
+            const pref = numStr.substring(0, i);
+            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
+        }
+        return null;
+    }
 /* State */
 let chatAutoRefresh = true;
 let refreshIntervalMs = 5000;
-let messagePollIntervalMs = 5000;
-let selectedChatId = {% if selected %}{{ selected|tojson }}{% else %}null{% endif %};
+let messagePollIntervalMs = 2000;
+let selectedChatId = {{ selected|tojson }};
 let lastChatsTimestamp = 0;
-let lastMessageTimestamp = {% if mensajes and mensajes[-1].timestamp %}{{ (mensajes[-1].timestamp.timestamp() * 1000) }}{% else %}0{% endif %};
-let lastMessageIdForSelected = 0;
+let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
+let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
 let isEditingAlias = false;
 let aliasTimers = new Map();
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
+
+/* Deduplication set (initialized from DOM on poll init) */
 let seenMessageKeys = new Set();
 
-/* ===================== CHAT-LIST FUNCTIONS ===================== */
+/* ===================== CHAT-LIST ===================== */
+
 function actualizarListaChats() {
     if (!chatAutoRefresh) return;
     fetch('/chats/data', { cache: 'no-store' })
@@ -1383,75 +1311,111 @@ function actualizarListaChats() {
 
 const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
-function crearNuevoChatHTML(chat) {
-    const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
-    const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
-    const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
-    const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
-    let imagen = '/static/icons/whatsapp-icon.png';
-    if (isTelegram) {
-        imagen = '/static/icons/telegram-icon-dos.png';
-    }
+    function crearNuevoChatHTML(chat) {
+        const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+        const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
 
-    const banderaUrl = getCountryFlag(num) || '';
-    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
-    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
-    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
-    const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
-    const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+        // DETERMINAR PLATAFORMA SIEMPRE - no solo cuando hay chat seleccionado
+        const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
+        const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
 
-    return `
-<a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
-    <div class="card-content">
-        <div class="card-title-row">
-            <div class="card-avatar-section">
-                <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
-            </div>
-            <div class="card-name-section">
-                <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
-            </div>
-        </div>
-        <div class="card-bottom-row">
-            <div class="card-msg">${preview}</div>
-            <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
-        </div>
-        ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
-    </div>
-</a>`.trim();
-}
-
-function actualizarIncrementalChats(chats) {
-    const container = document.querySelector('.chat-items');
-    if (!container) return;
-    const existing = new Map();
-    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
-
-    container.style.opacity = '0.99';
-
-    for (let i = chats.length - 1; i >= 0; i--) {
-        const chat = chats[i];
-        const num = chat.numero;
-        const node = existing.get(num);
-        if (node) {
-            actualizarChatExistente(node, chat);
-            existing.delete(num);
-            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                container.insertBefore(node, container.firstElementChild);
-            }
-        } else {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = crearNuevoChatHTML(chat);
-            const el = tmp.firstElementChild;
-            if (!el) continue;
-            container.insertBefore(el, container.firstElementChild);
-            el.classList.add('new-message');
-            setTimeout(() => el.classList.remove('new-message'), 1400);
+        let imagen = '/static/icons/whatsapp-icon.png';
+        if (isTelegram) {
+            imagen = '/static/icons/telegram-icon-dos.png';
         }
+
+        const banderaUrl = getCountryFlag(num) || '';
+        const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+        const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+        const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+        const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+        const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
+
+        return `
+    <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
+        <div class="card-content">
+            <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
+            <div class="card-title-row">
+                <div class="card-avatar-section">
+                    <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                    ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
+                </div>
+                <div class="card-name-section">
+                    <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
+                </div>
+            </div>
+
+            <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
+            <div class="card-bottom-row">
+                <div class="card-msg">${preview}</div>
+                <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
+            </div>
+
+            <!-- Indicador de mensajes no leídos -->
+            ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+        </div>
+    </a>`.trim();
+    }
+    function actualizarIncrementalChats(chats) {
+        const container = document.querySelector('.chat-items');
+        if (!container) return;
+        const existing = new Map();
+        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+
+        // PREVENIR PARPADEO: mantener visibilidad durante actualización
+        container.style.opacity = '0.99';
+
+        for (let i = chats.length - 1; i >= 0; i--) {
+            const chat = chats[i];
+            const num = chat.numero;
+            const node = existing.get(num);
+            if (node) {
+                actualizarChatExistente(node, chat);
+                existing.delete(num);
+                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                    container.insertBefore(node, container.firstElementChild);
+                }
+            } else {
+                const tmp = document.createElement('div');
+                const hasBuilder = typeof crearNuevoChatHTML === 'function';
+                tmp.innerHTML = hasBuilder
+                    ? crearNuevoChatHTML(chat)
+                    : `
+            <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
+                <div class="card-content">
+                    <div class="card-title-row">
+                        <div class="card-avatar-section">
+                            <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
+                        </div>
+                        <span class="alias-view">${chat.nombre_mostrado || chat.numero}</span>
+                    </div>
+                    <div class="card-meta-row">
+                        <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
+                    </div>
+                    <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
+                </div>
+            </a>`;
+                const el = tmp.firstElementChild;
+                if (!el) continue;
+                container.insertBefore(el, container.firstElementChild);
+                el.classList.add('new-message');
+                setTimeout(() => el.classList.remove('new-message'), 1400);
+            }
+        }
+
+        existing.forEach((node) => node.remove());
+
+        // Restaurar opacidad
+        setTimeout(() => {
+            container.style.opacity = '1';
+        }, 100);
     }
 
-    existing.forEach((node) => node.remove());
-    setTimeout(() => { container.style.opacity = '1'; }, 100);
+try {
+    const msgsEl = document.getElementById('msgs');
+    if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+} catch (e) {
+    console.warn('Initial scroll to bottom failed:', e);
 }
 
 function actualizarChatExistente(elemento, chat) {
@@ -1460,20 +1424,35 @@ function actualizarChatExistente(elemento, chat) {
     const aliasView = elemento.querySelector('.alias-view');
     if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
 
+    // === MANTENER LOS ICONOS CORRECTOS ===
     const avatarImg = elemento.querySelector('.card-avatar');
     if (avatarImg) {
+        // Determinar el icono correcto basado en el número/canal
         let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
         if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
             nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
         }
+
+        // Solo actualizar si es diferente
         if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
             avatarImg.setAttribute('src', nuevoAvatarSrc);
         }
     }
+    // === FIN MANTENER ICONOS ===
+
+
 
     const timeEl = elemento.querySelector('.card-time');
     if (timeEl) {
         timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+    } else {
+        const titleRow = elemento.querySelector('.card-title-row');
+        if (titleRow) {
+            const span = document.createElement('span');
+            span.className = 'card-time';
+            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
+            titleRow.appendChild(span);
+        }
     }
 
     const bandera = getCountryFlag(chat.numero) || '';
@@ -1500,6 +1479,15 @@ function actualizarChatExistente(elemento, chat) {
     const unreadEl = elemento.querySelector('.card-unread');
     if (sin_leer > 0) {
         if (unreadEl) unreadEl.textContent = sin_leer;
+        else {
+            const metaRow = elemento.querySelector('.card-meta-row');
+            if (metaRow) {
+                const span = document.createElement('span');
+                span.className = 'card-unread';
+                span.textContent = sin_leer;
+                metaRow.appendChild(span);
+            }
+        }
     } else if (unreadEl) {
         unreadEl.remove();
     }
@@ -1516,7 +1504,8 @@ function actualizarChatExistente(elemento, chat) {
     else elemento.classList.remove('selected');
 }
 
-/* ===================== MESSAGES FUNCTIONS ===================== */
+/* ===================== MESSAGES POLLING & DEDUPE ===================== */
+
 function buildMessageKeyFor(m) {
     const id = coalesce(m.id, m[0], m['id']);
     if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
@@ -1532,143 +1521,421 @@ function buildMessageKeyFor(m) {
     const rounded = Math.floor(ts / 1000);
     return 'text:' + normalizeText(content) + '|ts:' + String(rounded);
 }
+    function pollSelectedMessages() {
+        if (!selectedChatId || !chatAutoRefresh) return;
 
-function pollSelectedMessages() {
-    const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
-    fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
-        .then(r => r.json())
-        .then(data => {
-            if (!data || !Array.isArray(data.messages)) return;
-            if (data.messages.length === 0) return;
+        const after = Number(lastMessageTimestamp) || (Date.now() - 30000); // Solo últimos 30 segundos
 
-            let maxTs = lastMessageTimestamp;
-            data.messages.forEach(m => {
-                let ts = 0;
-                if (m.timestamp) {
-                    ts = Date.parse(m.timestamp);
-                    if (!isNaN(ts)) {
-                        maxTs = Math.max(maxTs, ts);
+        fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, {
+            cache: 'no-store',
+            headers: {
+                'Cache-Control': 'no-cache',
+                'Pragma': 'no-cache'
+            }
+        })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                if (!data || !Array.isArray(data.messages)) return;
+
+                let hasNewMessages = false;
+                let maxTs = lastMessageTimestamp;
+
+                // Procesar mensajes
+                data.messages.forEach(m => {
+                    const key = buildMessageKeyFor(m);
+                    if (!seenMessageKeys.has(key)) {
+                        hasNewMessages = true;
+
+                        // Actualizar timestamp máximo
+                        let ts = 0;
+                        if (m.timestamp) {
+                            ts = Date.parse(m.timestamp);
+                            if (!isNaN(ts)) {
+                                maxTs = Math.max(maxTs, ts);
+                            }
+                        }
+                    }
+                });
+
+                if (hasNewMessages) {
+                    // Procesar todos los mensajes nuevos
+                    appendUserMessagesToPanel(data.messages);
+                    appendAIResponsesToPanel(data.messages);
+                    appendImageMessagesToPanel(data.messages); // ← AGREGAR PARA IMÁGENES
+
+                    // Actualizar timestamp
+                    if (maxTs > lastMessageTimestamp) {
+                        lastMessageTimestamp = maxTs + 1;
+                    }
+
+                    // Scroll automático al final
+                    const container = document.getElementById('msgs');
+                    if (container) {
+                        setTimeout(() => {
+                            container.scrollTop = container.scrollHeight;
+                        }, 100);
+                    }
+
+                    console.log('Nuevos mensajes recibidos:', data.messages.length);
+                }
+            })
+            .catch(err => console.error('Error polling messages:', err));
+    }
+    /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
+
+    function setupChatSearch() {
+        const searchInput = document.getElementById('search-chats-input');
+        const chatItems = document.querySelectorAll('.chat-item');
+
+        if (!searchInput) {
+            console.warn('Search input not found');
+            return;
+        }
+
+        searchInput.addEventListener('input', function (e) {
+            const searchTerm = normalizeText(e.target.value);
+
+            chatItems.forEach(chatItem => {
+                const aliasElement = chatItem.querySelector('.alias-view');
+                const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
+
+                if (!aliasElement) return;
+
+                const chatName = normalizeText(aliasElement.textContent);
+                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+                const matchesSearch = chatName.includes(searchTerm) ||
+                    chatNumber.includes(searchTerm) ||
+                    (searchTerm === ''); // Mostrar todos si está vacío
+
+                chatItem.style.display = matchesSearch ? 'block' : 'none';
+            });
+        });
+
+        // También buscar en chats cargados dinámicamente
+        const observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                if (mutation.addedNodes.length) {
+                    // Si se añaden nuevos chats, reaplicar el filtro actual
+                    const currentSearch = normalizeText(searchInput.value);
+                    if (currentSearch) {
+                        searchInput.dispatchEvent(new Event('input'));
                     }
                 }
             });
+        });
 
-            if (maxTs > lastMessageTimestamp) {
-                lastMessageTimestamp = maxTs + 1;
+        const chatContainer = document.querySelector('.chat-items');
+        if (chatContainer) {
+            observer.observe(chatContainer, { childList: true, subtree: true });
+        }
+
+        console.debug('Chat search functionality initialized');
+    }
+    function appendImageMessagesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+
+        let appended = false;
+
+        for (const m of messages) {
+            // Solo procesar mensajes con imágenes que no hayamos visto
+            const key = buildMessageKeyFor(m);
+            if (seenMessageKeys.has(key)) continue;
+
+            if ((m.es_imagen && m.imagen_url) || (m.respuesta_tipo_mensaje === 'imagen' && m.respuesta_contenido_extra)) {
+                const isAIResponse = m.respuesta_tipo_mensaje === 'imagen';
+                const imageUrl = isAIResponse ? m.respuesta_contenido_extra : m.imagen_url;
+                const caption = isAIResponse ? m.respuesta : m.mensaje;
+
+                const div = document.createElement('div');
+                div.className = isAIResponse ? 'msg-box msg-ai' : 'msg-box msg-user';
+                if (m.id) div.setAttribute('data-msg-id', String(m.id));
+
+                const tsVal = Number(m.ts_ms) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+                const fechaFormateada = formatClientTime(tsVal);
+
+                let captionHTML = '';
+                if (caption && caption !== 'Analiza esta imagen' && caption !== 'El usuario envió una imagen') {
+                    captionHTML = `<div class="image-caption">${escapeHtml(caption)}</div>`;
+                }
+
+                div.innerHTML = `
+                <div class="message-content">
+                    <div class="whatsapp-image-container">
+                        <img src="${imageUrl}" alt="Imagen" class="whatsapp-image">
+                        ${captionHTML}
+                    </div>
+                </div>
+                <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+                    ${fechaFormateada}
+                </div>
+            `;
+
+                container.appendChild(div);
+                appended = true;
+                seenMessageKeys.add(key);
+            }
+        }
+
+        if (appended) {
+            const container = document.getElementById('msgs');
+            setTimeout(() => {
+                container.scrollTop = container.scrollHeight;
+            }, 50);
+        }
+    }
+    function appendUserMessagesToPanel(messages) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+        let appended = false;
+
+        for (const m of messages) {
+            const key = buildMessageKeyFor(m);
+            if (!key) continue;
+            if (seenMessageKeys.has(key)) {
+                const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+                if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+                continue;
             }
 
-            appendUserMessagesToPanel(data.messages);
-            appendAIResponsesToPanel(data.messages);
-        })
-        .catch(err => console.error('Error polling messages:', err));
-}
+            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
+            // SOLO eliminar espacios iniciales, mantener trim() para el resto
+            content = content.replace(/^\s+/, '').trim();
+            const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
 
-function appendAIResponsesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
+            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
+            content = content.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
+            content = content.trimStart();
+            // === FIN DE LAS LÍNEAS NUEVAS ===
 
-    for (const m of messages) {
-        let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
-        aiText = aiText.replace(/^[\s\n\r\t]+/, '');
-        aiText = aiText.replace(/\n\s*\n/g, '\n\n');
-        aiText = aiText.trim();
+            if (!content || (respuesta && respuesta.trim().length > 0)) {
+                if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+                seenMessageKeys.add(key);
+                continue;
+            }
 
-        if (!aiText) continue;
-
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        let key;
-        if (id) {
-            key = 'ai:id:' + id;
-            if (seenMessageKeys.has(key)) continue;
-        } else {
-            let ts = Number(coalesce(m.ts_ms, 0));
+            let ts = coalesce(m.ts_ms, 0);
             if (!ts && m.timestamp) {
                 const parsed = Date.parse(m.timestamp);
                 ts = isNaN(parsed) ? Date.now() : parsed;
             }
-            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
-            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
-            if (seenMessageKeys.has(key)) continue;
-        }
+            ts = Number(ts) || Date.now();
 
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-ai';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-        const fechaFormateada = formatClientTime(tsVal);
-        div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+            const div = document.createElement('div');
+            div.className = 'msg-box msg-user';
+            if (id) div.setAttribute('data-msg-id', String(id));
+            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+            const fechaFormateada = formatClientTime(ts);
+            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
-        container.appendChild(div);
-        appended = true;
-        seenMessageKeys.add(key);
-        if (id) seenMessageKeys.add('id:' + id);
-    }
-
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
-
-function appendUserMessagesToPanel(messages) {
-    const container = document.getElementById('msgs');
-    if (!container) return;
-    let appended = false;
-
-    for (const m of messages) {
-        const key = buildMessageKeyFor(m);
-        if (!key) continue;
-        if (seenMessageKeys.has(key)) {
-            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
-            continue;
-        }
-
-        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-        let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
-        content = content.replace(/^\s+/, '').trim();
-        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
-        content = content.replace(/^[\s\n\r\t]+/, '');
-        content = content.trimStart();
-
-        if (!content || (respuesta && respuesta.trim().length > 0)) {
+            container.appendChild(div);
+            appended = true;
             if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
             seenMessageKeys.add(key);
-            continue;
         }
 
-        let ts = coalesce(m.ts_ms, 0);
-        if (!ts && m.timestamp) {
-            const parsed = Date.parse(m.timestamp);
-            ts = isNaN(parsed) ? Date.now() : parsed;
+        if (appended) {
+            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+            if (wasAtBottom) container.scrollTop = container.scrollHeight;
         }
-        ts = Number(ts) || Date.now();
+    }
+/* ===================== ALIAS EDITING & EMOJI ===================== */
 
-        const div = document.createElement('div');
-        div.className = 'msg-box msg-user';
-        if (id) div.setAttribute('data-msg-id', String(id));
-        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-        const fechaFormateada = formatClientTime(ts);
-        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+    function enhanceAliasButtons() {
+        // SOLO aplicar a botones en el header del chat central, NO en la lista lateral
+        document.querySelectorAll('.chat-panel-header .edit-alias-btn, .chat-title .edit-alias-btn').forEach(btn => {
+            btn.removeEventListener('click', onEditAliasClick);
+            btn.addEventListener('click', onEditAliasClick);
+        });
 
-        container.appendChild(div);
-        appended = true;
-        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-        seenMessageKeys.add(key);
+        // ELIMINAR cualquier botón de edición en la lista lateral
+        document.querySelectorAll('.chat-list-v2 .edit-alias-btn, .chat-items .edit-alias-btn').forEach(btn => {
+            btn.remove();
+        });
     }
 
-    if (appended) {
-        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-        if (wasAtBottom) container.scrollTop = container.scrollHeight;
-    }
-}
+    function onEditAliasClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const btn = e.currentTarget;
 
-/* ===================== UI HELPERS ===================== */
+        // Buscar el contenedor padre correcto - IMPORTANTE para el chat del centro
+        const parent = btn.closest('.card-title-row') ||
+            btn.closest('.chat-title') ||
+            btn.closest('.chat-content') ||
+            btn.closest('.card-content');
+
+        if (parent) {
+            activarEdicionAlias(parent);
+        }
+    }
+
+    function activarEdicionAlias(parent) {
+        if (!parent) return;
+        const view = parent.querySelector('.alias-view');
+        const edit = parent.querySelector('.alias-edit');
+        if (!view || !edit) return;
+        const input = edit.querySelector('input[type=text]');
+        if (!input) return;
+
+        // Guardar el valor actual antes de editar
+        const valorOriginal = view.textContent;
+
+        view.style.display = 'none';
+        edit.style.display = 'flex';
+        input.focus();
+        input.select();
+        isEditingAlias = true;
+
+        const finish = () => {
+            const nuevo = (input.value || '').trim();
+            edit.style.display = 'none';
+            view.style.display = '';
+
+            if (!nuevo || nuevo === valorOriginal) {
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+                return;
+            }
+
+            view.textContent = nuevo;
+            fetch(`/contactos/${input.dataset.num}/alias`, {
+                method: 'POST',
+                body: new URLSearchParams({ alias: nuevo }),
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+            })
+                .then(response => {
+                    if (!response.ok) throw new Error('Error en la respuesta');
+                    return response.json();
+                })
+                .then(data => {
+                    console.log('Alias guardado exitosamente');
+                })
+                .catch(err => console.warn('Error guardando alias:', err))
+                .finally(() => {
+                    isEditingAlias = false;
+                });
+        };
+
+        input.onblur = () => setTimeout(finish, 200);
+        input.onkeydown = (ev) => {
+            if (ev.key === 'Enter') {
+                ev.preventDefault();
+                finish();
+            }
+            if (ev.key === 'Escape') {
+                edit.style.display = 'none';
+                view.style.display = '';
+                view.textContent = valorOriginal;
+                isEditingAlias = false;
+            }
+        };
+    }
+
+
+
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
+
+    // chats.html (Cerca de la línea 602)
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
+
+    function setupEmojiPicker() {
+        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+
+        // Contenedores del DOM
+        const picker = document.getElementById('emoji-picker-list');
+        const trigger = document.getElementById('emoji-pick-btn');
+        const input = document.getElementById('mensaje-texto');
+
+        if (!picker || !trigger || !input) {
+            console.warn('Faltan elementos DOM para el emoji picker (picker, trigger o input)');
+            return;
+        }
+
+        function buildPicker(container) {
+            if (container.dataset.built === '1') return;
+            container.innerHTML = EMOJIS.map(e =>
+                // Usamos clases CSS correctas
+                `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`
+            ).join('');
+            container.dataset.built = '1';
+        }
+
+        // 1. Construir el selector
+        buildPicker(picker);
+
+        // 2. Manejar clic en el botón de activación (trigger)
+        trigger.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const isVisible = picker.style.display === 'block';
+
+            if (isVisible) {
+                picker.style.display = 'none';
+            } else {
+                // Posicionar el selector justo encima del botón de entrada
+                const formGroup = trigger.closest('.input-group');
+                if (formGroup) {
+                    // Mueve el selector dentro del input-group (si es necesario)
+                    formGroup.appendChild(picker);
+                    const triggerRect = trigger.getBoundingClientRect();
+                    const formRect = formGroup.getBoundingClientRect();
+
+                    // Intentar posicionar encima del input-group
+                    picker.style.bottom = `${formRect.height + 8}px`;
+                    picker.style.left = '0px';
+
+                    picker.style.display = 'block';
+                }
+            }
+        });
+
+        // 3. Manejar clic en una opción de emoji
+        picker.addEventListener('click', function (ev) {
+            const emojiBtn = ev.target.closest('.emoji-option');
+            if (emojiBtn) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+
+                // Insertar el emoji en la posición del cursor
+                const start = input.selectionStart || input.value.length;
+                const end = input.selectionEnd || input.value.length;
+                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+
+                // Mover el cursor después del emoji insertado
+                const pos = start + emoji.length;
+                input.selectionStart = input.selectionEnd = pos;
+
+                input.focus();
+                picker.style.display = 'none'; // Ocultar después de seleccionar
+            }
+        });
+
+        // 4. Ocultar si se hace clic fuera del selector o del botón
+        document.addEventListener('click', function (ev) {
+            const isInsidePicker = picker.contains(ev.target);
+            const isTrigger = trigger.contains(ev.target);
+
+            if (!isInsidePicker && !isTrigger) {
+                picker.style.display = 'none';
+            }
+        });
+
+        console.debug('setupEmojiPicker initialized');
+    }
+
+
+/* ===================== AUDIO & UI HELPERS ===================== */
+
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-}
-
-function toggleAudio(id, btn) {
+}function toggleAudio(id, btn) {
     const audio = document.getElementById(id);
     const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
     const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
@@ -1704,856 +1971,33 @@ function seekAudio(id, progressBar, evt) {
     }
 }
 
-/* ===================== FILE UPLOAD ===================== */
-function setupFileUpload() {
-    const fileInput = document.getElementById('file-input');
-    const fileAttachBtn = document.getElementById('file-attach-btn');
-    const filePreview = document.getElementById('file-preview');
-    const fileName = document.getElementById('file-name');
-    const fileSize = document.getElementById('file-size');
-    const fileIcon = document.getElementById('file-icon');
-    const removeFileBtn = document.getElementById('remove-file');
-    const messageForm = document.getElementById('messageForm');
-    const textarea = document.getElementById('mensaje-texto');
-
-    if (!fileInput || !fileAttachBtn) {
-        console.warn('File upload elements not found');
-        return;
-    }
-
-    fileAttachBtn.addEventListener('click', function () {
-        console.log('📎 Click en botón adjuntar archivo');
-        fileInput.click();
-    });
-
-    fileInput.addEventListener('change', function (e) {
-        const file = e.target.files[0];
-        if (file) {
-            const maxSize = 50 * 1024 * 1024;
-            if (file.size > maxSize) {
-                alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
-                clearFileSelection();
-                return;
-            }
-
-            const allowedTypes = [
-                'application/pdf',
-                'application/vnd.ms-excel',
-                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                'application/msword',
-                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                'text/plain',
-                'image/jpeg',
-                'image/jpg',
-                'image/png',
-                'image/gif',
-                'video/mp4',
-                'video/quicktime',
-                'video/webm',
-                'video/x-msvideo',
-                'video/x-matroska',
-                'audio/mpeg',
-                'audio/wav',
-                'application/zip',
-                'application/x-rar-compressed'
-            ];
-
-            if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
-                alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
-                clearFileSelection();
-                return;
-            }
-
-            showFilePreview(file);
-        }
-    });
-
-    removeFileBtn.addEventListener('click', function () {
-        clearFileSelection();
-    });
-
-    function showFilePreview(file) {
-        const fileType = getFileType(file.name);
-        const icon = getFileIcon(fileType);
-
-        fileIcon.textContent = icon;
-        fileName.textContent = file.name;
-        fileSize.textContent = formatFileSize(file.size);
-        filePreview.style.display = 'block';
-        textarea.placeholder = "Añade un mensaje (opcional)...";
-        filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
-
-    function clearFileSelection() {
-        fileInput.value = '';
-        filePreview.style.display = 'none';
-        fileName.textContent = '';
-        fileSize.textContent = '';
-        fileIcon.textContent = '';
-        textarea.placeholder = "Escribe un mensaje manual...";
-    }
-
-    function getFileType(filename) {
-        const ext = filename.split('.').pop().toLowerCase();
-        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return 'image';
-        if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext)) return 'video';
-        if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return 'audio';
-        if (['pdf'].includes(ext)) return 'pdf';
-        if (['doc', 'docx'].includes(ext)) return 'word';
-        if (['xls', 'xlsx', 'csv'].includes(ext)) return 'excel';
-        if (['ppt', 'pptx'].includes(ext)) return 'powerpoint';
-        if (['zip', 'rar', '7z'].includes(ext)) return 'zip';
-        if (['txt', 'rtf'].includes(ext)) return 'text';
-        return 'other';
-    }
-
-    function getFileIcon(fileType) {
-        const icons = {
-            'image': '🖼️',
-            'video': '🎬',
-            'audio': '🎵',
-            'pdf': '📕',
-            'word': '📘',
-            'excel': '📗',
-            'powerpoint': '📙',
-            'zip': '📦',
-            'text': '📄',
-            'other': '📎'
-        };
-        return icons[fileType] || '📎';
-    }
-
-    function formatFileSize(bytes) {
-        if (bytes === 0) return '0 Bytes';
-        const k = 1024;
-        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-        const i = Math.floor(Math.log(bytes) / Math.log(k));
-        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-    }
-
-
-    console.debug('File upload functionality initialized');
-}
-
-/* ===================== EMOJI PICKER ===================== */
-function setupEmojiPicker() {
-    const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-    const picker = document.getElementById('emoji-picker-list');
-    const trigger = document.getElementById('emoji-pick-btn');
-    const input = document.getElementById('mensaje-texto');
-
-    if (!picker || !trigger || !input) {
-        console.warn('Faltan elementos para el emoji picker');
-        return;
-    }
-
-    function buildPicker(container) {
-        if (container.dataset.built === '1') return;
-        container.innerHTML = EMOJIS.map(e => `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`).join('');
-        container.dataset.built = '1';
-    }
-
-    buildPicker(picker);
-
-    trigger.addEventListener('click', function (ev) {
-        ev.preventDefault();
-        ev.stopPropagation();
-        const isVisible = picker.style.display === 'block';
-
-        if (isVisible) {
-            picker.style.display = 'none';
-        } else {
-            const formGroup = trigger.closest('.input-group');
-            if (formGroup) {
-                formGroup.appendChild(picker);
-                const triggerRect = trigger.getBoundingClientRect();
-                const formRect = formGroup.getBoundingClientRect();
-                picker.style.bottom = `${formRect.height + 8}px`;
-                picker.style.left = '0px';
-                picker.style.display = 'block';
-            }
-        }
-    });
-
-    picker.addEventListener('click', function (ev) {
-        const emojiBtn = ev.target.closest('.emoji-option');
-        if (emojiBtn) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
-            const start = input.selectionStart || input.value.length;
-            const end = input.selectionEnd || input.value.length;
-            input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-            const pos = start + emoji.length;
-            input.selectionStart = input.selectionEnd = pos;
-            input.focus();
-            picker.style.display = 'none';
-        }
-    });
-
-    document.addEventListener('click', function (ev) {
-        const isInsidePicker = picker.contains(ev.target);
-        const isTrigger = trigger.contains(ev.target);
-
-        if (!isInsidePicker && !isTrigger) {
-            picker.style.display = 'none';
-        }
-    });
-
-    console.debug('Emoji picker initialized');
-}
-
-/* ===================== AUDIO RECORDER ===================== */
-function setupAudioRecorder() {
-    const recordBtn = document.getElementById('record-audio-btn');
-    const startRecordBtn = document.getElementById('start-record-btn');
-    const audioRecorderContainer = document.getElementById('audio-recorder-container');
-    const recordingTimer = document.getElementById('recording-timer');
-    const recordingLevel = document.getElementById('recording-level');
-    const deleteAudioBtn = document.getElementById('delete-audio-btn');
-    const sendAudioBtn = document.getElementById('send-audio-btn');
-    const audioPlaybackControls = document.getElementById('audio-playback-controls');
-    const playRecordedBtn = document.getElementById('play-recorded-btn');
-    const recordedAudioPreview = document.getElementById('recorded-audio-preview');
-    const audioDuration = document.getElementById('audio-duration');
-    const audioProgress = document.getElementById('audio-progress');
-    const audioWaveform = document.getElementById('audio-waveform');
-    const audioDataInput = document.getElementById('audio-data-input');
-    const messageForm = document.getElementById('messageForm');
-    const textarea = document.getElementById('mensaje-texto');
-
-    if (!recordBtn || !audioRecorderContainer) {
-        console.warn('Audio recorder elements not found');
-        return;
-    }
-
-    let mediaRecorder = null;
-    let audioChunks = [];
-    let recordingInterval = null;
-    let recordingTime = 0;
-    let audioContext = null;
-    let analyser = null;
-    let dataArray = null;
-    let isRecording = false;
-    let currentAudioFormat = 'audio/webm';
-
-    recordBtn.addEventListener('click', function () {
-        console.log('🎤 Click en botón grabar audio');
-        if (audioRecorderContainer.style.display === 'none' || !audioRecorderContainer.style.display) {
-            audioRecorderContainer.style.display = 'block';
-            audioPlaybackControls.style.display = 'none';
-            resetRecorder();
-        } else {
-            audioRecorderContainer.style.display = 'none';
-        }
-    });
-
-    startRecordBtn.addEventListener('click', async function () {
-        if (!isRecording) {
-            await startRecording();
-        } else {
-            stopRecording();
-        }
-    });
-
-    deleteAudioBtn.addEventListener('click', function () {
-        resetRecorder();
-        audioRecorderContainer.style.display = 'none';
-    });
-
-    sendAudioBtn.addEventListener('click', function () {
-        if (audioChunks.length === 0) {
-            alert('No hay audio para enviar');
-            return;
-        }
-
-        console.log('Preparando audio para enviar...');
-        const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
-        console.log('Tamaño del audio:', audioBlob.size, 'bytes');
-
-        if (audioBlob.size > 16 * 1024 * 1024) {
-            alert('El audio es demasiado largo. Máximo 16MB.');
-            return;
-        }
-
-        if (audioBlob.size < 100) {
-            alert('El audio es demasiado corto');
-            return;
-        }
-
-        const reader = new FileReader();
-        reader.onloadend = function () {
-            const base64Audio = reader.result;
-            console.log('Base64 obtenido, longitud:', base64Audio.length);
-
-            if (!base64Audio || base64Audio.length < 100) {
-                alert('Error: El audio está vacío o corrupto');
-                return;
-            }
-
-            if (audioDataInput) {
-                audioDataInput.value = base64Audio;
-                console.log('✅ Audio guardado en input oculto');
-            } else {
-                console.error('❌ No se encontró el input oculto para audio');
-                alert('Error interno: no se pudo preparar el audio');
-                return;
-            }
-
-            sendAudioBtn.innerHTML = '⏳';
-            sendAudioBtn.disabled = true;
-            sendAudioBtn.title = 'Enviando...';
-
-            const mainSendBtn = document.querySelector('.send-btn');
-            if (mainSendBtn) {
-                mainSendBtn.innerHTML = '🎤⏳';
-                mainSendBtn.disabled = true;
-            }
-
-            if (textarea && !textarea.value.trim()) {
-                textarea.style.display = 'none';
-            }
-
-            const fileInput = document.getElementById('file-input');
-            if (fileInput) {
-                fileInput.value = '';
-            }
-
-            const filePreview = document.getElementById('file-preview');
-            if (filePreview) {
-                filePreview.style.display = 'none';
-            }
-
-            setTimeout(() => {
-                console.log('🚀 Enviando formulario con audio...');
-
-                if (!audioDataInput.value || audioDataInput.value.length < 100) {
-                    console.error('❌ El audio no se guardó correctamente en el input');
-                    alert('Error: El audio no se guardó correctamente');
-                    resetButtons();
-                    return;
-                }
-
-                if (messageForm) {
-                    console.log('📤 Enviando formulario...');
-                    disableAllButtons();
-
-                    setTimeout(() => {
-                        if (messageForm.requestSubmit) {
-                            messageForm.requestSubmit();
-                        } else {
-                            messageForm.submit();
-                        }
-                    }, 200);
-                } else {
-                    console.error('❌ No se encontró el formulario');
-                    alert('Error interno: no se encontró el formulario');
-                    resetButtons();
-                }
-            }, 500);
-        };
-
-        reader.onerror = function (error) {
-            console.error('❌ Error convirtiendo audio a base64:', error);
-            alert('Error procesando el audio');
-            resetButtons();
-        };
-
-        reader.readAsDataURL(audioBlob);
-    });
-
-    playRecordedBtn.addEventListener('click', function () {
-        if (recordedAudioPreview.src) {
-            if (recordedAudioPreview.paused) {
-                recordedAudioPreview.play();
-                playRecordedBtn.textContent = '⏸️';
-            } else {
-                recordedAudioPreview.pause();
-                playRecordedBtn.textContent = '▶️';
-            }
-        }
-    });
-
-    if (audioWaveform) {
-        audioWaveform.addEventListener('click', function (e) {
-            const rect = audioWaveform.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const percentage = (clickX / rect.width) * 100;
-
-            if (recordedAudioPreview.duration) {
-                recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
-            }
-        });
-    }
-
-    recordedAudioPreview.addEventListener('timeupdate', function () {
-        if (recordedAudioPreview.duration) {
-            const progress = (recordedAudioPreview.currentTime / recordedAudioPreview.duration) * 100;
-            if (audioProgress) {
-                audioProgress.style.width = progress + '%';
-            }
-
-            const currentTime = formatTime(recordedAudioPreview.currentTime);
-            const totalTime = formatTime(recordedAudioPreview.duration);
-            if (audioDuration) {
-                audioDuration.textContent = `${currentTime} / ${totalTime}`;
-            }
-        }
-    });
-
-    recordedAudioPreview.addEventListener('ended', function () {
-        if (playRecordedBtn) {
-            playRecordedBtn.textContent = '▶️';
-        }
-        if (audioProgress) {
-            audioProgress.style.width = '0%';
-        }
-    });
-
-    async function startRecording() {
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
-                    sampleRate: 16000
-                }
-            });
-
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            analyser = audioContext.createAnalyser();
-            const source = audioContext.createMediaStreamSource(stream);
-            source.connect(analyser);
-            analyser.fftSize = 256;
-            const bufferLength = analyser.frequencyBinCount;
-            dataArray = new Uint8Array(bufferLength);
-
-            const mimeTypes = [
-                'audio/webm;codecs=opus',
-                'audio/webm',
-                'audio/mp4',
-                'audio/ogg;codecs=opus',
-                'audio/wav',
-                'audio/mpeg'
-            ];
-
-            let supportedType = 'audio/webm';
-            for (const type of mimeTypes) {
-                if (MediaRecorder.isTypeSupported(type)) {
-                    supportedType = type;
-                    console.log('✅ Formato soportado seleccionado:', type);
-                    break;
-                }
-            }
-
-            currentAudioFormat = supportedType;
-
-            const options = { mimeType: supportedType };
-            try {
-                mediaRecorder = new MediaRecorder(stream, options);
-            } catch (e) {
-                console.warn('⚠️ No se pudo usar el formato preferido, usando por defecto:', e);
-                mediaRecorder = new MediaRecorder(stream);
-                currentAudioFormat = 'audio/webm';
-            }
-
-            audioChunks = [];
-
-            mediaRecorder.ondataavailable = event => {
-                if (event.data.size > 0) {
-                    audioChunks.push(event.data);
-                }
-            };
-
-            mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
-                const audioUrl = URL.createObjectURL(audioBlob);
-                recordedAudioPreview.src = audioUrl;
-
-                if (audioPlaybackControls) {
-                    audioPlaybackControls.style.display = 'flex';
-                }
-
-                recordedAudioPreview.onloadedmetadata = () => {
-                    if (audioDuration) {
-                        audioDuration.textContent = formatTime(recordedAudioPreview.duration);
-                    }
-                };
-            };
-
-            mediaRecorder.start(100);
-            isRecording = true;
-            startRecordBtn.classList.add('recording');
-            startRecordBtn.textContent = '⏹️';
-            recordingTime = 0;
-
-            recordingInterval = setInterval(() => {
-                recordingTime++;
-                if (recordingTimer) {
-                    recordingTimer.textContent = formatTime(recordingTime);
-                }
-            }, 1000);
-
-            visualizeRecording();
-
-        } catch (err) {
-            console.error('❌ Error al acceder al micrófono:', err);
-            alert('No se pudo acceder al micrófono. Por favor, revisa los permisos.');
-        }
-    }
-
-    function stopRecording() {
-        if (mediaRecorder && isRecording) {
-            mediaRecorder.stop();
-            isRecording = false;
-            startRecordBtn.classList.remove('recording');
-            startRecordBtn.textContent = '●';
-
-            if (audioContext) {
-                audioContext.close();
-                audioContext = null;
-            }
-
-            if (recordingInterval) {
-                clearInterval(recordingInterval);
-                recordingInterval = null;
-            }
-
-            if (mediaRecorder && mediaRecorder.stream) {
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
-            }
-        }
-    }
-
-    function visualizeRecording() {
-        if (!analyser || !isRecording) return;
-
-        function draw() {
-            if (!isRecording) return;
-            requestAnimationFrame(draw);
-            analyser.getByteFrequencyData(dataArray);
-
-            let sum = 0;
-            for (let i = 0; i < dataArray.length; i++) {
-                sum += dataArray[i];
-            }
-            const average = sum / dataArray.length;
-            const level = Math.min(100, (average / 128) * 100);
-            if (recordingLevel) {
-                recordingLevel.style.width = level + '%';
-            }
-        }
-
-        draw();
-    }
-
-    function resetRecorder() {
-        if (isRecording) {
-            stopRecording();
-        }
-
-        if (recordingInterval) {
-            clearInterval(recordingInterval);
-            recordingInterval = null;
-        }
-
-        audioChunks = [];
-        recordingTime = 0;
-        if (recordingTimer) {
-            recordingTimer.textContent = '0:00';
-        }
-        if (recordingLevel) {
-            recordingLevel.style.width = '0%';
-        }
-        if (startRecordBtn) {
-            startRecordBtn.classList.remove('recording');
-            startRecordBtn.textContent = '●';
-        }
-        if (audioPlaybackControls) {
-            audioPlaybackControls.style.display = 'none';
-        }
-
-        if (recordedAudioPreview && recordedAudioPreview.src) {
-            URL.revokeObjectURL(recordedAudioPreview.src);
-            recordedAudioPreview.src = '';
-        }
-
-        if (audioDataInput) {
-            audioDataInput.value = '';
-        }
-    }
-
-    function formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    function resetButtons() {
-        if (sendAudioBtn) {
-            sendAudioBtn.innerHTML = '✓';
-            sendAudioBtn.disabled = false;
-            sendAudioBtn.title = '';
-        }
-
-        const mainSendBtn = document.querySelector('.send-btn');
-        if (mainSendBtn) {
-            mainSendBtn.innerHTML = 'Enviar';
-            mainSendBtn.disabled = false;
-        }
-    }
-
-    function disableAllButtons() {
-        const buttons = [
-            sendAudioBtn,
-            document.querySelector('.send-btn'),
-            document.getElementById('file-attach-btn'),
-            document.getElementById('record-audio-btn'),
-            document.getElementById('emoji-pick-btn'),
-            document.getElementById('start-record-btn')
-        ];
-
-        buttons.forEach(btn => {
-            if (btn) {
-                btn.disabled = true;
-                // Guardar el estado original SOLO si no tiene ya un data-original-html
-                if (!btn.hasAttribute('data-original-html')) {
-                    const originalHTML = btn.innerHTML;
-                    btn.setAttribute('data-original-html', originalHTML);
-                    btn.innerHTML = '⏳';
-                }
-            }
-        });
-    }
-
-    // Añade esta función para restaurar botones
-    function restoreAllButtons() {
-        const buttons = [
-            sendAudioBtn,
-            document.querySelector('.send-btn'),
-            document.getElementById('file-attach-btn'),
-            document.getElementById('record-audio-btn'),
-            document.getElementById('emoji-pick-btn'),
-            document.getElementById('start-record-btn')
-        ];
-
-        buttons.forEach(btn => {
-            if (btn) {
-                btn.disabled = false;
-                const originalHTML = btn.getAttribute('data-original-html');
-                if (originalHTML) {
-                    btn.innerHTML = originalHTML;
-                    btn.removeAttribute('data-original-html');
-                }
-            }
-        });
-    }
-
-    window.addEventListener('beforeunload', resetRecorder);
-    console.debug('✅ Audio recorder initialized');
-    document.addEventListener('formSubmitComplete', function () {
-        setTimeout(() => {
-            restoreAllButtons();
-            resetRecorder();
-        }, 1000);
-    });
-
-    // También modifica el listener del formulario
-    if (document.getElementById('messageForm')) {
-        const originalSubmitHandler = document.getElementById('messageForm').onsubmit;
-        document.getElementById('messageForm').addEventListener('submit', function (e) {
-            // Ejecutar el handler original si existe
-            if (originalSubmitHandler) {
-                originalSubmitHandler.call(this, e);
-            }
-
-            // Agregar nuestro manejo
-            const form = e.target;
-
-            // Crear un evento personalizado para cuando se complete el submit
-            form.addEventListener('submitend', function () {
-                setTimeout(() => {
-                    document.dispatchEvent(new CustomEvent('formSubmitComplete'));
-                    restoreAllButtons();
-                }, 2000);
-            });
-        });
-    }
-
-
-/* ===================== CHAT SEARCH ===================== */
-/* ===================== CHAT SEARCH ===================== */
-function setupChatSearch() {
-    const searchInput = document.getElementById('search-chats-input');
-    const chatItems = document.querySelectorAll('.chat-item');
-
-    if (!searchInput) {
-        console.warn('Search input not found');
-        return;
-    }
-
-    searchInput.addEventListener('input', function (e) {
-        const searchTerm = normalizeText(e.target.value);
-
-        chatItems.forEach(chatItem => {
-            const aliasElement = chatItem.querySelector('.alias-view');
-            const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
-
-            if (!aliasElement) return;
-
-            const chatName = normalizeText(aliasElement.textContent);
-            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
-
-            const matchesSearch = chatName.includes(searchTerm) ||
-                chatNumber.includes(searchTerm) ||
-                (searchTerm === '');
-
-            chatItem.style.display = matchesSearch ? 'block' : 'none';
-        });
-    });
-
-    const observer = new MutationObserver(function (mutations) {
-        mutations.forEach(function (mutation) {
-            if (mutation.addedNodes.length) {
-                const currentSearch = normalizeText(searchInput.value);
-                if (currentSearch) {
-                    searchInput.dispatchEvent(new Event('input'));
-                }
-            }
-        });
-    });
-
-    const chatContainer = document.querySelector('.chat-items');
-    if (chatContainer) {
-        observer.observe(chatContainer, { childList: true, subtree: true });
-    }
-
-    console.debug('Chat search functionality initialized');
-}
-
-/* ===================== ALIAS EDITING ===================== */
-function enhanceAliasButtons() {
-    document.querySelectorAll('.chat-panel-header .edit-alias-btn, .chat-title .edit-alias-btn').forEach(btn => {
-        btn.removeEventListener('click', onEditAliasClick);
-        btn.addEventListener('click', onEditAliasClick);
-    });
-
-    document.querySelectorAll('.chat-list-v2 .edit-alias-btn, .chat-items .edit-alias-btn').forEach(btn => {
-        btn.remove();
-    });
-}
-
-function onEditAliasClick(e) {
-    e.preventDefault();
-    e.stopPropagation();
-    const btn = e.currentTarget;
-    const parent = btn.closest('.card-title-row') ||
-        btn.closest('.chat-title') ||
-        btn.closest('.chat-content') ||
-        btn.closest('.card-content');
-
-    if (parent) {
-        activarEdicionAlias(parent);
-    }
-}
-
-function activarEdicionAlias(parent) {
-    if (!parent) return;
-    const view = parent.querySelector('.alias-view');
-    const edit = parent.querySelector('.alias-edit');
-    if (!view || !edit) return;
-    const input = edit.querySelector('input[type=text]');
-    if (!input) return;
-
-    const valorOriginal = view.textContent;
-    view.style.display = 'none';
-    edit.style.display = 'flex';
-    input.focus();
-    input.select();
-    isEditingAlias = true;
-
-    const finish = () => {
-        const nuevo = (input.value || '').trim();
-        edit.style.display = 'none';
-        view.style.display = '';
-
-        if (!nuevo || nuevo === valorOriginal) {
-            view.textContent = valorOriginal;
-            isEditingAlias = false;
-            return;
-        }
-
-        view.textContent = nuevo;
-        fetch(`/contactos/${input.dataset.num}/alias`, {
-            method: 'POST',
-            body: new URLSearchParams({ alias: nuevo }),
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-        })
-            .then(response => {
-                if (!response.ok) throw new Error('Error en la respuesta');
-                return response.json();
-            })
-            .then(data => {
-                console.log('Alias guardado exitosamente');
-            })
-            .catch(err => console.warn('Error guardando alias:', err))
-            .finally(() => {
-                isEditingAlias = false;
-            });
-    };
-
-    input.onblur = () => setTimeout(finish, 200);
-    input.onkeydown = (ev) => {
-        if (ev.key === 'Enter') {
-            ev.preventDefault();
-            finish();
-        }
-        if (ev.key === 'Escape') {
-            edit.style.display = 'none';
-            view.style.display = '';
-            view.textContent = valorOriginal;
-            isEditingAlias = false;
-        }
-    };
-}
-
-/* ===================== INITIALIZATION ===================== */
-document.addEventListener('DOMContentLoaded', function () {
+document.addEventListener('DOMContentLoaded', () => {
     console.log('DOM cargado - inicializando componentes');
-
-    // Inicializar todos los componentes
     enhanceAliasButtons();
+
+    // INICIALIZACIÓN DIRECTA DE EMOJIS
     setupEmojiPicker();
-    setupChatSearch();
-    setupFileUpload();
-    setupAudioRecorder();
+    setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
+    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
+    console.log('Emoji picker inicializado');
+    console.log('Búsqueda de chats inicializada');
+    console.log('File upload inicializado');
 
-    console.log('✅ Todos los componentes inicializados');
-
-    // Inicializar scroll
-    try {
-        const msgsEl = document.getElementById('msgs');
-        if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
-    } catch (e) {
-        console.warn('Initial scroll to bottom failed:', e);
-    }
-
-    // Iniciar actualización de chats
+    // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
         actualizarListaChats();
-        if (!chatsIntervalHandle) {
-            chatsIntervalHandle = setInterval(() => {
-                if (!document.hidden) actualizarListaChats();
-            }, refreshIntervalMs);
-        }
+        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+            if (!document.hidden) actualizarListaChats();
+        }, refreshIntervalMs);
     }
 
-    // Inicializar polling de mensajes
+    // Initialize message polling if chat is selected
     function initMessagesStateFromDOM() {
         try {
             const msgsContainer = document.getElementById('msgs');
             if (!msgsContainer) return;
             const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            let maxTs = Number(lastMessageTimestamp) || 0;
             nodes.forEach(n => {
                 const idAttr = n.getAttribute('data-msg-id');
                 const id = Number(idAttr) || 0;
@@ -2577,7 +2021,6 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
-    // Manejar cambios de visibilidad
     document.addEventListener('visibilitychange', () => {
         if (document.hidden) {
             chatAutoRefresh = false;
@@ -2597,101 +2040,281 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
-    /* ===================== FORMULARIO ÚNICO MANEJADOR (CORREGIDO) ===================== */
-    document.addEventListener('DOMContentLoaded', function () {
-        const form = document.getElementById('messageForm');
+// Función mejorada para la búsqueda de chats
+function setupChatSearch() {
+    const searchInput = document.getElementById('search-chats-input');
 
-        if (form) {
-            // Eliminar listeners anteriores si existieran (opcional, pero seguro)
-            const newForm = form.cloneNode(false); // false = no clona hijos, solo la etiqueta form
-            // Nota: No reemplazamos el form entero, solo adjuntamos el evento al existente
-            // Simplemente aseguramos que el submit se maneje correctamente.
+    if (!searchInput) {
+        console.warn('Search input not found');
+        return;
+    }
 
-            form.addEventListener('submit', function (e) {
-                const textarea = document.getElementById('mensaje-texto');
-                const fileInput = document.getElementById('file-input');
-                const audioInput = document.getElementById('audio-data-input');
-                const emojiBtn = document.getElementById('emoji-pick-btn');
-                const sendBtn = document.querySelector('.send-btn');
+    function performSearch() {
+        const searchTerm = normalizeText(searchInput.value);
+        const chatItems = document.querySelectorAll('.chat-item');
 
-                // 1. Validar contenido
-                const hasText = textarea && textarea.value.trim() !== '';
-                const hasFile = fileInput && fileInput.files.length > 0;
-                const hasAudio = audioInput && audioInput.value !== '';
+        let foundAny = false;
 
-                console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+        chatItems.forEach(chatItem => {
+            const aliasElement = chatItem.querySelector('.alias-view');
 
-                if (!hasText && !hasFile && !hasAudio) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                    return false;
-                }
+            if (!aliasElement) return;
 
-                // 2. UI: Cerrar emoji picker
-                const emojiPicker = document.getElementById('emoji-picker-list');
-                if (emojiPicker) emojiPicker.style.display = 'none';
+            const chatName = normalizeText(aliasElement.textContent);
+            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
 
-                // 3. UI: Feedback visual en el botón
-                if (sendBtn) {
-                    // Guardar texto original si no existe
-                    if (!sendBtn.getAttribute('data-original-html')) {
-                        sendBtn.setAttribute('data-original-html', sendBtn.innerHTML);
-                    }
+            const matchesSearch = chatName.includes(searchTerm) ||
+                                chatNumber.includes(searchTerm) ||
+                                (searchTerm === '');
 
-                    if (hasAudio) {
-                        sendBtn.innerHTML = '🎤⏳';
-                    } else if (hasFile) {
-                        sendBtn.innerHTML = '📎⏳';
-                    } else {
-                        sendBtn.innerHTML = '⏳';
-                    }
+            chatItem.style.display = matchesSearch ? 'block' : 'none';
 
-                    sendBtn.disabled = true;
-
-                    // Deshabilitar otros botones para evitar doble clic
-                    if (emojiBtn) emojiBtn.disabled = true;
-                    const attachBtn = document.getElementById('file-attach-btn');
-                    if (attachBtn) attachBtn.disabled = true;
-                    const recordBtn = document.getElementById('record-audio-btn');
-                    if (recordBtn) recordBtn.disabled = true;
-
-                    // Restauración de seguridad por si el servidor tarda mucho o falla
-                    setTimeout(() => {
-                        restoreAllButtons();
-                    }, 8000);
-                }
-
-                // Dejar que el formulario se envíe normalmente
-                return true;
-            });
-        }
-
-        // Función auxiliar para restaurar botones
-        window.restoreAllButtons = function () {
-            const sendBtn = document.querySelector('.send-btn');
-            const emojiBtn = document.getElementById('emoji-pick-btn');
-            const attachBtn = document.getElementById('file-attach-btn');
-            const recordBtn = document.getElementById('record-audio-btn');
-            const startRecordBtn = document.getElementById('start-record-btn');
-
-            if (sendBtn) {
-                const original = sendBtn.getAttribute('data-original-html');
-                if (original) sendBtn.innerHTML = original;
-                else sendBtn.innerHTML = 'Enviar'; // Fallback text
-                sendBtn.disabled = false;
-            }
-            if (emojiBtn) emojiBtn.disabled = false;
-            if (attachBtn) attachBtn.disabled = false;
-            if (recordBtn) recordBtn.disabled = false;
-            if (startRecordBtn) startRecordBtn.disabled = false;
-        };
-
-        // Restaurar botones al volver a la página (fix para Safari/Firefox bfcache)
-        window.addEventListener('pageshow', function () {
-            if (typeof restoreAllButtons === 'function') {
-                restoreAllButtons();
+            if (matchesSearch && searchTerm !== '') {
+                foundAny = true;
             }
         });
+
+        // Opcional: Mostrar mensaje si no se encontraron resultados
+        const noResultsMsg = document.getElementById('no-search-results');
+        if (searchTerm !== '' && !foundAny) {
+            if (!noResultsMsg) {
+                const msg = document.createElement('div');
+                msg.id = 'no-search-results';
+                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
+                msg.style.padding = '10px';
+                msg.style.textAlign = 'center';
+                msg.style.color = '#999';
+                document.querySelector('.chat-items').appendChild(msg);
+            }
+        } else if (noResultsMsg) {
+            noResultsMsg.remove();
+        }
+    }
+
+    searchInput.addEventListener('input', performSearch);
+
+    // También aplicar búsqueda cuando se actualicen los chats dinámicamente
+    const observer = new MutationObserver(function(mutations) {
+        const currentSearch = normalizeText(searchInput.value);
+        if (currentSearch) {
+            performSearch();
+        }
     });
+
+    const chatContainer = document.querySelector('.chat-items');
+    if (chatContainer) {
+        observer.observe(chatContainer, { childList: true, subtree: true });
+    }
+
+    console.debug('Chat search functionality initialized - insensible a tildes');
+}
+
+// Función normalizadora mejorada (insensible a tildes)
+function normalizeText(s) {
+    if (!s) return '';
+    return String(s)
+        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
+        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
+        .replace(/\s+/g, ' ')
+        .trim()
+        .toLowerCase();
+}
+
+    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
+
+    function setupFileUpload() {
+        const fileInput = document.getElementById('file-input');
+        const fileAttachBtn = document.getElementById('file-attach-btn');
+        const filePreview = document.getElementById('file-preview');
+        const fileName = document.getElementById('file-name');
+        const fileSize = document.getElementById('file-size');
+        const fileIcon = document.getElementById('file-icon');
+        const removeFileBtn = document.getElementById('remove-file');
+        const messageForm = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
+
+        if (!fileInput || !fileAttachBtn) {
+            console.warn('File upload elements not found');
+            return;
+        }
+
+        // Abrir selector de archivos al hacer clic en el botón
+        fileAttachBtn.addEventListener('click', function () {
+            fileInput.click();
+        });
+
+        // Manejar selección de archivo
+        fileInput.addEventListener('change', function (e) {
+            const file = e.target.files[0];
+            if (file) {
+                // Validar tamaño máximo (50MB)
+                const maxSize = 50 * 1024 * 1024; // 50MB
+                if (file.size > maxSize) {
+                    alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
+                    clearFileSelection();
+                    return;
+                }
+
+                // Validar tipo de archivo
+                const allowedTypes = [
+                    'application/pdf',
+                    'application/vnd.ms-excel',
+                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                    'application/msword',
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                    'text/plain',
+                    'image/jpeg',
+                    'image/jpg',
+                    'image/png',
+                    'image/gif',
+                    'video/mp4',
+                    'video/quicktime',
+                    'video/webm',
+                    'video/x-msvideo',
+                    'video/x-matroska',
+                    'audio/mpeg',
+                    'audio/wav',
+                    'application/zip',
+                    'application/x-rar-compressed'
+                ];
+
+                if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                    alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
+                    clearFileSelection();
+                    return;
+                }
+
+                showFilePreview(file);
+            }
+        });
+
+        // Eliminar archivo seleccionado
+        removeFileBtn.addEventListener('click', function () {
+            clearFileSelection();
+        });
+
+        function showFilePreview(file) {
+            const fileType = getFileType(file.name);
+            const icon = getFileIcon(fileType);
+
+            fileIcon.textContent = icon;
+            fileName.textContent = file.name;
+            fileSize.textContent = formatFileSize(file.size);
+            filePreview.style.display = 'block';
+
+            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
+            textarea.placeholder = "Añade un mensaje (opcional)...";
+
+            // Hacer scroll para mostrar la previsualización
+            filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        function clearFileSelection() {
+            fileInput.value = '';
+            filePreview.style.display = 'none';
+            fileName.textContent = '';
+            fileSize.textContent = '';
+            fileIcon.textContent = '';
+            textarea.placeholder = "Escribe un mensaje manual...";
+        }
+
+        function getFileType(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+
+            // Imágenes
+            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext))
+                return 'image';
+
+            // Videos
+            if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext))
+                return 'video';
+
+            // Audio
+            if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext))
+                return 'audio';
+
+            // Documentos
+            if (['pdf'].includes(ext))
+                return 'pdf';
+
+            // Word
+            if (['doc', 'docx'].includes(ext))
+                return 'word';
+
+            // Excel
+            if (['xls', 'xlsx', 'csv'].includes(ext))
+                return 'excel';
+
+            // PowerPoint
+            if (['ppt', 'pptx'].includes(ext))
+                return 'powerpoint';
+
+            // Archivos comprimidos
+            if (['zip', 'rar', '7z'].includes(ext))
+                return 'zip';
+
+            // Texto
+            if (['txt', 'rtf'].includes(ext))
+                return 'text';
+
+            return 'other';
+        }
+
+        function getFileIcon(fileType) {
+            const icons = {
+                'image': '🖼️',
+                'video': '🎬',
+                'audio': '🎵',
+                'pdf': '📕',
+                'word': '📘',
+                'excel': '📗',
+                'powerpoint': '📙',
+                'zip': '📦',
+                'text': '📄',
+                'other': '📎'
+            };
+            return icons[fileType] || '📎';
+        }
+
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+
+        // Validar antes de enviar
+        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
+        // Validar antes de enviar - SOLO verificar que haya algo
+        // Validar antes de enviar - CORREGIDO DEFINITIVO
+        messageForm.addEventListener('submit', function (e) {
+            const hasText = textarea.value.trim() !== '';
+            const hasFile = fileInput.files.length > 0;
+
+            // SOLO validar si no hay absolutamente nada
+            if (!hasText && !hasFile) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje o selecciona un archivo');
+                return false;
+            }
+            // Si hay archivo, puede enviarse SIN texto - ESTO YA ESTÁ CORRECTO
+
+            // Mostrar indicador de envío
+            const sendBtn = document.querySelector('.send-btn');
+            const originalText = sendBtn.innerHTML;
+            sendBtn.innerHTML = '⏳';
+            sendBtn.disabled = true;
+
+            // Restaurar después de 3 segundos por si hay error
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 3000);
+        });
+
+        console.debug('File upload functionality initialized - WhatsApp style');
+    }
 </script>
-{% endblock %} 
+{% endblock %}      
