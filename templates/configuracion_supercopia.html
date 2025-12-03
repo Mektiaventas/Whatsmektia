@@ -108,12 +108,12 @@
             <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
     </div>
-    <div class="form-card" style="width: 30%;">
+    <div class="form-card" style="width: 100%;">
         <label>Descripción del Negocio</label>
         <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
     </div>
     <div class="form-row">
-        
+
         <div class="form-card" style="width: 30%;">
             <label>Dirección</label>
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
@@ -131,16 +131,22 @@
             </div>
             {% endif %}
         </div>
-    </div>
-
-    <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>Teléfono</label>
             <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
+    </div>
+
+    <div class="form-row">
+
         <div class="form-card" style="width: 30%;">
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">
+        </div>
+        <div class="form-card" style="width: 30%;">
+            <label>Nombre en la cuenta</label>
+            <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
+                   placeholder="Jonas">
         </div>
         <div class="form-card" style="width: 30%;">
             <label>Datos para transferencia - Número de cuenta</label>
@@ -149,21 +155,15 @@
             <small class="form-text text-muted">Número de cuenta o CLABE (según corresponda).</small>
         </div>
     </div>
+    <div class="form-card" style="width: 100%;">
+        <label>¿Qué quieres que haga tu IA?</label>
+        <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
+    </div>
     <div class="form-row">
-
-        <div class="form-card" style="width: 30%;">
-            <label>Nombre en la cuenta</label>
-            <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
-                   placeholder="Jonas">
-        </div>
         <div class="form-card" style="width: 30%;">
             <label>Banco</label>
             <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
                    placeholder="BBVA">
-        </div>
-        <div class="form-card" style="width: 30%;">
-            <label>¿Qué quieres que haga tu IA?</label>
-            <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
         </div>
     </div>
     <div class="form-row">
