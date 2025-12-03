@@ -11411,7 +11411,10 @@ def enviar_manual():
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero)) @app.route('/chats/<numero>/eliminar', methods=['POST'])
+    return redirect(url_for('ver_chat', numero=numero)) 
+
+
+@app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
