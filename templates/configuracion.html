@@ -83,39 +83,44 @@
 
 <form class="config-form" method="POST" enctype="multipart/form-data">
     <!-- AÑADE EL CAMPO AQUÍ AL INICIO DEL FORMULARIO -->
-   <!--<div class="form-card">
-        <label>Correo para notificaciones de Calendar</label>
-        <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
-               placeholder="ejemplo@gmail.com">
-        <small class="form-text text-muted">
-            Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
-        </small>
-    </div>--> 
+    <!--<div class="form-card">
+         <label>Correo para notificaciones de Calendar</label>
+         <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
+                placeholder="ejemplo@gmail.com">
+         <small class="form-text text-muted">
+             Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
+         </small>
+     </div>-->
     <div class="form-row">
         <div class="form-card" style="width: 30%;">
-        <label>Nombre de tu IA personalizada</label>
-        <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
-        <small class="form-text text-muted">
-            Este nombre se mostrará en el sidebar y título de la página
-        </small>
+            <label>Nombre de tu IA personalizada</label>
+            <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
+            <small class="form-text text-muted">
+                Este nombre se mostrará en el sidebar y título de la página
+            </small>
         </div>
         <div class="form-card" style="width: 30%;">
             <label>Nombre de tu Negocio</label>
             <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
         </div>
-            <div class="form-card" style="width: 30%;">
-        <label>Descripción del Negocio</label>
-        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
-    </div>
-    </div>
-        <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>URL del Negocio</label>
             <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
+    </div>
+    <div class="form-card" style="width: 93%;">
+        <label>Descripción del Negocio</label>
+        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
+    </div>
+    <div class="form-row">
+
         <div class="form-card" style="width: 30%;">
             <label>Dirección</label>
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
+        </div>
+        <div class="form-card" style="width: 30%;">
+            <label>Teléfono</label>
+            <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
         <div class="form-card" style="width: 30%;">
             <label>Logo de la Aplicación</label>
@@ -133,106 +138,95 @@
     </div>
 
     <div class="form-row">
-        <div class="form-card" style="width: 30%;">
-            <label>Teléfono</label>
-            <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
-        </div>
-        <div class="form-card" style="width: 30%;">
+
+        <div class="form-card" style="width: 20%;">
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">
         </div>
-        <div class="form-card" style="width: 30%;">
+        <div class="form-card" style="width: 20%;">
+            <label>Banco</label>
+            <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
+                   placeholder="BBVA">
+        </div>
+        <div class="form-card" style="width: 20%;">
+            <label>Nombre en la cuenta</label>
+            <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
+                   placeholder="Jonas">
+        </div>
+        <div class="form-card" style="width: 28%;">
             <label>Datos para transferencia - Número de cuenta</label>
             <input type="text" name="transferencia_numero" value="{{ datos.transferencia_numero or '' }}"
                    placeholder="1123 3454 2344 2343">
             <small class="form-text text-muted">Número de cuenta o CLABE (según corresponda).</small>
         </div>
     </div>
-    <div class="form-row">
-
-        <div class="form-card" style="width: 30%;">
-            <label>Nombre en la cuenta</label>
-            <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
-                   placeholder="Jonas">
-        </div>
-        <div class="form-card" style="width: 30%;">
-            <label>Banco</label>
-            <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
-                   placeholder="BBVA">
-        </div>
-        <div class="form-card" style="width: 30%;">
-            <label>¿Qué quieres que haga tu IA?</label>
-            <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
-        </div>
+    <div class="form-card" style="width: 93%;">
+        <label>¿Qué quieres que haga tu IA?</label>
+        <textarea name="que_hace" rows="7" required>{{ datos.que_hace or '' }}</textarea>
     </div>
-    <div class="form-row">
-    <div class="form-card" style="width: 30%;">
+    <div class="form-card" style="width: 93%;">
         <label>Leads, temas a los que avisar a un asesor</label>
         <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
         <small class="form-text text-muted">
             Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
         </small>
     </div>
-    <div class="form-card" style="width: 30%;">
-        <button type="submit" class="btn-primary" style="width: 100%; height: 100%;">Guardar Negocio</button>
-     </div>
-    </div>
-
+    <button type="submit" class="btn-primary">Guardar Negocio</button>
 </form>
-<div class="form-row" style="margin-top: 30px;"> 
-<form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-    <div class="form-card" style="width: 50%;">
-        <label>Publicar PDF (Catálogo / Documento)</label>
-        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-            <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
-            <textarea name="public_pdf_descripcion" class="longitud_desc" rows="4" placeholder="Descripción (opcional). Añade palabras claves para que la IA seleccione el catálogo más relevante."></textarea>
-            <div style="flex:0 0 auto; display:flex; align-items:center;">
-                <button type="submit" class="btn-success">📄 Publicar PDF</button>
+<div class="form-row" style="margin-top: 30px;">
+    <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px; width:93%">
+        <div class="form-card" style="width: 100%;">
+            <label>Publicar PDF (Catálogo / Documento)</label>
+            <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
+                <textarea name="public_pdf_descripcion" class="longitud_desc" rows="4" placeholder="Descripción (opcional). Añade palabras claves para que la IA seleccione el catálogo más relevante."></textarea>
+                <div style="flex:0 0 auto; display:flex; align-items:center;">
+                    <button type="submit" class="btn-success">📄 Publicar PDF</button>
+                </div>
             </div>
+            <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
         </div>
-        <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
+    </form>
+    <div class="form-card" style="width:93%">
+        <h4>📚 Catálogos publicados</h4>
+        {% if documents_publicos and documents_publicos|length > 0 %}
+        <div class="table-responsive">
+            <table class="table" style="font-size:13px;">
+                <thead>
+                    <tr>
+                        <th style="color:black;">Archivo</th>
+                        <th style="color:black;">Descripción</th>
+                        <th style="color:black;">Publicado</th>
+                        <th style="color:black;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="PDF">
+                    {% for doc in documents_publicos %}
+                    <tr>
+                        <td style="color:black;">
+                            <a href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank" rel="noopener">
+                                {{ doc.filename }}
+                            </a>
+                        </td>
+                        <td style="color:black;">{{ doc.descripcion or '-' }}</td>
+                        <td style="color:black;">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
+                        <td style="color:black;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <a class="btn small" href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank">Ver / Descargar</a>
+                                <form action="{{ url_for('borrar_pdf_configuracion', doc_id=doc.id) }}" method="post" onsubmit="return confirm('¿Eliminar {{ doc.filename }}? Esta acción no se puede deshacer.');" style="display:inline;">
+                                    <button type="submit" class="btn danger small">🗑️ Eliminar</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted">No hay catálogos publicados.</div>
+        {% endif %}
     </div>
-</form>
-<div class="form-card" style="width:50%;">
-    <h4>📚 Catálogos publicados</h4>
-    {% if documents_publicos and documents_publicos|length > 0 %}
-    <div class="table-responsive">
-        <table class="table" style="font-size:13px;">
-            <thead>
-                <tr>
-                    <th style="color:black;">Archivo</th>
-                    <th style="color:black;">Descripción</th>
-                    <th style="color:black;">Publicado</th>
-                    <th style="color:black;">Acciones</th>
-                </tr>
-            </thead>
-            <tbody class="PDF">
-                {% for doc in documents_publicos %}
-                <tr>
-                    <td style="color:black;">
-                        <a href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank" rel="noopener">
-                            {{ doc.filename }}
-                        </a>
-                    </td>
-                    <td style="color:black;">{{ doc.descripcion or '-' }}</td>
-                    <td style="color:black;">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
-                    <td style="color:black;">
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <a class="btn small" href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank">Ver / Descargar</a>
-                            <form action="{{ url_for('borrar_pdf_configuracion', doc_id=doc.id) }}" method="post" onsubmit="return confirm('¿Eliminar {{ doc.filename }}? Esta acción no se puede deshacer.');" style="display:inline;">
-                                <button type="submit" class="btn danger small">🗑️ Eliminar</button>
-                            </form>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="text-muted">No hay catálogos publicados.</div>
-    {% endif %}
-</div>
 </div>
 {% elif active == 'leads' %}
 <form class="config-form" method="POST">
