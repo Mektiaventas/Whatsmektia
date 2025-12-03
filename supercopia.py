@@ -798,45 +798,42 @@ def admin_asignar_plan_dominio():
 
 # En supercopia.py
 
+# En supercopia.py
+
 def guardar_configuracion_leads(db_conn, tenant_id, form_data):
-    """Procesa y guarda la configuración de leads desde los datos del formulario."""
     configuracion_leads = {}
     
-    # Asumiendo que LEADS_PREDEFINIDOS está definido globalmente: 
-    # LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado']
-    
+    # Asegúrate de importar LEADS_PREDEFINIDOS o definirlos aquí
+    LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado', 'Dormido'] # Agrega Dormido si lo necesitas
+
     for lead_name in LEADS_PREDEFINIDOS:
         lead_key = lead_name.lower().replace(' ', '_')
         
-        # 1. Días para Caliente
+        # 1. Días
         dias_a_caliente = form_data.get(f'{lead_key}_a_caliente_dias')
         
-        # 2. Switch IA
-        usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on' 
+        # 2. Checkbox IA: Si está en form_data es True, si no, es False
+        usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on'
         
-        # 3. Tiempo para Siguiente Lead
+        # 3. Minutos
         tiempo_siguiente_minutos = form_data.get(f'{lead_key}_tiempo_siguiente_minutos')
         
-        # 4. Tipo Estático/Dinámico
-        tipo = form_data.get(f'{lead_key}_tipo', 'dinamico') 
+        # 4. Checkbox Estático: Si está en form_data es 'estatico', si no, 'dinamico'
+        tipo = 'estatico' if form_data.get(f'{lead_key}_tipo') == 'estatico' else 'dinamico'
         
-        # 5. Criterio IA (NUEVO CAMPO)
+        # 5. Criterio IA
         criterio_ia = form_data.get(f'{lead_key}_criterio_ia', '').strip()
 
-        # Solo guardar si el lead es relevante (el formulario siempre lo envía si está dentro del <form>)
         config = {
-            'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 7,
+            'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 0,
             'usar_ia': usar_ia,
-            'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 1440,
+            'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 0,
             'tipo': tipo,
-            'criterio_ia': criterio_ia # <--- Campo crucial
+            'criterio_ia': criterio_ia
         }
         configuracion_leads[lead_key] = config
 
-    if configuracion_leads:
-        # Serializar el diccionario a JSON string
-        return json.dumps(configuracion_leads) 
-    return None
+    return json.dumps(configuracion_leads)
 
 # --------------------------------------------------------------------------------
 # En la función de lógica de clasificación de leads (donde se determina el cambio)
@@ -5751,7 +5748,8 @@ def save_config(cfg_all, config=None):
         alter_statements.append("ADD COLUMN asesor2_email VARCHAR(150) DEFAULT NULL")
     if 'asesores_json' not in existing_cols:
         alter_statements.append("ADD COLUMN asesores_json TEXT DEFAULT NULL")
-
+    if 'leads_config' not in existing_cols:
+        alter_statements.append("ADD COLUMN leads_config LONGTEXT DEFAULT NULL")
     if alter_statements:
         try:
             sql = f"ALTER TABLE configuracion {', '.join(alter_statements)}"
@@ -13243,6 +13241,109 @@ def actualizar_info_contacto(numero, config=None, nombre_perfil=None, plataforma
     finally:
         if cursor: cursor.close()
         if conn: conn.close()
+
+def evaluar_reglas_leads(numero, mensaje_usuario, config=None):
+    """
+    Evalúa si un chat debe cambiar de estado basado en la configuración personalizada (JSON).
+    Maneja: Tiempo, IA (Criterio semántico) y Bloqueo Estático.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+
+        # 1. Obtener estado actual del lead y su configuración
+        cfg_full = load_config(config)
+        leads_config = cfg_full.get('leads_config_list', {})
+        
+        cursor.execute("SELECT interes, ultima_interaccion_usuario FROM contactos WHERE numero_telefono = %s", (numero,))
+        contacto = cursor.fetchone()
+        
+        if not contacto:
+            return # No existe el contacto
+
+        estado_actual_db = (contacto.get('interes') or 'Nuevo').lower().replace(' ', '_')
+        ultima_interaccion = contacto.get('ultima_interaccion_usuario')
+        
+        # --- REGLA 1: SI ES ESTÁTICO, NO HACER NADA ---
+        # Buscamos la configuración del estado ACTUAL.
+        # Si el estado actual es 'dormido' y en la config dice 'estatico', se acabó.
+        config_estado_actual = leads_config.get(estado_actual_db, {})
+        
+        if config_estado_actual.get('tipo') == 'estatico':
+            app.logger.info(f"🔒 Lead {numero} está en estado ESTÁTICO ({estado_actual_db}). No se evalúan reglas.")
+            return # Salir, no se toca
+
+        # --- REGLA 2: EVALUAR CAMBIO POR CRITERIO IA ---
+        # Recorremos TODOS los posibles estados destino para ver si el mensaje cumple el criterio de alguno
+        for estado_destino, cfg_destino in leads_config.items():
+            
+            # Solo evaluar si tiene activada la IA y tiene un criterio escrito
+            if cfg_destino.get('usar_ia') and cfg_destino.get('criterio_ia'):
+                
+                criterio = cfg_destino.get('criterio_ia')
+                
+                # Llamada rápida a DeepSeek/OpenAI para validar el criterio
+                match = verificar_criterio_ia(mensaje_usuario, criterio)
+                
+                if match:
+                    app.logger.info(f"🎯 IA detectó criterio para {estado_destino}: '{criterio}'. Moviendo lead.")
+                    actualizar_interes_lead_db(numero, estado_destino, config)
+                    return # Ya lo movimos, terminamos
+
+        # --- REGLA 3: EVALUAR TIEMPO (Esto usualmente va en un CRON JOB/Scheduler, no en mensaje entrante) ---
+        # Pero si quieres checarlo aquí:
+        if ultima_interaccion and config_estado_actual.get('tiempo_siguiente_minutos') > 0:
+            minutos_limite = config_estado_actual.get('tiempo_siguiente_minutos')
+            tiempo_pasado = (datetime.now() - ultima_interaccion).total_seconds() / 60
+            
+            if tiempo_pasado >= minutos_limite:
+                # Aquí defines la lógica de "siguiente". 
+                # Por defecto, podría ir a Dormido o lo que definas.
+                pass 
+
+    except Exception as e:
+        app.logger.error(f"Error evaluando reglas leads: {e}")
+    finally:
+        if 'cursor' in locals(): cursor.close()
+        if 'conn' in locals(): conn.close()
+
+def verificar_criterio_ia(mensaje, criterio):
+    """Retorna True si el mensaje cumple con el criterio semántico."""
+    try:
+        prompt = f"""
+        Analiza si el siguiente mensaje cumple estrictamente con este criterio: "{criterio}".
+        Mensaje: "{mensaje}"
+        Responde SOLO "SI" o "NO".
+        """
+        # ... Tu código de llamada a OpenAI/DeepSeek aquí ...
+        # Simulación:
+        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        resp = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2
+        )
+        return "SI" in resp.choices[0].message.content.upper()
+    except:
+        return False
+
+def actualizar_interes_lead_db(numero, nuevo_interes, config):
+    conn = get_db_connection(config)
+    cur = conn.cursor()
+    # Normalizar nombre para guardar (ej: 'dormido' -> 'Dormido')
+    nuevo_interes_fmt = nuevo_interes.capitalize().replace('_', ' ')
+    
+    cur.execute("UPDATE contactos SET interes = %s WHERE numero_telefono = %s", (nuevo_interes_fmt, numero))
+    
+    # También actualizar chat_meta para que el Kanban lo refleje si usas columnas por estado
+    # (Opcional, depende de tu lógica de Kanban)
+    
+    conn.commit()
+    cur.close()
+    conn.close()
 
 def evaluar_movimiento_automatico(numero, mensaje, respuesta, config=None):
         if config is None:
