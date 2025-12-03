@@ -554,27 +554,6 @@
                     }
                 }
             }
-            messageForm.addEventListener('submit', function (e) {
-                const hasText = textarea.value.trim() !== '';
-                const hasFile = fileInput.files.length > 0;
-                const hasAudio = document.getElementById('audio-data-input').value !== '';
-
-                if (!hasText && !hasFile && !hasAudio) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                    return false;
-                }
-
-                const sendBtn = document.querySelector('.send-btn');
-                const originalText = sendBtn.innerHTML;
-                sendBtn.innerHTML = '⏳';
-                sendBtn.disabled = true;
-
-                setTimeout(() => {
-                    sendBtn.innerHTML = originalText;
-                    sendBtn.disabled = false;
-                }, 3000);
-            });
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
@@ -2517,161 +2496,198 @@ function activarEdicionAlias(parent) {
     };
 }
 
-    // ======================================================
-    // INICIALIZACIÓN LIMPIA DEL CHAT (SIN cloneNode)
-    // ======================================================
-    document.addEventListener('DOMContentLoaded', function () {
-        console.log('🚀 Iniciando chat (v2.0 fixed)...');
+/* ===================== INITIALIZATION ===================== */
+document.addEventListener('DOMContentLoaded', function () {
+    console.log('DOM cargado - inicializando componentes');
 
-        const messageForm = document.getElementById('messageForm');
+    // Inicializar todos los componentes
+    enhanceAliasButtons();
+    setupEmojiPicker();
+    setupChatSearch();
+    setupFileUpload();
+    setupAudioRecorder();
 
-        if (messageForm) {
-            // 1. Inicializar componentes (Emoji, Archivos, Audio)
-            // Se ejecutan DIRECTAMENTE sobre los elementos existentes
-            try {
-                if (typeof setupEmojiPicker === 'function') setupEmojiPicker();
-                else console.error('❌ Error: setupEmojiPicker no encontrado');
+    console.log('✅ Todos los componentes inicializados');
 
-                if (typeof setupFileUpload === 'function') setupFileUpload();
-                else console.error('❌ Error: setupFileUpload no encontrado');
+    // Inicializar scroll
+    try {
+        const msgsEl = document.getElementById('msgs');
+        if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+    } catch (e) {
+        console.warn('Initial scroll to bottom failed:', e);
+    }
 
-                if (typeof setupAudioRecorder === 'function') setupAudioRecorder();
-                else console.error('❌ Error: setupAudioRecorder no encontrado');
+    // Iniciar actualización de chats
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats();
+        if (!chatsIntervalHandle) {
+            chatsIntervalHandle = setInterval(() => {
+                if (!document.hidden) actualizarListaChats();
+            }, refreshIntervalMs);
+        }
+    }
 
-                if (typeof scrollToBottom === 'function') scrollToBottom();
-            } catch (err) {
-                console.error("❌ Error inicializando componentes:", err);
-            }
+    // Inicializar polling de mensajes
+    function initMessagesStateFromDOM() {
+        try {
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
+            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            nodes.forEach(n => {
+                const idAttr = n.getAttribute('data-msg-id');
+                const id = Number(idAttr) || 0;
+                if (id) {
+                    seenMessageKeys.add('id:' + String(id));
+                }
+            });
+            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+        } catch (e) {
+            console.warn('initMessagesStateFromDOM failed', e);
+        }
+    }
 
-            // 2. Configurar el envío del formulario
-            // Usamos una bandera para evitar múltiples listeners si el script corre dos veces
-            if (messageForm.dataset.listenerAttached === 'true') {
-                console.log('⚠️ Listener de submit ya estaba activo.');
-            } else {
-                messageForm.addEventListener('submit', async function (e) {
-                    // Prevenir envío estándar
-                    // La lógica de envío se maneja dentro de este listener o en las funciones individuales
-                    // Si tienes lógica personalizada aquí, asegúrate de mantenerla.
+    if (selectedChatId) {
+        initMessagesStateFromDOM();
+        if (!messagesIntervalHandle) {
+            pollSelectedMessages();
+            messagesIntervalHandle = setInterval(() => {
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
+        }
+    }
 
-                    // Nota: Si tus botones de "Enviar" hacen el submit, la validación
-                    // que te di anteriormente debería ir aquí.
-
-                    // Validaciones básicas de UI antes de enviar
-                    const sendBtn = document.querySelector('.send-btn');
-                    if (sendBtn) {
-                        sendBtn.innerHTML = '⏳';
-                        sendBtn.disabled = true;
-                        // Restaurar botón después de 5 seg por seguridad
-                        setTimeout(() => {
-                            sendBtn.innerHTML = 'Enviar';
-                            sendBtn.disabled = false;
-                        }, 5000);
-                    }
-                });
-
-                // Marcar como configurado
-                messageForm.dataset.listenerAttached = 'true';
-                console.log('✅ Formulario de chat configurado correctamente.');
-            }
+    // Manejar cambios de visibilidad
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
         } else {
-            console.error('🔴 Error CRÍTICO: No se encontró el formulario #messageForm');
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => {
+                    if (!document.hidden) actualizarListaChats();
+                }, refreshIntervalMs);
+            }
+            if (selectedChatId && !messagesIntervalHandle) {
+                initMessagesStateFromDOM();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
         }
     });
-    /* ===================== FORMULARIO ÚNICO MANEJADOR (CORREGIDO) ===================== */
-    document.addEventListener('DOMContentLoaded', function () {
-        const form = document.getElementById('messageForm');
+});
 
-        if (form) {
-            // Eliminar listeners anteriores si existieran (opcional, pero seguro)
-            const newForm = form.cloneNode(false); // false = no clona hijos, solo la etiqueta form
-            // Nota: No reemplazamos el form entero, solo adjuntamos el evento al existente
-            // Simplemente aseguramos que el submit se maneje correctamente.
+/* ===================== FORMULARIO ÚNICO MANEJADOR ===================== */
+// ESTE ES EL ÚNICO EVENT LISTENER PARA EL FORMULARIO
+document.addEventListener('DOMContentLoaded', function() {
+    if (document.getElementById('messageForm')) {
+        const messageForm = document.getElementById('messageForm');
 
-            form.addEventListener('submit', function (e) {
-                const textarea = document.getElementById('mensaje-texto');
-                const fileInput = document.getElementById('file-input');
-                const audioInput = document.getElementById('audio-data-input');
-                const emojiBtn = document.getElementById('emoji-pick-btn');
-                const sendBtn = document.querySelector('.send-btn');
+        // Clonar el formulario para eliminar event listeners previos
+        const newForm = messageForm.cloneNode(true);
+        messageForm.parentNode.replaceChild(newForm, messageForm);
 
-                // 1. Validar contenido
-                const hasText = textarea && textarea.value.trim() !== '';
-                const hasFile = fileInput && fileInput.files.length > 0;
-                const hasAudio = audioInput && audioInput.value !== '';
+        // Re-asignar variables después del clone
+        const textarea = document.getElementById('mensaje-texto');
+        const fileInput = document.getElementById('file-input');
+        const audioDataInput = document.getElementById('audio-data-input');
+        const emojiBtn = document.getElementById('emoji-pick-btn');
 
-                console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+        newForm.addEventListener('submit', function (e) {
+            const hasText = textarea ? textarea.value.trim() !== '' : false;
+            const hasFile = fileInput ? fileInput.files.length > 0 : false;
+            const hasAudio = audioDataInput ? audioDataInput.value !== '' : false;
 
-                if (!hasText && !hasFile && !hasAudio) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                    return false;
-                }
+            console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
-                // 2. UI: Cerrar emoji picker
-                const emojiPicker = document.getElementById('emoji-picker-list');
-                if (emojiPicker) emojiPicker.style.display = 'none';
-
-                // 3. UI: Feedback visual en el botón
-                if (sendBtn) {
-                    // Guardar texto original si no existe
-                    if (!sendBtn.getAttribute('data-original-html')) {
-                        sendBtn.setAttribute('data-original-html', sendBtn.innerHTML);
-                    }
-
-                    if (hasAudio) {
-                        sendBtn.innerHTML = '🎤⏳';
-                    } else if (hasFile) {
-                        sendBtn.innerHTML = '📎⏳';
-                    } else {
-                        sendBtn.innerHTML = '⏳';
-                    }
-
-                    sendBtn.disabled = true;
-
-                    // Deshabilitar otros botones para evitar doble clic
-                    if (emojiBtn) emojiBtn.disabled = true;
-                    const attachBtn = document.getElementById('file-attach-btn');
-                    if (attachBtn) attachBtn.disabled = true;
-                    const recordBtn = document.getElementById('record-audio-btn');
-                    if (recordBtn) recordBtn.disabled = true;
-
-                    // Restauración de seguridad por si el servidor tarda mucho o falla
-                    setTimeout(() => {
-                        restoreAllButtons();
-                    }, 8000);
-                }
-
-                // Dejar que el formulario se envíe normalmente
-                return true;
-            });
-        }
-
-        // Función auxiliar para restaurar botones
-        window.restoreAllButtons = function () {
-            const sendBtn = document.querySelector('.send-btn');
-            const emojiBtn = document.getElementById('emoji-pick-btn');
-            const attachBtn = document.getElementById('file-attach-btn');
-            const recordBtn = document.getElementById('record-audio-btn');
-            const startRecordBtn = document.getElementById('start-record-btn');
-
-            if (sendBtn) {
-                const original = sendBtn.getAttribute('data-original-html');
-                if (original) sendBtn.innerHTML = original;
-                else sendBtn.innerHTML = 'Enviar'; // Fallback text
-                sendBtn.disabled = false;
+            if (!hasText && !hasFile && !hasAudio) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+                return false;
             }
-            if (emojiBtn) emojiBtn.disabled = false;
-            if (attachBtn) attachBtn.disabled = false;
-            if (recordBtn) recordBtn.disabled = false;
-            if (startRecordBtn) startRecordBtn.disabled = false;
-        };
 
-        // Restaurar botones al volver a la página (fix para Safari/Firefox bfcache)
-        window.addEventListener('pageshow', function () {
+            // Cerrar el emoji picker si está abierto
+            const emojiPicker = document.getElementById('emoji-picker-list');
+            if (emojiPicker) {
+                emojiPicker.style.display = 'none';
+            }
+
+            // Deshabilitar temporalmente el botón de emoji
+            if (emojiBtn) {
+                emojiBtn.disabled = true;
+            }
+
+            // Mostrar indicadores de envío
+            const sendBtn = document.querySelector('.send-btn');
+            if (sendBtn) {
+                const originalText = sendBtn.innerHTML;
+
+                if (hasAudio) {
+                    sendBtn.innerHTML = '🎤⏳';
+                } else if (hasFile) {
+                    sendBtn.innerHTML = '📎⏳';
+                } else {
+                    sendBtn.innerHTML = '⏳';
+                }
+
+                sendBtn.disabled = true;
+
+                // Programar restauración automática después de 5 segundos
+                setTimeout(() => {
+                    sendBtn.innerHTML = originalText;
+                    sendBtn.disabled = false;
+
+                    // Restaurar el botón de emoji
+                    if (emojiBtn) {
+                        emojiBtn.disabled = false;
+                    }
+
+                    // Restaurar todos los botones
+                    if (typeof restoreAllButtons === 'function') {
+                        restoreAllButtons();
+                    }
+                }, 5000);
+            }
+
+            return true; // Permitir el envío del formulario
+        });
+    }
+
+    // Evento para restaurar botones cuando se complete el envío
+    document.addEventListener('formSubmitComplete', function() {
+        setTimeout(() => {
             if (typeof restoreAllButtons === 'function') {
                 restoreAllButtons();
             }
-        });
+            if (typeof resetRecorder === 'function') {
+                resetRecorder();
+            }
+
+            // Re-habilitar el botón de emoji
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            if (emojiBtn) {
+                emojiBtn.disabled = false;
+            }
+        }, 1000);
     });
+
+    // Para formularios que se envían sin AJAX (recarga de página)
+    window.addEventListener('pageshow', function() {
+        setTimeout(() => {
+            if (typeof restoreAllButtons === 'function') {
+                restoreAllButtons();
+            }
+            if (typeof resetRecorder === 'function') {
+                resetRecorder();
+            }
+
+            // Re-habilitar el botón de emoji
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            if (emojiBtn) {
+                emojiBtn.disabled = false;
+            }
+        }, 1000);
+    });
+});
 </script>
 {% endblock %} 
