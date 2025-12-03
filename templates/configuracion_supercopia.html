@@ -171,14 +171,11 @@
             Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
         </small>
     </div>
-    <div class="form-row">
-            <button type="submit" class="btn-primary" style="width: 100%; height: 100%;">Guardar Negocio</button>
-    </div>
-
+            <button type="submit" class="btn-primary" >Guardar Negocio</button>
 </form>
 <div class="form-row" style="margin-top: 30px;">
     <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-        <div class="form-card" style="width: 50%;">
+        <div class="form-card" style="width: 93%;">
             <label>Publicar PDF (Catálogo / Documento)</label>
             <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
                 <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
@@ -188,75 +185,6 @@
                 </div>
             </div>
             <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
-        </div>
-        <h2 style="margin-top: 30px; margin-bottom: 15px;">Configuración de Leads</h2>
-
-        <style>
-            .leads-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-                gap: 12px;
-            }
-
-            .lead-card {
-                padding: 12px;
-                border: 1px solid #e2e8f0;
-                border-radius: 8px;
-                background: #fff;
-            }
-
-            .form-check-input {
-                width: 20px;
-                height: 20px;
-                cursor: pointer;
-            }
-        </style>
-
-        <div class="leads-grid">
-            {# Definir una lista de leads de ejemplo si no tienes una en el contexto de Flask #}
-            {% set leads_a_configurar = ['Nuevo', 'Frio', 'Caliente', 'Cerrado'] %}
-
-            {# Asumimos que leads_map contiene las configuraciones actuales, ej: leads_map = {'nuevo': {'dias_a_caliente': 5, 'usar_ia': True, ...}} #}
-            {% set leads_map = leads_config_list if leads_config_list is defined and leads_config_list is mapping else {} %}
-
-            {% for lead_name in leads_a_configurar %}
-            {% set lead_key = lead_name|lower|replace(' ', '_') %}
-            {% set lead_config = leads_map.get(lead_key, {}) %}
-
-            <div class="lead-card">
-                <h4 style="margin-top: 0;">Lead: **{{ lead_name|capitalize }}**</h4>
-
-                {% if lead_key != 'caliente' %}
-                <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
-                <input type="number" id="{{ lead_key }}_a_caliente_dias" name="{{ lead_key }}_a_caliente_dias"
-                       class="input" min="1" value="{{ lead_config.get('dias_a_caliente', 7) }}"
-                       placeholder="Ej: 7" required>
-                {% endif %}
-
-                <div style="margin-top: 15px; display: flex; align-items: center;">
-                    <label for="{{ lead_key }}_usar_ia" style="flex: 1; margin-right: 10px;">Usar **IA** para clasificación:</label>
-                    {# Un campo hidden para asegurar que el valor 'off' se envía si el checkbox no está marcado #}
-                    <input type="hidden" name="{{ lead_key }}_usar_ia" value="off">
-                    <input type="checkbox" id="{{ lead_key }}_usar_ia" name="{{ lead_key }}_usar_ia"
-                           class="form-check-input" value="on"
-                           {{ 'checked' if lead_config.get('usar_ia') == True else '' }}>
-                </div>
-
-                <label for="{{ lead_key }}_tiempo_siguiente_minutos" style="margin-top: 15px;">Tiempo (**minutos**) sin mensaje para cambio:</label>
-                <input type="number" id="{{ lead_key }}_tiempo_siguiente_minutos" name="{{ lead_key }}_tiempo_siguiente_minutos"
-                       class="input" min="1" value="{{ lead_config.get('tiempo_siguiente_minutos', 1440) }}"
-                       placeholder="Ej: 1440 (24 horas)" required>
-
-                <div style="margin-top: 15px; display: flex; align-items: center;">
-                    <label for="{{ lead_key }}_tipo" style="flex: 1; margin-right: 10px;">Tipo **Estático** (no cambia después):</label>
-                    {# Un campo hidden para enviar 'dinamico' si no está marcado #}
-                    <input type="hidden" name="{{ lead_key }}_tipo" value="dinamico">
-                    <input type="checkbox" id="{{ lead_key }}_tipo" name="{{ lead_key }}_tipo"
-                           class="form-check-input" value="estatico"
-                           {{ 'checked' if lead_config.get('tipo') == 'estatico' else '' }}>
-                </div>
-            </div>
-            {% endfor %}
         </div>
     </form>
     <div class="form-card" style="width:50%;">
@@ -350,6 +278,75 @@
         <input type="text" name="lenguaje" value="{{ datos.lenguaje or '' }}" required>
     </div>
     <button type="submit" class="btn-primary">Guardar Personalización</button>
+    <h2 style="margin-top: 30px; margin-bottom: 15px;">Configuración de Leads</h2>
+
+    <style>
+        .leads-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 12px;
+        }
+
+        .lead-card {
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .form-check-input {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+    </style>
+
+    <div class="leads-grid">
+        {# Definir una lista de leads de ejemplo si no tienes una en el contexto de Flask #}
+        {% set leads_a_configurar = ['Nuevo', 'Frio', 'Caliente', 'Cerrado'] %}
+
+        {# Asumimos que leads_map contiene las configuraciones actuales, ej: leads_map = {'nuevo': {'dias_a_caliente': 5, 'usar_ia': True, ...}} #}
+        {% set leads_map = leads_config_list if leads_config_list is defined and leads_config_list is mapping else {} %}
+
+        {% for lead_name in leads_a_configurar %}
+        {% set lead_key = lead_name|lower|replace(' ', '_') %}
+        {% set lead_config = leads_map.get(lead_key, {}) %}
+
+        <div class="lead-card">
+            <h4 style="margin-top: 0;">Lead: **{{ lead_name|capitalize }}**</h4>
+
+            {% if lead_key != 'caliente' %}
+            <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
+            <input type="number" id="{{ lead_key }}_a_caliente_dias" name="{{ lead_key }}_a_caliente_dias"
+                   class="input" min="1" value="{{ lead_config.get('dias_a_caliente', 7) }}"
+                   placeholder="Ej: 7" required>
+            {% endif %}
+
+            <div style="margin-top: 15px; display: flex; align-items: center;">
+                <label for="{{ lead_key }}_usar_ia" style="flex: 1; margin-right: 10px;">Usar **IA** para clasificación:</label>
+                {# Un campo hidden para asegurar que el valor 'off' se envía si el checkbox no está marcado #}
+                <input type="hidden" name="{{ lead_key }}_usar_ia" value="off">
+                <input type="checkbox" id="{{ lead_key }}_usar_ia" name="{{ lead_key }}_usar_ia"
+                       class="form-check-input" value="on"
+                       {{ 'checked' if lead_config.get('usar_ia') == True else '' }}>
+            </div>
+
+            <label for="{{ lead_key }}_tiempo_siguiente_minutos" style="margin-top: 15px;">Tiempo (**minutos**) sin mensaje para cambio:</label>
+            <input type="number" id="{{ lead_key }}_tiempo_siguiente_minutos" name="{{ lead_key }}_tiempo_siguiente_minutos"
+                   class="input" min="1" value="{{ lead_config.get('tiempo_siguiente_minutos', 1440) }}"
+                   placeholder="Ej: 1440 (24 horas)" required>
+
+            <div style="margin-top: 15px; display: flex; align-items: center;">
+                <label for="{{ lead_key }}_tipo" style="flex: 1; margin-right: 10px;">Tipo **Estático** (no cambia después):</label>
+                {# Un campo hidden para enviar 'dinamico' si no está marcado #}
+                <input type="hidden" name="{{ lead_key }}_tipo" value="dinamico">
+                <input type="checkbox" id="{{ lead_key }}_tipo" name="{{ lead_key }}_tipo"
+                       class="form-check-input" value="estatico"
+                       {{ 'checked' if lead_config.get('tipo') == 'estatico' else '' }}>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
 </form>
 
 {% elif active == 'precios' %}
