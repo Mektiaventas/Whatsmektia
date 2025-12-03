@@ -13114,23 +13114,50 @@ def evaluar_reglas_leads(numero, mensaje_usuario, config=None):
         if 'conn' in locals(): conn.close()
 
 def verificar_criterio_ia(mensaje, criterio):
-    """Retorna True si el mensaje cumple con el criterio semántico."""
+    """
+    Retorna True si el mensaje cumple con el criterio semántico usando DeepSeek.
+    """
+    # Si no hay criterio o mensaje, salir rápido
+    if not criterio or not mensaje:
+        return False
+
     try:
         prompt = f"""
-        Analiza si el siguiente mensaje cumple estrictamente con este criterio: "{criterio}".
-        Mensaje: "{mensaje}"
-        Responde SOLO "SI" o "NO".
+        Tu tarea es evaluar si un mensaje de usuario cumple con una condición específica.
+        
+        Condición/Criterio: "{criterio}"
+        Mensaje del usuario: "{mensaje}"
+        
+        Responde ÚNICAMENTE con la palabra "SI" si se cumple, o "NO" si no se cumple.
         """
-        # ... Tu código de llamada a OpenAI/DeepSeek aquí ...
-        # Simulación:
-        client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        resp = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=2
-        )
-        return "SI" in resp.choices[0].message.content.upper()
-    except:
+        
+        headers = {
+            "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.0, # Temperatura 0 para máxima precisión
+            "max_tokens": 5
+        }
+        
+        response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            respuesta_ia = response.json()['choices'][0]['message']['content'].strip().upper()
+            
+            # LOG PARA DEPURACIÓN (Aparecerá en tu consola)
+            app.logger.info(f"🕵️‍♀️ LEADS IA CHECK: Msg='{mensaje}' | Criterio='{criterio}' | IA Dice: {respuesta_ia}")
+            
+            return "SI" in respuesta_ia
+        else:
+            app.logger.error(f"🔴 Error API DeepSeek en Leads: {response.text}")
+            return False
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Excepción en verificar_criterio_ia: {e}")
         return False
 
 def actualizar_interes_lead_db(numero, nuevo_interes, config):
