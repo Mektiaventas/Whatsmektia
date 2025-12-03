@@ -11410,7 +11410,6 @@ def enviar_manual():
         flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
-    
     return redirect(url_for('ver_chat', numero=numero)) 
 
 

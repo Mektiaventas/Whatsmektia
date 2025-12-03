@@ -2517,86 +2517,66 @@ function activarEdicionAlias(parent) {
     };
 }
 
-/* ===================== INITIALIZATION ===================== */
-document.addEventListener('DOMContentLoaded', function () {
-    console.log('DOM cargado - inicializando componentes');
+    // ======================================================
+    // INICIALIZACIÓN LIMPIA DEL CHAT (SIN cloneNode)
+    // ======================================================
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('🚀 Iniciando chat (v2.0 fixed)...');
 
-    // Inicializar todos los componentes
-    enhanceAliasButtons();
-    setupEmojiPicker();
-    setupChatSearch();
-    setupFileUpload();
-    setupAudioRecorder();
+        const messageForm = document.getElementById('messageForm');
 
-    console.log('✅ Todos los componentes inicializados');
+        if (messageForm) {
+            // 1. Inicializar componentes (Emoji, Archivos, Audio)
+            // Se ejecutan DIRECTAMENTE sobre los elementos existentes
+            try {
+                if (typeof setupEmojiPicker === 'function') setupEmojiPicker();
+                else console.error('❌ Error: setupEmojiPicker no encontrado');
 
-    // Inicializar scroll
-    try {
-        const msgsEl = document.getElementById('msgs');
-        if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
-    } catch (e) {
-        console.warn('Initial scroll to bottom failed:', e);
-    }
+                if (typeof setupFileUpload === 'function') setupFileUpload();
+                else console.error('❌ Error: setupFileUpload no encontrado');
 
-    // Iniciar actualización de chats
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats();
-        if (!chatsIntervalHandle) {
-            chatsIntervalHandle = setInterval(() => {
-                if (!document.hidden) actualizarListaChats();
-            }, refreshIntervalMs);
-        }
-    }
+                if (typeof setupAudioRecorder === 'function') setupAudioRecorder();
+                else console.error('❌ Error: setupAudioRecorder no encontrado');
 
-    // Inicializar polling de mensajes
-    function initMessagesStateFromDOM() {
-        try {
-            const msgsContainer = document.getElementById('msgs');
-            if (!msgsContainer) return;
-            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
-            nodes.forEach(n => {
-                const idAttr = n.getAttribute('data-msg-id');
-                const id = Number(idAttr) || 0;
-                if (id) {
-                    seenMessageKeys.add('id:' + String(id));
-                }
-            });
-            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
-        } catch (e) {
-            console.warn('initMessagesStateFromDOM failed', e);
-        }
-    }
+                if (typeof scrollToBottom === 'function') scrollToBottom();
+            } catch (err) {
+                console.error("❌ Error inicializando componentes:", err);
+            }
 
-    if (selectedChatId) {
-        initMessagesStateFromDOM();
-        if (!messagesIntervalHandle) {
-            pollSelectedMessages();
-            messagesIntervalHandle = setInterval(() => {
-                if (!document.hidden) pollSelectedMessages();
-            }, messagePollIntervalMs);
-        }
-    }
+            // 2. Configurar el envío del formulario
+            // Usamos una bandera para evitar múltiples listeners si el script corre dos veces
+            if (messageForm.dataset.listenerAttached === 'true') {
+                console.log('⚠️ Listener de submit ya estaba activo.');
+            } else {
+                messageForm.addEventListener('submit', async function (e) {
+                    // Prevenir envío estándar
+                    // La lógica de envío se maneja dentro de este listener o en las funciones individuales
+                    // Si tienes lógica personalizada aquí, asegúrate de mantenerla.
 
-    // Manejar cambios de visibilidad
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            chatAutoRefresh = false;
+                    // Nota: Si tus botones de "Enviar" hacen el submit, la validación
+                    // que te di anteriormente debería ir aquí.
+
+                    // Validaciones básicas de UI antes de enviar
+                    const sendBtn = document.querySelector('.send-btn');
+                    if (sendBtn) {
+                        sendBtn.innerHTML = '⏳';
+                        sendBtn.disabled = true;
+                        // Restaurar botón después de 5 seg por seguridad
+                        setTimeout(() => {
+                            sendBtn.innerHTML = 'Enviar';
+                            sendBtn.disabled = false;
+                        }, 5000);
+                    }
+                });
+
+                // Marcar como configurado
+                messageForm.dataset.listenerAttached = 'true';
+                console.log('✅ Formulario de chat configurado correctamente.');
+            }
         } else {
-            chatAutoRefresh = true;
-            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                chatsIntervalHandle = setInterval(() => {
-                    if (!document.hidden) actualizarListaChats();
-                }, refreshIntervalMs);
-            }
-            if (selectedChatId && !messagesIntervalHandle) {
-                initMessagesStateFromDOM();
-                messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages();
-                }, messagePollIntervalMs);
-            }
+            console.error('🔴 Error CRÍTICO: No se encontró el formulario #messageForm');
         }
     });
-});
     /* ===================== FORMULARIO ÚNICO MANEJADOR (CORREGIDO) ===================== */
     document.addEventListener('DOMContentLoaded', function () {
         const form = document.getElementById('messageForm');
