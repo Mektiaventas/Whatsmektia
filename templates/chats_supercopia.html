@@ -2597,122 +2597,101 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 });
-
-/* ===================== FORMULARIO ÚNICO MANEJADOR ===================== */
-// ESTE ES EL ÚNICO EVENT LISTENER PARA EL FORMULARIO
+    /* ===================== FORMULARIO ÚNICO MANEJADOR (CORREGIDO) ===================== */
     document.addEventListener('DOMContentLoaded', function () {
-    messageForm.addEventListener('submit', function (e) {
-        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
-        const hasFile = document.getElementById('file-input').files.length > 0;
-        const hasAudio = document.getElementById('audio-data-input').value !== '';
-    if (document.getElementById('messageForm')) {
-        const messageForm = document.getElementById('messageForm');
+        const form = document.getElementById('messageForm');
 
-        // Clonar el formulario para eliminar event listeners previos
-        const newForm = messageForm.cloneNode(true);
-        messageForm.parentNode.replaceChild(newForm, messageForm);
+        if (form) {
+            // Eliminar listeners anteriores si existieran (opcional, pero seguro)
+            const newForm = form.cloneNode(false); // false = no clona hijos, solo la etiqueta form
+            // Nota: No reemplazamos el form entero, solo adjuntamos el evento al existente
+            // Simplemente aseguramos que el submit se maneje correctamente.
 
-        // Re-asignar variables después del clone
-        const textarea = document.getElementById('mensaje-texto');
-        const fileInput = document.getElementById('file-input');
-        const audioDataInput = document.getElementById('audio-data-input');
-        const emojiBtn = document.getElementById('emoji-pick-btn');
+            form.addEventListener('submit', function (e) {
+                const textarea = document.getElementById('mensaje-texto');
+                const fileInput = document.getElementById('file-input');
+                const audioInput = document.getElementById('audio-data-input');
+                const emojiBtn = document.getElementById('emoji-pick-btn');
+                const sendBtn = document.querySelector('.send-btn');
 
-        newForm.addEventListener('submit', function (e) {
-            const hasText = textarea ? textarea.value.trim() !== '' : false;
-            const hasFile = fileInput ? fileInput.files.length > 0 : false;
-            const hasAudio = audioDataInput ? audioDataInput.value !== '' : false;
+                // 1. Validar contenido
+                const hasText = textarea && textarea.value.trim() !== '';
+                const hasFile = fileInput && fileInput.files.length > 0;
+                const hasAudio = audioInput && audioInput.value !== '';
 
-            console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+                console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
-            if (!hasText && !hasFile && !hasAudio) {
-                e.preventDefault();
-                alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                return false;
-            }
-
-            // Cerrar el emoji picker si está abierto
-            const emojiPicker = document.getElementById('emoji-picker-list');
-            if (emojiPicker) {
-                emojiPicker.style.display = 'none';
-            }
-
-            // Deshabilitar temporalmente el botón de emoji
-            if (emojiBtn) {
-                emojiBtn.disabled = true;
-            }
-
-            // Mostrar indicadores de envío
-            const sendBtn = document.querySelector('.send-btn');
-            if (sendBtn) {
-                const originalText = sendBtn.innerHTML;
-
-                if (hasAudio) {
-                    sendBtn.innerHTML = '🎤⏳';
-                } else if (hasFile) {
-                    sendBtn.innerHTML = '📎⏳';
-                } else {
-                    sendBtn.innerHTML = '⏳';
+                if (!hasText && !hasFile && !hasAudio) {
+                    e.preventDefault();
+                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+                    return false;
                 }
 
-                sendBtn.disabled = true;
+                // 2. UI: Cerrar emoji picker
+                const emojiPicker = document.getElementById('emoji-picker-list');
+                if (emojiPicker) emojiPicker.style.display = 'none';
 
-                // Programar restauración automática después de 5 segundos
-                setTimeout(() => {
-                    sendBtn.innerHTML = originalText;
-                    sendBtn.disabled = false;
-
-                    // Restaurar el botón de emoji
-                    if (emojiBtn) {
-                        emojiBtn.disabled = false;
+                // 3. UI: Feedback visual en el botón
+                if (sendBtn) {
+                    // Guardar texto original si no existe
+                    if (!sendBtn.getAttribute('data-original-html')) {
+                        sendBtn.setAttribute('data-original-html', sendBtn.innerHTML);
                     }
 
-                    // Restaurar todos los botones
-                    if (typeof restoreAllButtons === 'function') {
+                    if (hasAudio) {
+                        sendBtn.innerHTML = '🎤⏳';
+                    } else if (hasFile) {
+                        sendBtn.innerHTML = '📎⏳';
+                    } else {
+                        sendBtn.innerHTML = '⏳';
+                    }
+
+                    sendBtn.disabled = true;
+
+                    // Deshabilitar otros botones para evitar doble clic
+                    if (emojiBtn) emojiBtn.disabled = true;
+                    const attachBtn = document.getElementById('file-attach-btn');
+                    if (attachBtn) attachBtn.disabled = true;
+                    const recordBtn = document.getElementById('record-audio-btn');
+                    if (recordBtn) recordBtn.disabled = true;
+
+                    // Restauración de seguridad por si el servidor tarda mucho o falla
+                    setTimeout(() => {
                         restoreAllButtons();
-                    }
-                }, 5000);
-            }
+                    }, 8000);
+                }
 
-            return true; // Permitir el envío del formulario
+                // Dejar que el formulario se envíe normalmente
+                return true;
+            });
+        }
+
+        // Función auxiliar para restaurar botones
+        window.restoreAllButtons = function () {
+            const sendBtn = document.querySelector('.send-btn');
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            const attachBtn = document.getElementById('file-attach-btn');
+            const recordBtn = document.getElementById('record-audio-btn');
+            const startRecordBtn = document.getElementById('start-record-btn');
+
+            if (sendBtn) {
+                const original = sendBtn.getAttribute('data-original-html');
+                if (original) sendBtn.innerHTML = original;
+                else sendBtn.innerHTML = 'Enviar'; // Fallback text
+                sendBtn.disabled = false;
+            }
+            if (emojiBtn) emojiBtn.disabled = false;
+            if (attachBtn) attachBtn.disabled = false;
+            if (recordBtn) recordBtn.disabled = false;
+            if (startRecordBtn) startRecordBtn.disabled = false;
+        };
+
+        // Restaurar botones al volver a la página (fix para Safari/Firefox bfcache)
+        window.addEventListener('pageshow', function () {
+            if (typeof restoreAllButtons === 'function') {
+                restoreAllButtons();
+            }
         });
-    }
-
-    // Evento para restaurar botones cuando se complete el envío
-    document.addEventListener('formSubmitComplete', function() {
-        setTimeout(() => {
-            if (typeof restoreAllButtons === 'function') {
-                restoreAllButtons();
-            }
-            if (typeof resetRecorder === 'function') {
-                resetRecorder();
-            }
-
-            // Re-habilitar el botón de emoji
-            const emojiBtn = document.getElementById('emoji-pick-btn');
-            if (emojiBtn) {
-                emojiBtn.disabled = false;
-            }
-        }, 1000);
     });
-
-    // Para formularios que se envían sin AJAX (recarga de página)
-    window.addEventListener('pageshow', function() {
-        setTimeout(() => {
-            if (typeof restoreAllButtons === 'function') {
-                restoreAllButtons();
-            }
-            if (typeof resetRecorder === 'function') {
-                resetRecorder();
-            }
-
-            // Re-habilitar el botón de emoji
-            const emojiBtn = document.getElementById('emoji-pick-btn');
-            if (emojiBtn) {
-                emojiBtn.disabled = false;
-            }
-        }, 1000);
-    });
-});
 </script>
 {% endblock %} 
