@@ -266,18 +266,7 @@
     </div>
 
     <button type="submit" class="btn-primary">Guardar Mensajes de Leads</button>
-</form>
-{% elif active == 'personalizacion' %}
-<form class="config-form" method="POST">
-    <div class="form-card">
-        <label>Tono de la IA</label>
-        <input type="text" name="tono" value="{{ datos.tono or '' }}" required>
-    </div>
-    <div class="form-card">
-        <label>Lenguaje preferido</label>
-        <input type="text" name="lenguaje" value="{{ datos.lenguaje or '' }}" required>
-    </div>
-    <button type="submit" class="btn-primary">Guardar Personalización</button>
+
     <h2 style="margin-top: 30px; margin-bottom: 15px;">Configuración de Leads</h2>
 
     <style>
@@ -347,6 +336,19 @@
         </div>
         {% endfor %}
     </div>
+</form>
+{% elif active == 'personalizacion' %}
+<form class="config-form" method="POST">
+    <div class="form-card">
+        <label>Tono de la IA</label>
+        <input type="text" name="tono" value="{{ datos.tono or '' }}" required>
+    </div>
+    <div class="form-card">
+        <label>Lenguaje preferido</label>
+        <input type="text" name="lenguaje" value="{{ datos.lenguaje or '' }}" required>
+    </div>
+    <button type="submit" class="btn-primary">Guardar Personalización</button>
+    
 </form>
 
 {% elif active == 'precios' %}
