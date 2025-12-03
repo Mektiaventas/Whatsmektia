@@ -809,7 +809,9 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
         
         # 2. Switch IA: 'on' si está marcado, 'off' si es el valor del hidden (o no existe)
         usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on' 
-        
+
+        criterio_ia = form_data.get(f'{lead_key}_criterio_ia', '').strip()
+
         # 3. Tiempo para Siguiente Lead
         tiempo_siguiente_minutos = form_data.get(f'{lead_key}_tiempo_siguiente_minutos')
         
@@ -821,6 +823,7 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
             config = {
                 'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 7,
                 'usar_ia': usar_ia,
+                'criterio_ia': criterio_ia,
                 'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 1440,
                 'tipo': tipo
             }
@@ -840,27 +843,49 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
 # --------------------------------------------------------------------------------
 
 def clasificar_lead_con_ia(contexto_conversacion, lead_config):
-    """
-    Función para determinar el lead usando la IA.
-    Se activa solo si 'usar_ia' es True en la configuración del lead actual.
-    """
+    """Función para determinar el lead usando la IA con un criterio configurable."""
+    
     if lead_config.get('usar_ia'):
-        # **Este es el punto clave para tu prompt de IA.**
-        # El prompt se usaría para clasificar si el lead debe ser 'Caliente' 
-        # o pasar a otro estado específico.
+        criterio_personalizado = lead_config.get('criterio_ia')
+        
+        if not criterio_personalizado:
+            # Si el switch de IA está ON, pero no hay criterio, no podemos clasificar
+            return None 
+
+        # Crear el prompt dinámicamente con el criterio del usuario
         prompt_ia = (
-            "Eres un clasificador de leads. Analiza el siguiente historial de conversación. "
-            "Si la persona ha preguntado por **servicios específicos** o mostrado **alto interés de compra**, responde 'CALIENTE'. "
-            "De lo contrario, responde 'NO_CALIENTE'.\n"
-            f"Historial: {contexto_conversacion}"
+            "Eres un clasificador de leads. Analiza la conversación proporcionada y determina si cumple con el criterio de lead 'Caliente'.\n"
+            f"**Criterio de Lead Caliente (Personalizado):** {criterio_personalizado}\n\n"
+            "Si el historial de mensajes SÍ cumple con el Criterio, responde únicamente la palabra: **CALIENTE**.\n"
+            "Si el historial de mensajes NO cumple con el Criterio, responde únicamente la palabra: **FRIO**.\n\n"
+            f"Historial de Interacciones:\n"
+            f"{contexto_conversacion}"
         )
         
-        # Asumiendo que tienes una función para interactuar con tu modelo de IA
-        # respuesta = llamar_api_openai(prompt_ia) 
-        # if "CALIENTE" in respuesta.upper():
-        #    return "CALIENTE"
-        pass # Implementación de la llamada a IA
-    return None # No hay clasificación por IA o la IA no lo considera "Caliente"
+        try:
+            # Asumiendo que usas la librería OpenAI (ya importada en tu archivo)
+            client = OpenAI() # Asegúrate de que la API key esté configurada
+            
+            respuesta_ia = client.chat.completions.create(
+                model="gpt-4o-mini", # O el modelo que prefieras
+                messages=[{"role": "user", "content": prompt_ia}],
+                max_tokens=5, # Solo necesitamos 'CALIENTE' o 'FRIO'
+                temperature=0.0
+            )
+            
+            clasificacion = respuesta_ia.choices[0].message.content.strip().upper()
+            
+            if "CALIENTE" in clasificacion:
+                return "Caliente" # Retorna el lead al que debe cambiar
+            
+        except Exception as e:
+            current_app.logger.error(f"Error al llamar a la IA para clasificación de lead: {e}")
+            return None
+            
+    return None # La IA no se usa o falló
+
+# NOTA: Asegúrate de que 'contexto_conversacion' se genere usando la función
+# `generar_contexto_conversacion` que está presente en supercopia.py.
 
 
 def intentar_cambio_de_lead(lead_actual, datos_lead, config_leads):
