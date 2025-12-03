@@ -2208,6 +2208,7 @@ function normalizeText(s) {
     }
 
     /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
+    // REEMPLAZA la función de setupAudioRecorder() completa:
 
     function setupAudioRecorder() {
         const recordBtn = document.getElementById('record-audio-btn');
@@ -2225,6 +2226,7 @@ function normalizeText(s) {
         const audioWaveform = document.getElementById('audio-waveform');
         const audioDataInput = document.getElementById('audio-data-input');
         const messageForm = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
 
         if (!recordBtn || !audioRecorderContainer) {
             console.warn('Audio recorder elements not found');
@@ -2239,6 +2241,7 @@ function normalizeText(s) {
         let analyser = null;
         let dataArray = null;
         let isRecording = false;
+        let currentAudioFormat = 'audio/webm'; // Formato por defecto
 
         // Mostrar/ocultar grabador
         recordBtn.addEventListener('click', function () {
@@ -2266,7 +2269,7 @@ function normalizeText(s) {
             audioRecorderContainer.style.display = 'none';
         });
 
-        // Enviar audio - ¡CORRECCIÓN IMPORTANTE!
+        // Enviar audio - CORREGIDO COMPLETAMENTE
         sendAudioBtn.addEventListener('click', function () {
             if (audioChunks.length === 0) {
                 alert('No hay audio para enviar');
@@ -2274,47 +2277,114 @@ function normalizeText(s) {
             }
 
             console.log('Preparando audio para enviar...');
+            console.log('Formato de audio detectado:', currentAudioFormat);
 
-            // Crear Blob del audio
-            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+            // Crear Blob del audio usando el formato real en el que se grabó
+            const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
             console.log('Tamaño del audio:', audioBlob.size, 'bytes');
 
-            // Convertir a base64 para enviar
+            // Validar tamaño máximo (16MB para WhatsApp audio)
+            if (audioBlob.size > 16 * 1024 * 1024) {
+                alert('El audio es demasiado largo. Máximo 16MB.');
+                return;
+            }
+
+            // Validar tamaño mínimo (100 bytes)
+            if (audioBlob.size < 100) {
+                alert('El audio es demasiado corto');
+                return;
+            }
+
+            // Convertir a base64
             const reader = new FileReader();
             reader.onloadend = function () {
-                // Obtener el base64 COMPLETO (con el prefijo data:audio/webm;base64,)
                 const base64Audio = reader.result;
                 console.log('Base64 obtenido, longitud:', base64Audio.length);
+                console.log('Prefijo del base64:', base64Audio.substring(0, 50));
 
                 if (!base64Audio || base64Audio.length < 100) {
                     alert('Error: El audio está vacío o corrupto');
                     return;
                 }
 
-                // IMPORTANTE: Guardar el base64 COMPLETO
-                audioDataInput.value = base64Audio;
-                console.log('Audio guardado en input oculto');
+                // IMPORTANTE: Guardar en el input oculto COMPLETO
+                if (audioDataInput) {
+                    audioDataInput.value = base64Audio;
+                    console.log('✅ Audio guardado en input oculto');
+                } else {
+                    console.error('❌ No se encontró el input oculto para audio');
+                    alert('Error interno: no se pudo preparar el audio');
+                    return;
+                }
 
-                // Cambiar el botón para indicar que se está enviando
+                // Cambiar indicador del botón de audio
                 sendAudioBtn.innerHTML = '⏳';
                 sendAudioBtn.disabled = true;
+                sendAudioBtn.title = 'Enviando...';
 
-                // Pequeña pausa y luego enviar
+                // También cambiar el botón principal de enviar
+                const mainSendBtn = document.querySelector('.send-btn');
+                if (mainSendBtn) {
+                    mainSendBtn.innerHTML = '🎤⏳';
+                    mainSendBtn.disabled = true;
+                }
+
+                // Ocultar el textarea si está vacío para evitar envío duplicado
+                if (textarea && !textarea.value.trim()) {
+                    textarea.style.display = 'none';
+                }
+
+                // IMPORTANTE: Limpiar el campo de archivo si existe
+                const fileInput = document.getElementById('file-input');
+                if (fileInput) {
+                    fileInput.value = '';
+                }
+
+                // Ocultar el preview de archivo si está visible
+                const filePreview = document.getElementById('file-preview');
+                if (filePreview) {
+                    filePreview.style.display = 'none';
+                }
+
+                // Enviar formulario después de 500ms para asegurar que el valor está establecido
                 setTimeout(() => {
-                    console.log('Enviando formulario...');
+                    console.log('🚀 Enviando formulario con audio...');
 
-                    // Forzar el envío del formulario
-                    if (messageForm.requestSubmit) {
-                        messageForm.requestSubmit();
-                    } else {
-                        messageForm.submit();
+                    // Validar que el audio realmente está en el input
+                    if (!audioDataInput.value || audioDataInput.value.length < 100) {
+                        console.error('❌ El audio no se guardó correctamente en el input');
+                        alert('Error: El audio no se guardó correctamente');
+                        resetButtons();
+                        return;
                     }
-                }, 300);
+
+                    // Asegurar que el formulario se envíe
+                    if (messageForm) {
+                        console.log('📤 Enviando formulario...');
+
+                        // Deshabilitar todos los botones para prevenir doble envío
+                        disableAllButtons();
+
+                        // Crear un pequeño delay para asegurar que todo está listo
+                        setTimeout(() => {
+                            if (messageForm.requestSubmit) {
+                                messageForm.requestSubmit();
+                            } else {
+                                messageForm.submit();
+                            }
+                        }, 200);
+                    } else {
+                        console.error('❌ No se encontró el formulario');
+                        alert('Error interno: no se encontró el formulario');
+                        resetButtons();
+                    }
+                }, 500);
             };
 
             reader.onerror = function (error) {
-                console.error('Error convirtiendo audio a base64:', error);
+                console.error('❌ Error convirtiendo audio a base64:', error);
                 alert('Error procesando el audio');
+                resetButtons();
             };
 
             reader.readAsDataURL(audioBlob);
@@ -2334,38 +2404,54 @@ function normalizeText(s) {
         });
 
         // Control de progreso al hacer clic en la barra
-        audioWaveform.addEventListener('click', function (e) {
-            const rect = audioWaveform.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const percentage = (clickX / rect.width) * 100;
+        if (audioWaveform) {
+            audioWaveform.addEventListener('click', function (e) {
+                const rect = audioWaveform.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const percentage = (clickX / rect.width) * 100;
 
-            if (recordedAudioPreview.duration) {
-                recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
-            }
-        });
+                if (recordedAudioPreview.duration) {
+                    recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
+                }
+            });
+        }
 
         // Actualizar progreso durante reproducción
         recordedAudioPreview.addEventListener('timeupdate', function () {
             if (recordedAudioPreview.duration) {
                 const progress = (recordedAudioPreview.currentTime / recordedAudioPreview.duration) * 100;
-                audioProgress.style.width = progress + '%';
+                if (audioProgress) {
+                    audioProgress.style.width = progress + '%';
+                }
 
                 // Actualizar tiempo
                 const currentTime = formatTime(recordedAudioPreview.currentTime);
                 const totalTime = formatTime(recordedAudioPreview.duration);
-                audioDuration.textContent = `${currentTime} / ${totalTime}`;
+                if (audioDuration) {
+                    audioDuration.textContent = `${currentTime} / ${totalTime}`;
+                }
             }
         });
 
         // Cuando termina la reproducción
         recordedAudioPreview.addEventListener('ended', function () {
-            playRecordedBtn.textContent = '▶️';
-            audioProgress.style.width = '0%';
+            if (playRecordedBtn) {
+                playRecordedBtn.textContent = '▶️';
+            }
+            if (audioProgress) {
+                audioProgress.style.width = '0%';
+            }
         });
 
         async function startRecording() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        sampleRate: 16000 // Tasa de muestreo compatible con WhatsApp
+                    }
+                });
 
                 // Configurar audio context para visualización
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -2376,30 +2462,65 @@ function normalizeText(s) {
                 const bufferLength = analyser.frequencyBinCount;
                 dataArray = new Uint8Array(bufferLength);
 
-                // Configurar MediaRecorder
-                mediaRecorder = new MediaRecorder(stream);
+                // Detectar el mejor formato soportado
+                const mimeTypes = [
+                    'audio/webm;codecs=opus', // Chrome, Firefox
+                    'audio/webm',             // Chrome
+                    'audio/mp4',              // Safari
+                    'audio/ogg;codecs=opus',  // Firefox
+                    'audio/wav',              // Universal
+                    'audio/mpeg'              // Universal
+                ];
+
+                let supportedType = 'audio/webm';
+                for (const type of mimeTypes) {
+                    if (MediaRecorder.isTypeSupported(type)) {
+                        supportedType = type;
+                        console.log('✅ Formato soportado seleccionado:', type);
+                        break;
+                    }
+                }
+
+                currentAudioFormat = supportedType;
+
+                // Configurar MediaRecorder con el formato soportado
+                const options = { mimeType: supportedType };
+                try {
+                    mediaRecorder = new MediaRecorder(stream, options);
+                } catch (e) {
+                    console.warn('⚠️ No se pudo usar el formato preferido, usando por defecto:', e);
+                    mediaRecorder = new MediaRecorder(stream);
+                    currentAudioFormat = 'audio/webm';
+                }
+
                 audioChunks = [];
 
                 mediaRecorder.ondataavailable = event => {
-                    audioChunks.push(event.data);
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
                 };
 
                 mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
                     const audioUrl = URL.createObjectURL(audioBlob);
                     recordedAudioPreview.src = audioUrl;
 
                     // Mostrar controles de reproducción
-                    audioPlaybackControls.style.display = 'flex';
+                    if (audioPlaybackControls) {
+                        audioPlaybackControls.style.display = 'flex';
+                    }
 
                     // Obtener duración
                     recordedAudioPreview.onloadedmetadata = () => {
-                        audioDuration.textContent = formatTime(recordedAudioPreview.duration);
+                        if (audioDuration) {
+                            audioDuration.textContent = formatTime(recordedAudioPreview.duration);
+                        }
                     };
                 };
 
                 // Iniciar grabación
-                mediaRecorder.start();
+                mediaRecorder.start(100); // Emitir datos cada 100ms
                 isRecording = true;
                 startRecordBtn.classList.add('recording');
                 startRecordBtn.textContent = '⏹️';
@@ -2408,14 +2529,16 @@ function normalizeText(s) {
                 // Iniciar temporizador
                 recordingInterval = setInterval(() => {
                     recordingTime++;
-                    recordingTimer.textContent = formatTime(recordingTime);
+                    if (recordingTimer) {
+                        recordingTimer.textContent = formatTime(recordingTime);
+                    }
                 }, 1000);
 
                 // Iniciar visualizador de nivel
                 visualizeRecording();
 
             } catch (err) {
-                console.error('Error al acceder al micrófono:', err);
+                console.error('❌ Error al acceder al micrófono:', err);
                 alert('No se pudo acceder al micrófono. Por favor, revisa los permisos.');
             }
         }
@@ -2430,14 +2553,19 @@ function normalizeText(s) {
                 // Detener visualización
                 if (audioContext) {
                     audioContext.close();
+                    audioContext = null;
                 }
 
                 // Limpiar intervalos
-                clearInterval(recordingInterval);
-                recordingInterval = null;
+                if (recordingInterval) {
+                    clearInterval(recordingInterval);
+                    recordingInterval = null;
+                }
 
                 // Detener todas las pistas
-                mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                if (mediaRecorder && mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
             }
         }
 
@@ -2458,7 +2586,9 @@ function normalizeText(s) {
 
                 // Convertir a porcentaje (0-100)
                 const level = Math.min(100, (average / 128) * 100);
-                recordingLevel.style.width = level + '%';
+                if (recordingLevel) {
+                    recordingLevel.style.width = level + '%';
+                }
             }
 
             draw();
@@ -2476,13 +2606,21 @@ function normalizeText(s) {
 
             audioChunks = [];
             recordingTime = 0;
-            recordingTimer.textContent = '0:00';
-            recordingLevel.style.width = '0%';
-            startRecordBtn.classList.remove('recording');
-            startRecordBtn.textContent = '●';
-            audioPlaybackControls.style.display = 'none';
+            if (recordingTimer) {
+                recordingTimer.textContent = '0:00';
+            }
+            if (recordingLevel) {
+                recordingLevel.style.width = '0%';
+            }
+            if (startRecordBtn) {
+                startRecordBtn.classList.remove('recording');
+                startRecordBtn.textContent = '●';
+            }
+            if (audioPlaybackControls) {
+                audioPlaybackControls.style.display = 'none';
+            }
 
-            if (recordedAudioPreview.src) {
+            if (recordedAudioPreview && recordedAudioPreview.src) {
                 URL.revokeObjectURL(recordedAudioPreview.src);
                 recordedAudioPreview.src = '';
             }
@@ -2498,111 +2636,119 @@ function normalizeText(s) {
             return `${mins}:${secs.toString().padStart(2, '0')}`;
         }
 
+        function resetButtons() {
+            if (sendAudioBtn) {
+                sendAudioBtn.innerHTML = '✓';
+                sendAudioBtn.disabled = false;
+                sendAudioBtn.title = '';
+            }
+
+            const mainSendBtn = document.querySelector('.send-btn');
+            if (mainSendBtn) {
+                mainSendBtn.innerHTML = 'Enviar';
+                mainSendBtn.disabled = false;
+            }
+        }
+
+        function disableAllButtons() {
+            // Deshabilitar todos los botones relacionados
+            const buttons = [
+                sendAudioBtn,
+                document.querySelector('.send-btn'),
+                document.getElementById('file-attach-btn'),
+                document.getElementById('record-audio-btn'),
+                document.getElementById('emoji-pick-btn')
+            ];
+
+            buttons.forEach(btn => {
+                if (btn) {
+                    btn.disabled = true;
+                    if (btn !== sendAudioBtn) {
+                        const originalHTML = btn.innerHTML;
+                        btn.setAttribute('data-original-html', originalHTML);
+                        btn.innerHTML = '⏳';
+                    }
+                }
+            });
+        }
+
         // Limpiar al cambiar de chat o recargar
         window.addEventListener('beforeunload', resetRecorder);
 
-        console.debug('Audio recorder initialized - WhatsApp style');
+        console.debug('✅ Audio recorder initialized - WhatsApp style');
     }
 
-    // Llama a esta función en DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', () => {
-        console.log('DOM cargado - inicializando componentes');
-        enhanceAliasButtons();
+    // Y esta es la corrección para el event listener del formulario (al final del archivo):
+    document.addEventListener('DOMContentLoaded', function () {
+        // ... tu código existente ...
 
-        // INICIALIZACIÓN DIRECTA DE EMOJIS
-        setupEmojiPicker();
-        setupChatSearch();
-        setupFileUpload();
-        setupAudioRecorder(); // <-- AÑADE ESTA LÍNEA
+        // Reemplaza la validación del formulario con esta:
+        if (document.getElementById('messageForm')) {
+            document.getElementById('messageForm').addEventListener('submit', function (e) {
+                const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+                const hasFile = document.getElementById('file-input').files.length > 0;
+                const hasAudio = document.getElementById('audio-data-input').value !== '';
 
-        console.log('Emoji picker inicializado');
-        console.log('Búsqueda de chats inicializada');
-        console.log('File upload inicializado');
-        console.log('Audio recorder inicializado');
+                console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
-        // Start automatic chat-list refresh
-        if (document.querySelector('.chat-items')) {
-            actualizarListaChats();
-            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
-                if (!document.hidden) actualizarListaChats();
-            }, refreshIntervalMs);
-        }
+                // Si NO hay nada para enviar, prevenir el envío
+                if (!hasText && !hasFile && !hasAudio) {
+                    e.preventDefault();
+                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+                    return false;
+                }
 
-        // Initialize message polling if chat is selected
-        function initMessagesStateFromDOM() {
-            try {
-                const msgsContainer = document.getElementById('msgs');
-                if (!msgsContainer) return;
-                const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
-                let maxTs = Number(lastMessageTimestamp) || 0;
-                nodes.forEach(n => {
-                    const idAttr = n.getAttribute('data-msg-id');
-                    const id = Number(idAttr) || 0;
-                    if (id) {
-                        seenMessageKeys.add('id:' + String(id));
+                // Si hay audio, asegurarse de que se envíe correctamente
+                if (hasAudio) {
+                    console.log('🎤 Enviando audio grabado...');
+                    console.log('📊 Longitud del audio base64:', document.getElementById('audio-data-input').value.length);
+
+                    // Mostrar indicador de envío en el botón principal
+                    const sendBtn = document.querySelector('.send-btn');
+                    if (sendBtn) {
+                        sendBtn.innerHTML = '🎤⏳';
+                        sendBtn.disabled = true;
+
+                        // Restaurar después de 8 segundos por si hay error (más tiempo)
+                        setTimeout(() => {
+                            sendBtn.innerHTML = 'Enviar';
+                            sendBtn.disabled = false;
+                        }, 8000);
                     }
-                });
-                console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
-            } catch (e) {
-                console.warn('initMessagesStateFromDOM failed', e);
-            }
-        }
-
-        if (selectedChatId) {
-            initMessagesStateFromDOM();
-            if (!messagesIntervalHandle) {
-                pollSelectedMessages();
-                messagesIntervalHandle = setInterval(() => {
-                    if (!document.hidden) pollSelectedMessages();
-                }, messagePollIntervalMs);
-            }
-        }
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                chatAutoRefresh = false;
-            } else {
-                chatAutoRefresh = true;
-                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                    chatsIntervalHandle = setInterval(() => {
-                        if (!document.hidden) actualizarListaChats();
-                    }, refreshIntervalMs);
                 }
-                if (selectedChatId && !messagesIntervalHandle) {
-                    initMessagesStateFromDOM();
-                    messagesIntervalHandle = setInterval(() => {
-                        if (!document.hidden) pollSelectedMessages();
-                    }, messagePollIntervalMs);
+
+                // Si hay archivo, mostrar indicador
+                if (hasFile) {
+                    console.log('📎 Enviando archivo...');
+                    const sendBtn = document.querySelector('.send-btn');
+                    if (sendBtn) {
+                        sendBtn.innerHTML = '📎⏳';
+                        sendBtn.disabled = true;
+
+                        setTimeout(() => {
+                            sendBtn.innerHTML = 'Enviar';
+                            sendBtn.disabled = false;
+                        }, 8000);
+                    }
                 }
-            }
-        });
-    });
 
-    // Agrega esta validación al final de tu JavaScript
-    document.getElementById('messageForm').addEventListener('submit', function (e) {
-        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
-        const hasFile = document.getElementById('file-input').files.length > 0;
-        const hasAudio = document.getElementById('audio-data-input').value !== '';
+                // Si solo hay texto
+                if (hasText && !hasFile && !hasAudio) {
+                    console.log('💬 Enviando texto...');
+                    const sendBtn = document.querySelector('.send-btn');
+                    if (sendBtn) {
+                        sendBtn.innerHTML = '⏳';
+                        sendBtn.disabled = true;
 
-        console.log('Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
-
-        // Si hay audio, asegurarse de que se envíe correctamente
-        if (hasAudio) {
-            console.log('Enviando audio...');
-
-            // Mostrar indicador de envío
-            const sendBtn = document.querySelector('.send-btn');
-            const originalText = sendBtn.innerHTML;
-            sendBtn.innerHTML = '🎤⏳';
-            sendBtn.disabled = true;
-
-            // Restaurar después de 5 segundos por si hay error
-            setTimeout(() => {
-                sendBtn.innerHTML = originalText;
-                sendBtn.disabled = false;
-            }, 5000);
+                        setTimeout(() => {
+                            sendBtn.innerHTML = 'Enviar';
+                            sendBtn.disabled = false;
+                        }, 5000);
+                    }
+                }
+            });
         }
-    });
+    }); 
 
 </script>
 {% endblock %}       
