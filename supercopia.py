@@ -45,7 +45,6 @@ import os # Asegurar que 'os' también esté importado/disponible
 
 # En supercopia.py, define la lista de leads predefinidos
 LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado']
-
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',

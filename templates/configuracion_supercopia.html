@@ -228,18 +228,8 @@
         {% endif %}
     </div>
 </div>
-
-Asegúrate de que la función `guardar_configuracion_negocio` esté disponible para `url_for`.
-
----
-
-## Código Final de la Sección Leads (Corregido)
-
-A continuación, te envío el bloque completo de la pestaña Leads con la corrección aplicada en la línea 205 (aproximadamente):
-
-```html
 {% elif active == 'leads' %}
-<form class="config-form" method="POST" action="{{ url_for('guardar_configuracion_negocio') }}">
+<form class="config-form" method="POST">
     <div class="form-card">
         <h3>Mensajes de Seguimiento Automático</h3>
         <p class="text-muted" style="margin-bottom: 15px; color: #666;">
@@ -312,7 +302,7 @@ A continuación, te envío el bloque completo de la pestaña Leads con la correc
         {% set lead_config = leads_map.get(lead_key, {}) %}
 
         <div class="lead-card">
-            <h4 style="margin-top: 0; color:black">Lead: **{{ lead_name|capitalize }}****</h4>
+            <h4 style="margin-top: 0; color:black">Lead: **{{ lead_name|capitalize }}**</h4>
 
             {% if lead_key != 'caliente' %}
             <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
