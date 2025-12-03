@@ -110,7 +110,7 @@
             font-weight: normal;
             cursor: pointer;
         }
-</style> 
+</style>
 <div class="config-header">
     <h2>Configuración: {{ active|capitalize }}</h2>
     {% if guardado %}
@@ -387,32 +387,32 @@
                        class="input" min="1" value="{{ lead_config.get('dias_a_caliente', 7) }}"
                        placeholder="Ej: 7" required>
                 {% endif %}
+
                 <div style="margin-top: 15px;">
                     <label for="{{ lead_key }}_criterio_ia">Criterio para Clasificar a Caliente (por IA):</label>
                     <textarea id="{{ lead_key }}_criterio_ia" name="{{ lead_key }}_criterio_ia"
-                              class="longitud_desc" rows="3"
+                              class="input" rows="3"
                               placeholder="Ej: El cliente preguntó por los 'servicios de consultoría financiera' o 'planes premium'."
-                              style="width: 100%;">{{ lead_config.get('criterio_ia', '') }}</textarea>
+                              style="width: 100%; min-height: 80px; padding: 8px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 14px; box-sizing: border-box; resize: vertical;">{{ lead_config.get('criterio_ia', '') }}</textarea>
                     <small style="display: block; margin-top: 5px; color: #666;">
                         Define la condición que la IA debe verificar en el chat.
                     </small>
                 </div>
+
                 <div style="margin-top: 15px; display: flex; align-items: center;">
                     <label for="{{ lead_key }}_usar_ia" style="flex: 1; margin-right: 10px;">Usar **IA** para clasificación:</label>
-
                     <input type="checkbox" id="{{ lead_key }}_usar_ia" name="{{ lead_key }}_usar_ia"
                            class="form-check-input" value="on"
                            {{ 'checked' if lead_config.get('usar_ia') == True else '' }}>
                 </div>
 
-                <label for="{{ lead_key }}_tiempo_siguiente_minutos" style="margin-top: 15px;">Tiempo (**minutos**) sin mensaje para cambio:</label>
+                <label for="{{ lead_key }}_tiempo_siguiente_minutos" style="margin-top: 15px; display: block;">Tiempo (**minutos**) sin mensaje para cambio:</label>
                 <input type="number" id="{{ lead_key }}_tiempo_siguiente_minutos" name="{{ lead_key }}_tiempo_siguiente_minutos"
                        class="input" min="1" value="{{ lead_config.get('tiempo_siguiente_minutos', 1440) }}"
                        placeholder="Ej: 1440 (24 horas)" required>
 
                 <div style="margin-top: 15px; display: flex; align-items: center;">
                     <label for="{{ lead_key }}_tipo" style="flex: 1; margin-right: 10px;">Tipo **Estático** (no cambia después):</label>
-
                     <input type="checkbox" id="{{ lead_key }}_tipo" name="{{ lead_key }}_tipo"
                            class="form-check-input" value="estatico"
                            {{ 'checked' if lead_config.get('tipo') == 'estatico' else '' }}>
