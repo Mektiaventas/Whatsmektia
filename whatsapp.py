@@ -528,6 +528,7 @@ def enviar_imagen(numero, image_url, config=None):
     except Exception as e:
         logger.error(f"Exception enviar_imagen: {e}")
         return False
+
 def enviar_documento(numero, file_url, filename, config=None):
     """Enviar documento por link con logging diagnóstico y mejor manejo de URLs."""
     if config is None:

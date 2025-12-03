@@ -448,91 +448,253 @@
         </style>
 
         <script>
-            // Funciones para manejar el textarea mejorado
-            function handleMessageKeyDown(event) {
-                if (event.key === 'Enter') {
-                    if (event.shiftKey) {
-                        // Shift+Enter: Insertar nueva línea
-                        event.preventDefault();
-                        const textarea = event.target;
-                        const start = textarea.selectionStart;
-                        const end = textarea.selectionEnd;
-                        const value = textarea.value;
+            function setupAudioRecorder() {
+                const recordBtn = document.getElementById('record-audio-btn'); // Botón de micrófono
+                const audioInput = document.getElementById('audio-data-input'); // Input hidden
+                const sendBtn = document.querySelector('.send-btn');
 
-                        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
-                        textarea.selectionStart = textarea.selectionEnd = start + 1;
+                if (!recordBtn || !audioInput) return;
 
-                        // Actualizar altura
-                        autoResizeTextarea(textarea);
-                    } else {
-                        // Enter solo: Enviar mensaje inmediatamente
-                        event.preventDefault();
-                        const form = document.getElementById('messageForm');
-                        const textarea = document.getElementById('mensaje-texto');
-                        const fileInput = document.getElementById('file-input');
+                let mediaRecorder;
+                let audioChunks = [];
+                let isRecording = false;
 
-                        // Validar que haya contenido para enviar - CORREGIDO
-                        const hasText = textarea.value.trim() !== '';
-                        const hasFile = fileInput.files.length > 0;
+                // Crear elemento visual para el estado de grabación si no existe
+                let statusLabel = document.getElementById('recording-status');
+                if (!statusLabel) {
+                    statusLabel = document.createElement('span');
+                    statusLabel.id = 'recording-status';
+                    statusLabel.style.display = 'none';
+                    statusLabel.style.color = '#e53935';
+                    statusLabel.style.fontWeight = 'bold';
+                    statusLabel.style.marginLeft = '10px';
+                    recordBtn.parentNode.insertBefore(statusLabel, recordBtn.nextSibling);
+                }
 
-                        // SOLO validar si no hay absolutamente nada
-                        if (!hasText && !hasFile) {
-                            // No hay nada que enviar
-                            return;
+                recordBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+
+                    if (!isRecording) {
+                        // --- INICIAR GRABACIÓN ---
+                        try {
+                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            mediaRecorder = new MediaRecorder(stream);
+                            audioChunks = [];
+
+                            mediaRecorder.ondataavailable = event => {
+                                audioChunks.push(event.data);
+                            };
+
+                            mediaRecorder.onstop = () => {
+                                const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+                                const reader = new FileReader();
+                                reader.readAsDataURL(audioBlob);
+                                reader.onloadend = () => {
+                                    // Guardar base64 en el input hidden
+                                    audioInput.value = reader.result;
+                                    console.log("🎤 Audio procesado y listo para enviar");
+
+                                    // Cambiar botón de enviar para indicar que hay audio
+                                    sendBtn.innerHTML = '🎤 Enviar Audio';
+                                    sendBtn.classList.add('ready-to-send');
+                                };
+                            };
+
+                            mediaRecorder.start();
+                            isRecording = true;
+                            recordBtn.innerHTML = '⏹️'; // Icono de Stop
+                            recordBtn.classList.add('recording');
+                            statusLabel.innerText = "Grabando...";
+                            statusLabel.style.display = 'inline';
+
+                        } catch (err) {
+                            console.error("Error accediendo al micrófono:", err);
+                            alert("No se pudo acceder al micrófono. Verifica los permisos.");
                         }
+                    } else {
+                        // --- DETENER GRABACIÓN ---
+                        mediaRecorder.stop();
+                        isRecording = false;
+                        recordBtn.innerHTML = '🎤'; // Volver a icono micro
+                        recordBtn.classList.remove('recording');
+                        statusLabel.innerText = "Audio guardado. Presiona Enviar.";
 
-                        // Enviar el formulario inmediatamente
-                        form.submit();
+                        // Detener el stream
+                        mediaRecorder.stream.getTracks().forEach(track => track.stop());
                     }
-                }
+                });
             }
 
-            function autoResizeTextarea(textarea) {
-                // Guardar la altura actual antes de resetear
-                const currentHeight = textarea.style.height;
-
-                // Resetear altura para calcular la nueva
-                textarea.style.height = 'auto';
-
-                // Calcular nueva altura sin límites
-                const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
-
-                // Aplicar nueva altura
-                textarea.style.height = newHeight + 'px';
-
-                // Si el contenido se redujo mucho, mantener un tamaño mínimo
-                if (textarea.value === '' || textarea.value.trim() === '') {
-                    textarea.style.height = '44px';
-                }
-            }
-
-            // Inicializar altura del textarea al cargar
+            // Asegurar que hay un input hidden para el audio dentro del form
             document.addEventListener('DOMContentLoaded', function () {
-                const textarea = document.getElementById('mensaje-texto');
-                if (textarea) {
-                    autoResizeTextarea(textarea);
+                const form = document.getElementById('messageForm');
+                if (form && !document.getElementById('audio-data-input')) {
+                    const input = document.createElement('input');
+                    input.type = 'hidden';
+                    input.name = 'audio_data';
+                    input.id = 'audio-data-input';
+                    form.appendChild(input);
                 }
-            });
 
-            // Función para resetear el textarea si está vacío
-            function resetTextareaIfEmpty() {
-                const textarea = document.getElementById('mensaje-texto');
-                if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
-                    textarea.style.height = '44px';
+                // Inicializar la grabadora
+                setupAudioRecorder();
+            });
+        </script>
+
+        <style>
+            .recording {
+                animation: pulse 1.5s infinite;
+                background-color: #ffebee !important;
+                color: red !important;
+                border: 1px solid red !important;
+            }
+
+            @keyframes pulse {
+                0% {
+                    transform: scale(1);
+                }
+
+                50% {
+                    transform: scale(1.1);
+                }
+
+                100% {
+                    transform: scale(1);
                 }
             }
 
-            // Observar cambios en el textarea para resetear cuando esté vacío
-            document.addEventListener('input', function (event) {
-                if (event.target.id === 'mensaje-texto') {
-                    // Si el usuario borra todo el contenido, resetear altura
-                    if (event.target.value === '') {
-                        setTimeout(() => {
-                            resetTextareaIfEmpty();
-                        }, 100);
-                    }
+            .ready-to-send {
+                background-color: #00897b !important; /* Color diferente para indicar listo */
+            }
+        </style>
+
+        // Asegurar que hay un input hidden para el audio dentro del form
+        document.addEventListener('DOMContentLoaded', function () {
+        const form = document.getElementById('messageForm');
+        if (form && !document.getElementById('audio-data-input')) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'audio_data';
+        input.id = 'audio-data-input';
+        form.appendChild(input);
+        }
+
+        // Inicializar la grabadora
+        setupAudioRecorder();
+        });
+        </script>
+
+        <style>
+            .recording {
+                animation: pulse 1.5s infinite;
+                background-color: #ffebee !important;
+                color: red !important;
+                border: 1px solid red !important;
+            }
+
+            @keyframes pulse {
+                0% {
+                    transform: scale(1);
                 }
-            });
+
+                50% {
+                    transform: scale(1.1);
+                }
+
+                100% {
+                    transform: scale(1);
+                }
+            }
+
+            .ready-to-send {
+                background-color: #00897b !important; /* Color diferente para indicar listo */
+            }
+        </style>
+        // Funciones para manejar el textarea mejorado
+        function handleMessageKeyDown(event) {
+        if (event.key === 'Enter') {
+        if (event.shiftKey) {
+        // Shift+Enter: Insertar nueva línea
+        event.preventDefault();
+        const textarea = event.target;
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const value = textarea.value;
+
+        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + 1;
+
+        // Actualizar altura
+        autoResizeTextarea(textarea);
+        } else {
+        // Enter solo: Enviar mensaje inmediatamente
+        event.preventDefault();
+        const form = document.getElementById('messageForm');
+        const textarea = document.getElementById('mensaje-texto');
+        const fileInput = document.getElementById('file-input');
+
+        // Validar que haya contenido para enviar - CORREGIDO
+        const hasText = textarea.value.trim() !== '';
+        const hasFile = fileInput.files.length > 0;
+
+        // SOLO validar si no hay absolutamente nada
+        if (!hasText && !hasFile) {
+        // No hay nada que enviar
+        return;
+        }
+
+        // Enviar el formulario inmediatamente
+        form.submit();
+        }
+        }
+        }
+
+        function autoResizeTextarea(textarea) {
+        // Guardar la altura actual antes de resetear
+        const currentHeight = textarea.style.height;
+
+        // Resetear altura para calcular la nueva
+        textarea.style.height = 'auto';
+
+        // Calcular nueva altura sin límites
+        const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
+
+        // Aplicar nueva altura
+        textarea.style.height = newHeight + 'px';
+
+        // Si el contenido se redujo mucho, mantener un tamaño mínimo
+        if (textarea.value === '' || textarea.value.trim() === '') {
+        textarea.style.height = '44px';
+        }
+        }
+
+        // Inicializar altura del textarea al cargar
+        document.addEventListener('DOMContentLoaded', function () {
+        const textarea = document.getElementById('mensaje-texto');
+        if (textarea) {
+        autoResizeTextarea(textarea);
+        }
+        });
+
+        // Función para resetear el textarea si está vacío
+        function resetTextareaIfEmpty() {
+        const textarea = document.getElementById('mensaje-texto');
+        if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
+        textarea.style.height = '44px';
+        }
+        }
+
+        // Observar cambios en el textarea para resetear cuando esté vacío
+        document.addEventListener('input', function (event) {
+        if (event.target.id === 'mensaje-texto') {
+        // Si el usuario borra todo el contenido, resetear altura
+        if (event.target.value === '') {
+        setTimeout(() => {
+        resetTextareaIfEmpty();
+        }, 100);
+        }
+        }
+        });
         </script>
         {% else %}
         <div class="ia-active-message">

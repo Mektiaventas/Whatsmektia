@@ -11049,13 +11049,13 @@ def toggle_ai(numero, config=None):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
-    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
     config = obtener_configuracion_por_host()
     
     try:
         numero = request.form.get('numero', '').strip()
         texto = request.form.get('texto', '').strip()
         archivo = request.files.get('archivo')
+        audio_data = request.form.get('audio_data')
         
         if not numero:
             flash('❌ Número de destino requerido', 'error')
