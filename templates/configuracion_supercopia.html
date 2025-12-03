@@ -267,7 +267,7 @@
 
     <button type="submit" class="btn-primary">Guardar Mensajes de Leads</button>
 
-    <h2 style="margin-top: 30px; margin-bottom: 15px;">Configuración de Leads</h2>
+    <h2 style="margin-top: 30px; margin-bottom: 15px; color: aliceblue;">Configuración de Leads</h2>
 
     <style>
         .leads-grid {
@@ -302,7 +302,7 @@
         {% set lead_config = leads_map.get(lead_key, {}) %}
 
         <div class="lead-card">
-            <h4 style="margin-top: 0; color:aliceblue">Lead: **{{ lead_name|capitalize }}**</h4>
+            <h4 style="margin-top: 0;>Lead: **{{ lead_name|capitalize }}**</h4>
 
             {% if lead_key != 'caliente' %}
             <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
