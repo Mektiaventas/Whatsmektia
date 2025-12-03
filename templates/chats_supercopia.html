@@ -554,6 +554,27 @@
                     }
                 }
             }
+            messageForm.addEventListener('submit', function (e) {
+                const hasText = textarea.value.trim() !== '';
+                const hasFile = fileInput.files.length > 0;
+                const hasAudio = document.getElementById('audio-data-input').value !== '';
+
+                if (!hasText && !hasFile && !hasAudio) {
+                    e.preventDefault();
+                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+                    return false;
+                }
+
+                const sendBtn = document.querySelector('.send-btn');
+                const originalText = sendBtn.innerHTML;
+                sendBtn.innerHTML = '⏳';
+                sendBtn.disabled = true;
+
+                setTimeout(() => {
+                    sendBtn.innerHTML = originalText;
+                    sendBtn.disabled = false;
+                }, 3000);
+            });
 
             function autoResizeTextarea(textarea) {
                 // Guardar la altura actual antes de resetear
