@@ -302,7 +302,7 @@
         {% set lead_config = leads_map.get(lead_key, {}) %}
 
         <div class="lead-card">
-            <h4 style="margin-top: 0;">Lead: **{{ lead_name|capitalize }}**</h4>
+            <h4 style="margin-top: 0; color:aliceblue">Lead: **{{ lead_name|capitalize }}**</h4>
 
             {% if lead_key != 'caliente' %}
             <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
