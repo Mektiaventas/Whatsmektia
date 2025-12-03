@@ -108,7 +108,7 @@
             <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
     </div>
-    <div class="form-card" style="width: 90%;">
+    <div class="form-card" style="width: 93%;">
         <label>Descripción del Negocio</label>
         <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
     </div>
@@ -139,33 +139,32 @@
 
     <div class="form-row">
 
-        <div class="form-card" style="width: 30%;">
+        <div class="form-card" style="width: 25%;">
             <label>Correo de contacto</label>
             <input type="email" name="correo" value="{{ datos.correo or '' }}">
         </div>
-        <div class="form-card" style="width: 30%;">
+            <div class="form-card" style="width: 25%;">
+                <label>Banco</label>
+                <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
+                       placeholder="BBVA">
+            </div>
+        <div class="form-card" style="width: 25%;">
             <label>Nombre en la cuenta</label>
             <input type="text" name="transferencia_nombre" value="{{ datos.transferencia_nombre or '' }}"
                    placeholder="Jonas">
         </div>
-        <div class="form-card" style="width: 30%;">
+        <div class="form-card" style="width: 25%;">
             <label>Datos para transferencia - Número de cuenta</label>
             <input type="text" name="transferencia_numero" value="{{ datos.transferencia_numero or '' }}"
                    placeholder="1123 3454 2344 2343">
             <small class="form-text text-muted">Número de cuenta o CLABE (según corresponda).</small>
         </div>
     </div>
-    <div class="form-card" style="width: 90%;">
+    <div class="form-card" style="width: 93%;">
         <label>¿Qué quieres que haga tu IA?</label>
         <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
     </div>
-    <div class="form-row">
-        <div class="form-card" style="width: 30%;">
-            <label>Banco</label>
-            <input type="text" name="transferencia_banco" value="{{ datos.transferencia_banco or '' }}"
-                   placeholder="BBVA">
-        </div>
-    </div>
+
     <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>Leads, temas a los que avisar a un asesor</label>
