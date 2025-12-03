@@ -1,4 +1,4 @@
-{% extends 'base.html' %}
+﻿{% extends 'base.html' %}
 {% block title %}Configuración – {{ active|capitalize }}{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="C:\Users\jedua\OneDrive\Documents\GitHub\Whatsmektia\static\css\styles.css">
@@ -83,36 +83,37 @@
 
 <form class="config-form" method="POST" enctype="multipart/form-data">
     <!-- AÑADE EL CAMPO AQUÍ AL INICIO DEL FORMULARIO -->
-   <!--<div class="form-card">
-        <label>Correo para notificaciones de Calendar</label>
-        <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
-               placeholder="ejemplo@gmail.com">
-        <small class="form-text text-muted">
-            Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
-        </small>
-    </div>--> 
+    <!--<div class="form-card">
+         <label>Correo para notificaciones de Calendar</label>
+         <input type="email" name="calendar_email" value="{{ datos.calendar_email or '' }}"
+                placeholder="ejemplo@gmail.com">
+         <small class="form-text text-muted">
+             Este correo recibirá notificaciones cuando se agende una cita en Google Calendar
+         </small>
+     </div>-->
     <div class="form-row">
         <div class="form-card" style="width: 30%;">
-        <label>Nombre de tu IA personalizada</label>
-        <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
-        <small class="form-text text-muted">
-            Este nombre se mostrará en el sidebar y título de la página
-        </small>
+            <label>Nombre de tu IA personalizada</label>
+            <input type="text" name="ia_nombre" value="{{ datos.ia_nombre or '' }}" required>
+            <small class="form-text text-muted">
+                Este nombre se mostrará en el sidebar y título de la página
+            </small>
         </div>
         <div class="form-card" style="width: 30%;">
             <label>Nombre de tu Negocio</label>
             <input type="text" name="negocio_nombre" value="{{ datos.negocio_nombre or '' }}" required>
         </div>
-            <div class="form-card" style="width: 30%;">
-        <label>Descripción del Negocio</label>
-        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
-    </div>
-    </div>
-        <div class="form-row">
         <div class="form-card" style="width: 30%;">
             <label>URL del Negocio</label>
             <input type="url" name="url" value="{{ datos.url or '' }}">
         </div>
+    </div>
+    <div class="form-card" style="width: 30%;">
+        <label>Descripción del Negocio</label>
+        <textarea name="descripcion" rows="4" required>{{ datos.descripcion or '' }}</textarea>
+    </div>
+    <div class="form-row">
+        
         <div class="form-card" style="width: 30%;">
             <label>Dirección</label>
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
@@ -166,73 +167,142 @@
         </div>
     </div>
     <div class="form-row">
-    <div class="form-card" style="width: 30%;">
-        <label>Leads, temas a los que avisar a un asesor</label>
-        <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
-        <small class="form-text text-muted">
-            Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
-        </small>
-    </div>
-    <div class="form-card" style="width: 30%;">
-        <button type="submit" class="btn-primary" style="width: 100%; height: 100%;">Guardar Negocio</button>
-     </div>
+        <div class="form-card" style="width: 30%;">
+            <label>Leads, temas a los que avisar a un asesor</label>
+            <textarea name="contexto_adicional" rows="6" placeholder="Escribe aquí información extra que la IA deba saber: horarios de vacaciones, historia de la empresa, políticas específicas de garantía, promociones temporales, etc.">{{ datos.contexto_adicional or '' }}</textarea>
+            <small class="form-text text-muted">
+                Esta información se inyectará directamente en el "cerebro" de la IA para todas las respuestas.
+            </small>
+        </div>
+        <div class="form-card" style="width: 30%;">
+            <button type="submit" class="btn-primary" style="width: 100%; height: 100%;">Guardar Negocio</button>
+        </div>
     </div>
 
 </form>
-<div class="form-row" style="margin-top: 30px;"> 
-<form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
-    <div class="form-card" style="width: 50%;">
-        <label>Publicar PDF (Catálogo / Documento)</label>
-        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
-            <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
-            <textarea name="public_pdf_descripcion" class="longitud_desc" rows="4" placeholder="Descripción (opcional). Añade palabras claves para que la IA seleccione el catálogo más relevante."></textarea>
-            <div style="flex:0 0 auto; display:flex; align-items:center;">
-                <button type="submit" class="btn-success">📄 Publicar PDF</button>
+<div class="form-row" style="margin-top: 30px;">
+    <form action="{{ url_for('publicar_pdf_configuracion') }}" method="POST" enctype="multipart/form-data" style="margin-bottom:16px;">
+        <div class="form-card" style="width: 50%;">
+            <label>Publicar PDF (Catálogo / Documento)</label>
+            <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;">
+                <input type="file" name="public_pdf" accept=".pdf,image/*,video/*,.mp4,.mov,.webm,.avi,.mkv" required aria-label="Seleccionar archivo PDF o " style="flex:0 0 auto;">
+                <textarea name="public_pdf_descripcion" class="longitud_desc" rows="4" placeholder="Descripción (opcional). Añade palabras claves para que la IA seleccione el catálogo más relevante."></textarea>
+                <div style="flex:0 0 auto; display:flex; align-items:center;">
+                    <button type="submit" class="btn-success">📄 Publicar PDF</button>
+                </div>
             </div>
+            <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
         </div>
-        <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
+        <h2 style="margin-top: 30px; margin-bottom: 15px;">Configuración de Leads</h2>
+
+        <style>
+            .leads-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+                gap: 12px;
+            }
+
+            .lead-card {
+                padding: 12px;
+                border: 1px solid #e2e8f0;
+                border-radius: 8px;
+                background: #fff;
+            }
+
+            .form-check-input {
+                width: 20px;
+                height: 20px;
+                cursor: pointer;
+            }
+        </style>
+
+        <div class="leads-grid">
+            {# Definir una lista de leads de ejemplo si no tienes una en el contexto de Flask #}
+            {% set leads_a_configurar = ['Nuevo', 'Frio', 'Caliente', 'Cerrado'] %}
+
+            {# Asumimos que leads_map contiene las configuraciones actuales, ej: leads_map = {'nuevo': {'dias_a_caliente': 5, 'usar_ia': True, ...}} #}
+            {% set leads_map = leads_config_list if leads_config_list is defined and leads_config_list is mapping else {} %}
+
+            {% for lead_name in leads_a_configurar %}
+            {% set lead_key = lead_name|lower|replace(' ', '_') %}
+            {% set lead_config = leads_map.get(lead_key, {}) %}
+
+            <div class="lead-card">
+                <h4 style="margin-top: 0;">Lead: **{{ lead_name|capitalize }}**</h4>
+
+                {% if lead_key != 'caliente' %}
+                <label for="{{ lead_key }}_a_caliente_dias">Días para cambiar a **Caliente**:</label>
+                <input type="number" id="{{ lead_key }}_a_caliente_dias" name="{{ lead_key }}_a_caliente_dias"
+                       class="input" min="1" value="{{ lead_config.get('dias_a_caliente', 7) }}"
+                       placeholder="Ej: 7" required>
+                {% endif %}
+
+                <div style="margin-top: 15px; display: flex; align-items: center;">
+                    <label for="{{ lead_key }}_usar_ia" style="flex: 1; margin-right: 10px;">Usar **IA** para clasificación:</label>
+                    {# Un campo hidden para asegurar que el valor 'off' se envía si el checkbox no está marcado #}
+                    <input type="hidden" name="{{ lead_key }}_usar_ia" value="off">
+                    <input type="checkbox" id="{{ lead_key }}_usar_ia" name="{{ lead_key }}_usar_ia"
+                           class="form-check-input" value="on"
+                           {{ 'checked' if lead_config.get('usar_ia') == True else '' }}>
+                </div>
+
+                <label for="{{ lead_key }}_tiempo_siguiente_minutos" style="margin-top: 15px;">Tiempo (**minutos**) sin mensaje para cambio:</label>
+                <input type="number" id="{{ lead_key }}_tiempo_siguiente_minutos" name="{{ lead_key }}_tiempo_siguiente_minutos"
+                       class="input" min="1" value="{{ lead_config.get('tiempo_siguiente_minutos', 1440) }}"
+                       placeholder="Ej: 1440 (24 horas)" required>
+
+                <div style="margin-top: 15px; display: flex; align-items: center;">
+                    <label for="{{ lead_key }}_tipo" style="flex: 1; margin-right: 10px;">Tipo **Estático** (no cambia después):</label>
+                    {# Un campo hidden para enviar 'dinamico' si no está marcado #}
+                    <input type="hidden" name="{{ lead_key }}_tipo" value="dinamico">
+                    <input type="checkbox" id="{{ lead_key }}_tipo" name="{{ lead_key }}_tipo"
+                           class="form-check-input" value="estatico"
+                           {{ 'checked' if lead_config.get('tipo') == 'estatico' else '' }}>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </form>
+    <div class="form-card" style="width:50%;">
+        <h4>📚 Catálogos publicados</h4>
+        {% if documents_publicos and documents_publicos|length > 0 %}
+        <div class="table-responsive">
+            <table class="table" style="font-size:13px;">
+                <thead>
+                    <tr>
+                        <th style="color:black;">Archivo</th>
+                        <th style="color:black;">Descripción</th>
+                        <th style="color:black;">Publicado</th>
+                        <th style="color:black;">Acciones</th>
+                    </tr>
+                </thead>
+                <tbody class="PDF">
+                    {% for doc in documents_publicos %}
+                    <tr>
+                        <td style="color:black;">
+                            <a href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank" rel="noopener">
+                                {{ doc.filename }}
+                            </a>
+                        </td>
+                        <td style="color:black;">{{ doc.descripcion or '-' }}</td>
+                        <td style="color:black;">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
+                        <td style="color:black;">
+                            <div style="display:flex; gap:8px; align-items:center;">
+                                <a class="btn small" href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank">Ver / Descargar</a>
+                                <form action="{{ url_for('borrar_pdf_configuracion', doc_id=doc.id) }}" method="post" onsubmit="return confirm('¿Eliminar {{ doc.filename }}? Esta acción no se puede deshacer.');" style="display:inline;">
+                                    <button type="submit" class="btn danger small">🗑️ Eliminar</button>
+                                </form>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted">No hay catálogos publicados.</div>
+        {% endif %}
     </div>
-</form>
-<div class="form-card" style="width:50%;">
-    <h4>📚 Catálogos publicados</h4>
-    {% if documents_publicos and documents_publicos|length > 0 %}
-    <div class="table-responsive">
-        <table class="table" style="font-size:13px;">
-            <thead>
-                <tr>
-                    <th style="color:black;">Archivo</th>
-                    <th style="color:black;">Descripción</th>
-                    <th style="color:black;">Publicado</th>
-                    <th style="color:black;">Acciones</th>
-                </tr>
-            </thead>
-            <tbody class="PDF">
-                {% for doc in documents_publicos %}
-                <tr>
-                    <td style="color:black;">
-                        <a href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank" rel="noopener">
-                            {{ doc.filename }}
-                        </a>
-                    </td>
-                    <td style="color:black;">{{ doc.descripcion or '-' }}</td>
-                    <td style="color:black;">{{ doc.created_at.strftime('%d/%m/%Y %H:%M') if doc.created_at else '-' }}</td>
-                    <td style="color:black;">
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <a class="btn small" href="{{ url_for('serve_public_docs', relpath=(doc.get('tenant_slug') ~ '/' ~ doc.filename) if doc.get('tenant_slug') else doc.filename) }}" target="_blank">Ver / Descargar</a>
-                            <form action="{{ url_for('borrar_pdf_configuracion', doc_id=doc.id) }}" method="post" onsubmit="return confirm('¿Eliminar {{ doc.filename }}? Esta acción no se puede deshacer.');" style="display:inline;">
-                                <button type="submit" class="btn danger small">🗑️ Eliminar</button>
-                            </form>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-    {% else %}
-    <div class="text-muted">No hay catálogos publicados.</div>
-    {% endif %}
-</div>
 </div>
 {% elif active == 'leads' %}
 <form class="config-form" method="POST">

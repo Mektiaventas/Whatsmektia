@@ -43,6 +43,9 @@ from urllib.parse import urlparse
 from os.path import basename, join 
 import os # Asegurar que 'os' también esté importado/disponible
 
+# En supercopia.py, define la lista de leads predefinidos
+LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado']
+
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
@@ -793,6 +796,117 @@ def admin_asignar_plan_dominio():
         app.logger.error(f"🔴 admin_asignar_plan_dominio error: {e}")
         return jsonify({'error': str(e)}), 500
 
+
+def guardar_configuracion_leads(db_conn, tenant_id, form_data):
+    """Procesa y guarda la configuración de leads en la BD del tenant."""
+    configuracion_leads = {}
+    
+    for lead_name in LEADS_PREDEFINIDOS:
+        lead_key = lead_name.lower().replace(' ', '_')
+        
+        # 1. Días para Caliente
+        dias_a_caliente = form_data.get(f'{lead_key}_a_caliente_dias')
+        
+        # 2. Switch IA: 'on' si está marcado, 'off' si es el valor del hidden (o no existe)
+        usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on' 
+        
+        # 3. Tiempo para Siguiente Lead
+        tiempo_siguiente_minutos = form_data.get(f'{lead_key}_tiempo_siguiente_minutos')
+        
+        # 4. Tipo Estático/Dinámico: 'estatico' si está marcado, 'dinamico' si es el valor del hidden
+        tipo = form_data.get(f'{lead_key}_tipo', 'dinamico') # Por defecto 'dinamico'
+
+        # Solo guardar si hay configuración para evitar ruido
+        if lead_key in form_data: # Usar una comprobación más robusta si es necesario
+            config = {
+                'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 7,
+                'usar_ia': usar_ia,
+                'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 1440,
+                'tipo': tipo
+            }
+            configuracion_leads[lead_key] = config
+
+    if configuracion_leads:
+        # Serializar y guardar en la base de datos (Ejemplo, usa tu función de DB real)
+        config_json = json.dumps(configuracion_leads)
+        # Aquí iría tu lógica de base de datos para guardar config_json 
+        # para el tenant_id con una clave como 'leads_config'
+        # update_config_en_db(tenant_id, 'leads_config', config_json)
+        return config_json
+    return None
+
+# --------------------------------------------------------------------------------
+# En la función de lógica de clasificación de leads (donde se determina el cambio)
+# --------------------------------------------------------------------------------
+
+def clasificar_lead_con_ia(contexto_conversacion, lead_config):
+    """
+    Función para determinar el lead usando la IA.
+    Se activa solo si 'usar_ia' es True en la configuración del lead actual.
+    """
+    if lead_config.get('usar_ia'):
+        # **Este es el punto clave para tu prompt de IA.**
+        # El prompt se usaría para clasificar si el lead debe ser 'Caliente' 
+        # o pasar a otro estado específico.
+        prompt_ia = (
+            "Eres un clasificador de leads. Analiza el siguiente historial de conversación. "
+            "Si la persona ha preguntado por **servicios específicos** o mostrado **alto interés de compra**, responde 'CALIENTE'. "
+            "De lo contrario, responde 'NO_CALIENTE'.\n"
+            f"Historial: {contexto_conversacion}"
+        )
+        
+        # Asumiendo que tienes una función para interactuar con tu modelo de IA
+        # respuesta = llamar_api_openai(prompt_ia) 
+        # if "CALIENTE" in respuesta.upper():
+        #    return "CALIENTE"
+        pass # Implementación de la llamada a IA
+    return None # No hay clasificación por IA o la IA no lo considera "Caliente"
+
+
+def intentar_cambio_de_lead(lead_actual, datos_lead, config_leads):
+    """Función principal para determinar si el lead debe cambiar."""
+    from datetime import datetime, timedelta # Asegurar que estén importados
+
+    lead_key = lead_actual.lower().replace(' ', '_')
+    config = config_leads.get(lead_key, {})
+    
+    # 1. Lógica **Estático/Dinámico**
+    if config.get('tipo') == 'estatico':
+        # Si el lead es estático, la conversación NO PUEDE cambiar a otro lead
+        return lead_actual 
+
+    # 2. Lógica **IA** (para clasificar leads, por ejemplo, a "Caliente")
+    if config.get('usar_ia'):
+        # Asumiendo que 'datos_lead' tiene un 'contexto' o 'historial_conversacion'
+        nuevo_lead_ia = clasificar_lead_con_ia(datos_lead.get('historial_conversacion'), config)
+        if nuevo_lead_ia:
+            return nuevo_lead_ia # Retorna "CALIENTE" o el lead clasificado por la IA
+
+    # 3. Lógica de **Tiempo** (cambio al siguiente lead por inactividad)
+    # Asume que 'datos_lead' incluye 'fecha_ultimo_mensaje_usuario' como objeto datetime
+    tiempo_limite_minutos = config.get('tiempo_siguiente_minutos', 1440)
+    ultima_interaccion_dt = datos_lead.get('fecha_ultimo_mensaje_usuario')
+    
+    if ultima_interaccion_dt and isinstance(ultima_interaccion_dt, datetime):
+        tiempo_inactivo = datetime.now() - ultima_interaccion_dt
+        if (tiempo_inactivo.total_seconds() / 60) >= tiempo_limite_minutos:
+            # Si se excede el tiempo de inactividad, pasar al "siguiente" lead (ej: Frio o Descartado)
+            # **Necesitas definir la lógica de cuál es el "siguiente" lead por inactividad.**
+            # Ejemplo: Si es 'Nuevo', pasa a 'Frio'. Si es 'Frio', pasa a 'Descartado'.
+            if lead_key == 'nuevo':
+                return 'Frio' 
+            elif lead_key == 'frio':
+                return 'Descartado'
+            # else: retorna el actual o el que defina tu negocio
+    
+    # 4. Lógica de Días a **Caliente** (típicamente un trabajo programado)
+    # Esto se debería ejecutar en un cron job o scheduler, no en la clasificación en tiempo real
+    dias_a_caliente = config.get('dias_a_caliente')
+    # Si el lead tiene X días desde su creación o último cambio:
+    # if lead_actual != 'Caliente' and datos_lead.get('dias_en_estado') >= dias_a_caliente:
+    #     return 'Caliente'
+
+    return lead_actual # Si ninguna condición se cumple, retorna el lead actual
 
 @app.route('/configuracion/negocio', methods=['POST'])
 def guardar_configuracion_negocio():
@@ -11798,7 +11912,7 @@ def configuracion_tab(tab):
     # If showing 'negocio' tab, load published documents for the template (existing logic)
     documents_publicos = documents_publicos  # already loaded above when tab == 'negocio'
 
-    return render_template('configuracion.html',
+    return render_template('configuracion_supercopia.html',
         tabs=SUBTABS, active=tab,
         datos=datos, guardado=guardado,
         documents_publicos=documents_publicos,

@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from google.oauth2 import service_account
 from mysql.connector import pooling
-from flask import render_template_string
+from flask import render_template_string 
 import pytz
 import os
 import logging
