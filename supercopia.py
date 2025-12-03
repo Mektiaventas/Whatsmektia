@@ -11306,7 +11306,7 @@ def enviar_manual():
                 # Guardar archivo temporalmente
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
-                os.makedirs(os.path.dirname(filepath), exist_ok=True)  # Asegurar directorio
+                os.makedirs(os.path.dirname(filepath), exist_ok=True)
                 archivo.save(filepath)
                 app.logger.info(f"💾 Archivo guardado: {filepath} ({os.path.getsize(filepath)} bytes)")
                 
@@ -11319,25 +11319,30 @@ def enviar_manual():
                     if not dominio:
                         dominio = request.host
                     
-                    if not dominio.startswith('http'):
+                    # Asegurar formato correcto
+                    if '://' not in dominio:
                         dominio = f"https://{dominio}"
-                    
-                    # Asegurar HTTPS para WhatsApp
-                    if dominio.startswith('http://'):
+                    elif dominio.startswith('http://'):
                         dominio = dominio.replace('http://', 'https://')
                     
+                    # Construir URL para archivo
                     public_url = f"{dominio.rstrip('/')}/uploads/{filename}"
                     
                     app.logger.info(f"🌐 URL pública generada: {public_url}")
                     
-                    # VERIFICAR QUE LA URL SEA ACCESIBLE
-                    try:
-                        import requests
-                        headers = {'User-Agent': 'Mozilla/5.0'}
-                        verify_response = requests.head(public_url, headers=headers, timeout=5, allow_redirects=True)
-                        app.logger.info(f"🔗 Verificación URL: HTTP {verify_response.status_code}")
-                    except Exception as verify_error:
-                        app.logger.warning(f"⚠️ No se pudo verificar URL: {verify_error}")
+                    # Intentar acceso directo primero
+                    from urllib.parse import urlparse
+                    parsed = urlparse(public_url)
+                    
+                    # Si el dominio es localhost, usar IP pública o ngrok
+                    if 'localhost' in parsed.netloc or '127.0.0.1' in parsed.netloc:
+                        app.logger.warning("⚠️ URL local - WhatsApp no podrá acceder")
+                        # En desarrollo, necesitas una URL pública (ngrok, etc.)
+                        # Si tienes ngrok configurado, usa esa URL
+                        ngrok_url = os.getenv('NGROK_URL')
+                        if ngrok_url:
+                            public_url = f"{ngrok_url.rstrip('/')}/uploads/{filename}"
+                            app.logger.info(f"🔄 Usando ngrok URL: {public_url}")
                     
                     # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
                     if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']:
@@ -11345,47 +11350,43 @@ def enviar_manual():
                         app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
                         from whatsapp import enviar_imagen
                         
-                        # Si hay texto, usarlo como caption
-                        caption = texto if texto else "Imagen enviada desde web"
                         resultado = enviar_imagen(numero, public_url, config)
                         
                         if resultado:
                             archivo_info = f"📷 Imagen: {archivo.filename}"
                             mensaje_enviado = True
+                            # Si hay texto, enviarlo como mensaje separado
+                            if texto:
+                                from whatsapp import enviar_mensaje
+                                enviar_mensaje(numero, texto, config)
+                                archivo_info = f"{archivo_info}\n\n💬 {texto}"
                         else:
                             raise Exception("Error enviando imagen")
                         
                     elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac']:
-                        # Es audio - enviar como mensaje de voz (si es corto) o documento
+                        # Es audio - enviar como mensaje de voz
                         app.logger.info(f"🎵 Enviando audio: {archivo.filename}")
                         
-                        # Verificar si es un audio corto para enviar como mensaje de voz
-                        file_size = os.path.getsize(filepath)
-                        if file_size < 16 * 1024 * 1024:  # Menos de 16MB
-                            try:
-                                from whatsapp import enviar_mensaje_voz
-                                resultado = enviar_mensaje_voz(numero, public_url, config)
-                                if resultado:
-                                    archivo_info = f"🎤 Audio: {archivo.filename}"
-                                    mensaje_enviado = True
-                                else:
-                                    raise Exception("Error enviando audio de voz")
-                            except:
-                                # Fallback: enviar como documento
-                                app.logger.warning("Fallback: enviando audio como documento")
-                                from whatsapp import enviar_documento
-                                resultado = enviar_documento(numero, public_url, archivo.filename, config)
-                                if resultado:
-                                    archivo_info = f"📄 Audio (documento): {archivo.filename}"
-                                    mensaje_enviado = True
+                        from whatsapp import enviar_mensaje_voz
+                        resultado = enviar_mensaje_voz(numero, public_url, config)
+                        
+                        if resultado:
+                            archivo_info = f"🎤 Audio: {archivo.filename}"
+                            mensaje_enviado = True
+                            # Si hay texto, enviarlo como mensaje separado
+                            if texto:
+                                from whatsapp import enviar_mensaje
+                                enviar_mensaje(numero, texto, config)
+                                archivo_info = f"{archivo_info}\n\n💬 {texto}"
                         else:
-                            # Audio grande, enviar como documento
+                            # Fallback: enviar como documento
+                            app.logger.warning("Fallback: enviando audio como documento")
                             from whatsapp import enviar_documento
                             resultado = enviar_documento(numero, public_url, archivo.filename, config)
                             if resultado:
-                                archivo_info = f"📄 Audio: {archivo.filename}"
+                                archivo_info = f"📄 Audio (documento): {archivo.filename}"
                                 mensaje_enviado = True
-                                
+                        
                     else:
                         # Para todos los demás tipos, enviar como documento
                         app.logger.info(f"📄 Enviando documento: {archivo.filename}")
@@ -11406,12 +11407,17 @@ def enviar_manual():
                                 archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
                             elif file_ext in ['.txt', '.rtf']:
                                 archivo_info = f"📄 Archivo de texto: {archivo.filename}"
-                            elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg', '.mpg']:
+                            elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv']:
                                 archivo_info = f"🎬 Video: {archivo.filename}"
                             else:
                                 archivo_info = f"📎 Archivo: {archivo.filename}"
                             
                             mensaje_enviado = True
+                            # Si hay texto, enviarlo como mensaje separado
+                            if texto:
+                                from whatsapp import enviar_mensaje
+                                enviar_mensaje(numero, texto, config)
+                                archivo_info = f"{archivo_info}\n\n💬 {texto}"
                     
                     app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
                     
@@ -11496,8 +11502,7 @@ def enviar_manual():
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero))  
-@app.route('/chats/<numero>/eliminar', methods=['POST'])
+    return redirect(url_for('ver_chat', numero=numero)) @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)

@@ -546,7 +546,7 @@ def enviar_documento(numero, file_url, filename, config=None):
             logger.error("🔴 enviar_documento: falta phone_number_id o whatsapp_token (config/ENV)")
             return False
 
-        # Asegurar que file_url sea HTTPS
+        # Asegurar que file_url sea HTTPS (WhatsApp requiere HTTPS)
         if file_url.startswith('http://'):
             file_url = file_url.replace('http://', 'https://')
         elif not file_url.startswith('https://'):
@@ -565,7 +565,21 @@ def enviar_documento(numero, file_url, filename, config=None):
             elif dominio.startswith('http://'):
                 dominio = dominio.replace('http://', 'https://')
             
-            file_url = f"{dominio.rstrip('/')}/{file_url.lstrip('/')}"
+            # Construir URL completa para WhatsApp
+            file_url = f"{dominio.rstrip('/')}/uploads/{os.path.basename(file_url)}"
+
+        # WhatsApp requiere que el archivo sea accesible públicamente
+        # Verificar si la URL es accesible
+        try:
+            import requests
+            verify_response = requests.head(file_url, timeout=10, allow_redirects=True)
+            if verify_response.status_code != 200:
+                logger.warning(f"⚠️ URL no accesible directamente: {file_url}")
+                # Intentar usar proxy si está disponible
+                if '/uploads/' in file_url:
+                    file_url = file_url.replace('/uploads/', '/proxy-file/')
+        except Exception as verify_error:
+            logger.warning(f"⚠️ No se pudo verificar URL: {verify_error}")
 
         url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
         headers = {
@@ -573,8 +587,8 @@ def enviar_documento(numero, file_url, filename, config=None):
             'Content-Type': 'application/json'
         }
         
-        # Limitar longitud del filename para WhatsApp
-        safe_filename = filename[:256]
+        # Limitar longitud del filename para WhatsApp (max 240 chars)
+        safe_filename = filename[:240]
         
         payload = {
             'messaging_product': 'whatsapp',
@@ -587,10 +601,10 @@ def enviar_documento(numero, file_url, filename, config=None):
         }
 
         logger.info(f"📤 enviar_documento -> to={numero} filename={safe_filename}")
-        logger.info(f"📤 URL del documento: {file_url[:200]}...")
+        logger.info(f"📤 URL del documento: {file_url}")
         
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=20)
+            r = requests.post(url, headers=headers, json=payload, timeout=30)
             
             status = r.status_code
             try:
@@ -609,6 +623,21 @@ def enviar_documento(numero, file_url, filename, config=None):
                 try:
                     error_json = r.json()
                     logger.error(f"🔴 Error details: {error_json}")
+                    
+                    # Si es error de URL, intentar alternativas
+                    if 'error' in error_json and 'message' in error_json['error']:
+                        error_msg = error_json['error']['message']
+                        if 'URL' in error_msg or 'unreachable' in error_msg:
+                            logger.error(f"🔴 Problema con la URL del documento: {error_msg}")
+                            # Intentar con URL directa si estamos usando proxy
+                            if '/proxy-file/' in file_url:
+                                direct_url = file_url.replace('/proxy-file/', '/uploads/')
+                                logger.info(f"🔄 Intentando con URL directa: {direct_url}")
+                                payload['document']['link'] = direct_url
+                                r2 = requests.post(url, headers=headers, json=payload, timeout=30)
+                                if r2.status_code in (200, 201, 202):
+                                    logger.info(f"✅ enviar_documento OK con URL directa")
+                                    return True
                 except:
                     pass
                     
@@ -648,14 +677,13 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
             logger.error(f"🔴 enviar_mensaje_voz: audio_url inválida: {audio_url}")
             return False
 
-        # Asegurar que la URL sea HTTPS
+        # WhatsApp requiere HTTPS y URL accesible
         if audio_url.startswith('http://'):
             audio_url = audio_url.replace('http://', 'https://')
         elif not audio_url.startswith('https://'):
             # Si es una ruta relativa, construir URL completa
             dominio = cfg.get('dominio') or os.getenv('MI_DOMINIO')
             if not dominio:
-                # intentar usar la base del host actual
                 try:
                     from flask import request
                     dominio = request.url_root.rstrip('/')
@@ -667,20 +695,47 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
             elif dominio.startswith('http://'):
                 dominio = dominio.replace('http://', 'https://')
             
-            audio_url = f"{dominio.rstrip('/')}/{audio_url.lstrip('/')}"
+            # Extraer solo el nombre del archivo
+            if '/' in audio_url:
+                filename = audio_url.split('/')[-1]
+            else:
+                filename = audio_url
+            
+            audio_url = f"{dominio.rstrip('/')}/uploads/{filename}"
 
-        # Verificar que Facebook pueda acceder al archivo (HEAD) - SOLO si es URL absoluta
+        # IMPORTANTE: WhatsApp necesita que el audio sea accesible públicamente
+        # Verificar accesibilidad de la URL
         try:
             if audio_url.startswith('https://'):
-                head = requests.head(audio_url, timeout=8, allow_redirects=True, 
-                                     headers={'User-Agent': 'Mozilla/5.0 (WhatsApp)'})
-                if head.status_code >= 400:
-                    logger.warning(f"⚠️ enviar_mensaje_voz: audio URL not reachable (HEAD {head.status_code}): {audio_url}")
-                    # No retornar False todavía, intentar enviar de todas formas
+                headers = {'User-Agent': 'Mozilla/5.0 (WhatsApp)'}
+                head = requests.head(audio_url, timeout=10, allow_redirects=True, headers=headers)
+                
+                logger.info(f"🔗 Verificación URL audio: HTTP {head.status_code}, Content-Type: {head.headers.get('content-type')}")
+                
+                if head.status_code != 200:
+                    logger.warning(f"⚠️ audio URL not directly accessible (HEAD {head.status_code}): {audio_url}")
+                    
+                    # Intentar con proxy si la URL tiene /uploads/
+                    if '/uploads/' in audio_url:
+                        proxy_url = audio_url.replace('/uploads/', '/proxy-audio/')
+                        logger.info(f"🔄 Intentando con proxy: {proxy_url}")
+                        
+                        # Verificar si el proxy funciona
+                        head2 = requests.head(proxy_url, timeout=8, allow_redirects=True)
+                        if head2.status_code == 200:
+                            audio_url = proxy_url
+                            logger.info(f"✅ Usando proxy para audio")
+                        
+                # Verificar tipo de contenido
+                content_type = head.headers.get('content-type', '').lower()
+                if 'audio' not in content_type and 'ogg' not in content_type and 'mpeg' not in content_type:
+                    logger.warning(f"⚠️ Content-Type no es audio: {content_type}")
+                    
         except Exception as e:
             logger.warning(f"⚠️ enviar_mensaje_voz: HEAD check failed for {audio_url}: {e}")
-            # Continuar de todas formas
-       
+            # Continuar de todas formas - WhatsApp verificará por su lado
+        
+        # WhatsApp Graph API endpoint
         url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
         headers = {
             'Authorization': f'Bearer {token}',
@@ -697,14 +752,16 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
             }
         }
 
-        logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero} -> {audio_url}")
+        logger.info(f"📤 enviar_mensaje_voz: enviando audio a {numero}")
+        logger.info(f"🔗 URL de audio: {audio_url}")
         
         try:
-            r = requests.post(url, headers=headers, json=payload, timeout=15)
-            logger.info(f"📥 Graph API status: {r.status_code} response: {r.text[:500]}")
+            r = requests.post(url, headers=headers, json=payload, timeout=20)
+            
+            logger.info(f"📥 Graph API status: {r.status_code}")
             
             if r.status_code in (200, 201, 202):
-                logger.info(f"✅ Audio de voz enviado a {numero}")
+                logger.info(f"✅ Audio de voz enviado exitosamente a {numero}")
                 return True
             else:
                 # Intentar parsear el error
@@ -715,12 +772,17 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
                     # Si es error de URL, intentar verificar la accesibilidad
                     if 'error' in error_json and 'message' in error_json['error']:
                         error_msg = error_json['error']['message']
-                        if 'URL' in error_msg or 'unreachable' in error_msg:
-                            logger.error(f"🔴 Problema con la URL del audio: {error_msg}")
+                        if 'URL' in error_msg or 'unreachable' in error_msg or 'supported' in error_msg:
+                            logger.error(f"🔴 Problema con el audio: {error_msg}")
+                            
+                            # Intentar enviar como documento si falla como audio de voz
+                            logger.info(f"🔄 Intentando enviar como documento...")
+                            return enviar_documento(numero, audio_url, "audio.ogg", config)
                 except:
-                    logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text}")
+                    logger.error(f"🔴 Error enviando audio ({r.status_code}): {r.text[:200]}")
                 
                 return False
+                
         except requests.exceptions.Timeout:
             logger.error(f"🔴 Timeout enviando audio a {numero}")
             return False

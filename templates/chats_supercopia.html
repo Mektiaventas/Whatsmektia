@@ -2309,13 +2309,15 @@ function setupAudioRecorder() {
             document.querySelector('.send-btn'),
             document.getElementById('file-attach-btn'),
             document.getElementById('record-audio-btn'),
-            document.getElementById('emoji-pick-btn')
+            document.getElementById('emoji-pick-btn'),
+            document.getElementById('start-record-btn')
         ];
 
         buttons.forEach(btn => {
             if (btn) {
                 btn.disabled = true;
-                if (btn !== sendAudioBtn) {
+                // Guardar el estado original SOLO si no tiene ya un data-original-html
+                if (!btn.hasAttribute('data-original-html')) {
                     const originalHTML = btn.innerHTML;
                     btn.setAttribute('data-original-html', originalHTML);
                     btn.innerHTML = '⏳';
@@ -2324,9 +2326,60 @@ function setupAudioRecorder() {
         });
     }
 
+    // Añade esta función para restaurar botones
+    function restoreAllButtons() {
+        const buttons = [
+            sendAudioBtn,
+            document.querySelector('.send-btn'),
+            document.getElementById('file-attach-btn'),
+            document.getElementById('record-audio-btn'),
+            document.getElementById('emoji-pick-btn'),
+            document.getElementById('start-record-btn')
+        ];
+
+        buttons.forEach(btn => {
+            if (btn) {
+                btn.disabled = false;
+                const originalHTML = btn.getAttribute('data-original-html');
+                if (originalHTML) {
+                    btn.innerHTML = originalHTML;
+                    btn.removeAttribute('data-original-html');
+                }
+            }
+        });
+    } 
+
     window.addEventListener('beforeunload', resetRecorder);
     console.debug('✅ Audio recorder initialized');
-}
+    document.addEventListener('formSubmitComplete', function () {
+        setTimeout(() => {
+            restoreAllButtons();
+            resetRecorder();
+        }, 1000);
+    });
+
+    // También modifica el listener del formulario
+    if (document.getElementById('messageForm')) {
+        const originalSubmitHandler = document.getElementById('messageForm').onsubmit;
+        document.getElementById('messageForm').addEventListener('submit', function (e) {
+            // Ejecutar el handler original si existe
+            if (originalSubmitHandler) {
+                originalSubmitHandler.call(this, e);
+            }
+
+            // Agregar nuestro manejo
+            const form = e.target;
+
+            // Crear un evento personalizado para cuando se complete el submit
+            form.addEventListener('submitend', function () {
+                setTimeout(() => {
+                    document.dispatchEvent(new CustomEvent('formSubmitComplete'));
+                    restoreAllButtons();
+                }, 2000);
+            });
+        });
+    }
+
 
 /* ===================== CHAT SEARCH ===================== */
 function setupChatSearch() {
@@ -2545,41 +2598,80 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // Manejar el envío del formulario
-if (document.getElementById('messageForm')) {
-    document.getElementById('messageForm').addEventListener('submit', function (e) {
-        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
-        const hasFile = document.getElementById('file-input').files.length > 0;
-        const hasAudio = document.getElementById('audio-data-input').value !== '';
+    // Manejar el envío del formulario
+    if (document.getElementById('messageForm')) {
+        // Guardar el event listener original si existe
+        const messageForm = document.getElementById('messageForm');
+        const originalSubmitHandler = messageForm.onsubmit;
 
-        console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+        messageForm.addEventListener('submit', function (e) {
+            const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+            const hasFile = document.getElementById('file-input').files.length > 0;
+            const hasAudio = document.getElementById('audio-data-input').value !== '';
 
-        if (!hasText && !hasFile && !hasAudio) {
-            e.preventDefault();
-            alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-            return false;
-        }
+            console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
-        // Mostrar indicadores de envío
-        const sendBtn = document.querySelector('.send-btn');
-        if (sendBtn) {
-            const originalText = sendBtn.innerHTML;
-
-            if (hasAudio) {
-                sendBtn.innerHTML = '🎤⏳';
-            } else if (hasFile) {
-                sendBtn.innerHTML = '📎⏳';
-            } else {
-                sendBtn.innerHTML = '⏳';
+            if (!hasText && !hasFile && !hasAudio) {
+                e.preventDefault();
+                alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+                return false;
             }
 
-            sendBtn.disabled = true;
+            // Mostrar indicadores de envío
+            const sendBtn = document.querySelector('.send-btn');
+            if (sendBtn) {
+                const originalText = sendBtn.innerHTML;
 
-            setTimeout(() => {
-                sendBtn.innerHTML = originalText;
-                sendBtn.disabled = false;
-            }, 5000);
-        }
+                if (hasAudio) {
+                    sendBtn.innerHTML = '🎤⏳';
+                } else if (hasFile) {
+                    sendBtn.innerHTML = '📎⏳';
+                } else {
+                    sendBtn.innerHTML = '⏳';
+                }
+
+                sendBtn.disabled = true;
+
+                // Programar restauración automática después de 5 segundos
+                setTimeout(() => {
+                    sendBtn.innerHTML = originalText;
+                    sendBtn.disabled = false;
+                    // También restaurar todos los botones
+                    if (typeof restoreAllButtons === 'function') {
+                        restoreAllButtons();
+                    }
+                }, 5000);
+            }
+
+            // Ejecutar el handler original si existe
+            if (originalSubmitHandler) {
+                return originalSubmitHandler.call(this, e);
+            }
+        });
+    }
+
+    // Evento para restaurar botones cuando se complete el envío
+    document.addEventListener('formSubmitComplete', function () {
+        setTimeout(() => {
+            if (typeof restoreAllButtons === 'function') {
+                restoreAllButtons();
+            }
+            if (typeof resetRecorder === 'function') {
+                resetRecorder();
+            }
+        }, 1000);
     });
-}
+
+    // Para formularios que se envían sin AJAX (recarga de página)
+    window.addEventListener('pageshow', function () {
+        setTimeout(() => {
+            if (typeof restoreAllButtons === 'function') {
+                restoreAllButtons();
+            }
+            if (typeof resetRecorder === 'function') {
+                resetRecorder();
+            }
+        }, 1000);
+    }); 
 </script>
 {% endblock %}       
