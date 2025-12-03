@@ -449,81 +449,114 @@
 
         <script>
             function setupAudioRecorder() {
-                const recordBtn = document.getElementById('record-audio-btn'); // Botón de micrófono
-                const audioInput = document.getElementById('audio-data-input'); // Input hidden
-                const sendBtn = document.querySelector('.send-btn');
+    const recordBtn = document.getElementById('record-audio-btn'); // Botón de micrófono
+    const audioInput = document.getElementById('audio-data-input'); // Input hidden
+    const sendBtn = document.querySelector('.send-btn');
+    
+    if (!recordBtn || !audioInput) return;
 
-                if (!recordBtn || !audioInput) return;
+    let mediaRecorder;
+    let audioChunks = [];
+    let isRecording = false;
 
-                let mediaRecorder;
-                let audioChunks = [];
-                let isRecording = false;
+    // Crear elemento visual para el estado de grabación si no existe
+    let statusLabel = document.getElementById('recording-status');
+    if (!statusLabel) {
+        statusLabel = document.createElement('span');
+        statusLabel.id = 'recording-status';
+        statusLabel.style.display = 'none';
+        statusLabel.style.color = '#e53935';
+        statusLabel.style.fontWeight = 'bold';
+        statusLabel.style.marginLeft = '10px';
+        recordBtn.parentNode.insertBefore(statusLabel, recordBtn.nextSibling);
+    }
 
-                // Crear elemento visual para el estado de grabación si no existe
-                let statusLabel = document.getElementById('recording-status');
-                if (!statusLabel) {
-                    statusLabel = document.createElement('span');
-                    statusLabel.id = 'recording-status';
-                    statusLabel.style.display = 'none';
-                    statusLabel.style.color = '#e53935';
-                    statusLabel.style.fontWeight = 'bold';
-                    statusLabel.style.marginLeft = '10px';
-                    recordBtn.parentNode.insertBefore(statusLabel, recordBtn.nextSibling);
-                }
+    recordBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
 
-                recordBtn.addEventListener('click', async (e) => {
-                    e.preventDefault();
+        if (!isRecording) {
+            // --- INICIAR GRABACIÓN ---
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
 
-                    if (!isRecording) {
-                        // --- INICIAR GRABACIÓN ---
-                        try {
-                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            mediaRecorder = new MediaRecorder(stream);
-                            audioChunks = [];
+                mediaRecorder.ondataavailable = event => {
+                    audioChunks.push(event.data);
+                };
 
-                            mediaRecorder.ondataavailable = event => {
-                                audioChunks.push(event.data);
-                            };
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
+                    const reader = new FileReader();
+                    reader.readAsDataURL(audioBlob);
+                    reader.onloadend = () => {
+                        // Guardar base64 en el input hidden
+                        audioInput.value = reader.result;
+                        console.log("🎤 Audio procesado y listo para enviar");
+                        
+                        // Cambiar botón de enviar para indicar que hay audio
+                        sendBtn.innerHTML = '🎤 Enviar Audio';
+                        sendBtn.classList.add('ready-to-send');
+                    };
+                };
 
-                            mediaRecorder.onstop = () => {
-                                const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
-                                const reader = new FileReader();
-                                reader.readAsDataURL(audioBlob);
-                                reader.onloadend = () => {
-                                    // Guardar base64 en el input hidden
-                                    audioInput.value = reader.result;
-                                    console.log("🎤 Audio procesado y listo para enviar");
-
-                                    // Cambiar botón de enviar para indicar que hay audio
-                                    sendBtn.innerHTML = '🎤 Enviar Audio';
-                                    sendBtn.classList.add('ready-to-send');
-                                };
-                            };
-
-                            mediaRecorder.start();
-                            isRecording = true;
-                            recordBtn.innerHTML = '⏹️'; // Icono de Stop
-                            recordBtn.classList.add('recording');
-                            statusLabel.innerText = "Grabando...";
-                            statusLabel.style.display = 'inline';
-
-                        } catch (err) {
-                            console.error("Error accediendo al micrófono:", err);
-                            alert("No se pudo acceder al micrófono. Verifica los permisos.");
-                        }
-                    } else {
-                        // --- DETENER GRABACIÓN ---
-                        mediaRecorder.stop();
-                        isRecording = false;
-                        recordBtn.innerHTML = '🎤'; // Volver a icono micro
-                        recordBtn.classList.remove('recording');
-                        statusLabel.innerText = "Audio guardado. Presiona Enviar.";
-
-                        // Detener el stream
-                        mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                    }
-                });
+                mediaRecorder.start();
+                isRecording = true;
+                recordBtn.innerHTML = '⏹️'; // Icono de Stop
+                recordBtn.classList.add('recording');
+                statusLabel.innerText = "Grabando...";
+                statusLabel.style.display = 'inline';
+                
+            } catch (err) {
+                console.error("Error accediendo al micrófono:", err);
+                alert("No se pudo acceder al micrófono. Verifica los permisos.");
             }
+        } else {
+            // --- DETENER GRABACIÓN ---
+            mediaRecorder.stop();
+            isRecording = false;
+            recordBtn.innerHTML = '🎤'; // Volver a icono micro
+            recordBtn.classList.remove('recording');
+            statusLabel.innerText = "Audio guardado. Presiona Enviar.";
+            
+            // Detener el stream
+            mediaRecorder.stream.getTracks().forEach(track => track.stop());
+        }
+    });
+}
+
+// Asegurar que hay un input hidden para el audio dentro del form
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('messageForm');
+    if (form && !document.getElementById('audio-data-input')) {
+        const input = document.createElement('input');
+        input.type = 'hidden';
+        input.name = 'audio_data';
+        input.id = 'audio-data-input';
+        form.appendChild(input);
+    }
+    
+    // Inicializar la grabadora
+    setupAudioRecorder();
+});
+</script>
+
+<style>
+.recording {
+    animation: pulse 1.5s infinite;
+    background-color: #ffebee !important;
+    color: red !important;
+    border: 1px solid red !important;
+}
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+.ready-to-send {
+    background-color: #00897b !important; /* Color diferente para indicar listo */
+}
+</style>
 
             // Asegurar que hay un input hidden para el audio dentro del form
             document.addEventListener('DOMContentLoaded', function () {
@@ -539,49 +572,6 @@
                 // Inicializar la grabadora
                 setupAudioRecorder();
             });
-        </script>
-
-        <style>
-            .recording {
-                animation: pulse 1.5s infinite;
-                background-color: #ffebee !important;
-                color: red !important;
-                border: 1px solid red !important;
-            }
-
-            @keyframes pulse {
-                0% {
-                    transform: scale(1);
-                }
-
-                50% {
-                    transform: scale(1.1);
-                }
-
-                100% {
-                    transform: scale(1);
-                }
-            }
-
-            .ready-to-send {
-                background-color: #00897b !important; /* Color diferente para indicar listo */
-            }
-        </style>
-
-        // Asegurar que hay un input hidden para el audio dentro del form
-        document.addEventListener('DOMContentLoaded', function () {
-        const form = document.getElementById('messageForm');
-        if (form && !document.getElementById('audio-data-input')) {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'audio_data';
-        input.id = 'audio-data-input';
-        form.appendChild(input);
-        }
-
-        // Inicializar la grabadora
-        setupAudioRecorder();
-        });
         </script>
 
         <style>
