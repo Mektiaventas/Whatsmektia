@@ -5798,7 +5798,8 @@ def save_config(cfg_all, config=None):
             'asesores_json': None,
             'mensaje_tibio': leads.get('mensaje_tibio'),
             'mensaje_frio': leads.get('mensaje_frio'),
-            'mensaje_dormido': leads.get('mensaje_dormido')
+            'mensaje_dormido': leads.get('mensaje_dormido'),
+            'leads_config': cfg_all.get('leads_config')
         }
 
         # if caller supplied structured advisors (list or json), normalize to JSON string
@@ -12083,7 +12084,20 @@ def configuracion_tab(tab):
             cfg['asesores'] = advisors_map  # legacy map
             # supply structured list to be saved by save_config
             cfg['asesores_json'] = advisors_compiled
-
+        elif tab == 'leads':
+            # 1. Guardar mensajes legacy (tibio, frio, dormido)
+            cfg['leads'] = {
+                'mensaje_tibio': request.form.get('mensaje_tibio'),
+                'mensaje_frio': request.form.get('mensaje_frio'),
+                'mensaje_dormido': request.form.get('mensaje_dormido')
+            }
+            
+            # 2. Procesar la Grid de configuración JSON
+            # Nota: pasamos None a la conexión porque la función auxiliar solo formatea el JSON
+            json_leads = guardar_configuracion_leads(None, None, request.form)
+            
+            # 3. Asignar al diccionario principal para que save_config lo vea
+            cfg['leads_config'] = json_leads
         # Persist configuration
         try:
             save_config(cfg, config)
@@ -12104,7 +12118,7 @@ def configuracion_tab(tab):
             asesor_count = obtener_max_asesores_from_planes(default=2, cap=20)
 
     datos = cfg.get(tab, {})
-
+    leads_config_list = cfg.get('leads_config_list', {})
     # If showing 'negocio' tab, load published documents for the template (existing logic)
     documents_publicos = documents_publicos  # already loaded above when tab == 'negocio'
 
@@ -12113,7 +12127,8 @@ def configuracion_tab(tab):
         datos=datos, guardado=guardado,
         documents_publicos=documents_publicos,
         asesor_count=asesor_count,
-        asesores_list=asesores_list
+        asesores_list=asesores_list,
+        leads_config_list=leads_config_list
     )
 
 def negocio_contact_block(negocio):
