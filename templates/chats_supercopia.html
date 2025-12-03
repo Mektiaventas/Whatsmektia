@@ -1810,27 +1810,6 @@ function setupFileUpload() {
         return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
     }
 
-    messageForm.addEventListener('submit', function (e) {
-        const hasText = textarea.value.trim() !== '';
-        const hasFile = fileInput.files.length > 0;
-        const hasAudio = document.getElementById('audio-data-input').value !== '';
-
-        if (!hasText && !hasFile && !hasAudio) {
-            e.preventDefault();
-            alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-            return false;
-        }
-
-        const sendBtn = document.querySelector('.send-btn');
-        const originalText = sendBtn.innerHTML;
-        sendBtn.innerHTML = '⏳';
-        sendBtn.disabled = true;
-
-        setTimeout(() => {
-            sendBtn.innerHTML = originalText;
-            sendBtn.disabled = false;
-        }, 3000);
-    });
 
     console.debug('File upload functionality initialized');
 }
@@ -2347,7 +2326,7 @@ function setupAudioRecorder() {
                 }
             }
         });
-    } 
+    }
 
     window.addEventListener('beforeunload', resetRecorder);
     console.debug('✅ Audio recorder initialized');
@@ -2381,6 +2360,7 @@ function setupAudioRecorder() {
     }
 
 
+/* ===================== CHAT SEARCH ===================== */
 /* ===================== CHAT SEARCH ===================== */
 function setupChatSearch() {
     const searchInput = document.getElementById('search-chats-input');
@@ -2597,17 +2577,26 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
-// Manejar el envío del formulario
-    // Manejar el envío del formulario
+/* ===================== FORMULARIO ÚNICO MANEJADOR ===================== */
+// ESTE ES EL ÚNICO EVENT LISTENER PARA EL FORMULARIO
+document.addEventListener('DOMContentLoaded', function() {
     if (document.getElementById('messageForm')) {
-        // Guardar el event listener original si existe
         const messageForm = document.getElementById('messageForm');
-        const originalSubmitHandler = messageForm.onsubmit;
 
-        messageForm.addEventListener('submit', function (e) {
-            const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
-            const hasFile = document.getElementById('file-input').files.length > 0;
-            const hasAudio = document.getElementById('audio-data-input').value !== '';
+        // Clonar el formulario para eliminar event listeners previos
+        const newForm = messageForm.cloneNode(true);
+        messageForm.parentNode.replaceChild(newForm, messageForm);
+
+        // Re-asignar variables después del clone
+        const textarea = document.getElementById('mensaje-texto');
+        const fileInput = document.getElementById('file-input');
+        const audioDataInput = document.getElementById('audio-data-input');
+        const emojiBtn = document.getElementById('emoji-pick-btn');
+
+        newForm.addEventListener('submit', function (e) {
+            const hasText = textarea ? textarea.value.trim() !== '' : false;
+            const hasFile = fileInput ? fileInput.files.length > 0 : false;
+            const hasAudio = audioDataInput ? audioDataInput.value !== '' : false;
 
             console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
@@ -2615,6 +2604,17 @@ document.addEventListener('DOMContentLoaded', function () {
                 e.preventDefault();
                 alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
                 return false;
+            }
+
+            // Cerrar el emoji picker si está abierto
+            const emojiPicker = document.getElementById('emoji-picker-list');
+            if (emojiPicker) {
+                emojiPicker.style.display = 'none';
+            }
+
+            // Deshabilitar temporalmente el botón de emoji
+            if (emojiBtn) {
+                emojiBtn.disabled = true;
             }
 
             // Mostrar indicadores de envío
@@ -2636,34 +2636,43 @@ document.addEventListener('DOMContentLoaded', function () {
                 setTimeout(() => {
                     sendBtn.innerHTML = originalText;
                     sendBtn.disabled = false;
-                    // También restaurar todos los botones
+
+                    // Restaurar el botón de emoji
+                    if (emojiBtn) {
+                        emojiBtn.disabled = false;
+                    }
+
+                    // Restaurar todos los botones
                     if (typeof restoreAllButtons === 'function') {
                         restoreAllButtons();
                     }
                 }, 5000);
             }
 
-            // Ejecutar el handler original si existe
-            if (originalSubmitHandler) {
-                return originalSubmitHandler.call(this, e);
-            }
+            return true; // Permitir el envío del formulario
         });
     }
 
     // Evento para restaurar botones cuando se complete el envío
-    document.addEventListener('formSubmitComplete', function () {
+    document.addEventListener('formSubmitComplete', function() {
         setTimeout(() => {
             if (typeof restoreAllButtons === 'function') {
                 restoreAllButtons();
             }
             if (typeof resetRecorder === 'function') {
                 resetRecorder();
+            }
+
+            // Re-habilitar el botón de emoji
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            if (emojiBtn) {
+                emojiBtn.disabled = false;
             }
         }, 1000);
     });
 
     // Para formularios que se envían sin AJAX (recarga de página)
-    window.addEventListener('pageshow', function () {
+    window.addEventListener('pageshow', function() {
         setTimeout(() => {
             if (typeof restoreAllButtons === 'function') {
                 restoreAllButtons();
@@ -2671,7 +2680,14 @@ document.addEventListener('DOMContentLoaded', function () {
             if (typeof resetRecorder === 'function') {
                 resetRecorder();
             }
+
+            // Re-habilitar el botón de emoji
+            const emojiBtn = document.getElementById('emoji-pick-btn');
+            if (emojiBtn) {
+                emojiBtn.disabled = false;
+            }
         }, 1000);
-    }); 
+    });
+});
 </script>
-{% endblock %}       
+{% endblock %} 
