@@ -797,9 +797,14 @@ def admin_asignar_plan_dominio():
         return jsonify({'error': str(e)}), 500
 
 
+# En supercopia.py
+
 def guardar_configuracion_leads(db_conn, tenant_id, form_data):
-    """Procesa y guarda la configuración de leads en la BD del tenant."""
+    """Procesa y guarda la configuración de leads desde los datos del formulario."""
     configuracion_leads = {}
+    
+    # Asumiendo que LEADS_PREDEFINIDOS está definido globalmente: 
+    # LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado']
     
     for lead_name in LEADS_PREDEFINIDOS:
         lead_key = lead_name.lower().replace(' ', '_')
@@ -807,35 +812,31 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
         # 1. Días para Caliente
         dias_a_caliente = form_data.get(f'{lead_key}_a_caliente_dias')
         
-        # 2. Switch IA: 'on' si está marcado, 'off' si es el valor del hidden (o no existe)
+        # 2. Switch IA
         usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on' 
-
-        criterio_ia = form_data.get(f'{lead_key}_criterio_ia', '').strip()
-
+        
         # 3. Tiempo para Siguiente Lead
         tiempo_siguiente_minutos = form_data.get(f'{lead_key}_tiempo_siguiente_minutos')
         
-        # 4. Tipo Estático/Dinámico: 'estatico' si está marcado, 'dinamico' si es el valor del hidden
-        tipo = form_data.get(f'{lead_key}_tipo', 'dinamico') # Por defecto 'dinamico'
+        # 4. Tipo Estático/Dinámico
+        tipo = form_data.get(f'{lead_key}_tipo', 'dinamico') 
+        
+        # 5. Criterio IA (NUEVO CAMPO)
+        criterio_ia = form_data.get(f'{lead_key}_criterio_ia', '').strip()
 
-        # Solo guardar si hay configuración para evitar ruido
-        if lead_key in form_data: # Usar una comprobación más robusta si es necesario
-            config = {
-                'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 7,
-                'usar_ia': usar_ia,
-                'criterio_ia': criterio_ia,
-                'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 1440,
-                'tipo': tipo
-            }
-            configuracion_leads[lead_key] = config
+        # Solo guardar si el lead es relevante (el formulario siempre lo envía si está dentro del <form>)
+        config = {
+            'dias_a_caliente': int(dias_a_caliente) if dias_a_caliente else 7,
+            'usar_ia': usar_ia,
+            'tiempo_siguiente_minutos': int(tiempo_siguiente_minutos) if tiempo_siguiente_minutos else 1440,
+            'tipo': tipo,
+            'criterio_ia': criterio_ia # <--- Campo crucial
+        }
+        configuracion_leads[lead_key] = config
 
     if configuracion_leads:
-        # Serializar y guardar en la base de datos (Ejemplo, usa tu función de DB real)
-        config_json = json.dumps(configuracion_leads)
-        # Aquí iría tu lógica de base de datos para guardar config_json 
-        # para el tenant_id con una clave como 'leads_config'
-        # update_config_en_db(tenant_id, 'leads_config', config_json)
-        return config_json
+        # Serializar el diccionario a JSON string
+        return json.dumps(configuracion_leads) 
     return None
 
 # --------------------------------------------------------------------------------
@@ -977,7 +978,31 @@ def guardar_configuracion_negocio():
     # Guardar en la base de datos
     conn = get_db_connection(config)
     cursor = conn.cursor()
-    
+    try:
+        # Asumiendo que esta función procesa y serializa los datos del formulario a JSON
+        # (Función previamente implementada por nosotros)
+        configuracion_leads_json = guardar_configuracion_leads(conn, tenant_id, request.form)
+        
+        if configuracion_leads_json:
+            # Actualizar la nueva columna 'leads_config' en tu tabla 'configuracion'
+            # (Asumiendo que la fila se identifica por el ID = 1 o por el tenant_id)
+            query_update = """
+            UPDATE configuracion 
+            SET leads_config = %s
+            WHERE id = %s 
+            """
+            # NOTA: Debes reemplazar el '1' en la tupla con el ID de la fila de tu tenant.
+            cursor.execute(query_update, (configuracion_leads_json, 1)) 
+            conn.commit()
+            flash("✅ Configuración de Leads guardada exitosamente.", 'success')
+            
+    except Exception as e:
+        conn.rollback()
+        current_app.logger.error(f"Error al guardar config de leads: {e}")
+        flash("❌ Error al guardar la configuración de Leads.", 'danger')
+        
+    finally:
+        cursor.close()
     # Verificar/crear columnas necesarias (calendar_email + transferencias)
     try:
         required_cols = {
@@ -5490,7 +5515,8 @@ def load_config(config=None):
                 asesores_json TEXT,
                 mensaje_tibio TEXT,
                 mensaje_frio TEXT,
-                mensaje_dormido TEXT
+                mensaje_dormido TEXT,
+                'leads_config_list': {}
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
         # Consumir cualquier resultado pendiente del CREATE TABLE para limpiar el cursor
@@ -5502,10 +5528,10 @@ def load_config(config=None):
     # 2. Ejecutar SELECT (ahora el cursor está limpio)
     cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
     row = cursor.fetchone()
-    
+    leads_config_json = row.get('leads_config')
     cursor.close()
     conn.close()
-
+    
     if not row:
         # Retornar estructura vacía con defaults para evitar KeyErrors
         return {
