@@ -2545,82 +2545,41 @@ document.addEventListener('DOMContentLoaded', function () {
 });
 
 // Manejar el envío del formulario
-    // Manejar el envío del formulario
-    if (document.getElementById('messageForm')) {
-        const messageForm = document.getElementById('messageForm');
-        const audioDataInput = document.getElementById('audio-data-input'); // Campo oculto para el audio
-        const sendBtn = messageForm.querySelector('.send-btn');
-        const fileInput = document.getElementById('file-input');
-        const textInput = document.getElementById('mensaje-texto');
+if (document.getElementById('messageForm')) {
+    document.getElementById('messageForm').addEventListener('submit', function (e) {
+        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+        const hasFile = document.getElementById('file-input').files.length > 0;
+        const hasAudio = document.getElementById('audio-data-input').value !== '';
 
-        // Función para restablecer el estado del botón y el audio
-        const resetFormState = () => {
-            if (sendBtn) {
-                sendBtn.innerHTML = sendBtn.getAttribute('data-original-text') || 'Enviar';
-                sendBtn.disabled = false;
-            }
-            audioDataInput.value = ''; // CRÍTICO: Limpiar el audio grabado
-            // Si tienes una interfaz de grabadora, aquí la deberías restablecer visualmente.
-        };
+        console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
 
-        // Al cargar, guardar el texto original del botón
-        if (sendBtn) {
-            sendBtn.setAttribute('data-original-text', sendBtn.innerHTML.trim() || 'Enviar');
+        if (!hasText && !hasFile && !hasAudio) {
+            e.preventDefault();
+            alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+            return false;
         }
 
-        messageForm.addEventListener('submit', function (e) {
-            const hasText = textInput.value.trim() !== '';
-            const hasFile = fileInput.files.length > 0;
-            const hasAudio = audioDataInput.value !== '';
+        // Mostrar indicadores de envío
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            const originalText = sendBtn.innerHTML;
 
-            console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
-
-            if (!hasText && !hasFile && !hasAudio) {
-                e.preventDefault();
-                // Reemplazar alert() por un modal o mensaje flash si es posible
-                console.error('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                // Nota: Aquí se usa un log/error, idealmente se usaría un modal de error personalizado.
-                return false;
+            if (hasAudio) {
+                sendBtn.innerHTML = '🎤⏳';
+            } else if (hasFile) {
+                sendBtn.innerHTML = '📎⏳';
+            } else {
+                sendBtn.innerHTML = '⏳';
             }
 
-            // 1. Mostrar indicadores de envío y deshabilitar
-            if (sendBtn) {
-                if (hasAudio) {
-                    sendBtn.innerHTML = '🎤 Enviando... ⏳';
-                } else if (hasFile) {
-                    sendBtn.innerHTML = '📎 Enviando... ⏳';
-                } else {
-                    sendBtn.innerHTML = 'Enviando... ⏳';
-                }
-                sendBtn.disabled = true; // Deshabilita el botón para evitar doble clic
-            }
+            sendBtn.disabled = true;
 
-            // 2. Si hay audio, forzamos a que solo se envíe el audio (WhatsApp prefiere mensajes separados)
-            // Ya que el backend maneja el texto como un mensaje secundario si el audio es lo principal,
-            // nos aseguramos de que el JS no interfiera con esto.
-
-            // NOTA IMPORTANTE: Como el formulario hace un POST síncrono que recarga la página,
-            // no es necesario hacer un FETCH asíncrono. El backend se encargará de redirigir.
-            // Pero debemos asegurarnos de que el botón se deshabilite inmediatamente.
-
-            // 3. Limpiar los datos después de que el submit continúe.
-            // Lo limpiaremos en el evento de carga de la página (por si falla el back)
-            // o si usamos AJAX (que no es tu caso). En tu caso, el back redirige,
-            // y el estado se restablecerá al recargar. Aquí solo nos enfocamos en el loading.
-
-            // El formulario se envía ahora...
-
-        });
-
-        // CRÍTICO PARA EL REENVÍO: Si el backend falla, el campo audio-data-input queda lleno.
-        // Aunque el backend hace un redirect, si el usuario vuelve a la página, debemos limpiarlo
-        // para evitar que se envíe el mismo audio con el nuevo mensaje de texto.
-        window.addEventListener('pageshow', function (event) {
-            // Al regresar a la página (por redirect, back/forward), restablecer el estado.
-            resetFormState();
-            // También limpiar el input de archivo si es necesario:
-            fileInput.value = '';
-        });
-    } 
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 5000);
+        }
+    });
+}
 </script>
 {% endblock %}       
