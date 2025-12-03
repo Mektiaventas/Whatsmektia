@@ -310,7 +310,16 @@
                    class="input" min="1" value="{{ lead_config.get('dias_a_caliente', 7) }}"
                    placeholder="Ej: 7" required>
             {% endif %}
-
+            <div style="margin-top: 15px;">
+                <label for="{{ lead_key }}_criterio_ia">Criterio para Clasificar a Caliente (por IA):</label>
+                <textarea id="{{ lead_key }}_criterio_ia" name="{{ lead_key }}_criterio_ia"
+                          class="longitud_desc" rows="3"
+                          placeholder="Ej: El cliente preguntó por los 'servicios de consultoría financiera' o 'planes premium'."
+                          style="width: 100%;">{{ lead_config.get('criterio_ia', '') }}</textarea>
+                <small style="display: block; margin-top: 5px; color: #666;">
+                    Define la condición que la IA debe verificar en el chat.
+                </small>
+            </div>
             <div style="margin-top: 15px; display: flex; align-items: center;">
                 <label for="{{ lead_key }}_usar_ia" style="flex: 1; margin-right: 10px;">Usar **IA** para clasificación:</label>
                 {# Un campo hidden para asegurar que el valor 'off' se envía si el checkbox no está marcado #}
