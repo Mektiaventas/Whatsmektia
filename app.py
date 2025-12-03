@@ -11017,6 +11017,7 @@ def toggle_ai(numero, config=None):
         app.logger.error(f"Error al cambiar estado IA: {e}")
 
     return redirect(url_for('ver_chat', numero=numero))
+
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
     """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
