@@ -644,7 +644,7 @@
 
 <button class="mobile-chat-toggle" onclick="toggleChatList()">💬</button>
 
-<style> 
+<style>
     :root {
         --left-width: 340px;
         --right-width: 320px;
@@ -1297,11 +1297,11 @@ function normalizeText(s) {
 function escapeHtml(unsafe) {
     if (unsafe === null || unsafe === undefined) return '';
     return String(unsafe)
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 }
 
 function truncate(str, n) {
@@ -1309,44 +1309,28 @@ function truncate(str, n) {
     return str.length > n ? str.substring(0, n) + '...' : str;
 }
 
-    // chats.html (Línea ~334)
-    function formatClientTime(serverTs) {
-        // Asumimos que serverTs ya está en UTC o es un timestamp numérico válido
-        let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
-        if (isNaN(d.getTime())) d = new Date();
+function formatClientTime(serverTs) {
+    let d = typeof serverTs === 'number' ? new Date(serverTs) : new Date(Number(serverTs) || serverTs);
+    if (isNaN(d.getTime())) d = new Date();
 
-        // Formato IDÉNTICO al Kanban: día-mes hora:minuto
-        const day = d.getDate();
+    const day = d.getDate();
+    const month = d.toLocaleString('es-MX', { month: 'short' }).toLowerCase().replace('.', '').trim();
+    const time = d.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit', hour12: false });
 
-        // 🚨 CORRECCIÓN CLAVE: Eliminar la zona horaria y usar el TZ del cliente/servidor.
-        // Asumimos que el objeto 'd' ya fue creado a partir de un timestamp de México
-        // o que el navegador lo ajusta correctamente a la hora local del cliente.
-        const month = d.toLocaleString('es-MX', {
-            month: 'short',
-            // ELIMINADO: timeZone: 'America/Mexico_City'
-        }).toLowerCase().replace('.', '').trim();
+    return `${day}-${month}   ${time}`;
+}
 
-        const time = d.toLocaleTimeString('es-MX', {
-            // ELIMINADO: timeZone: 'America/Mexico_City',
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false
-        });
-
-        // Formato exacto igual a Kanban: "d-mes   hh:mm"
-        return `${day}-${month}   ${time}`;
+function getCountryFlag(numero) {
+    if (!numero) return null;
+    const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
+    const numStr = numero.toString().replace('+', '');
+    for (let i = 3; i > 0; i--) {
+        const pref = numStr.substring(0, i);
+        if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
     }
-    // Función para obtener bandera (igual que en kanban)
-    function getCountryFlag(numero) {
-        if (!numero) return null;
-        const prefijos = { '52': 'mx', '1': 'us', '54': 'ar', '57': 'co', '55': 'br', '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec' };
-        const numStr = numero.toString().replace('+', '');
-        for (let i = 3; i > 0; i--) {
-            const pref = numStr.substring(0, i);
-            if (prefijos[pref]) return `https://flagcdn.com/24x18/${prefijos[pref]}.png`;
-        }
-        return null;
-    }
+    return null;
+}
+
 /* State */
 let chatAutoRefresh = true;
 let refreshIntervalMs = 5000;
@@ -1354,17 +1338,14 @@ let messagePollIntervalMs = 5000;
 let selectedChatId = {% if selected %}{{ selected|tojson }}{% else %}null{% endif %};
 let lastChatsTimestamp = 0;
 let lastMessageTimestamp = {% if mensajes and mensajes[-1].timestamp %}{{ (mensajes[-1].timestamp.timestamp() * 1000) }}{% else %}0{% endif %};
-let lastMessageIdForSelected = 0; // <- AÑADE ESTA LÍNEA
+let lastMessageIdForSelected = 0;
 let isEditingAlias = false;
 let aliasTimers = new Map();
 let chatsIntervalHandle = null;
 let messagesIntervalHandle = null;
-
-/* Deduplication set (initialized from DOM on poll init) */
 let seenMessageKeys = new Set();
 
-/* ===================== CHAT-LIST ===================== */
-
+/* ===================== CHAT-LIST FUNCTIONS ===================== */
 function actualizarListaChats() {
     if (!chatAutoRefresh) return;
     fetch('/chats/data', { cache: 'no-store' })
@@ -1381,111 +1362,75 @@ function actualizarListaChats() {
 
 const IS_ADMIN = {{ 'true' if is_admin else 'false' }};
 
-    function crearNuevoChatHTML(chat) {
-        const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
-        const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+function crearNuevoChatHTML(chat) {
+    const num = String(coalesce(chat.numero, chat.number, chat.id || ''));
+    const nombre = escapeHtml(coalesce(chat.nombre_mostrado, chat.alias, chat.nombre, num));
+    const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
+    const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
+    let imagen = '/static/icons/whatsapp-icon.png';
+    if (isTelegram) {
+        imagen = '/static/icons/telegram-icon-dos.png';
+    }
 
-        // DETERMINAR PLATAFORMA SIEMPRE - no solo cuando hay chat seleccionado
-        const isTelegram = num.startsWith('tg_') || (chat.canal === 'Telegram');
-        const platformClass = isTelegram ? 'is-telegram' : 'is-whatsapp';
+    const banderaUrl = getCountryFlag(num) || '';
+    const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
+    const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
+    const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
+    const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
+    const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
 
-        let imagen = '/static/icons/whatsapp-icon.png';
-        if (isTelegram) {
-            imagen = '/static/icons/telegram-icon-dos.png';
-        }
-
-        const banderaUrl = getCountryFlag(num) || '';
-        const ultima = coalesce(chat.ultima_fecha, chat.last_activity, '');
-        const sin_leer = Number(coalesce(chat.sin_leer, chat.unread, 0));
-        const ultimo = escapeHtml(coalesce(chat.ultimo_mensaje, chat.last_message, ''));
-        const preview = chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (ultimo ? truncate(ultimo, 35) : '&nbsp;');
-        const selectedClass = (selectedChatId && String(selectedChatId) === String(num)) ? 'selected' : '';
-
-        return `
-    <a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
-        <div class="card-content">
-            <!-- Fila 1: Avatar, bandera, nombre - IDÉNTICO A KANBAN -->
-            <div class="card-title-row">
-                <div class="card-avatar-section">
-                    <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
-                    ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
-                </div>
-                <div class="card-name-section">
-                    <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
-                </div>
+    return `
+<a href="/chats/${num}" class="chat-item kanban-card ${selectedClass}" data-chat-num="${num}" style="text-decoration:none;color:inherit;display:block;">
+    <div class="card-content">
+        <div class="card-title-row">
+            <div class="card-avatar-section">
+                <img src="${imagen}" class="card-avatar" alt="Avatar" onerror="this.onerror=null;this.src='/static/icons/default-avatar.png';">
+                ${banderaUrl ? `<img src="${banderaUrl}" class="card-flag" alt="País" title="País">` : ''}
             </div>
-
-            <!-- Fila 2: Mensaje y fecha - IDÉNTICO A KANBAN -->
-            <div class="card-bottom-row">
-                <div class="card-msg">${preview}</div>
-                <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
+            <div class="card-name-section">
+                <span class="alias-view ${platformClass}" data-num="${num}">${nombre}</span>
             </div>
-
-            <!-- Indicador de mensajes no leídos -->
-            ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
         </div>
-    </a>`.trim();
-    }
-    function actualizarIncrementalChats(chats) {
-        const container = document.querySelector('.chat-items');
-        if (!container) return;
-        const existing = new Map();
-        container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
+        <div class="card-bottom-row">
+            <div class="card-msg">${preview}</div>
+            <div class="card-time">${ultima ? formatClientTime(ultima) : ''}</div>
+        </div>
+        ${sin_leer > 0 ? `<span class="card-unread">${sin_leer}</span>` : ''}
+    </div>
+</a>`.trim();
+}
 
-        // PREVENIR PARPADEO: mantener visibilidad durante actualización
-        container.style.opacity = '0.99';
+function actualizarIncrementalChats(chats) {
+    const container = document.querySelector('.chat-items');
+    if (!container) return;
+    const existing = new Map();
+    container.querySelectorAll('.chat-item').forEach(node => existing.set(node.dataset.chatNum, node));
 
-        for (let i = chats.length - 1; i >= 0; i--) {
-            const chat = chats[i];
-            const num = chat.numero;
-            const node = existing.get(num);
-            if (node) {
-                actualizarChatExistente(node, chat);
-                existing.delete(num);
-                if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
-                    container.insertBefore(node, container.firstElementChild);
-                }
-            } else {
-                const tmp = document.createElement('div');
-                const hasBuilder = typeof crearNuevoChatHTML === 'function';
-                tmp.innerHTML = hasBuilder
-                    ? crearNuevoChatHTML(chat)
-                    : `
-            <a href="/chats/${chat.numero}" class="chat-item" data-chat-num="${chat.numero}">
-                <div class="card-content">
-                    <div class="card-title-row">
-                        <div class="card-avatar-section">
-                            <img src="${chat.imagen_url || '/static/icons/default-avatar.png'}" class="card-avatar" alt="Avatar">
-                        </div>
-                        <span class="alias-view">${chat.nombre_mostrado || chat.numero}</span>
-                    </div>
-                    <div class="card-meta-row">
-                        <span class="card-time">${formatClientTime(chat.ultima_fecha)}</span>
-                    </div>
-                    <div class="card-msg">${chat.tipo_mensaje === 'imagen' ? '📷 Imagen' : (chat.ultimo_mensaje ? truncate(chat.ultimo_mensaje, 35) : 'Sin mensajes')}</div>
-                </div>
-            </a>`;
-                const el = tmp.firstElementChild;
-                if (!el) continue;
-                container.insertBefore(el, container.firstElementChild);
-                el.classList.add('new-message');
-                setTimeout(() => el.classList.remove('new-message'), 1400);
+    container.style.opacity = '0.99';
+
+    for (let i = chats.length - 1; i >= 0; i--) {
+        const chat = chats[i];
+        const num = chat.numero;
+        const node = existing.get(num);
+        if (node) {
+            actualizarChatExistente(node, chat);
+            existing.delete(num);
+            if (container.firstElementChild && container.firstElementChild.dataset.chatNum !== num) {
+                container.insertBefore(node, container.firstElementChild);
             }
+        } else {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = crearNuevoChatHTML(chat);
+            const el = tmp.firstElementChild;
+            if (!el) continue;
+            container.insertBefore(el, container.firstElementChild);
+            el.classList.add('new-message');
+            setTimeout(() => el.classList.remove('new-message'), 1400);
         }
-
-        existing.forEach((node) => node.remove());
-
-        // Restaurar opacidad
-        setTimeout(() => {
-            container.style.opacity = '1';
-        }, 100);
     }
 
-try {
-    const msgsEl = document.getElementById('msgs');
-    if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
-} catch (e) {
-    console.warn('Initial scroll to bottom failed:', e);
+    existing.forEach((node) => node.remove());
+    setTimeout(() => { container.style.opacity = '1'; }, 100);
 }
 
 function actualizarChatExistente(elemento, chat) {
@@ -1494,35 +1439,20 @@ function actualizarChatExistente(elemento, chat) {
     const aliasView = elemento.querySelector('.alias-view');
     if (aliasView && aliasView.textContent.trim() !== nombre) aliasView.textContent = nombre;
 
-    // === MANTENER LOS ICONOS CORRECTOS ===
     const avatarImg = elemento.querySelector('.card-avatar');
     if (avatarImg) {
-        // Determinar el icono correcto basado en el número/canal
         let nuevoAvatarSrc = '/static/icons/whatsapp-icon.png';
         if (chat.numero && (chat.numero.startsWith('tg_') || chat.canal === 'Telegram')) {
             nuevoAvatarSrc = '/static/icons/telegram-icon-dos.png';
         }
-
-        // Solo actualizar si es diferente
         if (avatarImg.getAttribute('src') !== nuevoAvatarSrc && !avatarImg.src.includes(nuevoAvatarSrc)) {
             avatarImg.setAttribute('src', nuevoAvatarSrc);
         }
     }
-    // === FIN MANTENER ICONOS ===
-
-
 
     const timeEl = elemento.querySelector('.card-time');
     if (timeEl) {
         timeEl.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
-    } else {
-        const titleRow = elemento.querySelector('.card-title-row');
-        if (titleRow) {
-            const span = document.createElement('span');
-            span.className = 'card-time';
-            span.textContent = chat.ultima_fecha ? formatClientTime(chat.ultima_fecha) : '';
-            titleRow.appendChild(span);
-        }
     }
 
     const bandera = getCountryFlag(chat.numero) || '';
@@ -1549,15 +1479,6 @@ function actualizarChatExistente(elemento, chat) {
     const unreadEl = elemento.querySelector('.card-unread');
     if (sin_leer > 0) {
         if (unreadEl) unreadEl.textContent = sin_leer;
-        else {
-            const metaRow = elemento.querySelector('.card-meta-row');
-            if (metaRow) {
-                const span = document.createElement('span');
-                span.className = 'card-unread';
-                span.textContent = sin_leer;
-                metaRow.appendChild(span);
-            }
-        }
     } else if (unreadEl) {
         unreadEl.remove();
     }
@@ -1574,8 +1495,7 @@ function actualizarChatExistente(elemento, chat) {
     else elemento.classList.remove('selected');
 }
 
-/* ===================== MESSAGES POLLING & DEDUPE ===================== */
-
+/* ===================== MESSAGES FUNCTIONS ===================== */
 function buildMessageKeyFor(m) {
     const id = coalesce(m.id, m[0], m['id']);
     if (id !== undefined && id !== null && String(id).trim() !== '' && Number(id) !== 0) {
@@ -1594,7 +1514,6 @@ function buildMessageKeyFor(m) {
 
 function pollSelectedMessages() {
     const after = Number(lastMessageTimestamp) || (Date.now() - 60000);
-
     fetch(`/chat/${encodeURIComponent(selectedChatId)}/messages?after_ts=${after}`, { cache: 'no-store' })
         .then(r => r.json())
         .then(data => {
@@ -1602,7 +1521,6 @@ function pollSelectedMessages() {
             if (data.messages.length === 0) return;
 
             let maxTs = lastMessageTimestamp;
-
             data.messages.forEach(m => {
                 let ts = 0;
                 if (m.timestamp) {
@@ -1622,348 +1540,109 @@ function pollSelectedMessages() {
         })
         .catch(err => console.error('Error polling messages:', err));
 }
-    /* ===================== CHAT SEARCH FUNCTIONALITY ===================== */
 
-    function setupChatSearch() {
-        const searchInput = document.getElementById('search-chats-input');
-        const chatItems = document.querySelectorAll('.chat-item');
+function appendAIResponsesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    let appended = false;
 
-        if (!searchInput) {
-            console.warn('Search input not found');
-            return;
-        }
+    for (const m of messages) {
+        let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
+        aiText = aiText.replace(/^[\s\n\r\t]+/, '');
+        aiText = aiText.replace(/\n\s*\n/g, '\n\n');
+        aiText = aiText.trim();
 
-        searchInput.addEventListener('input', function (e) {
-            const searchTerm = normalizeText(e.target.value);
+        if (!aiText) continue;
 
-            chatItems.forEach(chatItem => {
-                const aliasElement = chatItem.querySelector('.alias-view');
-                const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
-
-                if (!aliasElement) return;
-
-                const chatName = normalizeText(aliasElement.textContent);
-                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
-
-                const matchesSearch = chatName.includes(searchTerm) ||
-                    chatNumber.includes(searchTerm) ||
-                    (searchTerm === ''); // Mostrar todos si está vacío
-
-                chatItem.style.display = matchesSearch ? 'block' : 'none';
-            });
-        });
-
-        // También buscar en chats cargados dinámicamente
-        const observer = new MutationObserver(function (mutations) {
-            mutations.forEach(function (mutation) {
-                if (mutation.addedNodes.length) {
-                    // Si se añaden nuevos chats, reaplicar el filtro actual
-                    const currentSearch = normalizeText(searchInput.value);
-                    if (currentSearch) {
-                        searchInput.dispatchEvent(new Event('input'));
-                    }
-                }
-            });
-        });
-
-        const chatContainer = document.querySelector('.chat-items');
-        if (chatContainer) {
-            observer.observe(chatContainer, { childList: true, subtree: true });
-        }
-
-        console.debug('Chat search functionality initialized');
-    }
-    function appendAIResponsesToPanel(messages) {
-        const container = document.getElementById('msgs');
-        if (!container) return;
-        let appended = false;
-
-        for (const m of messages) {
-            let aiText = String(coalesce(m.respuesta, m['respuesta'], ''));
-
-            // ELIMINACIÓN MÁS AGRESIVA DE ESPACIOS
-            aiText = aiText.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios iniciales
-            aiText = aiText.replace(/\n\s*\n/g, '\n\n'); // Normaliza saltos múltiples
-            aiText = aiText.trim(); // Trim general
-
-            if (!aiText) continue;
-
-            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            let key;
-            if (id) {
-                key = 'ai:id:' + id;
-                if (seenMessageKeys.has(key)) continue;
-            } else {
-                let ts = Number(coalesce(m.ts_ms, 0));
-                if (!ts && m.timestamp) {
-                    const parsed = Date.parse(m.timestamp);
-                    ts = isNaN(parsed) ? Date.now() : parsed;
-                }
-                const rounded = Math.floor(Number(ts || Date.now()) / 1000);
-                key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
-                if (seenMessageKeys.has(key)) continue;
-            }
-
-            const div = document.createElement('div');
-            div.className = 'msg-box msg-ai';
-            if (id) div.setAttribute('data-msg-id', String(id));
-            const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
-            const fechaFormateada = formatClientTime(tsVal);
-
-            // Aplicar clase especial para evitar espacios
-            div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
-
-            container.appendChild(div);
-            appended = true;
-
-            seenMessageKeys.add(key);
-            if (id) seenMessageKeys.add('id:' + id);
-        }
-
-        if (appended) {
-            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-            if (wasAtBottom) container.scrollTop = container.scrollHeight;
-        }
-    }
-    function appendUserMessagesToPanel(messages) {
-        const container = document.getElementById('msgs');
-        if (!container) return;
-        let appended = false;
-
-        for (const m of messages) {
-            const key = buildMessageKeyFor(m);
-            if (!key) continue;
-            if (seenMessageKeys.has(key)) {
-                const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-                if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
-                continue;
-            }
-
-            const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
-            let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
-            // SOLO eliminar espacios iniciales, mantener trim() para el resto
-            content = content.replace(/^\s+/, '').trim();
-            const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
-
-            // === AÑADE ESTAS 2 LÍNEAS JUSTO AQUÍ ===
-            content = content.replace(/^[\s\n\r\t]+/, ''); // Elimina TODOS los espacios/tabs/saltos
-            content = content.trimStart();
-            // === FIN DE LAS LÍNEAS NUEVAS ===
-
-            if (!content || (respuesta && respuesta.trim().length > 0)) {
-                if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
-                seenMessageKeys.add(key);
-                continue;
-            }
-
-            let ts = coalesce(m.ts_ms, 0);
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        let key;
+        if (id) {
+            key = 'ai:id:' + id;
+            if (seenMessageKeys.has(key)) continue;
+        } else {
+            let ts = Number(coalesce(m.ts_ms, 0));
             if (!ts && m.timestamp) {
                 const parsed = Date.parse(m.timestamp);
                 ts = isNaN(parsed) ? Date.now() : parsed;
             }
-            ts = Number(ts) || Date.now();
+            const rounded = Math.floor(Number(ts || Date.now()) / 1000);
+            key = 'ai:text:' + normalizeText(aiText) + '|ts:' + rounded;
+            if (seenMessageKeys.has(key)) continue;
+        }
 
-            const div = document.createElement('div');
-            div.className = 'msg-box msg-user';
-            if (id) div.setAttribute('data-msg-id', String(id));
-            if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
-            const fechaFormateada = formatClientTime(ts);
-            div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-ai';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        const tsVal = Number(coalesce(m.ts_ms, 0)) || (m.timestamp ? Date.parse(m.timestamp) : Date.now());
+        const fechaFormateada = formatClientTime(tsVal);
+        div.innerHTML = `<div class="message-content"><div class="text-message no-initial-space">${escapeHtml(aiText)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
-            container.appendChild(div);
-            appended = true;
+        container.appendChild(div);
+        appended = true;
+        seenMessageKeys.add(key);
+        if (id) seenMessageKeys.add('id:' + id);
+    }
+
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
+    }
+}
+
+function appendUserMessagesToPanel(messages) {
+    const container = document.getElementById('msgs');
+    if (!container) return;
+    let appended = false;
+
+    for (const m of messages) {
+        const key = buildMessageKeyFor(m);
+        if (!key) continue;
+        if (seenMessageKeys.has(key)) {
+            const numericId = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+            if (numericId) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, numericId);
+            continue;
+        }
+
+        const id = Number(coalesce(m.id, m[0], m['id'], 0)) || 0;
+        let content = String(coalesce(m.content, m['content'], m.mensaje, m['mensaje'], ''));
+        content = content.replace(/^\s+/, '').trim();
+        const respuesta = String(coalesce(m.respuesta, m['respuesta'], '')) || '';
+        content = content.replace(/^[\s\n\r\t]+/, '');
+        content = content.trimStart();
+
+        if (!content || (respuesta && respuesta.trim().length > 0)) {
             if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
             seenMessageKeys.add(key);
+            continue;
         }
 
-        if (appended) {
-            const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
-            if (wasAtBottom) container.scrollTop = container.scrollHeight;
+        let ts = coalesce(m.ts_ms, 0);
+        if (!ts && m.timestamp) {
+            const parsed = Date.parse(m.timestamp);
+            ts = isNaN(parsed) ? Date.now() : parsed;
         }
-    }
-/* ===================== ALIAS EDITING & EMOJI ===================== */
+        ts = Number(ts) || Date.now();
 
-    function enhanceAliasButtons() {
-        // SOLO aplicar a botones en el header del chat central, NO en la lista lateral
-        document.querySelectorAll('.chat-panel-header .edit-alias-btn, .chat-title .edit-alias-btn').forEach(btn => {
-            btn.removeEventListener('click', onEditAliasClick);
-            btn.addEventListener('click', onEditAliasClick);
-        });
+        const div = document.createElement('div');
+        div.className = 'msg-box msg-user';
+        if (id) div.setAttribute('data-msg-id', String(id));
+        if (m.ts_ms) div.dataset.tsMs = m.ts_ms;
+        const fechaFormateada = formatClientTime(ts);
+        div.innerHTML = `<div class="message-content"><div class="text-message">${escapeHtml(content)}</div></div><div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">${fechaFormateada}</div>`;
 
-        // ELIMINAR cualquier botón de edición en la lista lateral
-        document.querySelectorAll('.chat-list-v2 .edit-alias-btn, .chat-items .edit-alias-btn').forEach(btn => {
-            btn.remove();
-        });
-    }
-
-    function onEditAliasClick(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        const btn = e.currentTarget;
-
-        // Buscar el contenedor padre correcto - IMPORTANTE para el chat del centro
-        const parent = btn.closest('.card-title-row') ||
-            btn.closest('.chat-title') ||
-            btn.closest('.chat-content') ||
-            btn.closest('.card-content');
-
-        if (parent) {
-            activarEdicionAlias(parent);
-        }
+        container.appendChild(div);
+        appended = true;
+        if (id) lastMessageIdForSelected = Math.max(lastMessageIdForSelected, id);
+        seenMessageKeys.add(key);
     }
 
-    function activarEdicionAlias(parent) {
-        if (!parent) return;
-        const view = parent.querySelector('.alias-view');
-        const edit = parent.querySelector('.alias-edit');
-        if (!view || !edit) return;
-        const input = edit.querySelector('input[type=text]');
-        if (!input) return;
-
-        // Guardar el valor actual antes de editar
-        const valorOriginal = view.textContent;
-
-        view.style.display = 'none';
-        edit.style.display = 'flex';
-        input.focus();
-        input.select();
-        isEditingAlias = true;
-
-        const finish = () => {
-            const nuevo = (input.value || '').trim();
-            edit.style.display = 'none';
-            view.style.display = '';
-
-            if (!nuevo || nuevo === valorOriginal) {
-                view.textContent = valorOriginal;
-                isEditingAlias = false;
-                return;
-            }
-
-            view.textContent = nuevo;
-            fetch(`/contactos/${input.dataset.num}/alias`, {
-                method: 'POST',
-                body: new URLSearchParams({ alias: nuevo }),
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
-            })
-                .then(response => {
-                    if (!response.ok) throw new Error('Error en la respuesta');
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Alias guardado exitosamente');
-                })
-                .catch(err => console.warn('Error guardando alias:', err))
-                .finally(() => {
-                    isEditingAlias = false;
-                });
-        };
-
-        input.onblur = () => setTimeout(finish, 200);
-        input.onkeydown = (ev) => {
-            if (ev.key === 'Enter') {
-                ev.preventDefault();
-                finish();
-            }
-            if (ev.key === 'Escape') {
-                edit.style.display = 'none';
-                view.style.display = '';
-                view.textContent = valorOriginal;
-                isEditingAlias = false;
-            }
-        };
+    if (appended) {
+        const wasAtBottom = (container.scrollHeight - container.clientHeight) <= container.scrollTop + 60;
+        if (wasAtBottom) container.scrollTop = container.scrollHeight;
     }
+}
 
-    /* ===================== EMOJI PICKER COMPLETO ===================== */
-
-    function setupEmojiPicker() {
-        const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
-
-        // Contenedores del DOM
-        const picker = document.getElementById('emoji-picker-list');
-        const trigger = document.getElementById('emoji-pick-btn');
-        const input = document.getElementById('mensaje-texto');
-
-        if (!picker || !trigger || !input) {
-            console.warn('Faltan elementos DOM para el emoji picker (picker, trigger o input)');
-            return;
-        }
-
-        function buildPicker(container) {
-            if (container.dataset.built === '1') return;
-            container.innerHTML = EMOJIS.map(e =>
-                // Usamos clases CSS correctas
-                `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`
-            ).join('');
-            container.dataset.built = '1';
-        }
-
-        // 1. Construir el selector
-        buildPicker(picker);
-
-        // 2. Manejar clic en el botón de activación (trigger)
-        trigger.addEventListener('click', function (ev) {
-            ev.preventDefault();
-            ev.stopPropagation();
-            const isVisible = picker.style.display === 'block';
-
-            if (isVisible) {
-                picker.style.display = 'none';
-            } else {
-                // Posicionar el selector justo encima del botón de entrada
-                const formGroup = trigger.closest('.input-group');
-                if (formGroup) {
-                    // Mueve el selector dentro del input-group (si es necesario)
-                    formGroup.appendChild(picker);
-                    const triggerRect = trigger.getBoundingClientRect();
-                    const formRect = formGroup.getBoundingClientRect();
-
-                    // Intentar posicionar encima del input-group
-                    picker.style.bottom = `${formRect.height + 8}px`;
-                    picker.style.left = '0px';
-
-                    picker.style.display = 'block';
-                }
-            }
-        });
-
-        // 3. Manejar clic en una opción de emoji
-        picker.addEventListener('click', function (ev) {
-            const emojiBtn = ev.target.closest('.emoji-option');
-            if (emojiBtn) {
-                ev.preventDefault();
-                ev.stopPropagation();
-                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
-
-                // Insertar el emoji en la posición del cursor
-                const start = input.selectionStart || input.value.length;
-                const end = input.selectionEnd || input.value.length;
-                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-
-                // Mover el cursor después del emoji insertado
-                const pos = start + emoji.length;
-                input.selectionStart = input.selectionEnd = pos;
-
-                input.focus();
-                picker.style.display = 'none'; // Ocultar después de seleccionar
-            }
-        });
-
-        // 4. Ocultar si se hace clic fuera del selector o del botón
-        document.addEventListener('click', function (ev) {
-            const isInsidePicker = picker.contains(ev.target);
-            const isTrigger = trigger.contains(ev.target);
-
-            if (!isInsidePicker && !isTrigger) {
-                picker.style.display = 'none';
-            }
-        });
-
-        console.debug('setupEmojiPicker initialized');
-    }
-
-/* ===================== AUDIO & UI HELPERS ===================== */
-
+/* ===================== UI HELPERS ===================== */
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
 }
@@ -2004,599 +1683,535 @@ function seekAudio(id, progressBar, evt) {
     }
 }
 
-// Función normalizadora mejorada (insensible a tildes)
-function normalizeText(s) {
-    if (!s) return '';
-    return String(s)
-        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
-        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-}
+/* ===================== FILE UPLOAD ===================== */
+function setupFileUpload() {
+    const fileInput = document.getElementById('file-input');
+    const fileAttachBtn = document.getElementById('file-attach-btn');
+    const filePreview = document.getElementById('file-preview');
+    const fileName = document.getElementById('file-name');
+    const fileSize = document.getElementById('file-size');
+    const fileIcon = document.getElementById('file-icon');
+    const removeFileBtn = document.getElementById('remove-file');
+    const messageForm = document.getElementById('messageForm');
+    const textarea = document.getElementById('mensaje-texto');
 
-    /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
-
-    function setupFileUpload() {
-        const fileInput = document.getElementById('file-input');
-        const fileAttachBtn = document.getElementById('file-attach-btn');
-        const filePreview = document.getElementById('file-preview');
-        const fileName = document.getElementById('file-name');
-        const fileSize = document.getElementById('file-size');
-        const fileIcon = document.getElementById('file-icon');
-        const removeFileBtn = document.getElementById('remove-file');
-        const messageForm = document.getElementById('messageForm');
-        const textarea = document.getElementById('mensaje-texto');
-
-        if (!fileInput || !fileAttachBtn) {
-            console.warn('File upload elements not found');
-            return;
-        }
-
-        // Abrir selector de archivos al hacer clic en el botón
-        fileAttachBtn.addEventListener('click', function () {
-            fileInput.click();
-        });
-
-        // Manejar selección de archivo
-        fileInput.addEventListener('change', function (e) {
-            const file = e.target.files[0];
-            if (file) {
-                // Validar tamaño máximo (50MB)
-                const maxSize = 50 * 1024 * 1024; // 50MB
-                if (file.size > maxSize) {
-                    alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
-                    clearFileSelection();
-                    return;
-                }
-
-                // Validar tipo de archivo
-                const allowedTypes = [
-                    'application/pdf',
-                    'application/vnd.ms-excel',
-                    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    'application/msword',
-                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-                    'text/plain',
-                    'image/jpeg',
-                    'image/jpg',
-                    'image/png',
-                    'image/gif',
-                    'video/mp4',
-                    'video/quicktime',
-                    'video/webm',
-                    'video/x-msvideo',
-                    'video/x-matroska',
-                    'audio/mpeg',
-                    'audio/wav',
-                    'application/zip',
-                    'application/x-rar-compressed'
-                ];
-
-                if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
-                    alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
-                    clearFileSelection();
-                    return;
-                }
-
-                showFilePreview(file);
-            }
-        });
-
-        // Eliminar archivo seleccionado
-        removeFileBtn.addEventListener('click', function () {
-            clearFileSelection();
-        });
-
-        function showFilePreview(file) {
-            const fileType = getFileType(file.name);
-            const icon = getFileIcon(fileType);
-
-            fileIcon.textContent = icon;
-            fileName.textContent = file.name;
-            fileSize.textContent = formatFileSize(file.size);
-            filePreview.style.display = 'block';
-
-            // Cambiar placeholder del textarea para indicar que se puede agregar un mensaje
-            textarea.placeholder = "Añade un mensaje (opcional)...";
-
-            // Hacer scroll para mostrar la previsualización
-            filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-        }
-
-        function clearFileSelection() {
-            fileInput.value = '';
-            filePreview.style.display = 'none';
-            fileName.textContent = '';
-            fileSize.textContent = '';
-            fileIcon.textContent = '';
-            textarea.placeholder = "Escribe un mensaje manual...";
-        }
-
-        function getFileType(filename) {
-            const ext = filename.split('.').pop().toLowerCase();
-
-            // Imágenes
-            if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext))
-                return 'image';
-
-            // Videos
-            if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext))
-                return 'video';
-
-            // Audio
-            if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext))
-                return 'audio';
-
-            // Documentos
-            if (['pdf'].includes(ext))
-                return 'pdf';
-
-            // Word
-            if (['doc', 'docx'].includes(ext))
-                return 'word';
-
-            // Excel
-            if (['xls', 'xlsx', 'csv'].includes(ext))
-                return 'excel';
-
-            // PowerPoint
-            if (['ppt', 'pptx'].includes(ext))
-                return 'powerpoint';
-
-            // Archivos comprimidos
-            if (['zip', 'rar', '7z'].includes(ext))
-                return 'zip';
-
-            // Texto
-            if (['txt', 'rtf'].includes(ext))
-                return 'text';
-
-            return 'other';
-        }
-
-        function getFileIcon(fileType) {
-            const icons = {
-                'image': '🖼️',
-                'video': '🎬',
-                'audio': '🎵',
-                'pdf': '📕',
-                'word': '📘',
-                'excel': '📗',
-                'powerpoint': '📙',
-                'zip': '📦',
-                'text': '📄',
-                'other': '📎'
-            };
-            return icons[fileType] || '📎';
-        }
-
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        // Validar antes de enviar
-        messageForm.addEventListener('submit', function (e) {
-            const hasText = textarea.value.trim() !== '';
-            const hasFile = fileInput.files.length > 0;
-
-            // SOLO validar si no hay absolutamente nada
-            if (!hasText && !hasFile) {
-                e.preventDefault();
-                alert('Por favor escribe un mensaje o selecciona un archivo');
-                return false;
-            }
-
-            // Mostrar indicador de envío
-            const sendBtn = document.querySelector('.send-btn');
-            const originalText = sendBtn.innerHTML;
-            sendBtn.innerHTML = '⏳';
-            sendBtn.disabled = true;
-
-            // Restaurar después de 3 segundos por si hay error
-            setTimeout(() => {
-                sendBtn.innerHTML = originalText;
-                sendBtn.disabled = false;
-            }, 3000);
-        });
-
-        console.debug('File upload functionality initialized - WhatsApp style');
+    if (!fileInput || !fileAttachBtn) {
+        console.warn('File upload elements not found');
+        return;
     }
 
-    /* ===================== AUDIO RECORDER FUNCTIONALITY ===================== */
-    // REEMPLAZA la función de setupAudioRecorder() completa:
+    fileAttachBtn.addEventListener('click', function () {
+        console.log('📎 Click en botón adjuntar archivo');
+        fileInput.click();
+    });
 
-    function setupAudioRecorder() {
-        const recordBtn = document.getElementById('record-audio-btn');
-        const startRecordBtn = document.getElementById('start-record-btn');
-        const audioRecorderContainer = document.getElementById('audio-recorder-container');
-        const recordingTimer = document.getElementById('recording-timer');
-        const recordingLevel = document.getElementById('recording-level');
-        const deleteAudioBtn = document.getElementById('delete-audio-btn');
-        const sendAudioBtn = document.getElementById('send-audio-btn');
-        const audioPlaybackControls = document.getElementById('audio-playback-controls');
-        const playRecordedBtn = document.getElementById('play-recorded-btn');
-        const recordedAudioPreview = document.getElementById('recorded-audio-preview');
-        const audioDuration = document.getElementById('audio-duration');
-        const audioProgress = document.getElementById('audio-progress');
-        const audioWaveform = document.getElementById('audio-waveform');
-        const audioDataInput = document.getElementById('audio-data-input');
-        const messageForm = document.getElementById('messageForm');
-        const textarea = document.getElementById('mensaje-texto');
+    fileInput.addEventListener('change', function (e) {
+        const file = e.target.files[0];
+        if (file) {
+            const maxSize = 50 * 1024 * 1024;
+            if (file.size > maxSize) {
+                alert('El archivo es demasiado grande. Tamaño máximo: 50MB');
+                clearFileSelection();
+                return;
+            }
 
-        if (!recordBtn || !audioRecorderContainer) {
-            console.warn('Audio recorder elements not found');
+            const allowedTypes = [
+                'application/pdf',
+                'application/vnd.ms-excel',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/msword',
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                'text/plain',
+                'image/jpeg',
+                'image/jpg',
+                'image/png',
+                'image/gif',
+                'video/mp4',
+                'video/quicktime',
+                'video/webm',
+                'video/x-msvideo',
+                'video/x-matroska',
+                'audio/mpeg',
+                'audio/wav',
+                'application/zip',
+                'application/x-rar-compressed'
+            ];
+
+            if (!allowedTypes.includes(file.type) && !file.type.startsWith('image/') && !file.type.startsWith('video/') && !file.type.startsWith('audio/')) {
+                alert('Tipo de archivo no permitido. Formatos aceptados: PDF, Excel, Word, imágenes, videos, audio, archivos comprimidos.');
+                clearFileSelection();
+                return;
+            }
+
+            showFilePreview(file);
+        }
+    });
+
+    removeFileBtn.addEventListener('click', function () {
+        clearFileSelection();
+    });
+
+    function showFilePreview(file) {
+        const fileType = getFileType(file.name);
+        const icon = getFileIcon(fileType);
+
+        fileIcon.textContent = icon;
+        fileName.textContent = file.name;
+        fileSize.textContent = formatFileSize(file.size);
+        filePreview.style.display = 'block';
+        textarea.placeholder = "Añade un mensaje (opcional)...";
+        filePreview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function clearFileSelection() {
+        fileInput.value = '';
+        filePreview.style.display = 'none';
+        fileName.textContent = '';
+        fileSize.textContent = '';
+        fileIcon.textContent = '';
+        textarea.placeholder = "Escribe un mensaje manual...";
+    }
+
+    function getFileType(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp'].includes(ext)) return 'image';
+        if (['mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg', 'mpg'].includes(ext)) return 'video';
+        if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext)) return 'audio';
+        if (['pdf'].includes(ext)) return 'pdf';
+        if (['doc', 'docx'].includes(ext)) return 'word';
+        if (['xls', 'xlsx', 'csv'].includes(ext)) return 'excel';
+        if (['ppt', 'pptx'].includes(ext)) return 'powerpoint';
+        if (['zip', 'rar', '7z'].includes(ext)) return 'zip';
+        if (['txt', 'rtf'].includes(ext)) return 'text';
+        return 'other';
+    }
+
+    function getFileIcon(fileType) {
+        const icons = {
+            'image': '🖼️',
+            'video': '🎬',
+            'audio': '🎵',
+            'pdf': '📕',
+            'word': '📘',
+            'excel': '📗',
+            'powerpoint': '📙',
+            'zip': '📦',
+            'text': '📄',
+            'other': '📎'
+        };
+        return icons[fileType] || '📎';
+    }
+
+    function formatFileSize(bytes) {
+        if (bytes === 0) return '0 Bytes';
+        const k = 1024;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    }
+
+    messageForm.addEventListener('submit', function (e) {
+        const hasText = textarea.value.trim() !== '';
+        const hasFile = fileInput.files.length > 0;
+        const hasAudio = document.getElementById('audio-data-input').value !== '';
+
+        if (!hasText && !hasFile && !hasAudio) {
+            e.preventDefault();
+            alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+            return false;
+        }
+
+        const sendBtn = document.querySelector('.send-btn');
+        const originalText = sendBtn.innerHTML;
+        sendBtn.innerHTML = '⏳';
+        sendBtn.disabled = true;
+
+        setTimeout(() => {
+            sendBtn.innerHTML = originalText;
+            sendBtn.disabled = false;
+        }, 3000);
+    });
+
+    console.debug('File upload functionality initialized');
+}
+
+/* ===================== EMOJI PICKER ===================== */
+function setupEmojiPicker() {
+    const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
+    const picker = document.getElementById('emoji-picker-list');
+    const trigger = document.getElementById('emoji-pick-btn');
+    const input = document.getElementById('mensaje-texto');
+
+    if (!picker || !trigger || !input) {
+        console.warn('Faltan elementos para el emoji picker');
+        return;
+    }
+
+    function buildPicker(container) {
+        if (container.dataset.built === '1') return;
+        container.innerHTML = EMOJIS.map(e => `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`).join('');
+        container.dataset.built = '1';
+    }
+
+    buildPicker(picker);
+
+    trigger.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const isVisible = picker.style.display === 'block';
+
+        if (isVisible) {
+            picker.style.display = 'none';
+        } else {
+            const formGroup = trigger.closest('.input-group');
+            if (formGroup) {
+                formGroup.appendChild(picker);
+                const triggerRect = trigger.getBoundingClientRect();
+                const formRect = formGroup.getBoundingClientRect();
+                picker.style.bottom = `${formRect.height + 8}px`;
+                picker.style.left = '0px';
+                picker.style.display = 'block';
+            }
+        }
+    });
+
+    picker.addEventListener('click', function (ev) {
+        const emojiBtn = ev.target.closest('.emoji-option');
+        if (emojiBtn) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+            const start = input.selectionStart || input.value.length;
+            const end = input.selectionEnd || input.value.length;
+            input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+            const pos = start + emoji.length;
+            input.selectionStart = input.selectionEnd = pos;
+            input.focus();
+            picker.style.display = 'none';
+        }
+    });
+
+    document.addEventListener('click', function (ev) {
+        const isInsidePicker = picker.contains(ev.target);
+        const isTrigger = trigger.contains(ev.target);
+
+        if (!isInsidePicker && !isTrigger) {
+            picker.style.display = 'none';
+        }
+    });
+
+    console.debug('Emoji picker initialized');
+}
+
+/* ===================== AUDIO RECORDER ===================== */
+function setupAudioRecorder() {
+    const recordBtn = document.getElementById('record-audio-btn');
+    const startRecordBtn = document.getElementById('start-record-btn');
+    const audioRecorderContainer = document.getElementById('audio-recorder-container');
+    const recordingTimer = document.getElementById('recording-timer');
+    const recordingLevel = document.getElementById('recording-level');
+    const deleteAudioBtn = document.getElementById('delete-audio-btn');
+    const sendAudioBtn = document.getElementById('send-audio-btn');
+    const audioPlaybackControls = document.getElementById('audio-playback-controls');
+    const playRecordedBtn = document.getElementById('play-recorded-btn');
+    const recordedAudioPreview = document.getElementById('recorded-audio-preview');
+    const audioDuration = document.getElementById('audio-duration');
+    const audioProgress = document.getElementById('audio-progress');
+    const audioWaveform = document.getElementById('audio-waveform');
+    const audioDataInput = document.getElementById('audio-data-input');
+    const messageForm = document.getElementById('messageForm');
+    const textarea = document.getElementById('mensaje-texto');
+
+    if (!recordBtn || !audioRecorderContainer) {
+        console.warn('Audio recorder elements not found');
+        return;
+    }
+
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let recordingInterval = null;
+    let recordingTime = 0;
+    let audioContext = null;
+    let analyser = null;
+    let dataArray = null;
+    let isRecording = false;
+    let currentAudioFormat = 'audio/webm';
+
+    recordBtn.addEventListener('click', function () {
+        console.log('🎤 Click en botón grabar audio');
+        if (audioRecorderContainer.style.display === 'none' || !audioRecorderContainer.style.display) {
+            audioRecorderContainer.style.display = 'block';
+            audioPlaybackControls.style.display = 'none';
+            resetRecorder();
+        } else {
+            audioRecorderContainer.style.display = 'none';
+        }
+    });
+
+    startRecordBtn.addEventListener('click', async function () {
+        if (!isRecording) {
+            await startRecording();
+        } else {
+            stopRecording();
+        }
+    });
+
+    deleteAudioBtn.addEventListener('click', function () {
+        resetRecorder();
+        audioRecorderContainer.style.display = 'none';
+    });
+
+    sendAudioBtn.addEventListener('click', function () {
+        if (audioChunks.length === 0) {
+            alert('No hay audio para enviar');
             return;
         }
 
-        let mediaRecorder = null;
-        let audioChunks = [];
-        let recordingInterval = null;
-        let recordingTime = 0;
-        let audioContext = null;
-        let analyser = null;
-        let dataArray = null;
-        let isRecording = false;
-        let currentAudioFormat = 'audio/webm'; // Formato por defecto
+        console.log('Preparando audio para enviar...');
+        const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
+        console.log('Tamaño del audio:', audioBlob.size, 'bytes');
 
-        // Mostrar/ocultar grabador
-        recordBtn.addEventListener('click', function () {
-            if (audioRecorderContainer.style.display === 'none' || !audioRecorderContainer.style.display) {
-                audioRecorderContainer.style.display = 'block';
-                audioPlaybackControls.style.display = 'none';
-                resetRecorder();
-            } else {
-                audioRecorderContainer.style.display = 'none';
-            }
-        });
-
-        // Iniciar grabación
-        startRecordBtn.addEventListener('click', async function () {
-            if (!isRecording) {
-                await startRecording();
-            } else {
-                stopRecording();
-            }
-        });
-
-        // Eliminar audio grabado
-        deleteAudioBtn.addEventListener('click', function () {
-            resetRecorder();
-            audioRecorderContainer.style.display = 'none';
-        });
-
-        // Enviar audio - CORREGIDO COMPLETAMENTE
-        sendAudioBtn.addEventListener('click', function () {
-            if (audioChunks.length === 0) {
-                alert('No hay audio para enviar');
-                return;
-            }
-
-            console.log('Preparando audio para enviar...');
-            console.log('Formato de audio detectado:', currentAudioFormat);
-
-            // Crear Blob del audio usando el formato real en el que se grabó
-            const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
-            console.log('Tamaño del audio:', audioBlob.size, 'bytes');
-
-            // Validar tamaño máximo (16MB para WhatsApp audio)
-            if (audioBlob.size > 16 * 1024 * 1024) {
-                alert('El audio es demasiado largo. Máximo 16MB.');
-                return;
-            }
-
-            // Validar tamaño mínimo (100 bytes)
-            if (audioBlob.size < 100) {
-                alert('El audio es demasiado corto');
-                return;
-            }
-
-            // Convertir a base64
-            const reader = new FileReader();
-            reader.onloadend = function () {
-                const base64Audio = reader.result;
-                console.log('Base64 obtenido, longitud:', base64Audio.length);
-                console.log('Prefijo del base64:', base64Audio.substring(0, 50));
-
-                if (!base64Audio || base64Audio.length < 100) {
-                    alert('Error: El audio está vacío o corrupto');
-                    return;
-                }
-
-                // IMPORTANTE: Guardar en el input oculto COMPLETO
-                if (audioDataInput) {
-                    audioDataInput.value = base64Audio;
-                    console.log('✅ Audio guardado en input oculto');
-                } else {
-                    console.error('❌ No se encontró el input oculto para audio');
-                    alert('Error interno: no se pudo preparar el audio');
-                    return;
-                }
-
-                // Cambiar indicador del botón de audio
-                sendAudioBtn.innerHTML = '⏳';
-                sendAudioBtn.disabled = true;
-                sendAudioBtn.title = 'Enviando...';
-
-                // También cambiar el botón principal de enviar
-                const mainSendBtn = document.querySelector('.send-btn');
-                if (mainSendBtn) {
-                    mainSendBtn.innerHTML = '🎤⏳';
-                    mainSendBtn.disabled = true;
-                }
-
-                // Ocultar el textarea si está vacío para evitar envío duplicado
-                if (textarea && !textarea.value.trim()) {
-                    textarea.style.display = 'none';
-                }
-
-                // IMPORTANTE: Limpiar el campo de archivo si existe
-                const fileInput = document.getElementById('file-input');
-                if (fileInput) {
-                    fileInput.value = '';
-                }
-
-                // Ocultar el preview de archivo si está visible
-                const filePreview = document.getElementById('file-preview');
-                if (filePreview) {
-                    filePreview.style.display = 'none';
-                }
-
-                // Enviar formulario después de 500ms para asegurar que el valor está establecido
-                setTimeout(() => {
-                    console.log('🚀 Enviando formulario con audio...');
-
-                    // Validar que el audio realmente está en el input
-                    if (!audioDataInput.value || audioDataInput.value.length < 100) {
-                        console.error('❌ El audio no se guardó correctamente en el input');
-                        alert('Error: El audio no se guardó correctamente');
-                        resetButtons();
-                        return;
-                    }
-
-                    // Asegurar que el formulario se envíe
-                    if (messageForm) {
-                        console.log('📤 Enviando formulario...');
-
-                        // Deshabilitar todos los botones para prevenir doble envío
-                        disableAllButtons();
-
-                        // Crear un pequeño delay para asegurar que todo está listo
-                        setTimeout(() => {
-                            if (messageForm.requestSubmit) {
-                                messageForm.requestSubmit();
-                            } else {
-                                messageForm.submit();
-                            }
-                        }, 200);
-                    } else {
-                        console.error('❌ No se encontró el formulario');
-                        alert('Error interno: no se encontró el formulario');
-                        resetButtons();
-                    }
-                }, 500);
-            };
-
-            reader.onerror = function (error) {
-                console.error('❌ Error convirtiendo audio a base64:', error);
-                alert('Error procesando el audio');
-                resetButtons();
-            };
-
-            reader.readAsDataURL(audioBlob);
-        });
-
-        // Reproducir audio grabado
-        playRecordedBtn.addEventListener('click', function () {
-            if (recordedAudioPreview.src) {
-                if (recordedAudioPreview.paused) {
-                    recordedAudioPreview.play();
-                    playRecordedBtn.textContent = '⏸️';
-                } else {
-                    recordedAudioPreview.pause();
-                    playRecordedBtn.textContent = '▶️';
-                }
-            }
-        });
-
-        // Control de progreso al hacer clic en la barra
-        if (audioWaveform) {
-            audioWaveform.addEventListener('click', function (e) {
-                const rect = audioWaveform.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const percentage = (clickX / rect.width) * 100;
-
-                if (recordedAudioPreview.duration) {
-                    recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
-                }
-            });
+        if (audioBlob.size > 16 * 1024 * 1024) {
+            alert('El audio es demasiado largo. Máximo 16MB.');
+            return;
         }
 
-        // Actualizar progreso durante reproducción
-        recordedAudioPreview.addEventListener('timeupdate', function () {
-            if (recordedAudioPreview.duration) {
-                const progress = (recordedAudioPreview.currentTime / recordedAudioPreview.duration) * 100;
-                if (audioProgress) {
-                    audioProgress.style.width = progress + '%';
-                }
+        if (audioBlob.size < 100) {
+            alert('El audio es demasiado corto');
+            return;
+        }
 
-                // Actualizar tiempo
-                const currentTime = formatTime(recordedAudioPreview.currentTime);
-                const totalTime = formatTime(recordedAudioPreview.duration);
-                if (audioDuration) {
-                    audioDuration.textContent = `${currentTime} / ${totalTime}`;
-                }
+        const reader = new FileReader();
+        reader.onloadend = function () {
+            const base64Audio = reader.result;
+            console.log('Base64 obtenido, longitud:', base64Audio.length);
+
+            if (!base64Audio || base64Audio.length < 100) {
+                alert('Error: El audio está vacío o corrupto');
+                return;
             }
-        });
 
-        // Cuando termina la reproducción
-        recordedAudioPreview.addEventListener('ended', function () {
-            if (playRecordedBtn) {
+            if (audioDataInput) {
+                audioDataInput.value = base64Audio;
+                console.log('✅ Audio guardado en input oculto');
+            } else {
+                console.error('❌ No se encontró el input oculto para audio');
+                alert('Error interno: no se pudo preparar el audio');
+                return;
+            }
+
+            sendAudioBtn.innerHTML = '⏳';
+            sendAudioBtn.disabled = true;
+            sendAudioBtn.title = 'Enviando...';
+
+            const mainSendBtn = document.querySelector('.send-btn');
+            if (mainSendBtn) {
+                mainSendBtn.innerHTML = '🎤⏳';
+                mainSendBtn.disabled = true;
+            }
+
+            if (textarea && !textarea.value.trim()) {
+                textarea.style.display = 'none';
+            }
+
+            const fileInput = document.getElementById('file-input');
+            if (fileInput) {
+                fileInput.value = '';
+            }
+
+            const filePreview = document.getElementById('file-preview');
+            if (filePreview) {
+                filePreview.style.display = 'none';
+            }
+
+            setTimeout(() => {
+                console.log('🚀 Enviando formulario con audio...');
+
+                if (!audioDataInput.value || audioDataInput.value.length < 100) {
+                    console.error('❌ El audio no se guardó correctamente en el input');
+                    alert('Error: El audio no se guardó correctamente');
+                    resetButtons();
+                    return;
+                }
+
+                if (messageForm) {
+                    console.log('📤 Enviando formulario...');
+                    disableAllButtons();
+
+                    setTimeout(() => {
+                        if (messageForm.requestSubmit) {
+                            messageForm.requestSubmit();
+                        } else {
+                            messageForm.submit();
+                        }
+                    }, 200);
+                } else {
+                    console.error('❌ No se encontró el formulario');
+                    alert('Error interno: no se encontró el formulario');
+                    resetButtons();
+                }
+            }, 500);
+        };
+
+        reader.onerror = function (error) {
+            console.error('❌ Error convirtiendo audio a base64:', error);
+            alert('Error procesando el audio');
+            resetButtons();
+        };
+
+        reader.readAsDataURL(audioBlob);
+    });
+
+    playRecordedBtn.addEventListener('click', function () {
+        if (recordedAudioPreview.src) {
+            if (recordedAudioPreview.paused) {
+                recordedAudioPreview.play();
+                playRecordedBtn.textContent = '⏸️';
+            } else {
+                recordedAudioPreview.pause();
                 playRecordedBtn.textContent = '▶️';
             }
-            if (audioProgress) {
-                audioProgress.style.width = '0%';
+        }
+    });
+
+    if (audioWaveform) {
+        audioWaveform.addEventListener('click', function (e) {
+            const rect = audioWaveform.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const percentage = (clickX / rect.width) * 100;
+
+            if (recordedAudioPreview.duration) {
+                recordedAudioPreview.currentTime = (percentage / 100) * recordedAudioPreview.duration;
             }
         });
+    }
 
-        async function startRecording() {
+    recordedAudioPreview.addEventListener('timeupdate', function () {
+        if (recordedAudioPreview.duration) {
+            const progress = (recordedAudioPreview.currentTime / recordedAudioPreview.duration) * 100;
+            if (audioProgress) {
+                audioProgress.style.width = progress + '%';
+            }
+
+            const currentTime = formatTime(recordedAudioPreview.currentTime);
+            const totalTime = formatTime(recordedAudioPreview.duration);
+            if (audioDuration) {
+                audioDuration.textContent = `${currentTime} / ${totalTime}`;
+            }
+        }
+    });
+
+    recordedAudioPreview.addEventListener('ended', function () {
+        if (playRecordedBtn) {
+            playRecordedBtn.textContent = '▶️';
+        }
+        if (audioProgress) {
+            audioProgress.style.width = '0%';
+        }
+    });
+
+    async function startRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    sampleRate: 16000
+                }
+            });
+
+            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            analyser = audioContext.createAnalyser();
+            const source = audioContext.createMediaStreamSource(stream);
+            source.connect(analyser);
+            analyser.fftSize = 256;
+            const bufferLength = analyser.frequencyBinCount;
+            dataArray = new Uint8Array(bufferLength);
+
+            const mimeTypes = [
+                'audio/webm;codecs=opus',
+                'audio/webm',
+                'audio/mp4',
+                'audio/ogg;codecs=opus',
+                'audio/wav',
+                'audio/mpeg'
+            ];
+
+            let supportedType = 'audio/webm';
+            for (const type of mimeTypes) {
+                if (MediaRecorder.isTypeSupported(type)) {
+                    supportedType = type;
+                    console.log('✅ Formato soportado seleccionado:', type);
+                    break;
+                }
+            }
+
+            currentAudioFormat = supportedType;
+
+            const options = { mimeType: supportedType };
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 16000 // Tasa de muestreo compatible con WhatsApp
-                    }
-                });
+                mediaRecorder = new MediaRecorder(stream, options);
+            } catch (e) {
+                console.warn('⚠️ No se pudo usar el formato preferido, usando por defecto:', e);
+                mediaRecorder = new MediaRecorder(stream);
+                currentAudioFormat = 'audio/webm';
+            }
 
-                // Configurar audio context para visualización
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                const source = audioContext.createMediaStreamSource(stream);
-                source.connect(analyser);
-                analyser.fftSize = 256;
-                const bufferLength = analyser.frequencyBinCount;
-                dataArray = new Uint8Array(bufferLength);
+            audioChunks = [];
 
-                // Detectar el mejor formato soportado
-                const mimeTypes = [
-                    'audio/webm;codecs=opus', // Chrome, Firefox
-                    'audio/webm',             // Chrome
-                    'audio/mp4',              // Safari
-                    'audio/ogg;codecs=opus',  // Firefox
-                    'audio/wav',              // Universal
-                    'audio/mpeg'              // Universal
-                ];
+            mediaRecorder.ondataavailable = event => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
 
-                let supportedType = 'audio/webm';
-                for (const type of mimeTypes) {
-                    if (MediaRecorder.isTypeSupported(type)) {
-                        supportedType = type;
-                        console.log('✅ Formato soportado seleccionado:', type);
-                        break;
-                    }
+            mediaRecorder.onstop = () => {
+                const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
+                const audioUrl = URL.createObjectURL(audioBlob);
+                recordedAudioPreview.src = audioUrl;
+
+                if (audioPlaybackControls) {
+                    audioPlaybackControls.style.display = 'flex';
                 }
 
-                currentAudioFormat = supportedType;
-
-                // Configurar MediaRecorder con el formato soportado
-                const options = { mimeType: supportedType };
-                try {
-                    mediaRecorder = new MediaRecorder(stream, options);
-                } catch (e) {
-                    console.warn('⚠️ No se pudo usar el formato preferido, usando por defecto:', e);
-                    mediaRecorder = new MediaRecorder(stream);
-                    currentAudioFormat = 'audio/webm';
-                }
-
-                audioChunks = [];
-
-                mediaRecorder.ondataavailable = event => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
+                recordedAudioPreview.onloadedmetadata = () => {
+                    if (audioDuration) {
+                        audioDuration.textContent = formatTime(recordedAudioPreview.duration);
                     }
                 };
+            };
 
-                mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: currentAudioFormat });
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    recordedAudioPreview.src = audioUrl;
+            mediaRecorder.start(100);
+            isRecording = true;
+            startRecordBtn.classList.add('recording');
+            startRecordBtn.textContent = '⏹️';
+            recordingTime = 0;
 
-                    // Mostrar controles de reproducción
-                    if (audioPlaybackControls) {
-                        audioPlaybackControls.style.display = 'flex';
-                    }
+            recordingInterval = setInterval(() => {
+                recordingTime++;
+                if (recordingTimer) {
+                    recordingTimer.textContent = formatTime(recordingTime);
+                }
+            }, 1000);
 
-                    // Obtener duración
-                    recordedAudioPreview.onloadedmetadata = () => {
-                        if (audioDuration) {
-                            audioDuration.textContent = formatTime(recordedAudioPreview.duration);
-                        }
-                    };
-                };
+            visualizeRecording();
 
-                // Iniciar grabación
-                mediaRecorder.start(100); // Emitir datos cada 100ms
-                isRecording = true;
-                startRecordBtn.classList.add('recording');
-                startRecordBtn.textContent = '⏹️';
-                recordingTime = 0;
-
-                // Iniciar temporizador
-                recordingInterval = setInterval(() => {
-                    recordingTime++;
-                    if (recordingTimer) {
-                        recordingTimer.textContent = formatTime(recordingTime);
-                    }
-                }, 1000);
-
-                // Iniciar visualizador de nivel
-                visualizeRecording();
-
-            } catch (err) {
-                console.error('❌ Error al acceder al micrófono:', err);
-                alert('No se pudo acceder al micrófono. Por favor, revisa los permisos.');
-            }
+        } catch (err) {
+            console.error('❌ Error al acceder al micrófono:', err);
+            alert('No se pudo acceder al micrófono. Por favor, revisa los permisos.');
         }
+    }
 
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                mediaRecorder.stop();
-                isRecording = false;
-                startRecordBtn.classList.remove('recording');
-                startRecordBtn.textContent = '●';
+    function stopRecording() {
+        if (mediaRecorder && isRecording) {
+            mediaRecorder.stop();
+            isRecording = false;
+            startRecordBtn.classList.remove('recording');
+            startRecordBtn.textContent = '●';
 
-                // Detener visualización
-                if (audioContext) {
-                    audioContext.close();
-                    audioContext = null;
-                }
-
-                // Limpiar intervalos
-                if (recordingInterval) {
-                    clearInterval(recordingInterval);
-                    recordingInterval = null;
-                }
-
-                // Detener todas las pistas
-                if (mediaRecorder && mediaRecorder.stream) {
-                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                }
-            }
-        }
-
-        function visualizeRecording() {
-            if (!analyser || !isRecording) return;
-
-            function draw() {
-                if (!isRecording) return;
-
-                requestAnimationFrame(draw);
-                analyser.getByteFrequencyData(dataArray);
-
-                let sum = 0;
-                for (let i = 0; i < dataArray.length; i++) {
-                    sum += dataArray[i];
-                }
-                const average = sum / dataArray.length;
-
-                // Convertir a porcentaje (0-100)
-                const level = Math.min(100, (average / 128) * 100);
-                if (recordingLevel) {
-                    recordingLevel.style.width = level + '%';
-                }
-            }
-
-            draw();
-        }
-
-        function resetRecorder() {
-            if (isRecording) {
-                stopRecording();
+            if (audioContext) {
+                audioContext.close();
+                audioContext = null;
             }
 
             if (recordingInterval) {
@@ -2604,151 +2219,367 @@ function normalizeText(s) {
                 recordingInterval = null;
             }
 
-            audioChunks = [];
-            recordingTime = 0;
-            if (recordingTimer) {
-                recordingTimer.textContent = '0:00';
-            }
-            if (recordingLevel) {
-                recordingLevel.style.width = '0%';
-            }
-            if (startRecordBtn) {
-                startRecordBtn.classList.remove('recording');
-                startRecordBtn.textContent = '●';
-            }
-            if (audioPlaybackControls) {
-                audioPlaybackControls.style.display = 'none';
-            }
-
-            if (recordedAudioPreview && recordedAudioPreview.src) {
-                URL.revokeObjectURL(recordedAudioPreview.src);
-                recordedAudioPreview.src = '';
-            }
-
-            if (audioDataInput) {
-                audioDataInput.value = '';
+            if (mediaRecorder && mediaRecorder.stream) {
+                mediaRecorder.stream.getTracks().forEach(track => track.stop());
             }
         }
-
-        function formatTime(seconds) {
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
-
-        function resetButtons() {
-            if (sendAudioBtn) {
-                sendAudioBtn.innerHTML = '✓';
-                sendAudioBtn.disabled = false;
-                sendAudioBtn.title = '';
-            }
-
-            const mainSendBtn = document.querySelector('.send-btn');
-            if (mainSendBtn) {
-                mainSendBtn.innerHTML = 'Enviar';
-                mainSendBtn.disabled = false;
-            }
-        }
-
-        function disableAllButtons() {
-            // Deshabilitar todos los botones relacionados
-            const buttons = [
-                sendAudioBtn,
-                document.querySelector('.send-btn'),
-                document.getElementById('file-attach-btn'),
-                document.getElementById('record-audio-btn'),
-                document.getElementById('emoji-pick-btn')
-            ];
-
-            buttons.forEach(btn => {
-                if (btn) {
-                    btn.disabled = true;
-                    if (btn !== sendAudioBtn) {
-                        const originalHTML = btn.innerHTML;
-                        btn.setAttribute('data-original-html', originalHTML);
-                        btn.innerHTML = '⏳';
-                    }
-                }
-            });
-        }
-
-        // Limpiar al cambiar de chat o recargar
-        window.addEventListener('beforeunload', resetRecorder);
-
-        console.debug('✅ Audio recorder initialized - WhatsApp style');
     }
 
-    // Y esta es la corrección para el event listener del formulario (al final del archivo):
-    document.addEventListener('DOMContentLoaded', function () {
-        // ... tu código existente ...
+    function visualizeRecording() {
+        if (!analyser || !isRecording) return;
 
-        // Reemplaza la validación del formulario con esta:
-        if (document.getElementById('messageForm')) {
-            document.getElementById('messageForm').addEventListener('submit', function (e) {
-                const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
-                const hasFile = document.getElementById('file-input').files.length > 0;
-                const hasAudio = document.getElementById('audio-data-input').value !== '';
+        function draw() {
+            if (!isRecording) return;
+            requestAnimationFrame(draw);
+            analyser.getByteFrequencyData(dataArray);
 
-                console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+            let sum = 0;
+            for (let i = 0; i < dataArray.length; i++) {
+                sum += dataArray[i];
+            }
+            const average = sum / dataArray.length;
+            const level = Math.min(100, (average / 128) * 100);
+            if (recordingLevel) {
+                recordingLevel.style.width = level + '%';
+            }
+        }
 
-                // Si NO hay nada para enviar, prevenir el envío
-                if (!hasText && !hasFile && !hasAudio) {
-                    e.preventDefault();
-                    alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
-                    return false;
+        draw();
+    }
+
+    function resetRecorder() {
+        if (isRecording) {
+            stopRecording();
+        }
+
+        if (recordingInterval) {
+            clearInterval(recordingInterval);
+            recordingInterval = null;
+        }
+
+        audioChunks = [];
+        recordingTime = 0;
+        if (recordingTimer) {
+            recordingTimer.textContent = '0:00';
+        }
+        if (recordingLevel) {
+            recordingLevel.style.width = '0%';
+        }
+        if (startRecordBtn) {
+            startRecordBtn.classList.remove('recording');
+            startRecordBtn.textContent = '●';
+        }
+        if (audioPlaybackControls) {
+            audioPlaybackControls.style.display = 'none';
+        }
+
+        if (recordedAudioPreview && recordedAudioPreview.src) {
+            URL.revokeObjectURL(recordedAudioPreview.src);
+            recordedAudioPreview.src = '';
+        }
+
+        if (audioDataInput) {
+            audioDataInput.value = '';
+        }
+    }
+
+    function formatTime(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    function resetButtons() {
+        if (sendAudioBtn) {
+            sendAudioBtn.innerHTML = '✓';
+            sendAudioBtn.disabled = false;
+            sendAudioBtn.title = '';
+        }
+
+        const mainSendBtn = document.querySelector('.send-btn');
+        if (mainSendBtn) {
+            mainSendBtn.innerHTML = 'Enviar';
+            mainSendBtn.disabled = false;
+        }
+    }
+
+    function disableAllButtons() {
+        const buttons = [
+            sendAudioBtn,
+            document.querySelector('.send-btn'),
+            document.getElementById('file-attach-btn'),
+            document.getElementById('record-audio-btn'),
+            document.getElementById('emoji-pick-btn')
+        ];
+
+        buttons.forEach(btn => {
+            if (btn) {
+                btn.disabled = true;
+                if (btn !== sendAudioBtn) {
+                    const originalHTML = btn.innerHTML;
+                    btn.setAttribute('data-original-html', originalHTML);
+                    btn.innerHTML = '⏳';
                 }
+            }
+        });
+    }
 
-                // Si hay audio, asegurarse de que se envíe correctamente
-                if (hasAudio) {
-                    console.log('🎤 Enviando audio grabado...');
-                    console.log('📊 Longitud del audio base64:', document.getElementById('audio-data-input').value.length);
+    window.addEventListener('beforeunload', resetRecorder);
+    console.debug('✅ Audio recorder initialized');
+}
 
-                    // Mostrar indicador de envío en el botón principal
-                    const sendBtn = document.querySelector('.send-btn');
-                    if (sendBtn) {
-                        sendBtn.innerHTML = '🎤⏳';
-                        sendBtn.disabled = true;
+/* ===================== CHAT SEARCH ===================== */
+function setupChatSearch() {
+    const searchInput = document.getElementById('search-chats-input');
+    const chatItems = document.querySelectorAll('.chat-item');
 
-                        // Restaurar después de 8 segundos por si hay error (más tiempo)
-                        setTimeout(() => {
-                            sendBtn.innerHTML = 'Enviar';
-                            sendBtn.disabled = false;
-                        }, 8000);
-                    }
+    if (!searchInput) {
+        console.warn('Search input not found');
+        return;
+    }
+
+    searchInput.addEventListener('input', function (e) {
+        const searchTerm = normalizeText(e.target.value);
+
+        chatItems.forEach(chatItem => {
+            const aliasElement = chatItem.querySelector('.alias-view');
+            const numberElement = chatItem.querySelector('.chat-number') || aliasElement;
+
+            if (!aliasElement) return;
+
+            const chatName = normalizeText(aliasElement.textContent);
+            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+            const matchesSearch = chatName.includes(searchTerm) ||
+                chatNumber.includes(searchTerm) ||
+                (searchTerm === '');
+
+            chatItem.style.display = matchesSearch ? 'block' : 'none';
+        });
+    });
+
+    const observer = new MutationObserver(function (mutations) {
+        mutations.forEach(function (mutation) {
+            if (mutation.addedNodes.length) {
+                const currentSearch = normalizeText(searchInput.value);
+                if (currentSearch) {
+                    searchInput.dispatchEvent(new Event('input'));
                 }
+            }
+        });
+    });
 
-                // Si hay archivo, mostrar indicador
-                if (hasFile) {
-                    console.log('📎 Enviando archivo...');
-                    const sendBtn = document.querySelector('.send-btn');
-                    if (sendBtn) {
-                        sendBtn.innerHTML = '📎⏳';
-                        sendBtn.disabled = true;
+    const chatContainer = document.querySelector('.chat-items');
+    if (chatContainer) {
+        observer.observe(chatContainer, { childList: true, subtree: true });
+    }
 
-                        setTimeout(() => {
-                            sendBtn.innerHTML = 'Enviar';
-                            sendBtn.disabled = false;
-                        }, 8000);
-                    }
-                }
+    console.debug('Chat search functionality initialized');
+}
 
-                // Si solo hay texto
-                if (hasText && !hasFile && !hasAudio) {
-                    console.log('💬 Enviando texto...');
-                    const sendBtn = document.querySelector('.send-btn');
-                    if (sendBtn) {
-                        sendBtn.innerHTML = '⏳';
-                        sendBtn.disabled = true;
+/* ===================== ALIAS EDITING ===================== */
+function enhanceAliasButtons() {
+    document.querySelectorAll('.chat-panel-header .edit-alias-btn, .chat-title .edit-alias-btn').forEach(btn => {
+        btn.removeEventListener('click', onEditAliasClick);
+        btn.addEventListener('click', onEditAliasClick);
+    });
 
-                        setTimeout(() => {
-                            sendBtn.innerHTML = 'Enviar';
-                            sendBtn.disabled = false;
-                        }, 5000);
-                    }
+    document.querySelectorAll('.chat-list-v2 .edit-alias-btn, .chat-items .edit-alias-btn').forEach(btn => {
+        btn.remove();
+    });
+}
+
+function onEditAliasClick(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    const btn = e.currentTarget;
+    const parent = btn.closest('.card-title-row') ||
+        btn.closest('.chat-title') ||
+        btn.closest('.chat-content') ||
+        btn.closest('.card-content');
+
+    if (parent) {
+        activarEdicionAlias(parent);
+    }
+}
+
+function activarEdicionAlias(parent) {
+    if (!parent) return;
+    const view = parent.querySelector('.alias-view');
+    const edit = parent.querySelector('.alias-edit');
+    if (!view || !edit) return;
+    const input = edit.querySelector('input[type=text]');
+    if (!input) return;
+
+    const valorOriginal = view.textContent;
+    view.style.display = 'none';
+    edit.style.display = 'flex';
+    input.focus();
+    input.select();
+    isEditingAlias = true;
+
+    const finish = () => {
+        const nuevo = (input.value || '').trim();
+        edit.style.display = 'none';
+        view.style.display = '';
+
+        if (!nuevo || nuevo === valorOriginal) {
+            view.textContent = valorOriginal;
+            isEditingAlias = false;
+            return;
+        }
+
+        view.textContent = nuevo;
+        fetch(`/contactos/${input.dataset.num}/alias`, {
+            method: 'POST',
+            body: new URLSearchParams({ alias: nuevo }),
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
+        })
+            .then(response => {
+                if (!response.ok) throw new Error('Error en la respuesta');
+                return response.json();
+            })
+            .then(data => {
+                console.log('Alias guardado exitosamente');
+            })
+            .catch(err => console.warn('Error guardando alias:', err))
+            .finally(() => {
+                isEditingAlias = false;
+            });
+    };
+
+    input.onblur = () => setTimeout(finish, 200);
+    input.onkeydown = (ev) => {
+        if (ev.key === 'Enter') {
+            ev.preventDefault();
+            finish();
+        }
+        if (ev.key === 'Escape') {
+            edit.style.display = 'none';
+            view.style.display = '';
+            view.textContent = valorOriginal;
+            isEditingAlias = false;
+        }
+    };
+}
+
+/* ===================== INITIALIZATION ===================== */
+document.addEventListener('DOMContentLoaded', function () {
+    console.log('DOM cargado - inicializando componentes');
+
+    // Inicializar todos los componentes
+    enhanceAliasButtons();
+    setupEmojiPicker();
+    setupChatSearch();
+    setupFileUpload();
+    setupAudioRecorder();
+
+    console.log('✅ Todos los componentes inicializados');
+
+    // Inicializar scroll
+    try {
+        const msgsEl = document.getElementById('msgs');
+        if (msgsEl) setTimeout(() => { msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+    } catch (e) {
+        console.warn('Initial scroll to bottom failed:', e);
+    }
+
+    // Iniciar actualización de chats
+    if (document.querySelector('.chat-items')) {
+        actualizarListaChats();
+        if (!chatsIntervalHandle) {
+            chatsIntervalHandle = setInterval(() => {
+                if (!document.hidden) actualizarListaChats();
+            }, refreshIntervalMs);
+        }
+    }
+
+    // Inicializar polling de mensajes
+    function initMessagesStateFromDOM() {
+        try {
+            const msgsContainer = document.getElementById('msgs');
+            if (!msgsContainer) return;
+            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+            nodes.forEach(n => {
+                const idAttr = n.getAttribute('data-msg-id');
+                const id = Number(idAttr) || 0;
+                if (id) {
+                    seenMessageKeys.add('id:' + String(id));
                 }
             });
+            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+        } catch (e) {
+            console.warn('initMessagesStateFromDOM failed', e);
         }
-    }); 
+    }
 
+    if (selectedChatId) {
+        initMessagesStateFromDOM();
+        if (!messagesIntervalHandle) {
+            pollSelectedMessages();
+            messagesIntervalHandle = setInterval(() => {
+                if (!document.hidden) pollSelectedMessages();
+            }, messagePollIntervalMs);
+        }
+    }
+
+    // Manejar cambios de visibilidad
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            chatAutoRefresh = false;
+        } else {
+            chatAutoRefresh = true;
+            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                chatsIntervalHandle = setInterval(() => {
+                    if (!document.hidden) actualizarListaChats();
+                }, refreshIntervalMs);
+            }
+            if (selectedChatId && !messagesIntervalHandle) {
+                initMessagesStateFromDOM();
+                messagesIntervalHandle = setInterval(() => {
+                    if (!document.hidden) pollSelectedMessages();
+                }, messagePollIntervalMs);
+            }
+        }
+    });
+});
+
+// Manejar el envío del formulario
+if (document.getElementById('messageForm')) {
+    document.getElementById('messageForm').addEventListener('submit', function (e) {
+        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+        const hasFile = document.getElementById('file-input').files.length > 0;
+        const hasAudio = document.getElementById('audio-data-input').value !== '';
+
+        console.log('🔍 Validando envío - Texto:', hasText, 'Archivo:', hasFile, 'Audio:', hasAudio);
+
+        if (!hasText && !hasFile && !hasAudio) {
+            e.preventDefault();
+            alert('Por favor escribe un mensaje, selecciona un archivo o graba un audio');
+            return false;
+        }
+
+        // Mostrar indicadores de envío
+        const sendBtn = document.querySelector('.send-btn');
+        if (sendBtn) {
+            const originalText = sendBtn.innerHTML;
+
+            if (hasAudio) {
+                sendBtn.innerHTML = '🎤⏳';
+            } else if (hasFile) {
+                sendBtn.innerHTML = '📎⏳';
+            } else {
+                sendBtn.innerHTML = '⏳';
+            }
+
+            sendBtn.disabled = true;
+
+            setTimeout(() => {
+                sendBtn.innerHTML = originalText;
+                sendBtn.disabled = false;
+            }, 5000);
+        }
+    });
+}
 </script>
 {% endblock %}       
