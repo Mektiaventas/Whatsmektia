@@ -5476,14 +5476,22 @@ def ver_citas(config=None):
 # --- EN app.py (Reemplazar load_config) ---
 
 def load_config(config=None):
+    """
+    Carga todos los ajustes de configuración de la base de datos, 
+    incluyendo la configuración de leads serializada en JSON.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
+        
     conn = get_db_connection(config)
-    cursor = conn.cursor(dictionary=True)
+    # Usar dictionary=True para obtener resultados como diccionario
+    cursor = conn.cursor(dictionary=True) 
     
-    # 1. Ejecutar CREATE TABLE y CONSUMIR resultados (si los hubiera)
+    # ----------------------------------------------------
+    # 1. Ejecutar CREATE TABLE IF NOT EXISTS para asegurar la existencia de la tabla
+    #    (Y para incluir la nueva columna leads_config)
+    # ----------------------------------------------------
     try:
-        # Nota: La lista de columnas aquí DEBE coincidir con la lista en save_config
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS configuracion (
                 id INT PRIMARY KEY DEFAULT 1,
@@ -5519,44 +5527,66 @@ def load_config(config=None):
                 mensaje_tibio TEXT,
                 mensaje_frio TEXT,
                 mensaje_dormido TEXT,
-                'leads_config_list': {}
+                leads_config LONGTEXT  -- ¡COLUMNA DE LEADS AÑADIDA!
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
         ''')
-        # Consumir cualquier resultado pendiente del CREATE TABLE para limpiar el cursor
+        # Consumir cualquier resultado pendiente del CREATE TABLE
         cursor.fetchall() 
     except Exception as e:
-        # Si la tabla ya existe o hay warning, lo ignoramos pero seguimos
+        if current_app:
+            current_app.logger.warning(f"⚠️ Error al crear tabla 'configuracion' (posiblemente ya existe): {e}")
         pass
+        
+    # ----------------------------------------------------
+    # 2. Ejecutar SELECT para obtener la configuración
+    # ----------------------------------------------------
+    row = None
+    leads_config_json = None
+    try:
+        # Se asume que la fila de configuración es 'id = 1'
+        cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
+        row = cursor.fetchone()
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"🔴 Error al seleccionar configuracion: {e}")
+    finally:
+        try:
+            cursor.close()
+            conn.close()
+        except:
+            pass # No hay problema si ya están cerrados
     
-    # 2. Ejecutar SELECT (ahora el cursor está limpio)
-    cursor.execute("SELECT * FROM configuracion WHERE id = 1;")
-    row = cursor.fetchone()
-    leads_config_json = row.get('leads_config')
-    cursor.close()
-    conn.close()
-    
+    # ----------------------------------------------------
+    # 3. Manejar caso sin configuración (devolver defaults)
+    # ----------------------------------------------------
     if not row:
-        # Retornar estructura vacía con defaults para evitar KeyErrors
         return {
             'negocio': {}, 
             'personalizacion': {}, 
             'restricciones': {}, 
             'asesores': {}, 
             'asesores_list': [],
-            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''} # <-- AÑADIDO
+            # Nueva clave con configuración de leads vacía
+            'leads_config_list': {}, 
+            # Mensajes legacy de leads
+            'leads': {'mensaje_tibio': '', 'mensaje_frio': '', 'mensaje_dormido': ''}
         }
 
-    # ... (resto del mapeo de campos igual que antes) ...
+    # ----------------------------------------------------
+    # 4. Mapeo de campos existentes
+    # ----------------------------------------------------
+    
+    # **A. Negocio y Otros**
     negocio = {
-        'ia_nombre': row.get('ia_nombre'),
-        'negocio_nombre': row.get('negocio_nombre'),
-        'descripcion': row.get('descripcion'),
-        'url': row.get('url'),
-        'direccion': row.get('direccion'),
-        'telefono': row.get('telefono'),
+        'ia_nombre': row.get('ia_nombre', ''),
+        'negocio_nombre': row.get('negocio_nombre', ''),
+        'descripcion': row.get('descripcion', ''),
+        'url': row.get('url', ''),
+        'direccion': row.get('direccion', ''),
+        'telefono': row.get('telefono', ''),
         'contexto_adicional': row.get('contexto_adicional', ''),
-        'correo': row.get('correo'),
-        'que_hace': row.get('que_hace'),
+        'correo': row.get('correo', ''),
+        'que_hace': row.get('que_hace', ''),
         'logo_url': row.get('logo_url', ''),
         'nombre_empresa': row.get('nombre_empresa', 'SmartWhats'),
         'app_logo': row.get('app_logo', ''),
@@ -5565,25 +5595,47 @@ def load_config(config=None):
         'transferencia_nombre': row.get('transferencia_nombre', ''),
         'transferencia_banco': row.get('transferencia_banco', ''),
     }
+    
+    # **B. Personalización**
     personalizacion = {
-        'tono': row.get('tono'),
-        'lenguaje': row.get('lenguaje'),
+        'tono': row.get('tono', ''),
+        'lenguaje': row.get('lenguaje', ''),
     }
+    
+    # **C. Restricciones**
     restricciones = {
         'restricciones': row.get('restricciones', ''),
         'palabras_prohibidas': row.get('palabras_prohibidas', ''),
-        'max_mensajes': row.get('max_mensajes', 10),
-        'tiempo_max_respuesta': row.get('tiempo_max_respuesta', 30)
+        # Asegurar que los valores por defecto sean enteros en caso de ser nulos
+        'max_mensajes': int(row.get('max_mensajes', 10) or 10), 
+        'tiempo_max_respuesta': int(row.get('tiempo_max_respuesta', 30) or 30)
     }
     
-    # --- Mapeo de campos de leads ---
+    # **D. Mensajes Legacy de Leads**
     leads = {
         'mensaje_tibio': row.get('mensaje_tibio', ''),
         'mensaje_frio': row.get('mensaje_frio', ''),
         'mensaje_dormido': row.get('mensaje_dormido', '')
     }
 
-    # ... (Lógica de asesores existente sin cambios) ...
+    # ----------------------------------------------------
+    # 5. Deserialización de la NUEVA configuración de Leads (JSON)
+    # ----------------------------------------------------
+    leads_config_list = {}
+    leads_config_json = row.get('leads_config') 
+    
+    if leads_config_json:
+        try:
+            # Deserializar el JSON y guardarlo para el template
+            leads_config_list = json.loads(leads_config_json)
+        except json.JSONDecodeError:
+            if current_app:
+                current_app.logger.error("🔴 Error al decodificar leads_config JSON de la BD.")
+            leads_config_list = {}
+
+    # ----------------------------------------------------
+    # 6. Lógica de Asesores (Sin cambios)
+    # ----------------------------------------------------
     asesores_list = []
     asesores_map = {}
     try:
@@ -5594,25 +5646,29 @@ def load_config(config=None):
                 if isinstance(parsed, list):
                     for a in parsed:
                         if isinstance(a, dict):
+                            # Almacenar en la lista
                             asesores_list.append({
                                 'nombre': (a.get('nombre') or '').strip(),
                                 'telefono': (a.get('telefono') or '').strip(),
                                 'email': (a.get('email') or '').strip()
                             })
+                    # Mapear para campos individuales (compatibilidad)
                     for idx, a in enumerate(asesores_list, start=1):
                         asesores_map[f'asesor{idx}_nombre'] = a.get('nombre', '')
                         asesores_map[f'asesor{idx}_telefono'] = a.get('telefono', '')
                         asesores_map[f'asesor{idx}_email'] = a.get('email', '')
             except Exception:
                 pass
+        
         if not asesores_list:
-            # Fallback legacy
+            # Fallback a campos legacy si no hay asesores_json válido
             a1n = (row.get('asesor1_nombre') or '').strip()
             a1t = (row.get('asesor1_telefono') or '').strip()
             a1e = (row.get('asesor1_email') or '').strip()
             a2n = (row.get('asesor2_nombre') or '').strip()
             a2t = (row.get('asesor2_telefono') or '').strip()
             a2e = (row.get('asesor2_email') or '').strip()
+            
             if a1n or a1t or a1e:
                 asesores_list.append({'nombre': a1n, 'telefono': a1t, 'email': a1e})
                 asesores_map['asesor1_nombre'] = a1n
@@ -5623,16 +5679,24 @@ def load_config(config=None):
                 asesores_map['asesor2_nombre'] = a2n
                 asesores_map['asesor2_telefono'] = a2t
                 asesores_map['asesor2_email'] = a2e
-    except Exception:
+
+    except Exception as e:
+        if current_app:
+            current_app.logger.error(f"🔴 Error procesando asesores: {e}")
         pass
 
+    # ----------------------------------------------------
+    # 7. Retorno final con todos los bloques
+    # ----------------------------------------------------
     return {
         'negocio': negocio,
         'personalizacion': personalizacion,
         'restricciones': restricciones,
         'asesores': asesores_map,
         'asesores_list': asesores_list,
-        'leads': leads # <-- DEVOLVER EL MAPEO DE LEADS
+        'leads': leads,
+        # ¡La nueva configuración de leads deserializada!
+        'leads_config_list': leads_config_list 
     }
 
 def save_config(cfg_all, config=None):
