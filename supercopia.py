@@ -796,15 +796,11 @@ def admin_asignar_plan_dominio():
         return jsonify({'error': str(e)}), 500
 
 
-# En supercopia.py
-
-# En supercopia.py
-
 def guardar_configuracion_leads(db_conn, tenant_id, form_data):
     configuracion_leads = {}
     
-    # Asegúrate de importar LEADS_PREDEFINIDOS o definirlos aquí
-    LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado', 'Dormido'] # Agrega Dormido si lo necesitas
+    # Aseguramos incluir todos los leads necesarios
+    LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado', 'Dormido']
 
     for lead_name in LEADS_PREDEFINIDOS:
         lead_key = lead_name.lower().replace(' ', '_')
@@ -812,14 +808,16 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
         # 1. Días
         dias_a_caliente = form_data.get(f'{lead_key}_a_caliente_dias')
         
-        # 2. Checkbox IA: Si está en form_data es True, si no, es False
-        usar_ia = form_data.get(f'{lead_key}_usar_ia') == 'on'
+        # 2. Checkbox IA (CORREGIDO): Usamos getlist para buscar 'on' en todos los valores enviados
+        vals_ia = form_data.getlist(f'{lead_key}_usar_ia')
+        usar_ia = 'on' in vals_ia
         
         # 3. Minutos
         tiempo_siguiente_minutos = form_data.get(f'{lead_key}_tiempo_siguiente_minutos')
         
-        # 4. Checkbox Estático: Si está en form_data es 'estatico', si no, 'dinamico'
-        tipo = 'estatico' if form_data.get(f'{lead_key}_tipo') == 'estatico' else 'dinamico'
+        # 4. Checkbox Estático (CORREGIDO): Usamos getlist
+        vals_tipo = form_data.getlist(f'{lead_key}_tipo')
+        tipo = 'estatico' if 'estatico' in vals_tipo else 'dinamico'
         
         # 5. Criterio IA
         criterio_ia = form_data.get(f'{lead_key}_criterio_ia', '').strip()
@@ -834,10 +832,6 @@ def guardar_configuracion_leads(db_conn, tenant_id, form_data):
         configuracion_leads[lead_key] = config
 
     return json.dumps(configuracion_leads)
-
-# --------------------------------------------------------------------------------
-# En la función de lógica de clasificación de leads (donde se determina el cambio)
-# --------------------------------------------------------------------------------
 
 def clasificar_lead_con_ia(contexto_conversacion, lead_config):
     """Función para determinar el lead usando la IA con un criterio configurable."""
@@ -4513,10 +4507,11 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
+
 @app.route('/uploads/<filename>')
 def serve_uploaded_file(filename):
     """Sirve archivos subidos desde la carpeta UPLOAD_FOLDER"""
-    return send_from_directory(UPLOAD_FOLDER, filename) 
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -11062,6 +11057,7 @@ def enviar_manual():
         audio_data = request.form.get('audio_data')  # NUEVO: Audio grabado en base64
         
         # DEBUG: Ver qué está llegando
+        app.logger.info(f" Este es un solo log que necesita ser visto por su escritor")
         app.logger.info(f"🔍 DEBUG enviar_manual - Datos recibidos:")
         app.logger.info(f"  Número: {numero}")
         app.logger.info(f"  Texto: {texto[:50] if texto else 'Vacío'}")
@@ -11139,6 +11135,25 @@ def enviar_manual():
                 
                 app.logger.info(f"💾 Audio grabado guardado: {filename} ({len(audio_bytes)} bytes)")
                 
+                dominio = config.get('dominio') or request.host
+                if not dominio:
+                    dominio = request.host
+                
+                # CORRECCIÓN: Forzar HTTPS siempre, WhatsApp falla con HTTP simple
+                if '://' not in dominio:
+                    # Si es localhost o IP, esto podría fallar, pero para producción es necesario
+                    if 'localhost' in dominio or '127.0.0.1' in dominio:
+                        dominio = f"http://{dominio}" 
+                    else:
+                        dominio = f"https://{dominio}"
+                elif dominio.startswith('http://') and 'localhost' not in dominio and '127.0.0.1' not in dominio:
+                    dominio = dominio.replace('http://', 'https://')
+                
+                # Construir URL para archivo
+                public_url = f"{dominio.rstrip('/')}/uploads/{filename}"
+                
+                app.logger.info(f"🌐 URL pública generada: {public_url}")
+
                 # Construir URL pública
                 dominio = config.get('dominio') or request.url_root.rstrip('/')
                 if not dominio.startswith('http'):
@@ -12634,6 +12649,11 @@ def ver_kanban(config=None):
     is_admin = str(au.get('servicio') or '').strip().lower() == 'admin'
 
     return render_template('kanban_supercopia.html', columnas=columnas, chats=chats, is_admin=is_admin)
+
+@app.route('/proxy-file/<filename>')
+def proxy_file(filename):
+    """Alias para servir archivos si whatsapp.py intenta usar el proxy fallback"""
+    return send_from_directory(UPLOAD_FOLDER, filename)
 
 @app.route('/kanban/mover', methods=['POST'])
 def kanban_mover():

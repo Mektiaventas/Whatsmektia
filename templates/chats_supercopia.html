@@ -2600,7 +2600,11 @@ document.addEventListener('DOMContentLoaded', function () {
 
 /* ===================== FORMULARIO ÚNICO MANEJADOR ===================== */
 // ESTE ES EL ÚNICO EVENT LISTENER PARA EL FORMULARIO
-document.addEventListener('DOMContentLoaded', function() {
+    document.addEventListener('DOMContentLoaded', function () {
+    messageForm.addEventListener('submit', function (e) {
+        const hasText = document.getElementById('mensaje-texto').value.trim() !== '';
+        const hasFile = document.getElementById('file-input').files.length > 0;
+        const hasAudio = document.getElementById('audio-data-input').value !== '';
     if (document.getElementById('messageForm')) {
         const messageForm = document.getElementById('messageForm');
 
