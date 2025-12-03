@@ -119,6 +119,10 @@
             <input type="text" name="direccion" value="{{ datos.direccion or '' }}">
         </div>
         <div class="form-card" style="width: 30%;">
+            <label>Teléfono</label>
+            <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
+        </div>
+        <div class="form-card" style="width: 30%;">
             <label>Logo de la Aplicación</label>
             <input type="file" name="app_logo" accept="image/png, image/jpeg, image/svg+xml">
             <small class="form-text text-muted">
@@ -130,10 +134,6 @@
                 <input type="hidden" name="app_logo_actual" value="{{ datos.app_logo }}">
             </div>
             {% endif %}
-        </div>
-        <div class="form-card" style="width: 30%;">
-            <label>Teléfono</label>
-            <input type="tel" name="telefono" value="{{ datos.telefono or '' }}">
         </div>
     </div>
 
@@ -162,7 +162,7 @@
     </div>
     <div class="form-card" style="width: 93%;">
         <label>¿Qué quieres que haga tu IA?</label>
-        <textarea name="que_hace" rows="4" required>{{ datos.que_hace or '' }}</textarea>
+        <textarea name="que_hace" rows="6" required>{{ datos.que_hace or '' }}</textarea>
     </div>
     <div class="form-card" style="width: 93%;">
         <label>Leads, temas a los que avisar a un asesor</label>
@@ -187,7 +187,7 @@
             <small class="form-text text-muted">El PDF se guardará en el servidor y se registrará en la base de datos. Añade una descripción útil (palabras clave, categorías, usos).</small>
         </div>
     </form>
-    <div class="form-card" style="width:50%;">
+    <div class="form-card" style="width:93%;">
         <h4>📚 Catálogos publicados</h4>
         {% if documents_publicos and documents_publicos|length > 0 %}
         <div class="table-responsive">
