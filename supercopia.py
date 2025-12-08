@@ -9354,25 +9354,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     """
     Flujo unificado para procesar un mensaje entrante.
     """ 
-    # Obtener estado de la IA (priorizando la memoria IA_ESTADOS)
     ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
-    
-    # Si la IA está desactivada, salimos inmediatamente.
     if not ia_activa:
-        app.logger.info(f"🚫 IA DESACTIVADA para {numero}. Omitiendo procesamiento y respuesta.")
-        
-        # Opcional pero recomendado: Marcar el mensaje como "manejado" en DB (para Kanban)
-        if incoming_saved:
-            try:
-                # Esto registra una nota interna para que el chat se marque como "leído"
-                actualizar_respuesta(numero, texto, "[Modo Manual Activo: IA Desactivada]", config, respuesta_tipo='nota_manual', respuesta_media_url=None)
-                # Opcional: mover a columna 2 (En Conversación)
-                # actualizar_columna_chat(numero, 2, config)
-            except Exception as e:
-                app.logger.warning(f"⚠️ Fallo al actualizar nota manual/columna: {e}")
-             
-        # CLAVE: Devolver TRUE. Esto indica al webhook que el mensaje fue "manejado" y no necesita respuesta de fallback.
-        return True 
+        app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento IA.")
+        return False # <-- ESTE RETURN DEBE SER TRUE
     # --- FIN CORRECCIÓN: SALIDA TEMPRANA DE IA ---
     try:
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
