@@ -427,7 +427,7 @@ def descargar_template():
     return "Error generando el archivo", 500
 
 @app.route('/configuracion/precios/vaciar', methods=['POST'])
-@login_required
+
 def configuracion_precios_vaciar():
     """Elimina todos los registros de la tabla precios."""
     config = obtener_configuracion_por_host()
