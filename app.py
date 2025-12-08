@@ -9394,6 +9394,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     """
     Flujo unificado para procesar un mensaje entrante.
     """ 
+    ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
+    if not ia_activa:
+        app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento IA.")
+        return False
     try:
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
         try:
