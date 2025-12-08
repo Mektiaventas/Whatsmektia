@@ -11183,10 +11183,10 @@ def enviar_manual():
                         archivo_info = f"📷 Imagen: {archivo.filename}"
                         
                     elif file_ext in ['.mp3', '.ogg', '.wav', '.m4a']:
-                        # Audio (Intentar enviar como audio, o documento si falla)
-                        app.logger.info(f"🎵 Enviando como audio...")
-                        # Nota: Asegúrate de tener enviar_audio implementado o usa enviar_documento
-                        sent_file = enviar_documento(numero, public_url, archivo.filename, config)
+                        # Audio (Usar la función especializada para audio)
+                        # Nota: La función enviar_mensaje_voz en whatsapp.py intentará enviar como 'audio' y, si falla, como 'document'.
+                        app.logger.info(f"🎵 Enviando como audio (usando función de voz)...")
+                        sent_file = enviar_mensaje_voz(numero, public_url, config)
                         archivo_info = f"🎵 Audio: {archivo.filename}"
                         
                     else:
@@ -11210,7 +11210,6 @@ def enviar_manual():
                 except Exception as file_error:
                     app.logger.error(f"🔴 Excepción enviando archivo: {file_error}")
                     flash('❌ Error interno al procesar el archivo', 'error')
-                    # No borramos el archivo inmediatamente para permitir debug si es necesario
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
@@ -11219,7 +11218,7 @@ def enviar_manual():
         # Lógica: Enviar texto SI:
         # a) No había archivo
         # b) Había archivo pero falló el envío (fallback para que al menos llegue el texto)
-        # c) Había archivo, se envió bien, PERO NO es imagen (las imágenes llevan el texto pegado, los documentos no)
+        # c) Había archivo, se envió bien, PERO NO es imagen (las imágenes llevan el texto pegado, los documentos/audio no)
         
         should_send_text = False
         if texto:
@@ -11228,7 +11227,7 @@ def enviar_manual():
             elif archivo and not mensaje_enviado:
                 should_send_text = True # Fallback si falla archivo
             elif archivo and mensaje_enviado and file_ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                should_send_text = True # Documentos separan el texto
+                should_send_text = True # Documentos y Audio separan el texto del cuerpo del mensaje
         
         if should_send_text:
             try:
@@ -11270,7 +11269,7 @@ def enviar_manual():
             cursor.close()
             conn.close()
             
-            # Actualizar Kanban
+            # Actualizar Kanban (mover a "Esperando Respuesta" = 3)
             try:
                 actualizar_columna_chat(numero, 3, config)
             except: pass
