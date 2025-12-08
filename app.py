@@ -3502,6 +3502,23 @@ def completar_autorizacion():
         app.logger.error(traceback.format_exc())
         return f"❌ Error: {str(e)}"
      
+def _ensure_precios_subscription_columns(config=None):
+    """Asegura que la tabla `precios` tenga las columnas para suscripciones."""
+    try:
+        conn = get_db_connection(config)
+        cur = conn.cursor()
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'inscripcion'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN inscripcion DECIMAL(10,2) DEFAULT 0.00")
+        cur.execute("SHOW COLUMNS FROM precios LIKE 'mensualidad'")
+        if cur.fetchone() is None:
+            cur.execute("ALTER TABLE precios ADD COLUMN mensualidad DECIMAL(10,2) DEFAULT 0.00")
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        app.logger.warning(f"⚠️ No se pudo asegurar columnas de suscripción en precios: {e}")
+
 # Coloca esta función cerca de obtener_siguiente_asesor o donde definas ALERT_NUMBER.
 def obtener_numeros_a_excluir(config=None):
     if config is None:
@@ -11855,7 +11872,6 @@ def configuracion_precio_guardar():
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor()
-
         # Ensure subscription columns exist in precios table
         try:
             _ensure_precios_subscription_columns(config)
