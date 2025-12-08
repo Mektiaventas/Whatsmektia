@@ -3,6 +3,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 import hashlib
 import time
+import shutil # Importamos librería para borrar carpetas
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -10589,10 +10590,10 @@ def diagnostico():
 @app.route('/configuracion/precios/vaciar', methods=['POST'])
 @login_required
 def configuracion_precios_vaciar():
-    """Elimina todos los registros de la tabla precios."""
+    """Elimina todos los registros de la tabla precios y sus imágenes físicas."""
     config = obtener_configuracion_por_host()
     
-    # Verificación de seguridad extra: Solo admins
+    # Verificación de seguridad
     au = session.get('auth_user') or {}
     if str(au.get('servicio') or '').strip().lower() != 'admin':
         flash('❌ No tienes permisos para vaciar la tabla.', 'error')
@@ -10603,14 +10604,48 @@ def configuracion_precios_vaciar():
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # Usamos TRUNCATE para reiniciar los IDs autoincrementales y ser más rápido
-        # Si tienes llaves foráneas estrictas, usa DELETE FROM precios
+        # 1. Vaciar la Base de Datos
         cursor.execute("TRUNCATE TABLE precios") 
+        # Si usas imagenes_productos también deberías vaciarla:
+        # cursor.execute("TRUNCATE TABLE imagenes_productos") 
         
         conn.commit()
         cursor.close()
-        flash('✅ La tabla de productos ha sido vaciada correctamente.', 'success')
-        app.logger.info(f"🗑️ Tabla de precios vaciada por usuario {au.get('user')}")
+
+        # ---------------------------------------------------------
+        # 2. Borrar archivos físicos (Equivalente a rm -r /ruta/*)
+        # ---------------------------------------------------------
+        try:
+            
+            # Esta función ya calcula la ruta: .../uploads/productos/tu_subdominio
+            productos_dir, tenant_slug = get_productos_dir_for_config(config)
+            
+            app.logger.info(f"🗑️ Intentando vaciar carpeta: {productos_dir}")
+
+            # Verificar que el directorio existe antes de intentar borrar
+            if os.path.exists(productos_dir):
+                # Iterar sobre cada archivo/carpeta dentro del directorio del tenant
+                for filename in os.listdir(productos_dir):
+                    file_path = os.path.join(productos_dir, filename)
+                    try:
+                        if os.path.isfile(file_path) or os.path.islink(file_path):
+                            os.unlink(file_path)  # Borrar archivo
+                        elif os.path.isdir(file_path):
+                            shutil.rmtree(file_path) # Borrar subcarpeta
+                    except Exception as e:
+                        app.logger.warning(f"⚠️ No se pudo borrar {file_path}: {e}")
+                
+                app.logger.info(f"✅ Carpeta de imágenes vaciada: {productos_dir}")
+            else:
+                app.logger.info("ℹ️ La carpeta de productos no existía, nada que borrar.")
+
+        except Exception as e_files:
+            app.logger.error(f"🔴 Error borrando archivos físicos: {e_files}")
+            # No detenemos el flujo, ya que la BD sí se borró
+        # ---------------------------------------------------------
+
+        flash('✅ Tabla de precios y carpeta de imágenes vaciadas correctamente.', 'success')
+        app.logger.info(f"🗑️ Catálogo vaciado completo por usuario {au.get('user')}")
         
     except Exception as e:
         app.logger.error(f"🔴 Error vaciando tabla precios: {e}")
