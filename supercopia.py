@@ -9354,6 +9354,40 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     """
     Flujo unificado para procesar un mensaje entrante.
     """ 
+    # --- INICIO CORRECCIÓN: VERIFICAR ESTADO IA (AÑADE ESTO) ---
+    # 1. Obtener estado actual de la IA (Priorizar memoria, sino leer DB)
+    ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
+        
+    # Si el estado no está en memoria, hacer una lectura defensiva de la DB
+    if numero not in IA_ESTADOS:
+            try:
+                conn_check = get_db_connection(config)
+                cursor_check = conn_check.cursor(dictionary=True)
+                cursor_check.execute("SELECT ia_activada FROM contactos WHERE numero_telefono = %s", (numero,))
+                result_check = cursor_check.fetchone()
+                ia_activa = True if result_check is None or result_check.get('ia_activada') is None else bool(result_check.get('ia_activada'))
+                IA_ESTADOS[numero] = {'activa': ia_activa}
+                cursor_check.close(); conn_check.close()
+            except Exception as e:
+                app.logger.warning(f"⚠️ Fallo al leer estado IA de DB para {numero}: {e}")
+                ia_activa = True # Fallback a ON
+        
+    # 2. Si la IA no está activa, registrar un mensaje de sistema y salir
+    if not ia_activa:
+        app.logger.info(f"🚫 IA DESACTIVADA para {numero}. Omitiendo procesamiento y respuesta.")
+            
+        # Registrar una "respuesta" para marcar el mensaje como leído en Kanban
+        # Se usa el mensaje del usuario como la respuesta (la IA no interviene)
+        if incoming_saved:
+            # Si el mensaje ya fue guardado, actualizará la respuesta a una nota
+            nota_manual = "[Modo Manual Activo: IA Desactivada]"
+            actualizar_respuesta(numero, texto, nota_manual, config, respuesta_tipo='nota_manual')
+                
+            # Mover a la columna "En Conversación" (ID 2)
+            actualizar_columna_chat(numero, 2, config)
+                
+        return True # Proceso manejado (se sale sin llamar a DeepSeek)
+    # --- FIN CORRECCIÓN: VERIFICAR ESTADO IA ---
     try:
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
         try:
