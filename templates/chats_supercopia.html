@@ -448,244 +448,91 @@
         </style>
 
         <script>
-            function setupAudioRecorder() {
-    const recordBtn = document.getElementById('record-audio-btn'); // Botón de micrófono
-    const audioInput = document.getElementById('audio-data-input'); // Input hidden
-    const sendBtn = document.querySelector('.send-btn');
-    
-    if (!recordBtn || !audioInput) return;
+            // Funciones para manejar el textarea mejorado
+            function handleMessageKeyDown(event) {
+                if (event.key === 'Enter') {
+                    if (event.shiftKey) {
+                        // Shift+Enter: Insertar nueva línea
+                        event.preventDefault();
+                        const textarea = event.target;
+                        const start = textarea.selectionStart;
+                        const end = textarea.selectionEnd;
+                        const value = textarea.value;
 
-    let mediaRecorder;
-    let audioChunks = [];
-    let isRecording = false;
+                        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
+                        textarea.selectionStart = textarea.selectionEnd = start + 1;
 
-    // Crear elemento visual para el estado de grabación si no existe
-    let statusLabel = document.getElementById('recording-status');
-    if (!statusLabel) {
-        statusLabel = document.createElement('span');
-        statusLabel.id = 'recording-status';
-        statusLabel.style.display = 'none';
-        statusLabel.style.color = '#e53935';
-        statusLabel.style.fontWeight = 'bold';
-        statusLabel.style.marginLeft = '10px';
-        recordBtn.parentNode.insertBefore(statusLabel, recordBtn.nextSibling);
-    }
+                        // Actualizar altura
+                        autoResizeTextarea(textarea);
+                    } else {
+                        // Enter solo: Enviar mensaje inmediatamente
+                        event.preventDefault();
+                        const form = document.getElementById('messageForm');
+                        const textarea = document.getElementById('mensaje-texto');
+                        const fileInput = document.getElementById('file-input');
 
-    recordBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
+                        // Validar que haya contenido para enviar - CORREGIDO
+                        const hasText = textarea.value.trim() !== '';
+                        const hasFile = fileInput.files.length > 0;
 
-        if (!isRecording) {
-            // --- INICIAR GRABACIÓN ---
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
-                audioChunks = [];
+                        // SOLO validar si no hay absolutamente nada
+                        if (!hasText && !hasFile) {
+                            // No hay nada que enviar
+                            return;
+                        }
 
-                mediaRecorder.ondataavailable = event => {
-                    audioChunks.push(event.data);
-                };
-
-                mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/ogg; codecs=opus' });
-                    const reader = new FileReader();
-                    reader.readAsDataURL(audioBlob);
-                    reader.onloadend = () => {
-                        // Guardar base64 en el input hidden
-                        audioInput.value = reader.result;
-                        console.log("🎤 Audio procesado y listo para enviar");
-                        
-                        // Cambiar botón de enviar para indicar que hay audio
-                        sendBtn.innerHTML = '🎤 Enviar Audio';
-                        sendBtn.classList.add('ready-to-send');
-                    };
-                };
-
-                mediaRecorder.start();
-                isRecording = true;
-                recordBtn.innerHTML = '⏹️'; // Icono de Stop
-                recordBtn.classList.add('recording');
-                statusLabel.innerText = "Grabando...";
-                statusLabel.style.display = 'inline';
-                
-            } catch (err) {
-                console.error("Error accediendo al micrófono:", err);
-                alert("No se pudo acceder al micrófono. Verifica los permisos.");
+                        // Enviar el formulario inmediatamente
+                        form.submit();
+                    }
+                }
             }
-        } else {
-            // --- DETENER GRABACIÓN ---
-            mediaRecorder.stop();
-            isRecording = false;
-            recordBtn.innerHTML = '🎤'; // Volver a icono micro
-            recordBtn.classList.remove('recording');
-            statusLabel.innerText = "Audio guardado. Presiona Enviar.";
-            
-            // Detener el stream
-            mediaRecorder.stream.getTracks().forEach(track => track.stop());
-        }
-    });
-}
 
-// Asegurar que hay un input hidden para el audio dentro del form
-document.addEventListener('DOMContentLoaded', function() {
-    const form = document.getElementById('messageForm');
-    if (form && !document.getElementById('audio-data-input')) {
-        const input = document.createElement('input');
-        input.type = 'hidden';
-        input.name = 'audio_data';
-        input.id = 'audio-data-input';
-        form.appendChild(input);
-    }
-    
-    // Inicializar la grabadora
-    setupAudioRecorder();
-});
-</script>
+            function autoResizeTextarea(textarea) {
+                // Guardar la altura actual antes de resetear
+                const currentHeight = textarea.style.height;
 
-<style>
-.recording {
-    animation: pulse 1.5s infinite;
-    background-color: #ffebee !important;
-    color: red !important;
-    border: 1px solid red !important;
-}
-@keyframes pulse {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.1); }
-    100% { transform: scale(1); }
-}
-.ready-to-send {
-    background-color: #00897b !important; /* Color diferente para indicar listo */
-}
-</style>
-        <script>
-            // Asegurar que hay un input hidden para el audio dentro del form
+                // Resetear altura para calcular la nueva
+                textarea.style.height = 'auto';
+
+                // Calcular nueva altura sin límites
+                const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
+
+                // Aplicar nueva altura
+                textarea.style.height = newHeight + 'px';
+
+                // Si el contenido se redujo mucho, mantener un tamaño mínimo
+                if (textarea.value === '' || textarea.value.trim() === '') {
+                    textarea.style.height = '44px';
+                }
+            }
+
+            // Inicializar altura del textarea al cargar
             document.addEventListener('DOMContentLoaded', function () {
-                const form = document.getElementById('messageForm');
-                if (form && !document.getElementById('audio-data-input')) {
-                    const input = document.createElement('input');
-                    input.type = 'hidden';
-                    input.name = 'audio_data';
-                    input.id = 'audio-data-input';
-                    form.appendChild(input);
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea) {
+                    autoResizeTextarea(textarea);
                 }
-
-                // Inicializar la grabadora
-                setupAudioRecorder();
             });
-        </script>
 
-        <style>
-            .recording {
-                animation: pulse 1.5s infinite;
-                background-color: #ffebee !important;
-                color: red !important;
-                border: 1px solid red !important;
-            }
-
-            @keyframes pulse {
-                0% {
-                    transform: scale(1);
-                }
-
-                50% {
-                    transform: scale(1.1);
-                }
-
-                100% {
-                    transform: scale(1);
+            // Función para resetear el textarea si está vacío
+            function resetTextareaIfEmpty() {
+                const textarea = document.getElementById('mensaje-texto');
+                if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
+                    textarea.style.height = '44px';
                 }
             }
 
-            .ready-to-send {
-                background-color: #00897b !important; /* Color diferente para indicar listo */
-            }
-        </style>
-        <script>
-        // Funciones para manejar el textarea mejorado
-        function handleMessageKeyDown(event) {
-        if (event.key === 'Enter') {
-        if (event.shiftKey) {
-        // Shift+Enter: Insertar nueva línea
-        event.preventDefault();
-        const textarea = event.target;
-        const start = textarea.selectionStart;
-        const end = textarea.selectionEnd;
-        const value = textarea.value;
-
-        textarea.value = value.substring(0, start) + '\n' + value.substring(end);
-        textarea.selectionStart = textarea.selectionEnd = start + 1;
-
-        // Actualizar altura
-        autoResizeTextarea(textarea);
-        } else {
-        // Enter solo: Enviar mensaje inmediatamente
-        event.preventDefault();
-        const form = document.getElementById('messageForm');
-        const textarea = document.getElementById('mensaje-texto');
-        const fileInput = document.getElementById('file-input');
-
-        // Validar que haya contenido para enviar - CORREGIDO
-        const hasText = textarea.value.trim() !== '';
-        const hasFile = fileInput.files.length > 0;
-
-        // SOLO validar si no hay absolutamente nada
-        if (!hasText && !hasFile) {
-        // No hay nada que enviar
-        return;
-        }
-
-        // Enviar el formulario inmediatamente
-        form.submit();
-        }
-        }
-        }
-
-        function autoResizeTextarea(textarea) {
-        // Guardar la altura actual antes de resetear
-        const currentHeight = textarea.style.height;
-
-        // Resetear altura para calcular la nueva
-        textarea.style.height = 'auto';
-
-        // Calcular nueva altura sin límites
-        const newHeight = Math.max(textarea.scrollHeight, 44); // Mínimo 44px
-
-        // Aplicar nueva altura
-        textarea.style.height = newHeight + 'px';
-
-        // Si el contenido se redujo mucho, mantener un tamaño mínimo
-        if (textarea.value === '' || textarea.value.trim() === '') {
-        textarea.style.height = '44px';
-        }
-        }
-
-        // Inicializar altura del textarea al cargar
-        document.addEventListener('DOMContentLoaded', function () {
-        const textarea = document.getElementById('mensaje-texto');
-        if (textarea) {
-        autoResizeTextarea(textarea);
-        }
-        });
-
-        // Función para resetear el textarea si está vacío
-        function resetTextareaIfEmpty() {
-        const textarea = document.getElementById('mensaje-texto');
-        if (textarea && (textarea.value === '' || textarea.value.trim() === '')) {
-        textarea.style.height = '44px';
-        }
-        }
-
-        // Observar cambios en el textarea para resetear cuando esté vacío
-        document.addEventListener('input', function (event) {
-        if (event.target.id === 'mensaje-texto') {
-        // Si el usuario borra todo el contenido, resetear altura
-        if (event.target.value === '') {
-        setTimeout(() => {
-        resetTextareaIfEmpty();
-        }, 100);
-        }
-        }
-        });
+            // Observar cambios en el textarea para resetear cuando esté vacío
+            document.addEventListener('input', function (event) {
+                if (event.target.id === 'mensaje-texto') {
+                    // Si el usuario borra todo el contenido, resetear altura
+                    if (event.target.value === '') {
+                        setTimeout(() => {
+                            resetTextareaIfEmpty();
+                        }, 100);
+                    }
+                }
+            });
         </script>
         {% else %}
         <div class="ia-active-message">
@@ -796,7 +643,7 @@ document.addEventListener('DOMContentLoaded', function() {
         overflow-y: auto;
     }
 
-
+    /* Chat items & messages */
     .chat-items {
         display: flex;
         flex-direction: column;
@@ -810,14 +657,14 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     .card-content {
-        padding: 10px 8px; 
+        padding: 10px 8px; /* Más padding vertical */
         display: flex;
         flex-direction: column;
-        gap: 4px; 
+        gap: 4px; /* Menor gap para más espacio */
         color: var(--text-light);
         position: relative;
-        min-height: 80px; 
-        padding-bottom: 16px; 
+        min-height: 80px; /* Aumentado a 80px */
+        padding-bottom: 16px; /* Espacio extra en la parte inferior */
     }
 
     .card-title-row {
@@ -854,14 +701,14 @@ document.addEventListener('DOMContentLoaded', function() {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
-        max-width: 200px !important; 
-        margin-right: auto !important; 
+        max-width: 200px !important; /* Reducido de 280px a 200px */
+        margin-right: auto !important; /* Fuerza a estar más a la izquierda */
         flex: 1;
     }
 
     .card-time {
         position: absolute !important;
-        bottom: 4px !important;
+        bottom: 4px !important; /* Cambiado de 12px a 4px - MUCHO más abajo */
         right: 8px !important;
         font-size: 0.65rem !important; /* Un poco más pequeño */
         opacity: 0.85;
@@ -879,6 +726,7 @@ document.addEventListener('DOMContentLoaded', function() {
         opacity: 0.95;
     }
 
+    /* Messages panel */
     .msgs-wrap-v2 {
         flex: 1 1 auto;
         overflow-y: auto;
