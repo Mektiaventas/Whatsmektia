@@ -77,6 +77,17 @@
                         <span class="tab-title">Template Columnas</span>
                     </div>
                 </button>
+                {% if is_admin %}
+                <form action="{{ url_for('configuracion_precios_vaciar') }}" method="POST" style="display:inline;"
+                      onsubmit="return confirm('⚠️ ¡PELIGRO! ⚠️\n\n¿Estás seguro de que quieres VACIAR toda la tabla de precios?\n\nEsto eliminará TODOS los productos permanentemente.\nEsta acción NO se puede deshacer.');">
+                    <button type="submit" class="btn mt-3" style="background-color: #dc2626; color: white; margin-left: 10px;" title="Eliminar todos los productos">
+                        <div class="tab-icon">🗑️</div>
+                        <div>
+                            <span class="tab-title">Vaciar Tabla</span>
+                        </div>
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
     </div>

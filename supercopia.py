@@ -45,6 +45,7 @@ import os # Asegurar que 'os' también esté importado/disponible
 
 # En supercopia.py, define la lista de leads predefinidos
 LEADS_PREDEFINIDOS = ['Nuevo', 'Frio', 'Caliente', 'Cerrado']
+
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
@@ -424,6 +425,33 @@ def descargar_template():
         )
     
     return "Error generando el archivo", 500
+
+@app.route('/configuracion/precios/vaciar', methods=['POST'])
+@login_required
+def configuracion_precios_vaciar():
+    """Endpoint para vaciar la tabla de precios."""
+    config = obtener_configuracion_por_host()
+    # Verificacion de seguridad extra, solo admins
+    au = session.get('auth_user') or {}
+    if str(au.get('servicio') or '').strip().lower() != 'admin':
+        flash('❌ No tienes permisos para vaciar la tabla de precios.', 'error'))
+        return redirect(url_for('configuracion_precios'))
+    conn = None 
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        cursor.execute("TRUNCATE precios")
+        conn.commit()
+        cursor.close()
+        flash('✅ Tabla de precios vaciada correctamente.', 'success')
+        app.logger.info(f"✅ Tabla de precios vaciada por usuario '{au.get('user')}'")
+    except Exception as e:
+        app.logger.error(f"🔴 Error vaciando tabla de precios: {e}")
+        if conn: conn.rollback()
+        flash('❌ Error vaciando la tabla de precios.', 'error')
+    finally:
+        if conn: conn.close()
+    return redirect(url_for('configuracion_precios'))
 
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: intenta encontrar la fila en la tabla usuarios de CLIENTES_DB por dominio/subdominio."""
