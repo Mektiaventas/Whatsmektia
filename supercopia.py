@@ -9357,7 +9357,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
     if not ia_activa:
         app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento IA.")
-        return False
+        return False # <-- ESTE RETURN DEBE SER TRUE
     try:
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
         try:
