@@ -11117,6 +11117,7 @@ def toggle_ai(numero, config=None):
 
 @app.route('/send-manual', methods=['POST'])
 def enviar_manual():
+    """Envía mensajes manuales desde la web, ahora soporta archivos con o sin texto"""
     config = obtener_configuracion_por_host()
     
     try:
@@ -11140,148 +11141,145 @@ def enviar_manual():
         
         # 1. Manejar archivo si existe
         if archivo and archivo.filename:
-            app.logger.info(f"📤 Procesando archivo manual: {archivo.filename}")
+            app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
             
             if allowed_file(archivo.filename):
-                # Guardar archivo
+                # Guardar archivo temporalmente
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
                 filepath = os.path.join(UPLOAD_FOLDER, filename)
                 archivo.save(filepath)
-                app.logger.info(f"💾 Archivo guardado localmente: {filepath}")
+                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
                 
-                # Determinar extensión
+                # Determinar tipo de archivo
                 file_ext = os.path.splitext(filename)[1].lower()
                 
                 try:
-                    # --- CORRECCIÓN DE URL PÚBLICA ---
-                    # 1. Intentar obtener el dominio de la config, si no, del Host header (mejor para proxies)
-                    dominio = config.get('dominio')
-                    if not dominio:
-                        dominio = request.headers.get('Host')
+                    # CONSTRUIR URL PÚBLICA CORRECTA para WhatsApp
+                    dominio = config.get('dominio') or request.url_root.rstrip('/')
+                    if not dominio.startswith('http'):
+                        dominio = f"https://{dominio}"
+                    public_url = f"{dominio}/uploads/{filename}"
                     
-                    # 2. Limpiar protocolo si existe
-                    if '://' in dominio:
-                        dominio = dominio.split('://')[1]
+                    app.logger.info(f"🌐 URL pública generada: {public_url}")
                     
-                    # 3. Forzar HTTPS (WhatsApp lo requiere obligatoriamente)
-                    # Solo usar http si es estrictamente localhost para pruebas internas
-                    if 'localhost' in dominio or '127.0.0.1' in dominio:
-                        protocolo = 'http'
-                    else:
-                        protocolo = 'https'
-                        
-                    public_url = f"{protocolo}://{dominio}/uploads/{filename}"
-                    app.logger.info(f"🌐 URL enviada a WhatsApp: {public_url}")
-                    
-                    sent_file = False
-
-                    # ENVIAR A WHATSAPP
+                    # ENVIAR ARCHIVO REALMENTE POR WHATSAPP
                     if file_ext in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                        # Imagen (El texto va como caption)
-                        app.logger.info(f"🖼️ Enviando como imagen...")
-                        sent_file = enviar_imagen(numero, public_url, texto if texto else "Imagen enviada", config)
+                        # Es imagen - enviar como imagen
+                        app.logger.info(f"🖼️ Enviando imagen: {archivo.filename}")
+                        enviar_imagen(numero, public_url, texto if texto else "Imagen enviada desde web", config)
                         archivo_info = f"📷 Imagen: {archivo.filename}"
                         
-                    elif file_ext in ['.mp3', '.ogg', '.wav', '.m4a']:
-                        # Audio (Usar la función especializada para audio)
-                        # Nota: La función enviar_mensaje_voz en whatsapp.py intentará enviar como 'audio' y, si falla, como 'document'.
-                        app.logger.info(f"🎵 Enviando como audio (usando función de voz)...")
-                        sent_file = enviar_mensaje_voz(numero, public_url, config)
-                        archivo_info = f"🎵 Audio: {archivo.filename}"
-                        
                     else:
-                        # Documento General (PDF, Excel, Video, etc.)
-                        app.logger.info(f"📄 Enviando como documento...")
-                        sent_file = enviar_documento(numero, public_url, archivo.filename, config)
+                        # Para todos los demás tipos, enviar como documento
+                        app.logger.info(f"📄 Enviando documento: {archivo.filename}")
+                        enviar_documento(numero, public_url, archivo.filename, config)
                         
-                        # Iconos para el log
-                        if file_ext == '.pdf': archivo_info = f"📕 PDF: {archivo.filename}"
-                        elif file_ext in ['.xls', '.xlsx', '.csv']: archivo_info = f"📗 Excel: {archivo.filename}"
-                        elif file_ext in ['.mp4', '.mov']: archivo_info = f"🎬 Video: {archivo.filename}"
-                        else: archivo_info = f"📎 Archivo: {archivo.filename}"
-
-                    if sent_file:
-                        mensaje_enviado = True
-                        app.logger.info(f"✅ Archivo aceptado por WhatsApp: {archivo.filename}")
-                    else:
-                        app.logger.error("🔴 La API de WhatsApp devolvió False. Posible error de URL o formato.")
-                        flash('❌ Error: WhatsApp no pudo descargar el archivo. Verifica que la URL sea pública y HTTPS.', 'error')
+                        # Determinar el tipo para el mensaje informativo
+                        if file_ext == '.pdf':
+                            archivo_info = f"📕 PDF: {archivo.filename}"
+                        elif file_ext in ['.doc', '.docx']:
+                            archivo_info = f"📘 Documento Word: {archivo.filename}"
+                        elif file_ext in ['.xls', '.xlsx', '.csv']:
+                            archivo_info = f"📗 Hoja de cálculo: {archivo.filename}"
+                        elif file_ext in ['.ppt', '.pptx']:
+                            archivo_info = f"📙 Presentación: {archivo.filename}"
+                        elif file_ext in ['.zip', '.rar', '.7z']:
+                            archivo_info = f"📦 Archivo comprimido: {archivo.filename}"
+                        elif file_ext in ['.txt', '.rtf']:
+                            archivo_info = f"📄 Archivo de texto: {archivo.filename}"
+                        elif file_ext in ['.mp4', '.mov', '.webm', '.avi', '.mkv', '.ogg', '.mpeg']:
+                            archivo_info = f"🎬 Video: {archivo.filename}"
+                        elif file_ext in ['.mp3', '.wav', '.ogg', '.m4a']:
+                            archivo_info = f"🎵 Audio: {archivo.filename}"
+                        else:
+                            archivo_info = f"📎 Archivo: {archivo.filename}"
+                    
+                    mensaje_enviado = True
+                    app.logger.info(f"✅ Archivo enviado exitosamente a {numero}: {archivo.filename}")
                     
                 except Exception as file_error:
-                    app.logger.error(f"🔴 Excepción enviando archivo: {file_error}")
-                    flash('❌ Error interno al procesar el archivo', 'error')
+                    app.logger.error(f"🔴 Error enviando archivo: {file_error}")
+                    app.logger.error(traceback.format_exc())
+                    flash('❌ Error al enviar el archivo', 'error')
+                    # Limpiar archivo temporal en caso de error
+                    try:
+                        if filepath and os.path.exists(filepath):
+                            os.remove(filepath)
+                    except:
+                        pass
+                    return redirect(url_for('ver_chat', numero=numero))
+                
+                # NO limpiar archivo temporal inmediatamente - dejar que WhatsApp lo descargue
+                # WhatsApp necesita tiempo para descargar el archivo desde la URL pública
+                
             else:
                 flash('❌ Tipo de archivo no permitido', 'error')
                 return redirect(url_for('ver_chat', numero=numero))
         
-        # 2. Manejar texto
-        # Lógica: Enviar texto SI:
-        # a) No había archivo
-        # b) Había archivo pero falló el envío (fallback para que al menos llegue el texto)
-        # c) Había archivo, se envió bien, PERO NO es imagen (las imágenes llevan el texto pegado, los documentos/audio no)
-        
-        should_send_text = False
+        # 2. Manejar texto si existe (puede ser adicional al archivo o solo texto)
         if texto:
-            if not archivo:
-                should_send_text = True
-            elif archivo and not mensaje_enviado:
-                should_send_text = True # Fallback si falla archivo
-            elif archivo and mensaje_enviado and file_ext not in ['.jpg', '.jpeg', '.png', '.gif', '.webp']:
-                should_send_text = True # Documentos y Audio separan el texto del cuerpo del mensaje
-        
-        if should_send_text:
             try:
-                app.logger.info(f"📤 Enviando texto a {numero}...")
-                sent_text = enviar_mensaje(numero, texto, config)
-                
-                if sent_text:
-                    mensaje_enviado = True
-                    respuesta_texto = texto
-                    if archivo_info and mensaje_enviado:
-                        respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
-                else:
-                    app.logger.error("🔴 API WhatsApp falló al enviar texto.")
-                    if not mensaje_enviado: # Si falló archivo Y texto
-                        flash('❌ Error al enviar el mensaje', 'error')
-                        
+                app.logger.info(f"📤 Enviando texto a {numero}: {texto[:50]}...")
+                enviar_mensaje(numero, texto, config)
+                respuesta_texto = texto
+                if archivo_info:
+                    respuesta_texto = f"{archivo_info}\n\n💬 {texto}"
+                mensaje_enviado = True
+                app.logger.info(f"✅ Texto enviado exitosamente a {numero}")
             except Exception as text_error:
                 app.logger.error(f"🔴 Error enviando texto: {text_error}")
+                if not mensaje_enviado:  # Si tampoco se pudo enviar el archivo
+                    flash('❌ Error al enviar el mensaje', 'error')
+                    return redirect(url_for('ver_chat', numero=numero))
         
-        # 3. GUARDAR EN BASE DE DATOS
+        # 3. GUARDAR EN BASE DE DATOS (como mensaje manual)
         if mensaje_enviado:
             conn = get_db_connection(config)
             cursor = conn.cursor()
             
             mensaje_historial = "[Mensaje manual desde web]"
+            respuesta_historial = respuesta_texto if respuesta_texto else archivo_info
             
-            # Construir qué se guarda en el historial
-            final_response_db = respuesta_texto if respuesta_texto else archivo_info
-            
+            # --- CAMBIO: Extraer solo el subdominio ---
             raw_domain = config.get('dominio', '')
             dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+            # ------------------------------------------
             
             cursor.execute(
                 "INSERT INTO conversaciones (numero, mensaje, respuesta, timestamp, dominio) VALUES (%s, %s, %s, UTC_TIMESTAMP(), %s);",
-                (numero, mensaje_historial, final_response_db, dominio_actual)
+                (numero, mensaje_historial, respuesta_historial, dominio_actual)
             )
             
             conn.commit()
             cursor.close()
             conn.close()
             
-            # Actualizar Kanban (mover a "Esperando Respuesta" = 3)
+            # 4. ACTUALIZAR KANBAN (mover a "Esperando Respuesta")
             try:
-                actualizar_columna_chat(numero, 3, config)
-            except: pass
+                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta' en Kanban")
+            except Exception as e:
+                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
             
-            flash('✅ Mensaje enviado correctamente', 'success')
+            # 5. MENSAJE DE CONFIRMACIÓN
+            if archivo and texto:
+                flash('✅ Archivo y mensaje enviados correctamente', 'success')
+            elif archivo:
+                flash('✅ Archivo enviado correctamente', 'success')
+            else:
+                flash('✅ Mensaje enviado correctamente', 'success')
+                
+            app.logger.info(f"✅ Mensaje manual enviado con éxito a {numero}")
+            
+        else:
+            flash('❌ No se pudo enviar el mensaje', 'error')
             
     except Exception as e:
-        flash(f'❌ Error general: {str(e)}', 'error')
+        flash('❌ Error al enviar el mensaje', 'error')
         app.logger.error(f"🔴 Error en enviar_manual: {e}")
         app.logger.error(traceback.format_exc())
     
-    return redirect(url_for('ver_chat', numero=numero))
+    return redirect(url_for('ver_chat', numero=numero)) 
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
