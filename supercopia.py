@@ -339,9 +339,6 @@ def public_image_url(imagen_url):
 
         if not fname:
             return imagen_url
-
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Priorizar la búsqueda en la carpeta de subidas general /uploads/
         # (para chats de usuarios) y si falla, buscar en /uploads/productos/
         try:
             # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
@@ -425,42 +422,6 @@ def descargar_template():
         )
     
     return "Error generando el archivo", 500
-
-@app.route('/configuracion/precios/vaciar', methods=['POST'])
-
-def configuracion_precios_vaciar():
-    """Elimina todos los registros de la tabla precios."""
-    config = obtener_configuracion_por_host()
-    
-    # Verificación de seguridad extra: Solo admins
-    au = session.get('auth_user') or {}
-    if str(au.get('servicio') or '').strip().lower() != 'admin':
-        flash('❌ No tienes permisos para vaciar la tabla.', 'error')
-        return redirect(url_for('configuracion_precios'))
-
-    conn = None
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        
-        # Usamos TRUNCATE para reiniciar los IDs autoincrementales y ser más rápido
-        # Si tienes llaves foráneas estrictas, usa DELETE FROM precios
-        cursor.execute("TRUNCATE TABLE precios") 
-        
-        conn.commit()
-        cursor.close()
-        flash('✅ La tabla de productos ha sido vaciada correctamente.', 'success')
-        app.logger.info(f"🗑️ Tabla de precios vaciada por usuario {au.get('user')}")
-        
-    except Exception as e:
-        app.logger.error(f"🔴 Error vaciando tabla precios: {e}")
-        if conn: conn.rollback()
-        flash(f'❌ Error al vaciar la tabla: {str(e)}', 'error')
-        
-    finally:
-        if conn: conn.close()
-
-    return redirect(url_for('configuracion_precios'))
 
 def _find_cliente_in_clientes_by_domain(dominio):
     """Helper: intenta encontrar la fila en la tabla usuarios de CLIENTES_DB por dominio/subdominio."""
@@ -10624,6 +10585,41 @@ def diagnostico():
         
     except Exception as e:
         return jsonify({'error': str(e)})    
+
+@app.route('/configuracion/precios/vaciar', methods=['POST'])
+def configuracion_precios_vaciar():
+    """Elimina todos los registros de la tabla precios."""
+    config = obtener_configuracion_por_host()
+    
+    # Verificación de seguridad extra: Solo admins
+    au = session.get('auth_user') or {}
+    if str(au.get('servicio') or '').strip().lower() != 'admin':
+        flash('❌ No tienes permisos para vaciar la tabla.', 'error')
+        return redirect(url_for('configuracion_precios'))
+
+    conn = None
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor()
+        
+        # Usamos TRUNCATE para reiniciar los IDs autoincrementales y ser más rápido
+        # Si tienes llaves foráneas estrictas, usa DELETE FROM precios
+        cursor.execute("TRUNCATE TABLE precios") 
+        
+        conn.commit()
+        cursor.close()
+        flash('✅ La tabla de productos ha sido vaciada correctamente.', 'success')
+        app.logger.info(f"🗑️ Tabla de precios vaciada por usuario {au.get('user')}")
+        
+    except Exception as e:
+        app.logger.error(f"🔴 Error vaciando tabla precios: {e}")
+        if conn: conn.rollback()
+        flash(f'❌ Error al vaciar la tabla: {str(e)}', 'error')
+        
+    finally:
+        if conn: conn.close()
+
+    return redirect(url_for('configuracion_precios'))
 
 @app.route('/home')
 @login_required
