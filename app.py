@@ -169,7 +169,7 @@ NUMEROS_CONFIG = {
         'db_user': os.getenv("SUPAG_DB_USER"),                
         'db_password': os.getenv("SUPAG_DB_PASSWORD"),          
         'db_name': os.getenv("SUPAG_DB_NAME"),                  
-        'dominio': 'supagcopia.mektia.com',
+        'dominio': 'supagprueba.mektia.com',
         # Claves de Messenger
         'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SUPAG"),
         'messenger_page_id_env': 'SUPAG_MESSENGER_PAGE_ID',
