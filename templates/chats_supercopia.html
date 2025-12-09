@@ -2067,64 +2067,66 @@ function buildMessageKeyFor(m) {
 
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-    }
+}
+    // 🚨 FUNCIÓN toggleAudio CORREGIDA
     function toggleAudio(id, btn) {
         const audio = document.getElementById(id);
+        // Usamos .closest() para encontrar el contenedor principal
         const playerDiv = btn.closest('.audio-player');
         const bar = playerDiv?.querySelector('.audio-progress-bar');
         const durSpan = playerDiv?.querySelector('.audio-duration');
 
         if (!audio) return;
 
-        // Función para actualizar la duración y el progreso
+        // Función central para actualizar el tiempo y la barra
         const updateTimeDisplay = () => {
             if (durSpan) {
                 const current = audio.currentTime;
                 const total = audio.duration || 0;
 
-                // Mostrar tiempo actual / total si la duración está disponible
+                // Si la duración es válida (no NaN, no 0)
                 if (isFinite(total) && total > 0) {
                     const m_curr = Math.floor(current / 60);
                     const s_curr = Math.floor(current % 60).toString().padStart(2, '0');
                     const m_total = Math.floor(total / 60);
                     const s_total = Math.floor(total % 60).toString().padStart(2, '0');
-                    durSpan.textContent = `${m_curr}:${s_curr} / ${m_total}:${s_total}`;
-                } else {
-                    // Solo mostrar el tiempo transcurrido hasta que cargue la duración total
-                    const m_curr = Math.floor(current / 60);
-                    const s_curr = Math.floor(current % 60).toString().padStart(2, '0');
-                    durSpan.textContent = `${m_curr}:${s_curr}`;
-                }
 
-                if (bar && isFinite(total) && total > 0) {
-                    bar.style.width = (current / total) * 100 + '%';
-                } else if (bar) {
-                    bar.style.width = '0%'; // Ocultar o resetear si no hay duración
+                    // Mostrar tiempo actual / total
+                    durSpan.textContent = `${m_curr}:${s_curr} / ${m_total}:${s_total}`;
+
+                    if (bar) {
+                        bar.style.width = (current / total) * 100 + '%';
+                    }
                 }
             }
         };
 
-        if (audio.paused) {
-            // Establecer los listeners antes de intentar reproducir
-            audio.ontimeupdate = updateTimeDisplay;
-            audio.onloadedmetadata = updateTimeDisplay; // Asegurar que se muestre la duración total
-            audio.onended = () => { // Manejar el final de la reproducción
-                btn.textContent = '▶️';
-                audio.currentTime = 0; // Resetear el tiempo
-                updateTimeDisplay();
-            };
+        // Evento que se dispara al finalizar la reproducción
+        const onAudioEnded = () => {
+            btn.textContent = '▶️';
+            audio.currentTime = 0; // Resetear el tiempo
+            updateTimeDisplay();
+        };
 
-            // Intentar reproducir (debe ser asíncrono)
+        if (audio.paused) {
+            // 1. Establecer listeners de control
+            audio.ontimeupdate = updateTimeDisplay;
+            audio.onended = onAudioEnded;
+
+            // 2. Intentar reproducir (manejar la Promesa)
             audio.play().then(() => {
                 btn.textContent = '⏸️';
-                updateTimeDisplay(); // Actualizar inmediatamente
+                // También actualizamos el span para incluir el tiempo total si cargó
+                updateTimeDisplay();
             }).catch(error => {
                 console.error('Error al reproducir el audio:', error);
-                btn.textContent = '▶️'; // Asegurar que el botón se resetee
-                alert('No se pudo reproducir el audio. Verifique el formato o la ruta del archivo.');
+                // Si falla la reproducción (e.g., el navegador lo bloquea), resetear el botón
+                btn.textContent = '▶️';
+                // Opcional: alert('Error de reproducción: ' + error.message);
             });
 
         } else {
+            // Pausar
             audio.pause();
             btn.textContent = '▶️';
         }
@@ -2134,9 +2136,9 @@ function seekAudio(id, progressBar, evt) {
     const inner = progressBar.querySelector('.audio-progress-bar');
     const rect = progressBar.getBoundingClientRect();
     const clickX = evt.clientX - rect.left;
-    if (audio && audio.duration) {
+    if (audio && isFinite(audio.duration) && audio.duration > 0) {
         audio.currentTime = (clickX / rect.width) * audio.duration;
-        if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+        if (inner) inner.style.width = (audio.currentTime / audio.duration) * 100 + '%';
     }
 }
 
