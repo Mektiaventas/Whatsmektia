@@ -8403,10 +8403,10 @@ def enviar_audio_manual():
         app.logger.info(f"🎤 Procesando audio manual para {numero}")
         
         # Validar tipo de archivo
-        allowed_audio_types = ['audio/webm', 'audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/wav']
+        allowed_audio_types = ['audio/webm', 'audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/wav', 'audio/mp3']
         if audio_file.mimetype not in allowed_audio_types:
-            # Aunque la grabadora JS crea webm, lo guardaremos con extensión temporal
-            pass 
+            app.logger.warning(f"Tipo de audio no estándar: {audio_file.mimetype}, continuando...")
+            # Continuar aunque el tipo no sea exactamente el esperado
         
         # Validar tamaño (max 16MB para WhatsApp)
         max_size = 16 * 1024 * 1024  # 16MB
@@ -8419,128 +8419,156 @@ def enviar_audio_manual():
         
         # Guardar archivo temporalmente
         timestamp = int(time.time())
-        # Usamos una extensión .webm temporal si viene del JS, o el original
-        temp_ext = os.path.splitext(audio_file.filename)[1] or '.webm'
-        temp_filename = secure_filename(f"audio_manual_{timestamp}_{numero}{temp_ext}")
-        filepath = os.path.join(UPLOAD_FOLDER, temp_filename)
+        filename = secure_filename(f"audio_manual_{timestamp}_{numero}.ogg")
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
         
-        final_filepath = None
+        # Guardar archivo original
+        audio_file.save(filepath)
+        app.logger.info(f"💾 Audio guardado: {filepath}")
         
-        try:
-            # 1. Guardar archivo original (.webm o lo que venga del JS)
-            audio_file.save(filepath)
-            app.logger.info(f"💾 Audio temporal guardado: {filepath}")
-            
-            # 2. Convertir a formato OGG/Opus (requiere pydub + ffmpeg)
-            final_filename = secure_filename(f"audio_final_{timestamp}_{numero}.ogg")
-            ogg_path = os.path.join(UPLOAD_FOLDER, final_filename)
-            
+        # Variable para el archivo final
+        final_filepath = filepath
+        
+        # Intentar convertir a formato compatible si no es OGG
+        if not filename.lower().endswith('.ogg'):
             try:
-                from pydub import AudioSegment
-                # Usar AudioSegment para cargar y exportar a OGG/opus
-                audio = AudioSegment.from_file(filepath)
-                audio.export(ogg_path, format='ogg', codec='libopus')
-                final_filepath = ogg_path
-                app.logger.info(f"✅ Conversión a OGG/Opus exitosa: {final_filepath}")
-                
-                # Eliminar archivo original temporal
-                if os.path.exists(filepath):
-                    os.remove(filepath)
-            except ImportError:
-                app.logger.warning("⚠️ pydub no disponible. Usando archivo original sin convertir.")
-                final_filepath = filepath
-            except Exception as conv_error:
-                app.logger.error(f"🔴 Fallo en conversión de audio a OGG/Opus: {conv_error}")
-                final_filepath = filepath # Usar original
-            
-            filename = os.path.basename(final_filepath) # Usar el nombre del archivo final
-            
-            # 3. Construir URL pública
-            dominio = config.get('dominio') or request.url_root.rstrip('/')
-            if not dominio.startswith('http'):
-                dominio = f"https://{dominio}"
-            
-            # La URL usa el nombre del archivo FINAL
-            public_url = f"{dominio}/uploads/{filename}"
-            app.logger.info(f"🌐 URL pública del audio: {public_url}")
-            
-            # 4. Enviar a WhatsApp usando la función de mensaje de voz (necesita un URL)
-            success = enviar_mensaje_voz(numero, public_url, config)
-            
-            if success:
-                app.logger.info(f"✅ Audio enviado exitosamente a {numero}")
-                
-                # 5. Guardar en base de datos (con la URL pública y como respuesta del BOT/Manual)
-                conn = get_db_connection(config)
-                cursor = conn.cursor()
-                
-                # Extraer subdominio
-                raw_domain = config.get('dominio', '')
-                dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
-                
-                cursor.execute(
-                    "INSERT INTO conversaciones (numero, mensaje, respuesta, tipo_mensaje, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio) VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s);",
-                    (numero, 
-                     '[Audio grabado desde web]', 
-                     'Audio de voz enviado manualmente', 
-                     'audio', # Tipo de mensaje del usuario
-                     'audio', # Tipo de respuesta del bot
-                     public_url, # Contenido extra es la URL
-                     dominio_actual)
-                )
-                
-                conn.commit()
-                cursor.close()
-                conn.close()
-                
-                # 6. Actualizar Kanban
+                # Intentar importar pydub
                 try:
-                    actualizar_columna_chat(numero, 3, config) # 3 = Esperando Respuesta
-                except Exception as e:
-                    app.logger.error(f"⚠ Error actualizando Kanban: {e}")
+                    from pydub import AudioSegment
+                    has_pydub = True
+                except ImportError:
+                    has_pydub = False
+                    app.logger.warning("Pydub no disponible, usando archivo original")
                 
-                # 7. Programar eliminación del archivo temporal (después de 5 minutos)
-                def delete_temp_file(path_to_delete):
+                if has_pydub:
                     try:
-                        if os.path.exists(path_to_delete):
-                            os.remove(path_to_delete)
-                            app.logger.info(f"🗑 Archivo temporal eliminado: {path_to_delete}")
-                    except Exception as e:
-                        app.logger.error(f"Error eliminando archivo temporal: {e}")
-                
-                # Se programa la eliminación de la ruta final
-                threading.Timer(300, delete_temp_file, args=[final_filepath]).start()  # 5 minutos
-                
-                return jsonify({
-                    'success': True,
-                    'message': 'Audio enviado correctamente',
-                    'audio_url': public_url
-                })
-            else:
-                # Eliminar archivo temporal si falla el envío
+                        # Detectar formato del archivo original
+                        original_ext = os.path.splitext(filename)[1].lower().lstrip('.')
+                        
+                        # Cargar audio según su extensión
+                        if original_ext in ['mp3', 'wav', 'm4a', 'flac', 'webm']:
+                            audio = AudioSegment.from_file(filepath, format=original_ext)
+                        else:
+                            # Intentar cargar de forma genérica
+                            audio = AudioSegment.from_file(filepath)
+                        
+                        # Convertir a OGG con codec opus
+                        ogg_path = filepath.replace(os.path.splitext(filepath)[1], '.ogg')
+                        audio.export(ogg_path, format='ogg', codec='libopus', bitrate='128k')
+                        final_filepath = ogg_path
+                        filename = os.path.basename(ogg_path)
+                        
+                        app.logger.info(f"🔄 Audio convertido a OGG: {final_filepath}")
+                        
+                        # Eliminar archivo temporal original
+                        if os.path.exists(filepath) and filepath != final_filepath:
+                            os.remove(filepath)
+                            
+                    except Exception as conv_error:
+                        app.logger.warning(f"No se pudo convertir audio: {conv_error}")
+                        # Continuar con el archivo original
+                        final_filepath = filepath
+                        
+            except Exception as conv_error:
+                app.logger.warning(f"Error en conversión de audio: {conv_error}")
+                # Continuar con el archivo original
+                final_filepath = filepath
+        
+        # Construir URL pública
+        dominio = config.get('dominio') or request.url_root.rstrip('/')
+        if not dominio.startswith('http'):
+            dominio = f"https://{dominio}"
+        
+        public_url = f"{dominio}/uploads/{filename}"
+        app.logger.info(f"🌐 URL pública del audio: {public_url}")
+        
+        # Verificar que el archivo existe
+        if not os.path.exists(final_filepath):
+            return jsonify({'success': False, 'error': 'El archivo de audio no se pudo guardar'}), 500
+        
+        # Enviar a WhatsApp usando la función de mensaje de voz
+        try:
+            success = enviar_mensaje_voz(numero, public_url, config)
+        except Exception as send_error:
+            app.logger.error(f"Error en enviar_mensaje_voz: {send_error}")
+            success = False
+        
+        if success:
+            app.logger.info(f"✅ Audio enviado exitosamente a {numero}")
+            
+            # Guardar en base de datos
+            conn = get_db_connection(config)
+            cursor = conn.cursor()
+            
+            # Extraer subdominio
+            raw_domain = config.get('dominio', '')
+            dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+            
+            cursor.execute(
+                "INSERT INTO conversaciones (numero, mensaje, respuesta, tipo_mensaje, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio) VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s);",
+                (numero, 
+                 '[Audio grabado desde web]', 
+                 'Audio de voz enviado manualmente', 
+                 'audio', 
+                 'audio', 
+                 public_url,
+                 dominio_actual)
+            )
+            
+            conn.commit()
+            cursor.close()
+            conn.close()
+            
+            # Actualizar Kanban
+            try:
+                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta'")
+            except Exception as e:
+                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+            
+            # Programar eliminación del archivo temporal (después de 5 minutos)
+            def delete_temp_file():
+                try:
+                    if os.path.exists(final_filepath):
+                        os.remove(final_filepath)
+                        app.logger.info(f"🗑️ Archivo temporal eliminado: {final_filepath}")
+                except Exception as e:
+                    app.logger.error(f"Error eliminando archivo temporal: {e}")
+            
+            threading.Timer(300, delete_temp_file).start()  # 5 minutos
+            
+            return jsonify({
+                'success': True,
+                'message': 'Audio enviado correctamente',
+                'audio_url': public_url
+            })
+        else:
+            # Eliminar archivo temporal si falla el envío
+            try:
                 if os.path.exists(final_filepath):
                     os.remove(final_filepath)
-                
-                return jsonify({'success': False, 'error': 'Error al enviar audio a WhatsApp. Verifica la URL pública y el formato.'}), 500
-                
-        except Exception as file_error:
-            # Limpiar archivos temporales en caso de excepción
-            for temp_file in [filepath, final_filepath if 'final_filepath' in locals() else None]:
-                if temp_file and os.path.exists(temp_file):
-                    try:
-                        os.remove(temp_file)
-                    except:
-                        pass
+                    app.logger.info(f"🗑️ Archivo temporal eliminado por fallo: {final_filepath}")
+            except Exception as e:
+                app.logger.error(f"Error eliminando archivo temporal: {e}")
             
-            app.logger.error(f"🔴 Error procesando audio: {file_error}")
-            app.logger.error(traceback.format_exc())
-            return jsonify({'success': False, 'error': f'Error procesando audio: {str(file_error)}'}), 500
+            return jsonify({'success': False, 'error': 'Error al enviar audio a WhatsApp'}), 500
             
     except Exception as e:
         app.logger.error(f"🔴 Error en enviar_audio_manual: {e}")
         app.logger.error(traceback.format_exc())
-        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500
+        
+        # Limpiar archivos temporales en caso de error
+        try:
+            if 'filepath' in locals() and os.path.exists(filepath):
+                os.remove(filepath)
+            if 'final_filepath' in locals() and os.path.exists(final_filepath) and final_filepath != filepath:
+                os.remove(final_filepath)
+        except:
+            pass
+        
+        return jsonify({'success': False, 'error': f'Error interno del servidor: {str(e)}'}), 500 
 
+@app.route('/chats/<numero>/eliminar', methods=['POST']) 
 def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False, respuesta_tipo='texto', respuesta_media_url=None):
     """
     Save the bot response in a way that avoids duplicating the incoming user message.
@@ -11444,190 +11472,7 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
-@app.route('/send-audio-manual', methods=['POST'])
-def enviar_audio_manual():
-    """Envía audios grabados manualmente desde la web a WhatsApp"""
-    config = obtener_configuracion_por_host()
-    
-    try:
-        numero = request.form.get('numero', '').strip()
-        audio_file = request.files.get('audio')
-        
-        if not numero:
-            return jsonify({'success': False, 'error': 'Número de destino requerido'}), 400
-        
-        if not audio_file or not audio_file.filename:
-            return jsonify({'success': False, 'error': 'Audio requerido'}), 400
-        
-        app.logger.info(f"🎤 Procesando audio manual para {numero}")
-        
-        # Validar tipo de archivo
-        allowed_audio_types = ['audio/webm', 'audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/wav', 'audio/mp3']
-        if audio_file.mimetype not in allowed_audio_types:
-            app.logger.warning(f"Tipo de audio no estándar: {audio_file.mimetype}, continuando...")
-            # Continuar aunque el tipo no sea exactamente el esperado
-        
-        # Validar tamaño (max 16MB para WhatsApp)
-        max_size = 16 * 1024 * 1024  # 16MB
-        audio_file.seek(0, 2)  # Ir al final
-        file_size = audio_file.tell()
-        audio_file.seek(0)  # Volver al inicio
-        
-        if file_size > max_size:
-            return jsonify({'success': False, 'error': 'Audio demasiado grande (máximo 16MB)'}), 400
-        
-        # Guardar archivo temporalmente
-        timestamp = int(time.time())
-        filename = secure_filename(f"audio_manual_{timestamp}_{numero}.ogg")
-        filepath = os.path.join(UPLOAD_FOLDER, filename)
-        
-        # Guardar archivo original
-        audio_file.save(filepath)
-        app.logger.info(f"💾 Audio guardado: {filepath}")
-        
-        # Variable para el archivo final
-        final_filepath = filepath
-        
-        # Intentar convertir a formato compatible si no es OGG
-        if not filename.lower().endswith('.ogg'):
-            try:
-                # Intentar importar pydub
-                try:
-                    from pydub import AudioSegment
-                    has_pydub = True
-                except ImportError:
-                    has_pydub = False
-                    app.logger.warning("Pydub no disponible, usando archivo original")
-                
-                if has_pydub:
-                    try:
-                        # Detectar formato del archivo original
-                        original_ext = os.path.splitext(filename)[1].lower().lstrip('.')
-                        
-                        # Cargar audio según su extensión
-                        if original_ext in ['mp3', 'wav', 'm4a', 'flac', 'webm']:
-                            audio = AudioSegment.from_file(filepath, format=original_ext)
-                        else:
-                            # Intentar cargar de forma genérica
-                            audio = AudioSegment.from_file(filepath)
-                        
-                        # Convertir a OGG con codec opus
-                        ogg_path = filepath.replace(os.path.splitext(filepath)[1], '.ogg')
-                        audio.export(ogg_path, format='ogg', codec='libopus', bitrate='128k')
-                        final_filepath = ogg_path
-                        filename = os.path.basename(ogg_path)
-                        
-                        app.logger.info(f"🔄 Audio convertido a OGG: {final_filepath}")
-                        
-                        # Eliminar archivo temporal original
-                        if os.path.exists(filepath) and filepath != final_filepath:
-                            os.remove(filepath)
-                            
-                    except Exception as conv_error:
-                        app.logger.warning(f"No se pudo convertir audio: {conv_error}")
-                        # Continuar con el archivo original
-                        final_filepath = filepath
-                        
-            except Exception as conv_error:
-                app.logger.warning(f"Error en conversión de audio: {conv_error}")
-                # Continuar con el archivo original
-                final_filepath = filepath
-        
-        # Construir URL pública
-        dominio = config.get('dominio') or request.url_root.rstrip('/')
-        if not dominio.startswith('http'):
-            dominio = f"https://{dominio}"
-        
-        public_url = f"{dominio}/uploads/{filename}"
-        app.logger.info(f"🌐 URL pública del audio: {public_url}")
-        
-        # Verificar que el archivo existe
-        if not os.path.exists(final_filepath):
-            return jsonify({'success': False, 'error': 'El archivo de audio no se pudo guardar'}), 500
-        
-        # Enviar a WhatsApp usando la función de mensaje de voz
-        try:
-            success = enviar_mensaje_voz(numero, public_url, config)
-        except Exception as send_error:
-            app.logger.error(f"Error en enviar_mensaje_voz: {send_error}")
-            success = False
-        
-        if success:
-            app.logger.info(f"✅ Audio enviado exitosamente a {numero}")
-            
-            # Guardar en base de datos
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            
-            # Extraer subdominio
-            raw_domain = config.get('dominio', '')
-            dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
-            
-            cursor.execute(
-                "INSERT INTO conversaciones (numero, mensaje, respuesta, tipo_mensaje, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio) VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s);",
-                (numero, 
-                 '[Audio grabado desde web]', 
-                 'Audio de voz enviado manualmente', 
-                 'audio', 
-                 'audio', 
-                 public_url,
-                 dominio_actual)
-            )
-            
-            conn.commit()
-            cursor.close()
-            conn.close()
-            
-            # Actualizar Kanban
-            try:
-                actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
-                app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta'")
-            except Exception as e:
-                app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
-            
-            # Programar eliminación del archivo temporal (después de 5 minutos)
-            def delete_temp_file():
-                try:
-                    if os.path.exists(final_filepath):
-                        os.remove(final_filepath)
-                        app.logger.info(f"🗑️ Archivo temporal eliminado: {final_filepath}")
-                except Exception as e:
-                    app.logger.error(f"Error eliminando archivo temporal: {e}")
-            
-            threading.Timer(300, delete_temp_file).start()  # 5 minutos
-            
-            return jsonify({
-                'success': True,
-                'message': 'Audio enviado correctamente',
-                'audio_url': public_url
-            })
-        else:
-            # Eliminar archivo temporal si falla el envío
-            try:
-                if os.path.exists(final_filepath):
-                    os.remove(final_filepath)
-                    app.logger.info(f"🗑️ Archivo temporal eliminado por fallo: {final_filepath}")
-            except Exception as e:
-                app.logger.error(f"Error eliminando archivo temporal: {e}")
-            
-            return jsonify({'success': False, 'error': 'Error al enviar audio a WhatsApp'}), 500
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Error en enviar_audio_manual: {e}")
-        app.logger.error(traceback.format_exc())
-        
-        # Limpiar archivos temporales en caso de error
-        try:
-            if 'filepath' in locals() and os.path.exists(filepath):
-                os.remove(filepath)
-            if 'final_filepath' in locals() and os.path.exists(final_filepath) and final_filepath != filepath:
-                os.remove(final_filepath)
-        except:
-            pass
-        
-        return jsonify({'success': False, 'error': f'Error interno del servidor: {str(e)}'}), 500 
 
-@app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
@@ -11924,6 +11769,99 @@ Gracias por tu pedido. Te avisaremos cuando esté en camino.
         app.logger.error(f"Error confirmando pedido: {e}")
         return "¡Pedido recibido! Pero hubo un error al procesarlo. Por favor, contacta directamente al negocio."
 
+
+@login_required
+def enviar_audio(numero, url_audio, config, caption=""):
+    """Envía un audio por WhatsApp"""
+    try:
+        app.logger.info(f"🎤 Intentando enviar audio a {numero}: {url_audio}")
+        
+        # Dependiendo de tu implementación de WhatsApp
+        # Si usas pywhatkit:
+        try:
+            import pywhatkit as kit
+            
+            # NOTA: pywhatkit no soporta audio directamente desde URL
+            # Necesitas descargar el archivo localmente primero
+            
+            import requests
+            import tempfile
+            
+            # Descargar audio temporalmente
+            response = requests.get(url_audio)
+            if response.status_code == 200:
+                with tempfile.NamedTemporaryFile(suffix='.ogg', delete=False) as tmp:
+                    tmp.write(response.content)
+                    temp_path = tmp.name
+                
+                app.logger.info(f"📥 Audio descargado temporalmente: {temp_path}")
+                
+                # Aquí necesitarías la lógica específica para enviar audio
+                # pywhatkit.sendwhats_image no funciona para audio
+                # Podrías necesitar otra librería como whatsapp-web.js
+                
+                # Por ahora, fallback a documento
+                app.logger.warning("⚠️ Enviando audio como documento (fallback)")
+                return enviar_documento(numero, url_audio, "audio.ogg", config)
+                
+        except ImportError:
+            app.logger.warning("⚠️ pywhatkit no disponible, usando fallback")
+        
+        # Fallback: enviar como documento
+        return enviar_documento(numero, url_audio, "audio.ogg", config)
+        
+    except Exception as e:
+        app.logger.error(f"Error enviando audio: {e}")
+        app.logger.error(traceback.format_exc())
+        raise 
+
+@app.route('/configuracion/negocio/borrar-pdf/<int:doc_id>', methods=['POST'])
+def borrar_pdf_configuracion(doc_id):
+    config = obtener_configuracion_por_host()
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        cursor.execute("SELECT filename, filepath FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
+        doc = cursor.fetchone()
+        if not doc:
+            cursor.close(); conn.close()
+            flash('❌ Documento no encontrado', 'error')
+            return redirect(url_for('configuracion_tab', tab='negocio'))
+
+        filename = doc.get('filename')
+        # Ruta esperada en uploads/docs
+        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
+        filepath = os.path.join(docs_dir, filename)
+
+        # Intentar eliminar archivo del disco si existe
+        try:
+            if os.path.isfile(filepath):
+                os.remove(filepath)
+                app.logger.info(f"🗑️ Archivo eliminado de disco: {filepath}")
+            else:
+                app.logger.info(f"ℹ️ Archivo no encontrado en disco (posiblemente ya eliminado): {filepath}")
+        except Exception as e:
+            app.logger.warning(f"⚠️ No se pudo eliminar archivo físico: {e}")
+
+        # Eliminar registro DB
+        try:
+            cursor.execute("DELETE FROM documents_publicos WHERE id = %s", (doc_id,))
+            conn.commit()
+            flash('✅ Catálogo eliminado correctamente', 'success')
+            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename}")
+        except Exception as e:
+            conn.rollback()
+            flash('❌ Error eliminando el registro en la base de datos', 'error')
+            app.logger.error(f"🔴 Error eliminando registro documents_publicos: {e}")
+        finally:
+            cursor.close(); conn.close()
+
+        return redirect(url_for('configuracion_tab', tab='negocio'))
+
+    except Exception as e:
+        app.logger.error(f"🔴 Error en borrar_pdf_configuracion: {e}")
+        flash('❌ Error eliminando el catálogo', 'error')
+        return redirect(url_for('configuracion_tab', tab='negocio'))
 
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
 def configuracion_tab(tab):
