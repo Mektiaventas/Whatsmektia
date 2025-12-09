@@ -2453,7 +2453,7 @@ function normalizeText(s) {
     // =======================================================
     // LÓGICA AGREGADA PARA EL BOTÓN DE GRABAR AUDIO (MICROFONO)
     // =======================================================
-    const recordAudioBtn = document.getElementById('record-audio-btn');
+    const startRecordingBtn = document.getElementById('start-recording');
     const audioRecorderContainer = document.getElementById('audio-recorder-container');
     const closeRecorderBtn = document.getElementById('close-recorder');
     const textarea = document.getElementById('mensaje-texto');
@@ -2461,7 +2461,10 @@ function normalizeText(s) {
     const fileAttachBtn = document.getElementById('file-attach-btn');
     const emojiPickBtn = document.getElementById('emoji-pick-btn');
     const inputGroup = document.querySelector('.input-group');
-
+    if (startRecordingBtn) {
+        // ESTO es lo que hace que el botón rojo funcione
+        startRecordingBtn.addEventListener('click', startRecording);
+    }
     function toggleAudioRecorder(show) {
         if (show) {
             audioRecorderContainer.style.display = 'block';
