@@ -2067,31 +2067,68 @@ function buildMessageKeyFor(m) {
 
 function toggleChatList() {
     document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
-}function toggleAudio(id, btn) {
-    const audio = document.getElementById(id);
-    const bar = btn.closest('.audio-player')?.querySelector('.audio-progress-bar');
-    const durSpan = btn.closest('.audio-player')?.querySelector('.audio-duration');
-    if (!audio) return;
-    if (audio.paused) {
-        audio.play().then(() => {
-            btn.textContent = '⏸️';
-            audio.ontimeupdate = () => {
-                if (audio.duration) {
-                    if (bar) bar.style.width = (audio.currentTime / audio.duration) * 100 + '%';
-                    if (durSpan) {
-                        const m = Math.floor(audio.currentTime / 60);
-                        const s = Math.floor(audio.currentTime % 60).toString().padStart(2, '0');
-                        durSpan.textContent = `${m}:${s}`;
-                    }
-                }
-            };
-        }).catch(console.error);
-    } else {
-        audio.pause();
-        btn.textContent = '▶️';
     }
-}
+    function toggleAudio(id, btn) {
+        const audio = document.getElementById(id);
+        const playerDiv = btn.closest('.audio-player');
+        const bar = playerDiv?.querySelector('.audio-progress-bar');
+        const durSpan = playerDiv?.querySelector('.audio-duration');
 
+        if (!audio) return;
+
+        // Función para actualizar la duración y el progreso
+        const updateTimeDisplay = () => {
+            if (durSpan) {
+                const current = audio.currentTime;
+                const total = audio.duration || 0;
+
+                // Mostrar tiempo actual / total si la duración está disponible
+                if (isFinite(total) && total > 0) {
+                    const m_curr = Math.floor(current / 60);
+                    const s_curr = Math.floor(current % 60).toString().padStart(2, '0');
+                    const m_total = Math.floor(total / 60);
+                    const s_total = Math.floor(total % 60).toString().padStart(2, '0');
+                    durSpan.textContent = `${m_curr}:${s_curr} / ${m_total}:${s_total}`;
+                } else {
+                    // Solo mostrar el tiempo transcurrido hasta que cargue la duración total
+                    const m_curr = Math.floor(current / 60);
+                    const s_curr = Math.floor(current % 60).toString().padStart(2, '0');
+                    durSpan.textContent = `${m_curr}:${s_curr}`;
+                }
+
+                if (bar && isFinite(total) && total > 0) {
+                    bar.style.width = (current / total) * 100 + '%';
+                } else if (bar) {
+                    bar.style.width = '0%'; // Ocultar o resetear si no hay duración
+                }
+            }
+        };
+
+        if (audio.paused) {
+            // Establecer los listeners antes de intentar reproducir
+            audio.ontimeupdate = updateTimeDisplay;
+            audio.onloadedmetadata = updateTimeDisplay; // Asegurar que se muestre la duración total
+            audio.onended = () => { // Manejar el final de la reproducción
+                btn.textContent = '▶️';
+                audio.currentTime = 0; // Resetear el tiempo
+                updateTimeDisplay();
+            };
+
+            // Intentar reproducir (debe ser asíncrono)
+            audio.play().then(() => {
+                btn.textContent = '⏸️';
+                updateTimeDisplay(); // Actualizar inmediatamente
+            }).catch(error => {
+                console.error('Error al reproducir el audio:', error);
+                btn.textContent = '▶️'; // Asegurar que el botón se resetee
+                alert('No se pudo reproducir el audio. Verifique el formato o la ruta del archivo.');
+            });
+
+        } else {
+            audio.pause();
+            btn.textContent = '▶️';
+        }
+    }
 function seekAudio(id, progressBar, evt) {
     const audio = document.getElementById(id);
     const inner = progressBar.querySelector('.audio-progress-bar');
@@ -2109,6 +2146,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // INICIALIZACIÓN DIRECTA DE EMOJIS
     setupChatSearch(); 
+    initializeAudioPlayers();
     setupFileUpload(); 
     setupEmojiPicker();
     setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
@@ -2124,7 +2162,43 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!document.hidden) actualizarListaChats();
         }, refreshIntervalMs);
     }
+    function initializeAudioPlayers() {
+        document.querySelectorAll('.whatsapp-audio').forEach(audio => {
+            // Solo inicializar si aún no tiene duración o si no se ha intentado
+            if (audio.dataset.initialized) return;
 
+            const durSpan = audio.closest('.audio-player')?.querySelector('.audio-duration');
+            if (!durSpan) return;
+
+            // Función para mostrar la duración total
+            const showTotalDuration = () => {
+                if (isFinite(audio.duration) && audio.duration > 0) {
+                    const m = Math.floor(audio.duration / 60);
+                    const s = Math.floor(audio.duration % 60).toString().padStart(2, '0');
+                    // Se usa el formato '0:00' para la duración inicial
+                    durSpan.textContent = `${m}:${s}`;
+                    audio.dataset.initialized = 'true';
+                    audio.removeEventListener('loadedmetadata', showTotalDuration);
+                    audio.removeEventListener('error', handleError);
+                }
+            };
+
+            const handleError = () => {
+                durSpan.textContent = 'Error';
+                audio.dataset.initialized = 'error';
+            };
+
+            // Escuchar cuando los metadatos estén cargados
+            audio.addEventListener('loadedmetadata', showTotalDuration);
+            audio.addEventListener('error', handleError);
+
+            // Forzar la carga de metadatos (necesario si el audio no está en autoplay)
+            audio.load();
+
+            // En caso de que ya se haya cargado antes de añadir el listener
+            showTotalDuration();
+        });
+    }
     // Initialize message polling if chat is selected
     function initMessagesStateFromDOM() {
         try {
