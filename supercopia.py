@@ -11444,6 +11444,156 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
+@app.route('/send-audio-manual', methods=['POST'])
+def enviar_audio_manual():
+    """Envía audios grabados manualmente desde la web a WhatsApp"""
+    config = obtener_configuracion_por_host()
+    
+    try:
+        numero = request.form.get('numero', '').strip()
+        audio_file = request.files.get('audio')
+        
+        if not numero:
+            return jsonify({'success': False, 'error': 'Número de destino requerido'}), 400
+        
+        if not audio_file or not audio_file.filename:
+            return jsonify({'success': False, 'error': 'Audio requerido'}), 400
+        
+        app.logger.info(f"🎤 Procesando audio manual para {numero}")
+        
+        # Validar tipo de archivo
+        allowed_audio_types = ['audio/webm', 'audio/ogg', 'audio/opus', 'audio/mpeg', 'audio/wav']
+        if audio_file.mimetype not in allowed_audio_types:
+            return jsonify({'success': False, 'error': 'Tipo de audio no soportado'}), 400
+        
+        # Validar tamaño (max 16MB para WhatsApp)
+        max_size = 16 * 1024 * 1024  # 16MB
+        audio_file.seek(0, 2)  # Ir al final
+        file_size = audio_file.tell()
+        audio_file.seek(0)  # Volver al inicio
+        
+        if file_size > max_size:
+            return jsonify({'success': False, 'error': 'Audio demasiado grande (máximo 16MB)'}), 400
+        
+        # Guardar archivo temporalmente
+        timestamp = int(time.time())
+        filename = secure_filename(f"audio_manual_{timestamp}_{numero}.ogg")
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        
+        # Convertir a formato compatible con WhatsApp si es necesario
+        try:
+            # Guardar archivo original
+            audio_file.save(filepath)
+            app.logger.info(f"💾 Audio guardado: {filepath}")
+            
+            # Verificar/convertir formato si es necesario
+            # WhatsApp prefiere OGG con codec opus o MP3
+            final_filepath = filepath
+            
+            # Si no es OGG, intentar convertir
+            if not filename.lower().endswith('.ogg'):
+                try:
+                    from pydub import AudioSegment
+                    audio = AudioSegment.from_file(filepath)
+                    ogg_path = filepath.replace(os.path.splitext(filepath)[1], '.ogg')
+                    audio.export(ogg_path, format='ogg', codec='libopus')
+                    final_filepath = ogg_path
+                    filename = os.path.basename(ogg_path)
+                    
+                    # Eliminar archivo temporal original
+                    if os.path.exists(filepath):
+                        os.remove(filepath)
+                        
+                except Exception as conv_error:
+                    app.logger.warning(f"No se pudo convertir audio: {conv_error}")
+                    # Continuar con el archivo original
+                    final_filepath = filepath
+            
+            # Construir URL pública
+            dominio = config.get('dominio') or request.url_root.rstrip('/')
+            if not dominio.startswith('http'):
+                dominio = f"https://{dominio}"
+            
+            public_url = f"{dominio}/uploads/{filename}"
+            app.logger.info(f"🌐 URL pública del audio: {public_url}")
+            
+            # Enviar a WhatsApp usando la función de mensaje de voz
+            success = enviar_mensaje_voz(numero, public_url, config)
+            
+            if success:
+                app.logger.info(f"✅ Audio enviado exitosamente a {numero}")
+                
+                # Guardar en base de datos
+                conn = get_db_connection(config)
+                cursor = conn.cursor()
+                
+                # Extraer subdominio
+                raw_domain = config.get('dominio', '')
+                dominio_actual = raw_domain.split('.')[0] if raw_domain else ''
+                
+                cursor.execute(
+                    "INSERT INTO conversaciones (numero, mensaje, respuesta, tipo_mensaje, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, dominio) VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s);",
+                    (numero, 
+                     '[Audio grabado desde web]', 
+                     'Audio de voz enviado manualmente', 
+                     'audio', 
+                     'audio', 
+                     public_url,
+                     dominio_actual)
+                )
+                
+                conn.commit()
+                cursor.close()
+                conn.close()
+                
+                # Actualizar Kanban
+                try:
+                    actualizar_columna_chat(numero, 3)  # 3 = Esperando Respuesta
+                    app.logger.info(f"📊 Chat {numero} movido a 'Esperando Respuesta'")
+                except Exception as e:
+                    app.logger.error(f"⚠️ Error actualizando Kanban: {e}")
+                
+                # Programar eliminación del archivo temporal (después de 5 minutos)
+                def delete_temp_file():
+                    try:
+                        if os.path.exists(final_filepath):
+                            os.remove(final_filepath)
+                            app.logger.info(f"🗑️ Archivo temporal eliminado: {final_filepath}")
+                    except Exception as e:
+                        app.logger.error(f"Error eliminando archivo temporal: {e}")
+                
+                threading.Timer(300, delete_temp_file).start()  # 5 minutos
+                
+                return jsonify({
+                    'success': True,
+                    'message': 'Audio enviado correctamente',
+                    'audio_url': public_url
+                })
+            else:
+                # Eliminar archivo temporal si falla el envío
+                if os.path.exists(final_filepath):
+                    os.remove(final_filepath)
+                
+                return jsonify({'success': False, 'error': 'Error al enviar audio a WhatsApp'}), 500
+                
+        except Exception as file_error:
+            app.logger.error(f"🔴 Error procesando audio: {file_error}")
+            app.logger.error(traceback.format_exc())
+            
+            # Limpiar archivos temporales
+            for temp_file in [filepath, final_filepath if 'final_filepath' in locals() else None]:
+                if temp_file and os.path.exists(temp_file):
+                    try:
+                        os.remove(temp_file)
+                    except:
+                        pass
+            
+            return jsonify({'success': False, 'error': f'Error procesando audio: {str(file_error)}'}), 500
+            
+    except Exception as e:
+        app.logger.error(f"🔴 Error en enviar_audio_manual: {e}")
+        app.logger.error(traceback.format_exc())
+        return jsonify({'success': False, 'error': 'Error interno del servidor'}), 500 
 
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
