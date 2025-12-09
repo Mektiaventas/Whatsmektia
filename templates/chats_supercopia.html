@@ -2627,6 +2627,13 @@ function normalizeText(s) {
     function setupAudioRecording() {
         const recordBtn = document.getElementById('record-audio-btn');
         const recorderContainer = document.getElementById('audio-recorder-container');
+
+        if (!recordBtn || !recorderContainer) {
+            console.warn('Audio recording elements not found');
+            return;
+        }
+
+        // Elementos del DOM
         const closeRecorderBtn = document.getElementById('close-recorder');
         const startBtn = document.getElementById('start-recording');
         const stopBtn = document.getElementById('stop-recording');
@@ -2645,11 +2652,7 @@ function normalizeText(s) {
         const fileAttachBtn = document.getElementById('file-attach-btn');
         const emojiPickBtn = document.getElementById('emoji-pick-btn');
 
-        if (!recordBtn || !recorderContainer) {
-            console.warn('Audio recording elements not found');
-            return;
-        }
-
+        // Variables de estado
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
@@ -2658,24 +2661,21 @@ function normalizeText(s) {
         let timerInterval = null;
         let recordedBlob = null;
         let stream = null;
-        let audioContext = null;
-        let analyser = null;
-        let canvas = null;
-        let canvasCtx = null;
 
         // Función para mostrar/ocultar el grabador
         function toggleAudioRecorder(show) {
             if (show) {
                 recorderContainer.style.display = 'block';
+
                 // Posicionar correctamente el contenedor
-                const rect = recordBtn.getBoundingClientRect();
-                const containerRect = document.querySelector('.input-group').getBoundingClientRect();
+                const inputGroup = document.querySelector('.input-group');
+                if (inputGroup) {
+                    const rect = inputGroup.getBoundingClientRect();
+                    recorderContainer.style.bottom = `${window.innerHeight - rect.top + 10}px`;
+                    recorderContainer.style.left = `${Math.max(10, rect.left)}px`;
+                }
 
-                // Calcular posición para que esté sobre el área de entrada
-                recorderContainer.style.bottom = `${window.innerHeight - rect.top + 60}px`;
-                recorderContainer.style.left = `${Math.max(10, rect.left - 100)}px`;
-
-                // Ocultar elementos de entrada de texto
+                // Ocultar elementos de entrada de texto temporalmente
                 if (textarea) textarea.style.display = 'none';
                 if (mainSendBtn) mainSendBtn.style.display = 'none';
                 if (fileAttachBtn) fileAttachBtn.style.display = 'none';
@@ -2685,8 +2685,13 @@ function normalizeText(s) {
                 recordBtn.innerHTML = '❌';
                 recordBtn.title = 'Cancelar grabación';
                 recordBtn.classList.add('active');
+
+                // Resetear estado al abrir
+                resetRecordingState();
+
             } else {
                 recorderContainer.style.display = 'none';
+
                 // Mostrar elementos de entrada de texto
                 if (textarea) textarea.style.display = 'block';
                 if (mainSendBtn) mainSendBtn.style.display = 'flex';
@@ -2703,21 +2708,11 @@ function normalizeText(s) {
             }
         }
 
-        // Abrir/cerrar grabador
-        recordBtn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            const isVisible = recorderContainer.style.display === 'block';
-            toggleAudioRecorder(!isVisible);
-        });
-
-        // Cerrar grabador
-        closeRecorderBtn.addEventListener('click', function () {
-            toggleAudioRecorder(false);
-        });
-
-        // Iniciar grabación
-        startBtn.addEventListener('click', async function () {
+        // Función para iniciar grabación
+        async function startRecording() {
             try {
+                console.log('Iniciando grabación...');
+
                 // Solicitar permisos de micrófono
                 stream = await navigator.mediaDevices.getUserMedia({
                     audio: {
@@ -2725,27 +2720,31 @@ function normalizeText(s) {
                         noiseSuppression: true,
                         sampleRate: 44100,
                         channelCount: 1
-                    }
+                    },
+                    video: false
                 });
 
-                // Configurar MediaRecorder
+                // Configurar MediaRecorder con formato compatible
                 const options = {
-                    mimeType: 'audio/webm;codecs=opus',
                     audioBitsPerSecond: 128000
                 };
 
-                // Intentar diferentes formatos compatibles
+                // Verificar formatos compatibles
                 if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) {
                     options.mimeType = 'audio/webm;codecs=opus';
                 } else if (MediaRecorder.isTypeSupported('audio/webm')) {
                     options.mimeType = 'audio/webm';
                 } else if (MediaRecorder.isTypeSupported('audio/mp4')) {
                     options.mimeType = 'audio/mp4';
+                } else {
+                    // Usar el formato por defecto del navegador
+                    console.warn('Usando formato por defecto del navegador');
                 }
 
                 mediaRecorder = new MediaRecorder(stream, options);
                 audioChunks = [];
 
+                // Configurar eventos del MediaRecorder
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         audioChunks.push(event.data);
@@ -2756,8 +2755,10 @@ function normalizeText(s) {
                     const mimeType = mediaRecorder.mimeType || 'audio/webm';
                     recordedBlob = new Blob(audioChunks, { type: mimeType });
 
-                    // Convertir y mostrar preview
-                    convertAndPreviewAudio(recordedBlob);
+                    console.log(`Audio grabado: ${recordedBlob.size} bytes, tipo: ${mimeType}`);
+
+                    // Mostrar preview del audio
+                    showAudioPreview(recordedBlob);
 
                     // Mostrar controles de audio grabado
                     audioPreview.style.display = 'block';
@@ -2768,20 +2769,14 @@ function normalizeText(s) {
                     // Actualizar estado
                     statusText.textContent = 'Grabación finalizada ✓';
                     statusText.style.color = '#25D366';
-
-                    // Limpiar visualización de onda
-                    if (canvasCtx) {
-                        canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                    }
-
-                    console.log('Audio grabado:', recordedBlob.size, 'bytes, tipo:', mimeType);
                 };
 
                 mediaRecorder.onerror = (event) => {
                     console.error('Error en grabación:', event.error);
                     statusText.textContent = `Error: ${event.error.name}`;
                     statusText.style.color = '#FF4444';
-                    toggleAudioRecorder(false);
+                    alert(`Error de grabación: ${event.error.message}`);
+                    stopRecording();
                 };
 
                 // Iniciar grabación
@@ -2798,32 +2793,68 @@ function normalizeText(s) {
                 // Iniciar temporizador
                 startTimer();
 
-                // Iniciar visualización de onda
-                setupAudioVisualization(stream);
-
                 statusText.textContent = 'Grabando... 🎤';
                 statusText.style.color = '#FF4444';
 
-                console.log('Grabación iniciada con formato:', mediaRecorder.mimeType);
+                console.log('Grabación iniciada exitosamente');
 
             } catch (error) {
                 console.error('Error al acceder al micrófono:', error);
-                alert(`No se pudo acceder al micrófono: ${error.message}\n\nAsegúrate de dar permisos de micrófono en tu navegador.`);
+
+                // Mensajes de error más específicos
+                let errorMessage = `No se pudo acceder al micrófono: ${error.message}`;
+
+                if (error.name === 'NotAllowedError') {
+                    errorMessage = 'Permiso de micrófono denegado. Por favor, permite el acceso al micrófono en la configuración de tu navegador.';
+                } else if (error.name === 'NotFoundError') {
+                    errorMessage = 'No se encontró ningún micrófono disponible.';
+                } else if (error.name === 'NotReadableError') {
+                    errorMessage = 'El micrófono está siendo usado por otra aplicación.';
+                }
+
+                alert(errorMessage);
                 toggleAudioRecorder(false);
             }
-        });
+        }
 
-        // Detener grabación
-        stopBtn.addEventListener('click', function () {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-                stopRecording();
+        // Función para detener grabación
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                // Detener el MediaRecorder
+                if (mediaRecorder.state === 'recording' || mediaRecorder.state === 'paused') {
+                    mediaRecorder.stop();
+                }
+
+                isRecording = false;
+                isPaused = false;
+
+                // Detener stream del micrófono
+                if (stream) {
+                    stream.getTracks().forEach(track => {
+                        track.stop();
+                        track.enabled = false;
+                    });
+                    stream = null;
+                }
+
+                // Actualizar UI
+                startBtn.style.display = 'flex';
+                stopBtn.style.display = 'none';
+                pauseResumeBtn.style.display = 'none';
+                pauseResumeBtn.innerHTML = '❚❚';
+                recordBtn.classList.remove('recording');
+                recordBtn.classList.remove('paused');
+
+                // Detener temporizador
+                clearInterval(timerInterval);
             }
-        });
+        }
 
-        // Pausar/Reanudar grabación
-        pauseResumeBtn.addEventListener('click', function () {
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
+        // Función para pausar/reanudar
+        function togglePauseRecording() {
+            if (!mediaRecorder) return;
+
+            if (mediaRecorder.state === 'recording') {
                 mediaRecorder.pause();
                 isPaused = true;
                 pauseResumeBtn.innerHTML = '▶️';
@@ -2831,7 +2862,7 @@ function normalizeText(s) {
                 clearInterval(timerInterval);
                 recordBtn.classList.remove('recording');
                 recordBtn.classList.add('paused');
-            } else if (mediaRecorder && mediaRecorder.state === 'paused') {
+            } else if (mediaRecorder.state === 'paused') {
                 mediaRecorder.resume();
                 isPaused = false;
                 pauseResumeBtn.innerHTML = '❚❚';
@@ -2840,17 +2871,121 @@ function normalizeText(s) {
                 recordBtn.classList.add('recording');
                 recordBtn.classList.remove('paused');
             }
-        });
+        }
 
-        // Eliminar grabación
-        deleteBtn.addEventListener('click', function () {
-            if (confirm('¿Eliminar esta grabación?')) {
-                resetRecordingState();
+        // Función para resetear estado
+        function resetRecordingState() {
+            recordedBlob = null;
+            audioChunks = [];
+            isRecording = false;
+            isPaused = false;
+
+            audioPreview.style.display = 'none';
+            if (previewAudio) {
+                previewAudio.src = '';
+                previewAudio.load();
             }
-        });
+            deleteBtn.style.display = 'none';
+            sendBtn.style.display = 'none';
+            saveBtn.style.display = 'none';
+            startBtn.style.display = 'flex';
+            stopBtn.style.display = 'none';
+            pauseResumeBtn.style.display = 'none';
+            pauseResumeBtn.innerHTML = '❚❚';
+            statusText.textContent = 'Listo para grabar';
+            statusText.style.color = '#666';
+            timerText.textContent = '00:00';
+            recordBtn.classList.remove('recording');
+            recordBtn.classList.remove('paused');
 
-        // Enviar grabación
-        sendBtn.addEventListener('click', async function () {
+            // Detener stream si existe
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            // Limpiar mediaRecorder
+            if (mediaRecorder) {
+                mediaRecorder = null;
+            }
+
+            clearInterval(timerInterval);
+        }
+
+        // Función para iniciar temporizador
+        function startTimer() {
+            clearInterval(timerInterval);
+            recordingStartTime = Date.now();
+
+            timerInterval = setInterval(() => {
+                const elapsed = Date.now() - recordingStartTime;
+                const minutes = Math.floor(elapsed / 60000);
+                const seconds = Math.floor((elapsed % 60000) / 1000);
+                timerText.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+
+                // Límite de 2 minutos (WhatsApp)
+                if (elapsed >= 120000) {
+                    stopRecording();
+                    alert('⚠️ Límite de 2 minutos alcanzado (límite de WhatsApp)');
+                }
+            }, 1000);
+        }
+
+        // Función para mostrar preview del audio
+        function showAudioPreview(blob) {
+            try {
+                // Crear URL para el preview
+                const url = URL.createObjectURL(blob);
+                previewAudio.src = url;
+
+                // Configurar eventos para obtener duración
+                let durationLoaded = false;
+
+                const loadDuration = () => {
+                    if (!durationLoaded && previewAudio.duration && isFinite(previewAudio.duration)) {
+                        const duration = previewAudio.duration;
+                        const minutes = Math.floor(duration / 60);
+                        const seconds = Math.floor(duration % 60);
+                        audioDurationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        durationLoaded = true;
+                    }
+                };
+
+                previewAudio.onloadedmetadata = loadDuration;
+                previewAudio.oncanplaythrough = loadDuration;
+
+                // Forzar carga de metadatos
+                previewAudio.load();
+
+                // Mostrar tamaño del archivo
+                const sizeKB = Math.round(blob.size / 1024);
+                const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+                audioSizeDisplay.textContent = sizeKB < 1024 ?
+                    `${sizeKB} KB` :
+                    `${sizeMB} MB`;
+
+                // Fallback si no se carga la duración
+                setTimeout(() => {
+                    if (!durationLoaded) {
+                        // Estimar duración basada en tamaño (bitrate promedio de 128kbps)
+                        const estimatedDuration = blob.size / (128000 / 8); // bytes / (bits por segundo / 8)
+                        if (estimatedDuration > 0) {
+                            const minutes = Math.floor(estimatedDuration / 60);
+                            const seconds = Math.floor(estimatedDuration % 60);
+                            audioDurationDisplay.textContent = `~${minutes}:${seconds.toString().padStart(2, '0')}`;
+                        }
+                    }
+                }, 1000);
+
+            } catch (error) {
+                console.error('Error mostrando preview:', error);
+                audioDurationDisplay.textContent = 'N/A';
+                audioSizeDisplay.textContent = 'N/A';
+            }
+        }
+
+        // Función para enviar audio al servidor
+        async function sendAudioToServer() {
             if (!recordedBlob) {
                 alert('No hay audio para enviar');
                 return;
@@ -2866,10 +3001,20 @@ function normalizeText(s) {
                 const formData = new FormData();
                 formData.append('numero', selectedChatId);
 
-                // Usar el blob original o convertirlo
-                const audioBlob = recordedBlob;
-                const filename = `audio_${Date.now()}.${audioBlob.type.includes('webm') ? 'webm' : 'ogg'}`;
-                formData.append('audio', audioBlob, filename);
+                // Determinar extensión basada en el tipo MIME
+                let extension = 'webm';
+                if (recordedBlob.type.includes('ogg') || recordedBlob.type.includes('opus')) {
+                    extension = 'ogg';
+                } else if (recordedBlob.type.includes('mp4')) {
+                    extension = 'm4a';
+                } else if (recordedBlob.type.includes('mpeg')) {
+                    extension = 'mp3';
+                }
+
+                const filename = `audio_${Date.now()}.${extension}`;
+                formData.append('audio', recordedBlob, filename);
+
+                console.log(`Enviando audio: ${filename}, tamaño: ${recordedBlob.size} bytes`);
 
                 // Enviar al servidor
                 const response = await fetch('/send-audio-manual', {
@@ -2909,253 +3054,55 @@ function normalizeText(s) {
 
             } catch (error) {
                 console.error('Error enviando audio:', error);
-                alert(`❌ Error al enviar audio:\n${error.message}`);
+
+                // Mensaje de error más amigable
+                let errorMessage = error.message;
+                if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                    errorMessage = 'Error de conexión. Verifica tu internet e intenta de nuevo.';
+                }
+
+                alert(`❌ Error al enviar audio:\n${errorMessage}`);
                 statusText.textContent = 'Error al enviar';
                 statusText.style.color = '#FF4444';
             } finally {
                 sendBtn.innerHTML = '📤 Enviar audio';
                 sendBtn.disabled = false;
             }
-        });
+        }
 
-        // Guardar grabación localmente
-        saveBtn.addEventListener('click', function () {
+        // Función para guardar audio localmente
+        function saveAudioLocally() {
             if (!recordedBlob) return;
 
-            const url = URL.createObjectURL(recordedBlob);
-            const extension = recordedBlob.type.includes('webm') ? 'webm' : 'ogg';
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `grabacion_${Date.now()}.${extension}`;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            URL.revokeObjectURL(url);
-
-            alert('✅ Audio guardado localmente');
-        });
-
-        // ========== FUNCIONES AUXILIARES ==========
-
-        function stopRecording() {
-            if (mediaRecorder && isRecording) {
-                if (mediaRecorder.state !== 'inactive') {
-                    mediaRecorder.stop();
-                }
-                isRecording = false;
-
-                // Detener stream
-                if (stream) {
-                    stream.getTracks().forEach(track => track.stop());
-                    stream = null;
-                }
-
-                // Actualizar UI
-                startBtn.style.display = 'flex';
-                stopBtn.style.display = 'none';
-                pauseResumeBtn.style.display = 'none';
-                recordBtn.classList.remove('recording');
-                recordBtn.classList.remove('paused');
-
-                // Detener temporizador
-                clearInterval(timerInterval);
-
-                // Detener visualización
-                if (audioContext) {
-                    audioContext.close();
-                    audioContext = null;
-                }
-            }
-        }
-
-        function resetRecordingState() {
-            recordedBlob = null;
-            audioChunks = [];
-            audioPreview.style.display = 'none';
-            if (previewAudio) {
-                previewAudio.src = '';
-                previewAudio.load();
-            }
-            deleteBtn.style.display = 'none';
-            sendBtn.style.display = 'none';
-            saveBtn.style.display = 'none';
-            startBtn.style.display = 'flex';
-            stopBtn.style.display = 'none';
-            pauseResumeBtn.style.display = 'none';
-            statusText.textContent = 'Listo para grabar';
-            statusText.style.color = '#666';
-            timerText.textContent = '00:00';
-            recordBtn.classList.remove('recording');
-            recordBtn.classList.remove('paused');
-
-            // Limpiar canvas
-            if (canvasCtx) {
-                canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-            }
-
-            // Detener stream si existe
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-                stream = null;
-            }
-        }
-
-        function startTimer() {
-            clearInterval(timerInterval);
-            recordingStartTime = Date.now();
-
-            timerInterval = setInterval(() => {
-                const elapsed = Date.now() - recordingStartTime;
-                const minutes = Math.floor(elapsed / 60000);
-                const seconds = Math.floor((elapsed % 60000) / 1000);
-                timerText.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-
-                // Límite de 2 minutos (WhatsApp)
-                if (elapsed >= 120000) {
-                    stopRecording();
-                    alert('⚠️ Límite de 2 minutos alcanzado (límite de WhatsApp)');
-                }
-            }, 1000);
-        }
-
-        function setupAudioVisualization(stream) {
-            // Crear canvas para visualización si no existe
-            if (!canvas) {
-                canvas = document.createElement('canvas');
-                canvas.className = 'waveform-canvas';
-                canvas.width = 280;
-                canvas.height = 40;
-
-                const container = document.querySelector('.recorder-status');
-                if (!container) return;
-
-                // Limpiar contenedor anterior
-                const existingWaveform = container.querySelector('.waveform-container');
-                if (existingWaveform) {
-                    existingWaveform.remove();
-                }
-
-                const waveContainer = document.createElement('div');
-                waveContainer.className = 'waveform-container';
-                waveContainer.appendChild(canvas);
-                container.appendChild(waveContainer);
-
-                canvasCtx = canvas.getContext('2d');
-            }
-
-            // Configurar audio context
             try {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                const source = audioContext.createMediaStreamSource(stream);
+                const url = URL.createObjectURL(recordedBlob);
 
-                source.connect(analyser);
-                analyser.fftSize = 256;
-                analyser.smoothingTimeConstant = 0.8;
-                const bufferLength = analyser.frequencyBinCount;
-                const dataArray = new Uint8Array(bufferLength);
-
-                function draw() {
-                    if (!isRecording && !isPaused) {
-                        // Limpiar canvas si no se está grabando
-                        if (canvasCtx) {
-                            canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-                        }
-                        return;
-                    }
-
-                    requestAnimationFrame(draw);
-                    analyser.getByteFrequencyData(dataArray);
-
-                    // Limpiar canvas
-                    canvasCtx.fillStyle = '#f0f0f0';
-                    canvasCtx.fillRect(0, 0, canvas.width, canvas.height);
-
-                    // Dibujar barras de frecuencia
-                    const barWidth = (canvas.width / bufferLength) * 2.5;
-                    let barHeight;
-                    let x = 0;
-
-                    for (let i = 0; i < bufferLength; i++) {
-                        barHeight = (dataArray[i] / 255) * canvas.height;
-
-                        // Color gradiente (rojo cuando más intenso)
-                        const intensity = dataArray[i] / 255;
-                        const red = 50 + (intensity * 205);
-                        const green = 50;
-                        const blue = 50;
-
-                        canvasCtx.fillStyle = `rgb(${red}, ${green}, ${blue})`;
-                        canvasCtx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
-
-                        x += barWidth + 1;
-                    }
+                // Determinar extensión
+                let extension = 'webm';
+                if (recordedBlob.type.includes('ogg') || recordedBlob.type.includes('opus')) {
+                    extension = 'ogg';
+                } else if (recordedBlob.type.includes('mp4')) {
+                    extension = 'm4a';
                 }
 
-                draw();
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `grabacion_${Date.now()}.${extension}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                // Liberar memoria
+                setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+                alert('✅ Audio guardado localmente');
             } catch (error) {
-                console.warn('No se pudo inicializar visualización de audio:', error);
+                console.error('Error guardando audio:', error);
+                alert('❌ Error al guardar el audio');
             }
         }
 
-        async function convertAndPreviewAudio(blob) {
-            try {
-                // Crear URL para preview
-                const url = URL.createObjectURL(blob);
-                previewAudio.src = url;
-
-                // Configurar eventos para obtener duración
-                let durationLoaded = false;
-
-                const loadDuration = () => {
-                    if (!durationLoaded && previewAudio.duration && isFinite(previewAudio.duration)) {
-                        const duration = previewAudio.duration;
-                        const minutes = Math.floor(duration / 60);
-                        const seconds = Math.floor(duration % 60);
-                        audioDurationDisplay.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
-                        durationLoaded = true;
-                    }
-                };
-
-                previewAudio.onloadedmetadata = loadDuration;
-                previewAudio.oncanplaythrough = loadDuration;
-
-                // Forzar carga de metadatos
-                previewAudio.load();
-
-                // Mostrar tamaño
-                const sizeKB = Math.round(blob.size / 1024);
-                const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-                audioSizeDisplay.textContent = sizeKB < 1024 ?
-                    `${sizeKB} KB` :
-                    `${sizeMB} MB`;
-
-                // Si después de 1 segundo no se cargó la duración, usar estimación
-                setTimeout(() => {
-                    if (!durationLoaded) {
-                        // Estimar duración basada en tamaño (aproximado)
-                        const estimatedDuration = blob.size / 16000; // 16kbps aproximado
-                        if (estimatedDuration > 0) {
-                            const minutes = Math.floor(estimatedDuration / 60);
-                            const seconds = Math.floor(estimatedDuration % 60);
-                            audioDurationDisplay.textContent = `~${minutes}:${seconds.toString().padStart(2, '0')}`;
-                        }
-                    }
-                }, 1000);
-
-            } catch (error) {
-                console.error('Error procesando audio:', error);
-                audioDurationDisplay.textContent = 'N/A';
-                audioSizeDisplay.textContent = 'N/A';
-            }
-        }
-
-        async function convertToOgg(blob) {
-            // Conversión básica - en producción usarías una librería como ffmpeg.js
-            // WhatsApp acepta webm/opus, así que devolvemos el blob original
-            return blob;
-        }
-
+        // Función para mostrar audio en el chat
         function appendAudioMessageToChat(audioUrl) {
             const container = document.getElementById('msgs');
             if (!container) return;
@@ -3213,18 +3160,74 @@ function normalizeText(s) {
             console.log('Audio añadido al chat:', audioUrl);
         }
 
+        // ========== EVENT LISTENERS ==========
+
+        // Abrir/cerrar grabador
+        recordBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            const isVisible = recorderContainer.style.display === 'block';
+            toggleAudioRecorder(!isVisible);
+        });
+
+        // Cerrar grabador
+        if (closeRecorderBtn) {
+            closeRecorderBtn.addEventListener('click', function () {
+                toggleAudioRecorder(false);
+            });
+        }
+
+        // Iniciar grabación
+        if (startBtn) {
+            startBtn.addEventListener('click', startRecording);
+        }
+
+        // Detener grabación
+        if (stopBtn) {
+            stopBtn.addEventListener('click', stopRecording);
+        }
+
+        // Pausar/Reanudar grabación
+        if (pauseResumeBtn) {
+            pauseResumeBtn.addEventListener('click', togglePauseRecording);
+        }
+
+        // Eliminar grabación
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function () {
+                if (confirm('¿Eliminar esta grabación?')) {
+                    resetRecordingState();
+                }
+            });
+        }
+
+        // Enviar grabación
+        if (sendBtn) {
+            sendBtn.addEventListener('click', sendAudioToServer);
+        }
+
+        // Guardar grabación localmente
+        if (saveBtn) {
+            saveBtn.addEventListener('click', saveAudioLocally);
+        }
+
         // Cerrar grabador si se hace clic fuera de él
         document.addEventListener('click', function (event) {
             if (recorderContainer.style.display === 'block' &&
                 !recorderContainer.contains(event.target) &&
-                !recordBtn.contains(event.target) &&
-                event.target !== recordBtn) {
+                !recordBtn.contains(event.target)) {
+                toggleAudioRecorder(false);
+            }
+        });
+
+        // Manejar tecla Escape para cerrar
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && recorderContainer.style.display === 'block') {
                 toggleAudioRecorder(false);
             }
         });
 
         console.debug('Audio recording functionality initialized');
-    }
+    } 
 
     /* ===================== INICIALIZACIÓN EN DOM CONTENT LOADED ===================== */
 
