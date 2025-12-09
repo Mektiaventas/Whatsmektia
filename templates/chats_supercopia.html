@@ -2451,5 +2451,63 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
+    // =======================================================
+    // LÓGICA AGREGADA PARA EL BOTÓN DE GRABAR AUDIO (MICROFONO)
+    // =======================================================
+    const recordAudioBtn = document.getElementById('record-audio-btn');
+    const audioRecorderContainer = document.getElementById('audio-recorder-container');
+    const closeRecorderBtn = document.getElementById('close-recorder');
+    const textarea = document.getElementById('mensaje-texto');
+    const sendBtn = document.querySelector('.send-btn');
+    const fileAttachBtn = document.getElementById('file-attach-btn');
+    const emojiPickBtn = document.getElementById('emoji-pick-btn');
+    const inputGroup = document.querySelector('.input-group');
+
+    function toggleAudioRecorder(show) {
+        if (show) {
+            audioRecorderContainer.style.display = 'block';
+            // Ocultar elementos de entrada de texto
+            textarea.style.display = 'none';
+            sendBtn.style.display = 'none';
+            fileAttachBtn.style.display = 'none';
+            emojiPickBtn.style.display = 'none';
+            recordAudioBtn.innerHTML = '❌'; // Cambiar icono a cerrar
+            recordAudioBtn.title = 'Cancelar grabación';
+
+            // Asegurar que el contenedor del grabador tenga espacio
+            inputGroup.style.alignItems = 'flex-start';
+
+        } else {
+            audioRecorderContainer.style.display = 'none';
+            // Mostrar elementos de entrada de texto
+            textarea.style.display = 'block';
+            sendBtn.style.display = 'flex';
+            fileAttachBtn.style.display = 'flex';
+            emojiPickBtn.style.display = 'flex';
+            recordAudioBtn.innerHTML = '🎤'; // Restaurar icono
+            recordAudioBtn.title = 'Grabar audio';
+
+            inputGroup.style.alignItems = 'flex-end';
+        }
+    }
+
+
+    // Manejar clic en el botón de micrófono
+    if (recordAudioBtn) {
+        recordAudioBtn.addEventListener('click', function () {
+            const isVisible = audioRecorderContainer.style.display === 'block';
+            toggleAudioRecorder(!isVisible);
+        });
+    }
+
+    // Manejar clic en el botón de cerrar del panel (X)
+    if (closeRecorderBtn) {
+        closeRecorderBtn.addEventListener('click', function () {
+            toggleAudioRecorder(false);
+        });
+    }
+    // =======================================================
+    // FIN DE LÓGICA DE AUDIO
+    // =======================================================
 </script>
 {% endblock %}      
