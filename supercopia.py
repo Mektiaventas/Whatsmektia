@@ -321,6 +321,105 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
+certificate_base64 = os.getenv("CERTIFICATE_B64")
+phone_number = os.getenv("REGISTRATION_PHONE")
+country_code = "52"  # México
+# --- Función de Utilidad ---
+def solicitar_codigo_registro(country_code, phone_number, certificate_base64, method="sms", pin=None):
+    """
+    Realiza la solicitud POST al endpoint externo para obtener el código de registro.
+    """
+    
+    # ⚠️ REEMPLAZA ESTA URL BASE con la URL real de tu API
+    API_BASE_URL = os.getenv("EXTERNAL_REG_API_URL", "https://api.ejemplo-externo.com")
+    ENDPOINT = "/v1/account"
+
+    url = API_BASE_URL + ENDPOINT
+    
+    payload = {
+        "cc": country_code,
+        "phone_number": phone_number,
+        "method": method,
+        "cert": certificate_base64,
+    }
+    
+    if pin is not None and pin.strip():
+        payload["pin"] = pin
+        
+    headers = {
+        'Content-Type': 'application/json'
+    }
+    
+    try:
+        current_app.logger.info(f"🌐 Solicitando código de registro a: {url}")
+        
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response.raise_for_status() 
+        
+        return response.json()
+        
+    except requests.exceptions.RequestException as e:
+        current_app.logger.error(f"🔴 Error al solicitar código de registro: {e}")
+        return {"error": "Error de conexión o API", "details": str(e)}
+
+# --- CONTINÚA EL RESTO DEL CÓDIGO ---
+@app.route('/solicitar_registro_api', methods=['GET'])
+# Opcional: Si quieres que solo administradores lo ejecuten
+def solicitar_registro_api():
+    """
+    Endpoint que ejecuta la solicitud del código de registro (POST /v1/account)
+    usando datos de configuración o de variables de entorno.
+    """
+    config = obtener_configuracion_por_host()
+    
+    # --- 1. Obtener datos necesarios ---
+    
+    # ⚠️ AJUSTA ESTOS VALORES: Deben ser los datos REALES para tu registro externo.
+    # Usamos variables de entorno como marcadores de posición para datos sensibles.
+    
+    # Intenta usar datos del .env, o usa un valor fijo de la configuración del tenant si es necesario
+    CERT_B64 = os.getenv("TENANT_CERTIFICATE_B64", "CERTIFICADO_BASE64_POR_DEFECTO")
+    
+    # Intenta obtener el teléfono del negocio de la configuración actual, o un valor por defecto
+    telefono_completo = (config.get('telefono') or os.getenv("REGISTRATION_PHONE", "52449..."))
+    
+    # Suponemos que necesitas el código de país (ej. "52") y el resto del número
+    # Esta lógica de parseo es un ejemplo y PUEDE NECESITAR AJUSTES
+    PAIS = telefono_completo[:2] if telefono_completo.startswith('52') else "52"
+    NUMERO_SIN_PAIS = telefono_completo.lstrip('+').lstrip(PAIS)
+    
+    # --- 2. Realizar la solicitud ---
+    
+    if not CERT_B64 or CERT_B64 == "CERTIFICADO_BASE64_POR_DEFECTO":
+         return jsonify({
+             "status": "error", 
+             "message": "Falta configurar la variable de entorno TENANT_CERTIFICATE_B64 o su equivalente."
+         }), 500
+
+    resultado = solicitar_codigo_registro(
+        country_code=PAIS,
+        phone_number=NUMERO_SIN_PAIS,
+        certificate_base64=CERT_B64,
+        method="sms", 
+        pin=None # Dejar el PIN como None si no se usa verificación de dos pasos
+    )
+    
+    # --- 3. Devolver el resultado ---
+    
+    if resultado and "error" not in resultado:
+        return jsonify({
+            "status": "success",
+            "message": f"Solicitud enviada para {PAIS}{NUMERO_SIN_PAIS}. Revisa tu SMS/voz.",
+            "response_api": resultado
+        })
+    else:
+        return jsonify({
+            "status": "error",
+            "message": "Fallo al solicitar el código de registro.",
+            "details": resultado.get('details', 'No especificado'),
+            "response_api": resultado
+        }), 500
+
 def public_image_url(imagen_url):
     """Normalize image reference for templates: robust handling of filenames, subpaths and absolute URLs."""
     try:
