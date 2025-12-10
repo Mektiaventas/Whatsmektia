@@ -2798,25 +2798,6 @@ def inicializar_kanban_multitenant():
         except Exception as e:
             app.logger.error(f"❌ Error inicializando Kanban para {config['dominio']}: {e}")
 
-# --- NUEVAS FUNCIONES DE ASEGURAMIENTO PARA LEADS ---
-
-def _ensure_columna_interaccion_usuario(config=None):
-    """Crea una columna dedicada a guardar SOLO la fecha del último mensaje del USUARIO."""
-    if config is None:
-        config = obtener_configuracion_por_host()
-    try:
-        conn = get_db_connection(config)
-        cursor = conn.cursor()
-        cursor.execute("SHOW COLUMNS FROM contactos LIKE 'ultima_interaccion_usuario'")
-        if cursor.fetchone() is None:
-            cursor.execute("ALTER TABLE contactos ADD COLUMN ultima_interaccion_usuario DATETIME DEFAULT NULL")
-            conn.commit()
-            app.logger.info("🔧 Columna 'ultima_interaccion_usuario' creada.")
-        cursor.close()
-        conn.close()
-    except Exception as e:
-        app.logger.warning(f"⚠️ Error columna interaccion usuario: {e}")
-
 def _ensure_interes_column(config=None):
     """Asegura que la tabla contactos tenga la columna interes"""
     if config is None:

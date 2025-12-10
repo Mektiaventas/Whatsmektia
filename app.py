@@ -234,7 +234,8 @@ NUMEROS_CONFIG = {
         'dominio': 'lacse.mektia.com',
         # Claves de Messenger
         'messenger_page_id_env': 'LACSE_MESSENGER_PAGE_ID',
-        'messenger_token_env': 'LACSE_PAGE_ACCESS_TOKEN'
+        'messenger_token_env': 'LACSE_PAGE_ACCESS_TOKEN',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_LACSE"),
     }
 }
 
