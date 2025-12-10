@@ -382,7 +382,7 @@ def solicitar_registro_api():
     CERT_B64 = os.getenv("TENANT_CERTIFICATE_B64")
     
     # Intenta obtener el teléfono del negocio de la configuración actual, o un valor por defecto
-    telefono_completo = "4812372326"
+    telefono_completo = "524812372326"
     
     # Suponemos que necesitas el código de país (ej. "52") y el resto del número
     # Esta lógica de parseo es un ejemplo y PUEDE NECESITAR AJUSTES
