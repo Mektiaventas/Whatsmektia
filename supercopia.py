@@ -328,9 +328,17 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
     Realiza la solicitud POST al endpoint externo para obtener el código de registro.
     """
     
-    # ⚠️ REEMPLAZA ESTA URL BASE con la URL real de tu API
-    API_BASE_URL = "https://graph.facebook.com"
-    ENDPOINT = "/v1/account"
+    PHONE_ID = os.getenv("SUPAG_PHONE_NUMBER_ID") 
+    ACCESS_TOKEN= os.getenv("SUPAG_WHATSAPP_TOKEN")
+
+    if not PHONE_ID:
+        current_app.logger.error("🔴 Error: SUPAG_PHONE_NUMBER_ID no configurado.")
+        return {"error": "Configuración incompleta", "details": "Falta el ID del número de teléfono"}
+
+    # 2. Usar el formato de URL con el ID del número: /v18.0/{phone_number_id}/account
+    # Utilizamos una versión de API (ej. v18.0) para el formato estándar del Graph API
+    API_BASE_URL = "https://graph.facebook.com/v18.0"
+    ENDPOINT = f"/{PHONE_ID}/account"
     ACCESS_TOKEN= os.getenv("SUPAG_WHATSAPP_TOKEN")
     url = API_BASE_URL + ENDPOINT
     
