@@ -378,10 +378,10 @@ def solicitar_registro_api():
     # Usamos variables de entorno como marcadores de posición para datos sensibles.
     
     # Intenta usar datos del .env, o usa un valor fijo de la configuración del tenant si es necesario
-    CERT_B64 = os.getenv("TENANT_CERTIFICATE_B64", "CERTIFICADO_BASE64_POR_DEFECTO")
+    CERT_B64 = os.getenv("TENANT_CERTIFICATE_B64")
     
     # Intenta obtener el teléfono del negocio de la configuración actual, o un valor por defecto
-    telefono_completo = (config.get('telefono') or os.getenv("REGISTRATION_PHONE", "52449..."))
+    telefono_completo = "481 237 2326"
     
     # Suponemos que necesitas el código de país (ej. "52") y el resto del número
     # Esta lógica de parseo es un ejemplo y PUEDE NECESITAR AJUSTES
