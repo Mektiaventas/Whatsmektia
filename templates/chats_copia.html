@@ -308,10 +308,12 @@
 
                 <!-- botón de emoji más grande -->
                 <button type="button" id="emoji-pick-btn" class="emoji-pick-btn emoji-btn" style="font-size: 24px;">😊</button>
-                <button type="button" id="recordAudioBtn" class="record-audio-btn" style="font-size: 24px; position: relative;" title="Grabar audio">
+                <!-- botón de grabar audio -->
+                <button type="button" id="record-audio-btn" class="record-audio-btn" style="font-size: 24px; position: relative;" title="Grabar audio">
                     🎤
                 </button>
-                <div id="audio-recorder-container" class="audio-recorder-container" style="display: none; position: absolute; bottom: 60px; left: 0px; background: white; border: 1px solid #ccc; border-radius: 12px; padding: 15px; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;">
+                <!-- Contenedor para controles de grabación -->
+                <div id="audio-recorder-container" class="audio-recorder-container" style="display: none;  position: absolute; bottom: 60px; background: white; border: 1px solid #ccc; border-radius: 12px;  z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;">
                     <div class="recorder-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                         <h4 style="margin: 0;">Grabar audio</h4>
                         <button type="button" id="close-recorder" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
@@ -345,7 +347,7 @@
 
                     <div class="recorder-actions" style="display: flex; justify-content: space-between;">
                         <button type="button" id="delete-recording" class="action-btn" style="background: #FF4444; color: white; border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer; display: none;">
-                            🗑 Eliminar
+                            🗑️ Eliminar
                         </button>
                         <button type="button" id="send-recording" class="action-btn" style="background: #25D366; color: white; border: none; border-radius: 6px; padding: 8px 15px; cursor: pointer; display: none;">
                             📤 Enviar audio
@@ -379,89 +381,89 @@
         <style>
             /* Estilos para grabación de audio */
             .record-audio-btn {
-                    background: none;
-                    border: none;
-                    font-size: 24px;
-                    cursor: pointer;
-                    padding: 8px;
-                    border-radius: 50%;
-                    transition: background 0.2s;
-                    width: 44px;
-                    height: 44px;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
+                background: none;
+                border: none;
+                font-size: 24px;
+                cursor: pointer;
+                padding: 8px;
+                border-radius: 50%;
+                transition: background 0.2s;
+                width: 44px;
+                height: 44px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
             }
 
                 .record-audio-btn:hover {
-                        background: #e0e0e0;
+                    background: #e0e0e0;
                 }
 
                 .record-audio-btn.recording {
-                        animation: pulse 1.5s infinite;
-                        background: #FF4444;
-                        color: white;
+                    animation: pulse 1.5s infinite;
+                    background: #FF4444;
+                    color: white;
                 }
 
             @keyframes pulse {
-                    0% {
+                0% {
                     box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
                 }
 
-                    70% {
+                70% {
                     box-shadow: 0 0 0 10px rgba(255, 68, 68, 0);
                 }
 
-                    100% {
+                100% {
                     box-shadow: 0 0 0 0 rgba(255, 68, 68, 0);
                 }
             }
 
             .recorder-btn:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
+                opacity: 0.5;
+                cursor: not-allowed;
             }
 
             .action-btn:disabled {
-                    opacity: 0.5;
-                    cursor: not-allowed;
+                opacity: 0.5;
+                cursor: not-allowed;
             }
 
             /* Indicador de grabación en tiempo real */
             .recording-indicator {
-                    position: absolute;
-                    top: -5px;
-                    right: -5px;
-                    width: 10px;
-                    height: 10px;
-                    background: #FF4444;
-                    border-radius: 50%;
-                    animation: blink 1s infinite;
+                position: absolute;
+                top: -5px;
+                right: -5px;
+                width: 10px;
+                height: 10px;
+                background: #FF4444;
+                border-radius: 50%;
+                animation: blink 1s infinite;
             }
 
             @keyframes blink {
-                    0%, 100% {
+                0%, 100% {
                     opacity: 1;
                 }
 
-                    50% {
+                50% {
                     opacity: 0.3;
                 }
             }
 
             /* Visualizador de onda de audio */
             .waveform-container {
-                    width: 100%;
-                    height: 40px;
-                    background: #f0f0f0;
-                    border-radius: 4px;
-                    overflow: hidden;
-                    margin: 10px 0;
+                width: 100%;
+                height: 40px;
+                background: #f0f0f0;
+                border-radius: 4px;
+                overflow: hidden;
+                margin: 10px 0;
             }
 
             .waveform-canvas {
-                    width: 100%;
-                    height: 100%;
+                width: 100%;
+                height: 100%;
             }
             /* Estilos para el textarea mejorado */
             .reply-textarea {
@@ -1340,6 +1342,35 @@
     .image-message {
         display: none;
     }
+    /* Estilos adicionales para el botón de audio activo */
+    .record-audio-btn.active {
+        background: #FF4444;
+        color: white;
+        transform: scale(1.1);
+    }
+
+    .record-audio-btn.paused {
+        background: #FFA500;
+        color: white;
+    }
+
+    /* Mejorar visibilidad del contenedor de grabación */
+    .audio-recorder-container {
+        border: 2px solid #25D366 !important;
+        animation: slideIn 0.3s ease-out;
+    }
+
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(20px);
+        }
+
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
 </style>
 <script>
 /* Small helpers */
@@ -1975,6 +2006,7 @@ function buildMessageKeyFor(m) {
 
     // chats.html (Cerca de la línea 602)
     /* ===================== EMOJI PICKER COMPLETO ===================== */
+    /* ===================== EMOJI PICKER COMPLETO ===================== */
 
     function setupEmojiPicker() {
         const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
@@ -2061,20 +2093,12 @@ function buildMessageKeyFor(m) {
 
         console.debug('setupEmojiPicker initialized');
     }
-
-    function startRecording() {
-        console.warn("startRecording no implementada. Implementa MediaRecorder API.");
-    }
-    function stopRecording() {
-        console.warn("stopRecording no implementada.");
-    }
-/* ===================== AUDIO & UI HELPERS ===================== */
+    /* ===================== AUDIO & UI HELPERS ===================== */
 
     function toggleChatList() {
         document.querySelector('.chat-list-v2')?.classList.toggle('mobile-visible');
     }
 
-    // 🚨 FUNCIÓN toggleAudio CORREGIDA
     function toggleAudio(id, btn) {
         const audio = document.getElementById(id);
         const playerDiv = btn.closest('.audio-player');
@@ -2140,7 +2164,6 @@ function buildMessageKeyFor(m) {
         }
     }
 
-    // La función seekAudio también debe ser más robusta
     function seekAudio(id, progressBar, evt) {
         const audio = document.getElementById(id);
         const inner = progressBar.querySelector('.audio-progress-bar');
@@ -2148,64 +2171,13 @@ function buildMessageKeyFor(m) {
         const clickX = evt.clientX - rect.left;
         if (audio && isFinite(audio.duration) && audio.duration > 0) {
             audio.currentTime = (clickX / rect.width) * audio.duration;
-            if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
+            if (inner) inner.style.width = (audio.currentTime / audio.duration) * 100 + '%';
         }
     }
 
-    // 🚨 FUNCIÓN NUEVA: Inicializa la duración de 0:00 / M:SS al cargar
     function initializeAudioPlayers() {
-        // Seleccionar todos los elementos <audio>
-        document.querySelectorAll('.whatsapp-audio').forEach(audio => {
-            // No inicializar si ya lo hicimos
-            if (audio.dataset.initialized === 'true') return;
+        console.log('🎵 Inicializando reproductores de audio...');
 
-            // Encontrar el span donde se muestra la duración
-            const durSpan = audio.closest('.audio-player')?.querySelector('.audio-duration');
-            if (!durSpan) return;
-
-            // Función para mostrar la duración total
-            const showTotalDuration = () => {
-                // Verifica que la duración sea un número finito y mayor que cero
-                if (isFinite(audio.duration) && audio.duration > 0) {
-                    const m = Math.floor(audio.duration / 60);
-                    const s = Math.floor(audio.duration % 60).toString().padStart(2, '0');
-
-                    // Mostrar el formato inicial: 0:00 / M:SS
-                    durSpan.textContent = `0:00 / ${m}:${s}`;
-                    audio.dataset.initialized = 'true';
-                    audio.removeEventListener('loadedmetadata', showTotalDuration);
-                }
-            };
-
-            // Escuchar cuando los metadatos estén cargados
-            audio.addEventListener('loadedmetadata', showTotalDuration);
-
-            // Forzar la carga de metadatos (necesario si el audio no está en autoplay)
-            audio.load();
-
-            // En caso de que ya se haya cargado antes de añadir el listener
-            showTotalDuration();
-
-            // Mostrar 0:00 mientras carga (fallback visual)
-            if (!durSpan.textContent || durSpan.textContent.includes('NaN')) {
-                durSpan.textContent = '0:00';
-            }
-        });
-    }
-
-    function seekAudio(id, progressBar, evt) {
-        const audio = document.getElementById(id);
-        const inner = progressBar.querySelector('.audio-progress-bar');
-        const rect = progressBar.getBoundingClientRect();
-        const clickX = evt.clientX - rect.left;
-        if (audio && isFinite(audio.duration) && audio.duration > 0) {
-            audio.currentTime = (clickX / rect.width) * audio.duration;
-            if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
-        }
-    }
-
-    // 🚨 FUNCIÓN NUEVA: Inicializa la duración de 0:00 / M:SS al cargar
-    function initializeAudioPlayers() {
         document.querySelectorAll('.whatsapp-audio').forEach(audio => {
             // Encontrar el span donde se muestra la duración
             const durSpan = audio.closest('.audio-player')?.querySelector('.audio-duration');
@@ -2221,6 +2193,7 @@ function buildMessageKeyFor(m) {
                     // Mostrar el formato inicial: 0:00 / M:SS
                     durSpan.textContent = `0:00 / ${m}:${s}`;
                     audio.removeEventListener('loadedmetadata', showTotalDuration);
+                    console.log('✅ Duración del audio cargada:', `${m}:${s}`);
                 }
             };
 
@@ -2240,223 +2213,281 @@ function buildMessageKeyFor(m) {
                 durSpan.textContent = '0:00';
             }
         });
+
+        console.log('✅ initializeAudioPlayers completado');
     }
-    // La función seekAudio se mantiene igual
-    function seekAudio(id, progressBar, evt) {
-        const audio = document.getElementById(id);
-        const inner = progressBar.querySelector('.audio-progress-bar');
-        const rect = progressBar.getBoundingClientRect();
-        const clickX = evt.clientX - rect.left;
-        if (audio && isFinite(audio.duration) && audio.duration > 0) {
-            audio.currentTime = (clickX / rect.width) * audio.duration;
-            if (inner) inner.style.width = (clickX / rect.width) * 100 + '%';
-        }
+
+    // Función para mostrar audio en el chat después de enviarlo
+    function appendAudioMessageToChat(audioUrl) {
+        const container = document.getElementById('msgs');
+        if (!container) return;
+
+        const msgId = `audio_manual_${Date.now()}`;
+        const html = `
+    <div class="msg-box msg-user" data-msg-id="${msgId}">
+        <div class="message-content">
+            <div class="audio-player">
+                <audio id="${msgId}" class="whatsapp-audio">
+                    <source src="${audioUrl}" type="audio/ogg">
+                    <source src="${audioUrl}" type="audio/webm">
+                    Tu navegador no soporta el elemento de audio.
+                </audio>
+                <div class="audio-controls">
+                    <button class="audio-play-btn" onclick="toggleAudio('${msgId}', this)">
+                        ▶️
+                    </button>
+                    <div class="audio-progress" onclick="seekAudio('${msgId}', this, event)">
+                        <div class="audio-progress-bar"></div>
+                    </div>
+                    <span class="audio-duration" id="duration-${msgId}">0:00</span>
+                    <a href="${audioUrl}" download="audio-grabado.ogg" class="audio-download-btn" title="Descargar audio">
+                        ⬇️
+                    </a>
+                </div>
+                <div class="audio-transcription">
+                    <strong>🎤 Audio grabado:</strong> Mensaje de voz enviado desde la web
+                </div>
+            </div>
+        </div>
+        <div class="msg-meta" style="text-align: right; font-size: 11px; color: #8696a0; margin-top: 2px;">
+            ${formatClientTime(Date.now())}
+        </div>
+    </div>`;
+
+        const temp = document.createElement('div');
+        temp.innerHTML = html;
+        const newMessage = temp.firstElementChild;
+        container.appendChild(newMessage);
+
+        // Inicializar el reproductor de audio
+        setTimeout(() => {
+            initializeAudioPlayers();
+        }, 100);
+
+        // Scroll al final
+        setTimeout(() => {
+            container.scrollTop = container.scrollHeight;
+        }, 200);
+
+        console.log('🎤 Audio añadido al chat:', audioUrl);
     }
-function seekAudio(id, progressBar, evt) {
-    const audio = document.getElementById(id);
-    const inner = progressBar.querySelector('.audio-progress-bar');
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = evt.clientX - rect.left;
-    if (audio && isFinite(audio.duration) && audio.duration > 0) {
-        audio.currentTime = (clickX / rect.width) * audio.duration;
-        if (inner) inner.style.width = (audio.currentTime / audio.duration) * 100 + '%';
-    }
-}
 
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('DOM cargado - inicializando componentes');
-    enhanceAliasButtons();
+    /* ===================== INICIALIZACIÓN ÚNICA ===================== */
 
-    // INICIALIZACIÓN DIRECTA DE EMOJIS
-    setupChatSearch();
-    setupFileUpload();
-    setupEmojiPicker();
-    setupChatSearch(); // ← FUNCIÓN DE BÚSQUEDA AÑADIDA
-    setupFileUpload(); // ← NUEVA LÍNEA A AÑADIR
+    function initializeAllComponents() {
+        console.log('🔄 Inicializando todos los componentes...');
 
-    // 🚨 AÑADE ESTA LÍNEA AQUÍ
-    initializeAudioPlayers();
-    console.log('Emoji picker inicializado');
-    console.log('Búsqueda de chats inicializada');
-    console.log('File upload inicializado');
-
-    // Start automatic chat-list refresh
-    if (document.querySelector('.chat-items')) {
-        actualizarListaChats();
-        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
-            if (!document.hidden) actualizarListaChats();
-        }, refreshIntervalMs);
-    }
-    function startRecording() {
-        // Si tienes un botón que llama a esta función, este stub evitará el error de "no definido".
-        console.warn("La función startRecording no está implementada. Implementa MediaRecorder API para habilitar la grabación de voz.");
-        // NOTA: Si este botón es visible, es mejor ocultarlo o reemplazarlo por un botón de texto normal.
-    }
-    function stopRecording() {
-        console.warn("La función stopRecording no está implementada.");
-    }
-    function initializeAudioPlayers() {
-        // Seleccionar todos los elementos <audio>
-        document.querySelectorAll('.whatsapp-audio').forEach(audio => {
-            // Encontrar el span donde se muestra la duración
-            const playerDiv = audio.closest('.audio-player');
-            const durSpan = playerDiv?.querySelector('.audio-duration');
-            if (!durSpan) return;
-
-            // Función para mostrar la duración total
-            const showTotalDuration = () => {
-                // Verifica que la duración sea un número finito y mayor que cero
-                if (isFinite(audio.duration) && audio.duration > 0) {
-                    const m = Math.floor(audio.duration / 60);
-                    const s = Math.floor(audio.duration % 60).toString().padStart(2, '0');
-
-                    // Mostrar el formato inicial: 0:00 / M:SS
-                    durSpan.textContent = `0:00 / ${m}:${s}`;
-                    audio.removeEventListener('loadedmetadata', showTotalDuration);
-                } else if (durSpan.textContent === '0:00') {
-                    // Si falla o la duración es 0, al menos mostrar el estado inicial
-                    durSpan.textContent = '0:00';
-                }
-            };
-
-            // Escuchar cuando los metadatos estén cargados
-            audio.addEventListener('loadedmetadata', showTotalDuration);
-
-            // Forzar la carga de metadatos (necesario si el audio no está en autoplay)
-            audio.load();
-
-            // Si ya está cargado (a veces ocurre), inicializar
-            showTotalDuration();
-        });
-    }
-    // Initialize message polling if chat is selected
-    function initMessagesStateFromDOM() {
+        // 1. Inicializar componentes básicos
         try {
-            const msgsContainer = document.getElementById('msgs');
-            if (!msgsContainer) return;
-            const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
-            let maxTs = Number(lastMessageTimestamp) || 0;
-            nodes.forEach(n => {
-                const idAttr = n.getAttribute('data-msg-id');
-                const id = Number(idAttr) || 0;
-                if (id) {
-                    seenMessageKeys.add('id:' + String(id));
-                }
-            });
-            console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
-        } catch (e) {
-            console.warn('initMessagesStateFromDOM failed', e);
-        }
-    }
+            enhanceAliasButtons();
+            console.log('✅ Alias buttons inicializado');
+        } catch (e) { console.error('Error en alias buttons:', e); }
 
-    if (selectedChatId) {
-        initMessagesStateFromDOM();
-        if (!messagesIntervalHandle) {
-            pollSelectedMessages();
-            messagesIntervalHandle = setInterval(() => {
-                if (!document.hidden) pollSelectedMessages();
-            }, messagePollIntervalMs);
-        }
-    }
+        try {
+            setupChatSearch();
+            console.log('✅ Búsqueda de chats inicializado');
+        } catch (e) { console.error('Error en búsqueda de chats:', e); }
 
-    document.addEventListener('visibilitychange', () => {
-        if (document.hidden) {
-            chatAutoRefresh = false;
-        } else {
-            chatAutoRefresh = true;
-            if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
-                chatsIntervalHandle = setInterval(() => {
-                    if (!document.hidden) actualizarListaChats();
-                }, refreshIntervalMs);
+        try {
+            setupFileUpload();
+            console.log('✅ Subida de archivos inicializado');
+        } catch (e) { console.error('Error en subida de archivos:', e); }
+
+        try {
+            setupEmojiPicker();
+            console.log('✅ Picker de emojis inicializado');
+        } catch (e) { console.error('Error en picker de emojis:', e); }
+
+        try {
+            initializeAudioPlayers();
+            console.log('✅ Reproductores de audio inicializado');
+        } catch (e) { console.error('Error en reproductores de audio:', e); }
+
+        // 2. INICIALIZAR GRABADOR DE AUDIO - SIEMPRE intentarlo
+        const recordBtn = document.getElementById('record-audio-btn');
+        if (recordBtn && recordBtn.offsetParent !== null) { // Verifica si es visible
+            try {
+                console.log('🎤 Inicializando grabador de audio...');
+                setupAudioRecording();
+                console.log('✅ Grabador de audio inicializado');
+            } catch (e) {
+                console.error('Error en grabador de audio:', e);
             }
-            if (selectedChatId && !messagesIntervalHandle) {
-                initMessagesStateFromDOM();
+        } else {
+            console.log('ℹ️ Botón de audio no encontrado o no visible (puede estar en modo IA)');
+        }
+
+        console.log('✅✅✅ TODOS los componentes inicializados ✅✅✅');
+    }
+
+    // ✅ UN SOLO DOMContentLoaded - ELIMINAR LOS DEMÁS
+    document.addEventListener('DOMContentLoaded', function () {
+        console.log('📄 DOM completamente cargado - Iniciando...');
+
+        // Primero inicializar componentes básicos
+        enhanceAliasButtons();
+
+        // Inicializar componentes de la interfaz
+        setupChatSearch();
+        setupFileUpload();
+        setupEmojiPicker();
+        initializeAudioPlayers();
+
+        // 🎤 INICIALIZAR GRABADOR DE AUDIO (solo si estamos en modo manual)
+        const recordBtn = document.getElementById('record-audio-btn');
+        console.log('🔍 Buscando botón de audio:', recordBtn);
+
+        if (recordBtn && recordBtn.style.display !== 'none') {
+            console.log('🎤 Botón de audio encontrado, inicializando grabador...');
+            try {
+                setupAudioRecording();
+                console.log('✅ Grabador de audio inicializado');
+            } catch (error) {
+                console.error('Error inicializando grabador de audio:', error);
+            }
+        } else {
+            console.log('ℹ️ Botón de audio no disponible (posible modo IA)');
+        }
+
+        // Start automatic chat-list refresh
+        if (document.querySelector('.chat-items')) {
+            actualizarListaChats();
+            if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+                if (!document.hidden) actualizarListaChats();
+            }, refreshIntervalMs);
+        }
+
+        // Initialize message polling if chat is selected
+        function initMessagesStateFromDOM() {
+            try {
+                const msgsContainer = document.getElementById('msgs');
+                if (!msgsContainer) return;
+                const nodes = Array.from(msgsContainer.querySelectorAll('[data-msg-id]'));
+                let maxTs = Number(lastMessageTimestamp) || 0;
+                nodes.forEach(n => {
+                    const idAttr = n.getAttribute('data-msg-id');
+                    const id = Number(idAttr) || 0;
+                    if (id) {
+                        seenMessageKeys.add('id:' + String(id));
+                    }
+                });
+                console.debug('messages state initialized', { lastMessageTimestamp, seenCount: seenMessageKeys.size });
+            } catch (e) {
+                console.warn('initMessagesStateFromDOM failed', e);
+            }
+        }
+
+        if (selectedChatId) {
+            initMessagesStateFromDOM();
+            if (!messagesIntervalHandle) {
+                pollSelectedMessages();
                 messagesIntervalHandle = setInterval(() => {
                     if (!document.hidden) pollSelectedMessages();
                 }, messagePollIntervalMs);
             }
         }
-    });
-});
-// Función mejorada para la búsqueda de chats
-function setupChatSearch() {
-    const searchInput = document.getElementById('search-chats-input');
 
-    if (!searchInput) {
-        console.warn('Search input not found');
-        return;
-    }
-
-    function performSearch() {
-        const searchTerm = normalizeText(searchInput.value);
-        const chatItems = document.querySelectorAll('.chat-item');
-
-        let foundAny = false;
-
-        chatItems.forEach(chatItem => {
-            const aliasElement = chatItem.querySelector('.alias-view');
-
-            if (!aliasElement) return;
-
-            const chatName = normalizeText(aliasElement.textContent);
-            const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
-
-            const matchesSearch = chatName.includes(searchTerm) ||
-                                chatNumber.includes(searchTerm) ||
-                                (searchTerm === '');
-
-            chatItem.style.display = matchesSearch ? 'block' : 'none';
-
-            if (matchesSearch && searchTerm !== '') {
-                foundAny = true;
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                chatAutoRefresh = false;
+            } else {
+                chatAutoRefresh = true;
+                if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
+                    chatsIntervalHandle = setInterval(() => {
+                        if (!document.hidden) actualizarListaChats();
+                    }, refreshIntervalMs);
+                }
+                if (selectedChatId && !messagesIntervalHandle) {
+                    initMessagesStateFromDOM();
+                    messagesIntervalHandle = setInterval(() => {
+                        if (!document.hidden) pollSelectedMessages();
+                    }, messagePollIntervalMs);
+                }
             }
         });
 
-        // Opcional: Mostrar mensaje si no se encontraron resultados
-        const noResultsMsg = document.getElementById('no-search-results');
-        if (searchTerm !== '' && !foundAny) {
-            if (!noResultsMsg) {
-                const msg = document.createElement('div');
-                msg.id = 'no-search-results';
-                msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
-                msg.style.padding = '10px';
-                msg.style.textAlign = 'center';
-                msg.style.color = '#999';
-                document.querySelector('.chat-items').appendChild(msg);
-            }
-        } else if (noResultsMsg) {
-            noResultsMsg.remove();
-        }
-    }
-
-    searchInput.addEventListener('input', performSearch);
-
-    // También aplicar búsqueda cuando se actualicen los chats dinámicamente
-    const observer = new MutationObserver(function(mutations) {
-        const currentSearch = normalizeText(searchInput.value);
-        if (currentSearch) {
-            performSearch();
-        }
+        console.log('✅ Inicialización completa del DOM');
     });
 
-    const chatContainer = document.querySelector('.chat-items');
-    if (chatContainer) {
-        observer.observe(chatContainer, { childList: true, subtree: true });
+    // Función mejorada para la búsqueda de chats
+    function setupChatSearch() {
+        const searchInput = document.getElementById('search-chats-input');
+
+        if (!searchInput) {
+            console.warn('Search input not found');
+            return;
+        }
+
+        function performSearch() {
+            const searchTerm = normalizeText(searchInput.value);
+            const chatItems = document.querySelectorAll('.chat-item');
+
+            let foundAny = false;
+
+            chatItems.forEach(chatItem => {
+                const aliasElement = chatItem.querySelector('.alias-view');
+
+                if (!aliasElement) return;
+
+                const chatName = normalizeText(aliasElement.textContent);
+                const chatNumber = chatItem.dataset.chatNum ? normalizeText(chatItem.dataset.chatNum) : '';
+
+                const matchesSearch = chatName.includes(searchTerm) ||
+                    chatNumber.includes(searchTerm) ||
+                    (searchTerm === '');
+
+                chatItem.style.display = matchesSearch ? 'block' : 'none';
+
+                if (matchesSearch && searchTerm !== '') {
+                    foundAny = true;
+                }
+            });
+
+            // Opcional: Mostrar mensaje si no se encontraron resultados
+            const noResultsMsg = document.getElementById('no-search-results');
+            if (searchTerm !== '' && !foundAny) {
+                if (!noResultsMsg) {
+                    const msg = document.createElement('div');
+                    msg.id = 'no-search-results';
+                    msg.textContent = 'No se encontraron chats que coincidan con la búsqueda';
+                    msg.style.padding = '10px';
+                    msg.style.textAlign = 'center';
+                    msg.style.color = '#999';
+                    document.querySelector('.chat-items').appendChild(msg);
+                }
+            } else if (noResultsMsg) {
+                noResultsMsg.remove();
+            }
+        }
+
+        searchInput.addEventListener('input', performSearch);
+
+        // También aplicar búsqueda cuando se actualicen los chats dinámicamente
+        const observer = new MutationObserver(function (mutations) {
+            const currentSearch = normalizeText(searchInput.value);
+            if (currentSearch) {
+                performSearch();
+            }
+        });
+
+        const chatContainer = document.querySelector('.chat-items');
+        if (chatContainer) {
+            observer.observe(chatContainer, { childList: true, subtree: true });
+        }
+
+        console.debug('Chat search functionality initialized - insensible a tildes');
     }
 
-    console.debug('Chat search functionality initialized - insensible a tildes');
-}
-
-// Función normalizadora mejorada (insensible a tildes)
-function normalizeText(s) {
-    if (!s) return '';
-    return String(s)
-        .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
-        .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
-        .replace(/\s+/g, ' ')
-        .trim()
-        .toLowerCase();
-}
+    // Función normalizadora mejorada (insensible a tildes)
+    function normalizeText(s) {
+        if (!s) return '';
+        return String(s)
+            .normalize("NFD")  // Separa los caracteres base de los diacríticos (tildes)
+            .replace(/[\u0300-\u036f]/g, "")  // Elimina los diacríticos
+            .replace(/\s+/g, ' ')
+            .trim()
+            .toLowerCase();
+    }
 
     /* ===================== FILE UPLOAD FUNCTIONALITY ===================== */
 
@@ -2622,11 +2653,7 @@ function normalizeText(s) {
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
 
-
         // Validar antes de enviar
-        // Validar antes de enviar - CORREGIDO: texto no obligatorio si hay archivo
-        // Validar antes de enviar - SOLO verificar que haya algo
-        // Validar antes de enviar - CORREGIDO DEFINITIVO
         messageForm.addEventListener('submit', function (e) {
             const hasText = textarea.value.trim() !== '';
             const hasFile = fileInput.files.length > 0;
@@ -2637,7 +2664,6 @@ function normalizeText(s) {
                 alert('Por favor escribe un mensaje o selecciona un archivo');
                 return false;
             }
-            // Si hay archivo, puede enviarse SIN texto - ESTO YA ESTÁ CORRECTO
 
             // Mostrar indicador de envío
             const sendBtn = document.querySelector('.send-btn');
@@ -2654,66 +2680,397 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
-    // =======================================================
-    // LÓGICA AGREGADA PARA EL BOTÓN DE GRABAR AUDIO (MICROFONO)
-    // =======================================================
-    const startRecordingBtn = document.getElementById('start-recording');
-    const audioRecorderContainer = document.getElementById('audio-recorder-container');
-    const closeRecorderBtn = document.getElementById('close-recorder');
-    const textarea = document.getElementById('mensaje-texto');
-    const sendBtn = document.querySelector('.send-btn');
-    const fileAttachBtn = document.getElementById('file-attach-btn');
-    const emojiPickBtn = document.getElementById('emoji-pick-btn');
-    const inputGroup = document.querySelector('.input-group');
-    if (startRecordingBtn) {
-        // ESTO es lo que hace que el botón rojo funcione
-        startRecordingBtn.addEventListener('click', startRecording);
-    }
-    function toggleAudioRecorder(show) {
-        if (show) {
-            audioRecorderContainer.style.display = 'block';
-            // Ocultar elementos de entrada de texto
-            textarea.style.display = 'none';
-            sendBtn.style.display = 'none';
-            fileAttachBtn.style.display = 'none';
-            emojiPickBtn.style.display = 'none';
-            recordAudioBtn.innerHTML = '❌'; // Cambiar icono a cerrar
-            recordAudioBtn.title = 'Cancelar grabación';
 
-            // Asegurar que el contenedor del grabador tenga espacio
-            inputGroup.style.alignItems = 'flex-start';
+    /* ===================== AUDIO RECORDING FUNCTIONALITY ===================== */
 
-        } else {
-            audioRecorderContainer.style.display = 'none';
-            // Mostrar elementos de entrada de texto
-            textarea.style.display = 'block';
-            sendBtn.style.display = 'flex';
-            fileAttachBtn.style.display = 'flex';
-            emojiPickBtn.style.display = 'flex';
-            recordAudioBtn.innerHTML = '🎤'; // Restaurar icono
-            recordAudioBtn.title = 'Grabar audio';
+    function setupAudioRecording() {
+        console.log('🎤 Inicializando grabador de audio...');
 
-            inputGroup.style.alignItems = 'flex-end';
+        const recordBtn = document.getElementById('record-audio-btn');
+        const recorderContainer = document.getElementById('audio-recorder-container');
+
+        console.log('🔍 Buscando elementos de grabación:');
+        console.log('- Botón de grabar:', recordBtn);
+        console.log('- Contenedor grabador:', recorderContainer);
+
+        if (!recordBtn) {
+            console.error('❌ ERROR: No se encontró el botón de grabar audio (record-audio-btn)');
+            return;
         }
+
+        if (!recorderContainer) {
+            console.error('❌ ERROR: No se encontró el contenedor de grabación (audio-recorder-container)');
+            return;
+        }
+
+        // Elementos del DOM
+        const closeRecorderBtn = document.getElementById('close-recorder');
+        const startBtn = document.getElementById('start-recording');
+        const stopBtn = document.getElementById('stop-recording');
+        const deleteBtn = document.getElementById('delete-recording');
+        const sendBtn = document.getElementById('send-recording');
+        const previewAudio = document.getElementById('recorded-audio-preview');
+        const statusText = document.getElementById('recording-status');
+        const timerText = document.getElementById('recording-timer');
+        const audioPreview = document.getElementById('audio-preview');
+
+        console.log('🎯 Elementos internos encontrados:');
+        console.log('- Botón inicio:', startBtn);
+        console.log('- Botón parar:', stopBtn);
+        console.log('- Botón enviar:', sendBtn);
+
+        // Variables de estado
+        let mediaRecorder = null;
+        let audioChunks = [];
+        let isRecording = false;
+        let recordingStartTime = 0;
+        let timerInterval = null;
+        let recordedBlob = null;
+        let stream = null;
+
+        // Función para actualizar el temporizador
+        function updateTimer() {
+            if (!recordingStartTime) return;
+
+            const elapsed = Date.now() - recordingStartTime;
+            const minutes = Math.floor(elapsed / 60000);
+            const seconds = Math.floor((elapsed % 60000) / 1000);
+
+            timerText.textContent = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+        }
+
+        // Función para detener la grabación
+        function stopRecording() {
+            if (mediaRecorder && isRecording) {
+                if (mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+                isRecording = false;
+
+                // Detener stream
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                }
+
+                // Actualizar UI
+                if (startBtn) startBtn.style.display = 'block';
+                if (stopBtn) stopBtn.style.display = 'none';
+
+                // Limpiar temporizador
+                if (timerInterval) {
+                    clearInterval(timerInterval);
+                    timerInterval = null;
+                }
+
+                console.log('⏹️ Grabación detenida');
+            }
+        }
+
+        // Función para limpiar grabación
+        function deleteRecording() {
+            audioChunks = [];
+            isRecording = false;
+            recordedBlob = null;
+
+            if (previewAudio) {
+                previewAudio.src = '';
+            }
+
+            if (audioPreview) audioPreview.style.display = 'none';
+            if (sendBtn) sendBtn.style.display = 'none';
+            if (deleteBtn) deleteBtn.style.display = 'none';
+            if (statusText) {
+                statusText.textContent = 'Listo para grabar';
+                statusText.style.color = '#666';
+            }
+            if (timerText) timerText.textContent = '00:00';
+
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+
+            console.log('🗑️ Grabación eliminada');
+        }
+
+        // Mostrar/ocultar grabador
+        recordBtn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            console.log('🎤 Botón de audio clickeado');
+
+            if (recorderContainer.style.display === 'block') {
+                recorderContainer.style.display = 'none';
+                recordBtn.innerHTML = '🎤';
+                recordBtn.title = 'Grabar audio';
+                recordBtn.classList.remove('active');
+                stopRecording();
+                deleteRecording();
+                console.log('👆 Grabador cerrado');
+            } else {
+                recorderContainer.style.display = 'block';
+                recordBtn.innerHTML = '❌';
+                recordBtn.title = 'Cancelar grabación';
+                recordBtn.classList.add('active');
+                console.log('👇 Grabador abierto');
+
+                // Posicionar el contenedor
+                const rect = recordBtn.getBoundingClientRect();
+                const inputGroup = document.querySelector('.input-group');
+                if (inputGroup) {
+                    const groupRect = inputGroup.getBoundingClientRect();
+                    recorderContainer.style.bottom = (window.innerHeight - groupRect.top + 10) + 'px';
+
+                }
+
+                // Resetear estado
+                deleteRecording();
+            }
+        });
+
+        // Cerrar grabador
+        if (closeRecorderBtn) {
+            closeRecorderBtn.addEventListener('click', function () {
+                recorderContainer.style.display = 'none';
+                recordBtn.innerHTML = '🎤';
+                recordBtn.title = 'Grabar audio';
+                recordBtn.classList.remove('active');
+                stopRecording();
+                deleteRecording();
+                console.log('👆 Grabador cerrado por botón X');
+            });
+        }
+
+        // Iniciar grabación
+        if (startBtn) {
+            startBtn.addEventListener('click', async function () {
+                try {
+                    console.log('🎙️ Iniciando grabación...');
+
+                    // Solicitar permisos de micrófono
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: true
+                    });
+
+                    // Configurar MediaRecorder
+                    mediaRecorder = new MediaRecorder(stream);
+                    audioChunks = [];
+
+                    // Configurar eventos del MediaRecorder
+                    mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            audioChunks.push(event.data);
+                        }
+                    };
+
+                    mediaRecorder.onstop = () => {
+                        recordedBlob = new Blob(audioChunks, { type: 'audio/webm;codecs=opus' });
+
+                        // Mostrar preview del audio
+                        const audioUrl = URL.createObjectURL(recordedBlob);
+                        if (previewAudio) {
+                            previewAudio.src = audioUrl;
+                            audioPreview.style.display = 'block';
+                        }
+
+                        // Mostrar controles de audio grabado
+                        if (deleteBtn) deleteBtn.style.display = 'block';
+                        if (sendBtn) sendBtn.style.display = 'block';
+
+                        // Actualizar estado
+                        if (statusText) {
+                            statusText.textContent = 'Grabación finalizada ✓';
+                            statusText.style.color = '#25D366';
+                        }
+
+                        console.log(`🎙️ Audio grabado: ${recordedBlob.size} bytes`);
+                    };
+
+                    // Iniciar grabación
+                    mediaRecorder.start(100); // Capturar datos cada 100ms
+                    isRecording = true;
+                    recordingStartTime = Date.now();
+
+                    // Actualizar UI
+                    if (startBtn) startBtn.style.display = 'none';
+                    if (stopBtn) stopBtn.style.display = 'block';
+                    recordBtn.classList.add('recording');
+
+                    // Iniciar temporizador
+                    timerInterval = setInterval(updateTimer, 1000);
+
+                    if (statusText) {
+                        statusText.textContent = 'Grabando... 🎤';
+                        statusText.style.color = '#FF4444';
+                    }
+
+                    console.log('✅ Grabación iniciada exitosamente');
+
+                } catch (error) {
+                    console.error('❌ Error al acceder al micrófono:', error);
+
+                    let errorMessage = 'No se pudo acceder al micrófono.';
+                    if (error.name === 'NotAllowedError') {
+                        errorMessage = 'Permiso de micrófono denegado. Por favor, permite el acceso al micrófono en la configuración de tu navegador.';
+                    } else if (error.name === 'NotFoundError') {
+                        errorMessage = 'No se encontró ningún micrófono disponible.';
+                    }
+
+                    alert(errorMessage);
+                    if (startBtn) startBtn.style.display = 'block';
+                    if (stopBtn) stopBtn.style.display = 'none';
+                    deleteRecording();
+                }
+            });
+        }
+
+        // Detener grabación
+        if (stopBtn) {
+            stopBtn.addEventListener('click', function () {
+                console.log('⏹️ Botón de parar clickeado');
+                stopRecording();
+            });
+        }
+
+        // Eliminar grabación
+        if (deleteBtn) {
+            deleteBtn.addEventListener('click', function () {
+                if (confirm('¿Eliminar esta grabación?')) {
+                    deleteRecording();
+                    console.log('🗑️ Grabación eliminada por confirmación');
+                }
+            });
+        }
+
+        // Enviar grabación
+        if (sendBtn) {
+            sendBtn.addEventListener('click', async function () {
+                if (!recordedBlob || !selectedChatId) {
+                    alert('No hay audio grabado o chat seleccionado');
+                    return;
+                }
+
+                try {
+                    sendBtn.innerHTML = '⏳ Enviando...';
+                    sendBtn.disabled = true;
+                    if (statusText) statusText.textContent = 'Enviando audio...';
+
+                    const formData = new FormData();
+                    formData.append('numero', selectedChatId);
+                    formData.append('audio', recordedBlob, `audio_${Date.now()}.webm`);
+
+                    console.log(`📤 Enviando audio: ${recordedBlob.size} bytes a ${selectedChatId}`);
+
+                    // Enviar al servidor
+                    const response = await fetch('/send-audio-manual', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.ok) {
+                        const result = await response.json();
+
+                        if (result.success) {
+                            // Mostrar mensaje de éxito
+                            if (statusText) {
+                                statusText.textContent = '✅ Audio enviado correctamente';
+                                statusText.style.color = '#25D366';
+                            }
+
+                            // Esperar un momento antes de cerrar
+                            setTimeout(() => {
+                                // Cerrar grabador
+                                recorderContainer.style.display = 'none';
+                                recordBtn.innerHTML = '🎤';
+                                recordBtn.title = 'Grabar audio';
+                                recordBtn.classList.remove('active');
+
+                                // Resetear estado
+                                deleteRecording();
+
+                                // Mostrar el audio en el chat
+                                if (result.audio_url) {
+                                    appendAudioMessageToChat(result.audio_url);
+                                }
+                            }, 1000);
+
+                            console.log('✅ Audio enviado correctamente');
+
+                        } else {
+                            throw new Error(result.error || 'Error al enviar');
+                        }
+                    } else {
+                        const errorText = await response.text();
+                        throw new Error(`Error ${response.status}: ${errorText}`);
+                    }
+
+                } catch (error) {
+                    console.error('❌ Error enviando audio:', error);
+
+                    let errorMessage = error.message;
+                    if (error.message.includes('NetworkError') || error.message.includes('Failed to fetch')) {
+                        errorMessage = 'Error de conexión. Verifica tu internet e intenta de nuevo.';
+                    }
+
+                    alert(`❌ Error al enviar audio:\n${errorMessage}`);
+                    if (statusText) {
+                        statusText.textContent = 'Error al enviar';
+                        statusText.style.color = '#FF4444';
+                    }
+                } finally {
+                    sendBtn.innerHTML = '📤 Enviar audio';
+                    sendBtn.disabled = false;
+                }
+            });
+        }
+
+        // Cerrar grabador si se hace clic fuera de él
+        document.addEventListener('click', function (event) {
+            if (recorderContainer.style.display === 'block' &&
+                !recorderContainer.contains(event.target) &&
+                !recordBtn.contains(event.target)) {
+                recorderContainer.style.display = 'none';
+                recordBtn.innerHTML = '🎤';
+                recordBtn.title = 'Grabar audio';
+                recordBtn.classList.remove('active');
+                stopRecording();
+                deleteRecording();
+                console.log('👆 Grabador cerrado por clic fuera');
+            }
+        });
+
+        // Manejar tecla Escape para cerrar
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && recorderContainer.style.display === 'block') {
+                recorderContainer.style.display = 'none';
+                recordBtn.innerHTML = '🎤';
+                recordBtn.title = 'Grabar audio';
+                recordBtn.classList.remove('active');
+                stopRecording();
+                deleteRecording();
+                console.log('👆 Grabador cerrado por tecla Escape');
+            }
+        });
+
+        console.log('✅ setupAudioRecording inicializado correctamente');
     }
 
+    // Función para cortar audio (opcional avanzada)
+    function setupAudioTrimming() {
+        const trimBtn = document.createElement('button');
+        trimBtn.id = 'trim-audio';
+        trimBtn.className = 'action-btn';
+        trimBtn.innerHTML = '✂️ Recortar';
+        trimBtn.style.display = 'none';
 
-    // Manejar clic en el botón de micrófono
-    if (recordAudioBtn) {
-        recordAudioBtn.addEventListener('click', function () {
-            const isVisible = audioRecorderContainer.style.display === 'block';
-            toggleAudioRecorder(!isVisible);
+        const recorderActions = document.querySelector('.recorder-actions');
+        if (recorderActions) {
+            recorderActions.appendChild(trimBtn);
+        }
+
+        trimBtn.addEventListener('click', function () {
+            alert('Funcionalidad de recorte de audio - Para implementar:\n1. Usar wavesurfer.js\n2. Permitir seleccionar inicio/fin\n3. Exportar segmento seleccionado');
         });
     }
-
-    // Manejar clic en el botón de cerrar del panel (X)
-    if (closeRecorderBtn) {
-        closeRecorderBtn.addEventListener('click', function () {
-            toggleAudioRecorder(false);
-        });
-    }
-    // =======================================================
-    // FIN DE LÓGICA DE AUDIO
-    // =======================================================
 </script>
-{% endblock %}        
+{% endblock %} 
