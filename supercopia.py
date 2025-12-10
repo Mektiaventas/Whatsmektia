@@ -333,7 +333,7 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
     # ⚠️ REEMPLAZA ESTA URL BASE con la URL real de tu API
     API_BASE_URL = "https://graph.facebook.com"
     ENDPOINT = "/v1/account"
-
+    ACCESS_TOKEN= os.getenv("LACSE_WHATSAPP_TOKEN")
     url = API_BASE_URL + ENDPOINT
     
     payload = {
@@ -347,7 +347,8 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
         payload["pin"] = pin
         
     headers = {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {ACCESS_TOKEN}'
     }
     
     try:
