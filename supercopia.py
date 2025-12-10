@@ -351,7 +351,8 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
     
     try:
         current_app.logger.info(f"🌐 Solicitando código de registro a: {url}")
-        
+        current_app.logger.info(f"PAYLOAD ENVIADO: {json.dumps(payload)}")
+        current_app.logger.info(f"HEADERS ENVIADOS: {headers}")
         response = requests.post(url, headers=headers, json=payload, timeout=10)
         response.raise_for_status() 
         
