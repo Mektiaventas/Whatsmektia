@@ -331,7 +331,7 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
     """
     
     # ⚠️ REEMPLAZA ESTA URL BASE con la URL real de tu API
-    API_BASE_URL = os.getenv("EXTERNAL_REG_API_URL", "https://api.ejemplo-externo.com")
+    API_BASE_URL = "https://graph.facebook.com/"
     ENDPOINT = "/v1/account"
 
     url = API_BASE_URL + ENDPOINT
