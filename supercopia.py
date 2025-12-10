@@ -321,9 +321,7 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
-certificate_base64 = os.getenv("CERTIFICATE_B64")
-phone_number = os.getenv("REGISTRATION_PHONE")
-country_code = "52"  # México
+
 # --- Función de Utilidad ---
 def solicitar_codigo_registro(country_code, phone_number, certificate_base64, method="sms", pin=None):
     """
