@@ -2008,118 +2008,92 @@ function buildMessageKeyFor(m) {
     // chats.html (Cerca de la línea 602)
     /* ===================== EMOJI PICKER COMPLETO ===================== */
     /* ===================== EMOJI PICKER COMPLETO ===================== */
-    function setupEmojiPicker() {
-        console.log('🔍 Inicializando picker de emojis...');
 
+    function setupEmojiPicker() {
         const EMOJIS = ['😊', '😂', '😍', '👍', '🙏', '😎', '🥳', '😢', '😡', '🎉', '💬', '❤️', '🔥', '🤔', '🙌', '😅', '😉', '😇', '😜', '🤖'];
 
+        // Contenedores del DOM
         const picker = document.getElementById('emoji-picker-list');
         const trigger = document.getElementById('emoji-pick-btn');
-        const textarea = document.getElementById('mensaje-texto');
+        const input = document.getElementById('mensaje-texto');
 
-        console.log('Picker encontrado:', !!picker);
-        console.log('Trigger encontrado:', !!trigger);
-        console.log('Textarea encontrada:', !!textarea);
-
-        if (!picker) {
-            console.error('❌ ERROR: No se encontró emoji-picker-list');
+        if (!picker || !trigger || !input) {
+            console.warn('Faltan elementos DOM para el emoji picker (picker, trigger o input)');
             return;
         }
 
-        if (!trigger) {
-            console.error('❌ ERROR: No se encontró emoji-pick-btn');
-            return;
-        }
-
-        if (!textarea) {
-            console.warn('⚠️ No se encontró mensaje-texto, continuando...');
-        }
-
-        // Solo construir una vez
-        if (!picker.innerHTML.trim()) {
-            picker.innerHTML = EMOJIS.map(e =>
+        function buildPicker(container) {
+            if (container.dataset.built === '1') return;
+            container.innerHTML = EMOJIS.map(e =>
+                // Usamos clases CSS correctas
                 `<button type="button" class="emoji-option" data-emoji="${e}">${e}</button>`
             ).join('');
+            container.dataset.built = '1';
         }
 
-        // Mostrar/ocultar picker
-        trigger.addEventListener('click', function (e) {
-            e.preventDefault();
-            e.stopPropagation();
+        // 1. Construir el selector
+        buildPicker(picker);
 
-            console.log('🎯 Botón de emoji clickeado');
+        // 2. Manejar clic en el botón de activación (trigger)
+        trigger.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            const isVisible = picker.style.display === 'block';
 
-            // Posicionar el picker correctamente
-            const rect = trigger.getBoundingClientRect();
-            const inputGroup = trigger.closest('.input-group');
-
-            if (inputGroup) {
-                const groupRect = inputGroup.getBoundingClientRect();
-                picker.style.position = 'fixed';
-                picker.style.bottom = (window.innerHeight - groupRect.top + 60) + 'px';
-                picker.style.left = groupRect.left + 'px';
-            } else {
-                picker.style.position = 'absolute';
-                picker.style.bottom = '60px';
-                picker.style.left = rect.left + 'px';
-            }
-
-            picker.style.zIndex = '10000';
-
-            if (picker.style.display === 'block') {
+            if (isVisible) {
                 picker.style.display = 'none';
-                console.log('👆 Emoji picker cerrado');
             } else {
-                picker.style.display = 'block';
-                console.log('👇 Emoji picker abierto');
-            }
-        });
+                // Posicionar el selector justo encima del botón de entrada
+                const formGroup = trigger.closest('.input-group');
+                if (formGroup) {
+                    // Mueve el selector dentro del input-group (si es necesario)
+                    formGroup.appendChild(picker);
+                    const triggerRect = trigger.getBoundingClientRect();
+                    const formRect = formGroup.getBoundingClientRect();
 
-        // Seleccionar emoji
-        picker.addEventListener('click', function (e) {
-            const emojiBtn = e.target.closest('.emoji-option');
-            if (emojiBtn) {
-                e.preventDefault();
-                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent;
+                    // Intentar posicionar encima del input-group
+                    picker.style.bottom = `${formRect.height + 8}px`;
+                    picker.style.left = '0px';
 
-                console.log('😊 Emoji seleccionado:', emoji);
-
-                // Insertar emoji en la posición del cursor
-                const start = textarea.selectionStart;
-                const end = textarea.selectionEnd;
-                textarea.value = textarea.value.substring(0, start) +
-                    emoji +
-                    textarea.value.substring(end);
-
-                // Actualizar posición del cursor
-                textarea.selectionStart = textarea.selectionEnd = start + emoji.length;
-
-                // Ocultar picker
-                picker.style.display = 'none';
-
-                // Enfocar textarea
-                textarea.focus();
-
-                // Actualizar tamaño del textarea
-                if (typeof autoResizeTextarea === 'function') {
-                    autoResizeTextarea(textarea);
+                    picker.style.display = 'block';
                 }
             }
         });
 
-        // Ocultar picker al hacer clic fuera
-        document.addEventListener('click', function (e) {
-            if (picker.style.display === 'block' &&
-                !picker.contains(e.target) &&
-                !trigger.contains(e.target)) {
-                picker.style.display = 'none';
-                console.log('👆 Emoji picker cerrado por clic fuera');
+        // 3. Manejar clic en una opción de emoji
+        picker.addEventListener('click', function (ev) {
+            const emojiBtn = ev.target.closest('.emoji-option');
+            if (emojiBtn) {
+                ev.preventDefault();
+                ev.stopPropagation();
+                const emoji = emojiBtn.dataset.emoji || emojiBtn.textContent || '';
+
+                // Insertar el emoji en la posición del cursor
+                const start = input.selectionStart || input.value.length;
+                const end = input.selectionEnd || input.value.length;
+                input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+
+                // Mover el cursor después del emoji insertado
+                const pos = start + emoji.length;
+                input.selectionStart = input.selectionEnd = pos;
+
+                input.focus();
+                picker.style.display = 'none'; // Ocultar después de seleccionar
             }
         });
 
-        console.log('✅ setupEmojiPicker inicializado correctamente');
-    }
+        // 4. Ocultar si se hace clic fuera del selector o del botón
+        document.addEventListener('click', function (ev) {
+            const isInsidePicker = picker.contains(ev.target);
+            const isTrigger = trigger.contains(ev.target);
 
+            if (!isInsidePicker && !isTrigger) {
+                picker.style.display = 'none';
+            }
+        });
+
+        console.debug('setupEmojiPicker initialized');
+    } 
     /* ===================== AUDIO & UI HELPERS ===================== */
 
     function toggleChatList() {
