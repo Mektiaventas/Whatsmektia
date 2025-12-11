@@ -220,6 +220,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("DRASGO_DB_PASSWORD"),          
         'db_name': os.getenv("DRASGO_DB_NAME"),                  
         'dominio': 'drasgo.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_DRASGO"),
         # Claves de Messenger
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
