@@ -225,6 +225,7 @@ NUMEROS_CONFIG = {
         'db_password': os.getenv("DRASGO_DB_PASSWORD"),          
         'db_name': os.getenv("DRASGO_DB_NAME"),                  
         'dominio': 'drasgo.mektia.com',
+        'telegram_token': os.getenv("TELEGRAM_BOT_TOKEN_SOIN3"),
         # Claves de Messenger
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
@@ -388,7 +389,7 @@ def solicitar_registro_api():
     # Intenta usar datos del .env, o usa un valor fijo de la configuración del tenant si es necesario
     CERT_B64 = os.getenv("TENANT_CERTIFICATE_B64")
     
-    # Intenta obtener el teléfono del negocio de la configuración actual, o un valor por defecto
+    # Intenta obtener el teléfono del n egocio de la configuración actual, o un valor por defecto
     telefono_completo = "524499628022"
     
     # Suponemos que necesitas el código de país (ej. "52") y el resto del número
