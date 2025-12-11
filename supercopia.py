@@ -8154,7 +8154,6 @@ def messenger_webhook():
         app.logger.error(f"🔴 CRITICAL error in messenger_webhook: {e}")
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
-
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -8215,6 +8214,7 @@ def webhook():
             actualizar_info_contacto(numero, config, nombre_perfil=nombre_whatsapp) 
         except Exception as e:
             app.logger.warning(f"⚠️ pre-processing kanban/contact failed: {e}")
+        
         # Deduplication by message id
         message_id = msg.get('id')
         if not message_id:
@@ -8238,6 +8238,7 @@ def webhook():
         imagen_base64 = None
         public_url = None
         transcripcion = None
+        audio_url = None
 
         if 'text' in msg and 'body' in msg['text']:
             texto = (msg['text']['body'] or '').strip()
@@ -8269,6 +8270,25 @@ def webhook():
             texto = f"[{msg.get('type', 'unknown')}] Mensaje no textual"
 
         app.logger.info(f"📝 Incoming {numero}: '{(texto or '')[:200]}' (imagen={es_imagen}, audio={es_audio}, archivo={es_archivo})")
+        
+        # --- NUEVO: PROCESAR LEAD CON LEAD MANAGER ---
+        try:
+            if texto and config and lead_manager:
+                # Procesar lead automáticamente basado en palabras clave
+                resultado_lead = lead_manager.procesar_mensaje_y_asignar_lead(
+                    numero=numero,
+                    mensaje=texto,
+                    config=config
+                )
+                
+                if resultado_lead and not resultado_lead.get('error'):
+                    app.logger.info(f"📊 Lead asignado automáticamente: {numero} -> {resultado_lead.get('lead_asignado')} ({resultado_lead.get('nivel_detectado')})")
+                elif resultado_lead.get('error'):
+                    app.logger.error(f"❌ Error en Lead Manager: {resultado_lead.get('error')}")
+        except Exception as e:
+            app.logger.error(f"❌ Error procesando lead: {e}")
+        # --- FIN PROCESAR LEAD ---
+        
         # --- AÑADIR LÓGICA DE NUEVA CONVERSACIÓN AQUÍ ---
         try:
             # Llama a la función con el número, el texto y la configuración detectada
@@ -8276,6 +8296,7 @@ def webhook():
         except Exception as e:
             app.logger.error(f"❌ Error al registrar nueva conversación desde webhook: {e}")
         # --- FIN LÓGICA AÑADIDA ---
+        
         # --- GUARDO EL MENSAJE DEL USUARIO INMEDIATAMENTE para que el Kanban y la lista de chats lo reflejen ---
         try:
             # --- MODIFICADO ---
@@ -8295,7 +8316,6 @@ def webhook():
                 )
             # --- FIN MODIFICADO ---
         except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
             app.logger.warning(f"⚠️ No se pudo guardar mensaje inmediato en webhook: {e}")
 
         # Delegate ALL business logic to procesar_mensaje_unificado (single place to persist/respond).
@@ -8324,8 +8344,7 @@ def webhook():
     except Exception as e:
         app.logger.error(f"🔴 CRITICAL error in webhook: {e}")
         app.logger.error(traceback.format_exc())
-        return 'Internal server error', 500
-
+        return 'Internal server error', 500 
 @app.route('/send-audio-manual', methods=['POST'])
 def enviar_audio_manual():
     """Envía audios grabados manualmente desde la web a WhatsApp"""
@@ -13272,12 +13291,19 @@ with app.app_context():
     app.logger.info("🔍 Verificando tablas en todas las bases de datos...")
     for nombre, config in NUMEROS_CONFIG.items():
         verificar_tablas_bd(config)
+    
+    # Asegurar índices de performance
     for nombre, config in NUMEROS_CONFIG.items():
-            _ensure_performance_indexes(config)
+        _ensure_performance_indexes(config)
+
+# INICIALIZAR LEAD MANAGER
+lead_manager = init_lead_manager()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=5003, help='Puerto para ejecutar la aplicación')
     args = parser.parse_args()
-    app.run(host='0.0.0.0', port=5003)
+    
+    app.logger.info("🚀 Aplicación iniciando con Lead Manager...")
+    app.run(host='0.0.0.0', port=5003, debug=True) 
       
