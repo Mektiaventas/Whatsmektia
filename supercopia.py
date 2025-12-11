@@ -337,7 +337,7 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
 
     # 2. Usar el formato de URL con el ID del número: /v18.0/{phone_number_id}/account
     # Utilizamos una versión de API (ej. v18.0) para el formato estándar del Graph API
-    API_BASE_URL = "https://graph.facebook.com/v18.0"
+    API_BASE_URL = "https://graph.facebook.com"
     ENDPOINT = f"/{PHONE_ID}/account"
     ACCESS_TOKEN= os.getenv("SUPAG_WHATSAPP_TOKEN")
     url = API_BASE_URL + ENDPOINT
