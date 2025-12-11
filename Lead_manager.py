@@ -16,16 +16,125 @@ class LeadManager:
         self.app = app
         self.get_db_connection = db_connection_func
         self.load_config = config_loader_func
-        self.enviar_mensaje = messaging_funcs.get('enviar_mensaje')
-        self.send_telegram_message = messaging_funcs.get('send_telegram_message')
-        self.guardar_respuesta_sistema = messaging_funcs.get('guardar_respuesta_sistema')
-        self.obtener_historial = messaging_funcs.get('obtener_historial')
-        self.actualizar_estado_conversacion = messaging_funcs.get('actualizar_estado_conversacion')
         self.logger = logger
         self.tz_mx = tz_mx
         self.deepseek_api_key = deepseek_api_key
         self.deepseek_api_url = deepseek_api_url
         
+        # Asignar funciones con verificaciones y fallbacks
+        self.enviar_mensaje = messaging_funcs.get('enviar_mensaje')
+        self.send_telegram_message = messaging_funcs.get('send_telegram_message')
+        self.guardar_respuesta_sistema = messaging_funcs.get('guardar_respuesta_sistema')
+        self.obtener_historial = messaging_funcs.get('obtener_historial')
+        self.actualizar_estado_conversacion = messaging_funcs.get('actualizar_estado_conversacion')
+        
+        # Verificar y crear fallbacks para funciones críticas
+        self._verificar_y_crear_fallbacks()
+        
+        self.logger.info("✅ Lead Manager inicializado correctamente")
+    
+    def _verificar_y_crear_fallbacks(self):
+        """Verifica funciones críticas y crea fallbacks si no existen."""
+        
+        # Verificar enviar_mensaje
+        if not self.enviar_mensaje:
+            self.logger.warning("⚠️ Función 'enviar_mensaje' no disponible, usando fallback")
+            self.enviar_mensaje = self._enviar_mensaje_fallback
+        
+        # Verificar send_telegram_message
+        if not self.send_telegram_message:
+            self.logger.warning("⚠️ Función 'send_telegram_message' no disponible, usando fallback")
+            self.send_telegram_message = self._send_telegram_message_fallback
+        
+        # Verificar guardar_respuesta_sistema
+        if not self.guardar_respuesta_sistema:
+            self.logger.warning("⚠️ Función 'guardar_respuesta_sistema' no disponible, usando fallback")
+            self.guardar_respuesta_sistema = self._guardar_respuesta_sistema_fallback
+        
+        # Verificar obtener_historial
+        if not self.obtener_historial:
+            self.logger.warning("⚠️ Función 'obtener_historial' no disponible, usando fallback")
+            self.obtener_historial = self._obtener_historial_fallback
+        
+        # Verificar actualizar_estado_conversacion
+        if not self.actualizar_estado_conversacion:
+            self.logger.warning("⚠️ Función 'actualizar_estado_conversacion' no disponible, usando fallback")
+            self.actualizar_estado_conversacion = self._actualizar_estado_conversacion_fallback
+    
+    # -----------------------------------------------------------------
+    # FALLBACK FUNCTIONS
+    # -----------------------------------------------------------------
+    
+    def _enviar_mensaje_fallback(self, numero, texto, config):
+        """Fallback si enviar_mensaje no existe."""
+        self.logger.info(f"📤 Fallback enviar_mensaje: Simulando envío a {numero}")
+        return True
+    
+    def _send_telegram_message_fallback(self, chat_id, text, token):
+        """Fallback si send_telegram_message no existe."""
+        self.logger.info(f"📤 Fallback Telegram: Simulando envío a {chat_id}")
+        return True
+    
+    def _guardar_respuesta_sistema_fallback(self, numero, respuesta, config, respuesta_tipo, respuesta_media_url=None):
+        """Fallback si guardar_respuesta_sistema no existe."""
+        try:
+            conn = self.get_db_connection(config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO conversaciones 
+                (numero, respuesta, timestamp, respuesta_tipo, respuesta_media_url)
+                VALUES (%s, %s, NOW(), %s, %s)
+            """, (numero, respuesta, respuesta_tipo, respuesta_media_url))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Error fallback guardar_respuesta_sistema: {e}")
+            return False
+    
+    def _obtener_historial_fallback(self, numero, limite, config):
+        """Fallback si obtener_historial no existe."""
+        try:
+            conn = self.get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute("""
+                SELECT mensaje, respuesta, timestamp, tipo_mensaje, imagen_url
+                FROM conversaciones 
+                WHERE numero = %s 
+                ORDER BY timestamp DESC 
+                LIMIT %s
+            """, (numero, limite))
+            historial = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return historial[::-1]  # Invertir para orden cronológico
+        except Exception as e:
+            self.logger.error(f"❌ Error fallback obtener_historial: {e}")
+            return []
+    
+    def _actualizar_estado_conversacion_fallback(self, numero, contexto, accion, datos, config):
+        """Fallback si actualizar_estado_conversacion no existe."""
+        try:
+            conn = self.get_db_connection(config)
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO chat_meta (numero, contexto, accion, datos, actualizado) 
+                VALUES (%s, %s, %s, %s, NOW())
+                ON DUPLICATE KEY UPDATE 
+                    contexto = VALUES(contexto),
+                    accion = VALUES(accion),
+                    datos = VALUES(datos),
+                    actualizado = NOW()
+            """, (numero, str(contexto), accion, str(datos)))
+            conn.commit()
+            cursor.close()
+            conn.close()
+            return True
+        except Exception as e:
+            self.logger.error(f"❌ Error fallback actualizar_estado_conversacion: {e}")
+            return False
+    
     # -----------------------------------------------------------------
     # FUNCIONES DE DETECCIÓN DE LEADS POR PALABRAS CLAVE
     # -----------------------------------------------------------------
@@ -380,7 +489,7 @@ class LeadManager:
                 enviado = self._enviar_plantilla_reactivacion(numero, nombre_cliente, mensaje, config)
             else:
                 # Mensaje normal
-                if numero.startswith('tg_'):
+                if numero and isinstance(numero, str) and numero.startswith('tg_'):
                     token = config.get('telegram_token')
                     if token:
                         enviado = self.send_telegram_message(numero.replace('tg_', ''), mensaje, token)
@@ -430,8 +539,8 @@ class LeadManager:
                 return None
                 
             contexto = "\n".join([
-                f"{'Usuario' if msg['mensaje'] else 'IA'}: {msg['mensaje'] or msg['respuesta']}" 
-                for msg in historial
+                f"{'Usuario' if msg.get('mensaje') else 'IA'}: {msg.get('mensaje') or msg.get('respuesta', '')}" 
+                for msg in historial if msg
             ])
             
             prompt = f"""
@@ -536,6 +645,13 @@ class LeadManager:
         """Inicia el scheduler de seguimientos."""
         def _worker():
             self.logger.info("🚀 Scheduler de Seguimiento INICIADO")
+            
+            # Asegurar columnas una vez al inicio
+            for config in NUMEROS_CONFIG.values():
+                try:
+                    self.ensure_columns(config)
+                except Exception as e:
+                    self.logger.error(f"❌ Error asegurando columnas: {e}")
             
             while True:
                 try:

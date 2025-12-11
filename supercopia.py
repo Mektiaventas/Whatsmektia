@@ -28,6 +28,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import re
 import io
+from Lead_manager import LeadManager 
 from werkzeug.utils import secure_filename
 from PIL import Image 
 from openai import OpenAI
@@ -371,6 +372,72 @@ def solicitar_codigo_registro(country_code, phone_number, certificate_base64, me
     except requests.exceptions.RequestException as e:
         current_app.logger.error(f"🔴 Error al solicitar código de registro: {e}")
         return {"error": "Error de conexión o API", "details": str(e)}
+
+    # DESPUÉS DE NUMEROS_CONFIG Y ANTES DEL WEBHOOK, AÑADE:
+lead_manager = None
+
+def init_lead_manager():
+    global lead_manager
+    
+    app.logger.info("🚀 Inicializando Lead Manager...")
+    
+    # Definir funciones wrapper para pasar al LeadManager
+    def get_db_wrapper(config):
+        return get_db_connection(config)
+    
+    def load_config_wrapper(config):
+        return load_config(config)
+    
+    # Diccionario con funciones de mensajería
+    # Asegúrate de que estas funciones existan en tu código
+    messaging_funcs = {
+        'enviar_mensaje': enviar_mensaje,
+        'send_telegram_message': send_telegram_message,
+        'guardar_respuesta_sistema': guardar_respuesta_sistema,
+        'obtener_historial': obtener_historial,
+        'actualizar_estado_conversacion': actualizar_estado_conversacion
+    }
+    
+    # Verificar que todas las funciones existan
+    for func_name, func in messaging_funcs.items():
+        if func is None:
+            app.logger.warning(f"⚠️ Función {func_name} no encontrada para Lead Manager")
+    
+    try:
+        from Lead_manager import LeadManager
+        
+        lead_manager = LeadManager(
+            app=app,
+            db_connection_func=get_db_wrapper,
+            config_loader_func=load_config_wrapper,
+            messaging_funcs=messaging_funcs,
+            logger=app.logger,
+            tz_mx=tz_mx,
+            deepseek_api_key=DEEPSEEK_API_KEY,
+            deepseek_api_url=DEEPSEEK_API_URL
+        )
+        
+        app.logger.info("✅ Lead Manager inicializado correctamente")
+        
+        # Asegurar columnas en todas las bases de datos
+        for config in NUMEROS_CONFIG.values():
+            try:
+                lead_manager.ensure_columns(config)
+                app.logger.info(f"✅ Columnas aseguradas para {config.get('db_name', 'unknown')}")
+            except Exception as e:
+                app.logger.error(f"❌ Error asegurando columnas: {e}")
+        
+        # Iniciar scheduler de seguimientos
+        lead_manager.start_followup_scheduler(NUMEROS_CONFIG)
+        
+        return lead_manager
+        
+    except ImportError as e:
+        app.logger.error(f"❌ No se pudo importar LeadManager: {e}")
+        return None
+    except Exception as e:
+        app.logger.error(f"❌ Error inicializando Lead Manager: {e}")
+        return None 
 
 # --- CONTINÚA EL RESTO DEL CÓDIGO ---
 @app.route('/solicitar_registro_api', methods=['GET'])
@@ -13296,7 +13363,7 @@ with app.app_context():
     for nombre, config in NUMEROS_CONFIG.items():
         _ensure_performance_indexes(config)
 
-# INICIALIZAR LEAD MANAGER
+# INICIALIZAR LEAD MANAGER (FUERA del with app.app_context())
 lead_manager = init_lead_manager()
 
 if __name__ == '__main__':
@@ -13304,6 +13371,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=5003, help='Puerto para ejecutar la aplicación')
     args = parser.parse_args()
     
-    app.logger.info("🚀 Aplicación iniciando con Lead Manager...")
-    app.run(host='0.0.0.0', port=5003, debug=True) 
+    if lead_manager:
+        app.logger.info("🚀 Aplicación iniciando con Lead Manager...")
+    else:
+        app.logger.warning("⚠️ Aplicación iniciando SIN Lead Manager")
+    
+    app.run(host='0.0.0.0', port=args.port, debug=False)  # debug=False para producción 
       
