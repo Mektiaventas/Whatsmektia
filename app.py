@@ -10611,7 +10611,7 @@ def obtener_configuracion_por_host():
         # DETECCIÓN LACSE
         if 'lacse' in host:
             app.logger.info("✅ Configuración detectada: Lacse")
-            return NUMEROS_CONFIG['1013']
+            return NUMEROS_CONFIG['524499628022']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
