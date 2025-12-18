@@ -7982,6 +7982,8 @@ def webhook_verification():
         verify_token = os.getenv("PORFIRIANNA_VERIFY_TOKEN")
     elif 'ofitodo' in host:  
         verify_token = os.getenv("FITO_VERIFY_TOKEN")
+    elif 'lacse' in host:
+        verify_token = os.getenv("LACSE_VERIFY_TOKEN")
     else:
         verify_token = os.getenv("MEKTIA_VERIFY_TOKEN")
     
