@@ -225,7 +225,7 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
-    '1013': {  # Número de Lacse
+    '524499628022': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("LACSE_DB_HOST"),                  
