@@ -225,7 +225,7 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
-    '524499628022': {  # Número de Lacse
+    '524495486824': {  # Número de Lacse
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("LACSE_DB_HOST"),                  
@@ -10613,7 +10613,7 @@ def obtener_configuracion_por_host():
         # DETECCIÓN LACSE
         if 'lacse' in host:
             app.logger.info("✅ Configuración detectada: Lacse")
-            return NUMEROS_CONFIG['524499628022']
+            return NUMEROS_CONFIG['524495486824']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
