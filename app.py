@@ -9651,9 +9651,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 producto_aplica = "NO_APLICA"
                 app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
         
-# --- Carga de catálogos y configuración (SIN CAMBIOS) ---
-precios = obtener_todos_los_precios(config) or []
-texto_catalogo = build_texto_catalogo(precios, limit=40)
+        # --- Carga de catálogos y configuración (SIN CAMBIOS) ---
+        precios = obtener_todos_los_precios(config) or []
+        texto_catalogo = build_texto_catalogo(precios, limit=40)
 
         catalog_list = []
         for p in precios:
