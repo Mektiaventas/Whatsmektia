@@ -2213,6 +2213,7 @@ def get_db_connection(config=None):
                 password=config['db_password'],
                 database=config['db_name'],
                 charset='utf8mb4'
+                buffered=True  # ← AÑADIR ESTO
             )
         conn = _MYSQL_POOLS[pool_key].get_connection()
         # ensure the connection is alive
@@ -10625,35 +10626,87 @@ def obtener_configuracion_por_host():
 
 @app.route('/diagnostico')
 def diagnostico():
-    """Endpoint completo de diagnóstico"""
+    """Endpoint de diagnóstico corregido sin 'Unread result found'"""
+    import traceback
+    host = request.headers.get('Host', 'desconocido')
+    referer = request.headers.get('Referer')
+    url = request.url
+    
     try:
         config = obtener_configuracion_por_host()
+        config_db = config.get('db_name', 'desconocido')
+        config_detectada = config.get('dominio', 'desconocido')
         
-        info = {
-            'host': request.headers.get('Host'),
-            'referer': request.headers.get('Referer'),
-            'url': request.url,
-            'config_detectada': config.get('dominio'),
-            'config_db': config.get('db_name'),
-            'timestamp': datetime.now().isoformat()
-        }
-        
-        # Intentar conexión a BD
+        # Intentar conexión CON BUFFERED
         try:
-            conn = get_db_connection(config)
-            cursor = conn.cursor()
-            cursor.execute("SELECT 1")
-            info['bd_conexion'] = 'success'
-            cursor.close()
-            conn.close()
+            # Crear conexión temporal con buffered
+            temp_conn = mysql.connector.connect(
+                host=config['db_host'],
+                user=config['db_user'],
+                password=config['db_password'],
+                database=config['db_name'],
+                charset='utf8mb4',
+                buffered=True
+            )
+            temp_cursor = temp_conn.cursor(dictionary=True)
+            
+            # Verificar tablas básicas
+            tablas_esperadas = ['configuracion', 'contactos', 'conversaciones', 'precios']
+            tablas_existentes = []
+            
+            for tabla in tablas_esperadas:
+                try:
+                    temp_cursor.execute(f"SHOW TABLES LIKE '{tabla}'")
+                    resultado = temp_cursor.fetchone()
+                    # CONSUMIR RESULTADOS
+                    while temp_cursor.nextset():
+                        pass
+                    tablas_existentes.append(tabla if resultado else None)
+                except:
+                    tablas_existentes.append(None)
+            
+            temp_cursor.close()
+            temp_conn.close()
+            
+            return jsonify({
+                'status': 'success',
+                'host': host,
+                'config_detectada': config_detectada,
+                'config_db': config_db,
+                'bd_conexion': 'ok',
+                'tablas_existentes': {
+                    'configuracion': bool(tablas_existentes[0]),
+                    'contactos': bool(tablas_existentes[1]),
+                    'conversaciones': bool(tablas_existentes[2]),
+                    'precios': bool(tablas_existentes[3])
+                },
+                'referer': referer,
+                'url': url,
+                'timestamp': datetime.now().isoformat()
+            })
+            
         except Exception as e:
-            info['bd_conexion'] = f'error: {str(e)}'
-        
-        return jsonify(info)
-        
+            return jsonify({
+                'status': 'bd_error',
+                'host': host,
+                'config_detectada': config_detectada,
+                'config_db': config_db,
+                'bd_conexion': f'error: {str(e)}',
+                'referer': referer,
+                'url': url,
+                'timestamp': datetime.now().isoformat()
+            })
+            
     except Exception as e:
-        return jsonify({'error': str(e)})    
-
+        return jsonify({
+            'status': 'config_error',
+            'host': host,
+            'error': str(e),
+            'traceback': traceback.format_exc(),
+            'referer': referer,
+            'url': url,
+            'timestamp': datetime.now().isoformat()
+        })
 @app.route('/home')
 @login_required
 def home():
