@@ -2212,7 +2212,7 @@ def get_db_connection(config=None):
                 user=config['db_user'],
                 password=config['db_password'],
                 database=config['db_name'],
-                charset='utf8mb4'
+                charset='utf8mb4',
                 buffered=True  # ← AÑADIR ESTO
             )
         conn = _MYSQL_POOLS[pool_key].get_connection()
