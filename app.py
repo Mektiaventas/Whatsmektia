@@ -5801,6 +5801,42 @@ def obtener_todos_los_precios(config):
     except Exception as e:
         print(f"Error obteniendo precios: {str(e)}")
         return []
+
+def obtener_productos_por_categoria(categoria, config=None, limite=200):
+    """
+    Obtiene productos SOLO de una categoría específica
+    Ideal para bases grandes: busca en categoría en vez de toda la BD
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        query = """
+            SELECT sku, categoria, subcategoria, servicio, modelo,
+                   descripcion, precio_menudeo, precio_mayoreo, imagen
+            FROM precios 
+            WHERE categoria = %s
+            AND (status_ws IS NULL OR status_ws = 'activo')
+            ORDER BY servicio
+            LIMIT %s
+        """
+        
+        cursor.execute(query, (categoria, limite))
+        productos = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"📁 {len(productos)} productos en categoría '{categoria}'")
+        return productos
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error buscando por categoría: {e}")
+        # Fallback: búsqueda por palabra clave
+        return obtener_productos_por_palabra_clave(categoria[:15], config, limite=100)
         
 # Agrega esta función NUEVA en app.py (cerca de donde está obtener_todos_los_precios)
 def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=10):
@@ -9653,19 +9689,42 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
 
 
-        # --- Carga de catálogos y configuración CON FILTRO INTELIGENTE ---
-        # FILTRO 1: Si el mensaje es sobre productos, buscar SOLO productos relevantes
+                # --- Carga de catálogos y configuración CON FILTRO INTELIGENTE ---
+        # Para bases de datos grandes (12,000+ productos)
         if producto_aplica == "SI_APLICA" and texto:
-            # Buscar por palabra clave en el mensaje
-            precios = obtener_productos_por_palabra_clave(texto[:25], config, limite=30)
-            app.logger.info(f"🔍 Búsqueda filtrada por: '{texto[:25]}' -> {len(precios)} productos")
+            # PRIMERO: Detectar categoría específica del mensaje
+            categoria_detectada = detectar_categoria_del_mensaje(texto)
+            
+            if categoria_detectada:
+                # 🎯 OPTIMIZACIÓN: Buscar SOLO en la categoría detectada
+                precios = obtener_productos_por_categoria(categoria_detectada, config, limite=200)
+                app.logger.info(f"🎯 Búsqueda por categoría: '{categoria_detectada}' -> {len(precios)} productos")
+            else:
+                # 🎯 Búsqueda por palabra clave dentro de TODA la BD (pero filtrada)
+                precios = obtener_productos_por_palabra_clave(texto[:20], config, limite=150)
+                app.logger.info(f"🔍 Búsqueda por palabra clave: '{texto[:20]}' -> {len(precios)} productos")
+            
+            # Si aún no hay suficientes resultados, agregar algunos extras
+            if len(precios) < 30:
+                precios_completos = obtener_todos_los_precios(config) or []
+                extras = precios_completos[:50]
+                # Evitar duplicados
+                skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
+                for extra in extras:
+                    if extra.get('sku') not in skus_existentes:
+                        precios.append(extra)
+                        skus_existentes.add(extra.get('sku'))
+                app.logger.info(f"➕ Agregados productos extra, total: {len(precios)}")
+                
         else:
-            # FILTRO 2: Si no es sobre productos, cargar SOLO algunos productos como ejemplo
+            # Para conversaciones NO sobre productos: mínimo necesario
             precios_completos = obtener_todos_los_precios(config) or []
-            precios = precios_completos[:20]  # ← ¡SOLO 20 PRODUCTOS MÁXIMO!
-            app.logger.info(f"📦 Carga mínima: {len(precios)} productos de ejemplo")
+            precios = precios_completos[:80]  # 80 productos para contexto general
+            app.logger.info(f"📦 Carga general: {len(precios)} productos")
 
         texto_catalogo = build_texto_catalogo(precios, limit=40)
+
+        
         
         catalog_list = []
         for p in precios:
