@@ -9651,10 +9651,22 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 producto_aplica = "NO_APLICA"
                 app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
         
-        # --- Carga de catálogos y configuración (SIN CAMBIOS) ---
-        precios = obtener_todos_los_precios(config) or []
-        texto_catalogo = build_texto_catalogo(precios, limit=40)
 
+
+        # --- Carga de catálogos y configuración CON FILTRO INTELIGENTE ---
+        # FILTRO 1: Si el mensaje es sobre productos, buscar SOLO productos relevantes
+        if producto_aplica == "SI_APLICA" and texto:
+            # Buscar por palabra clave en el mensaje
+            precios = obtener_productos_por_palabra_clave(texto[:25], config, limite=30)
+            app.logger.info(f"🔍 Búsqueda filtrada por: '{texto[:25]}' -> {len(precios)} productos")
+        else:
+            # FILTRO 2: Si no es sobre productos, cargar SOLO algunos productos como ejemplo
+            precios_completos = obtener_todos_los_precios(config) or []
+            precios = precios_completos[:20]  # ← ¡SOLO 20 PRODUCTOS MÁXIMO!
+            app.logger.info(f"📦 Carga mínima: {len(precios)} productos de ejemplo")
+
+        texto_catalogo = build_texto_catalogo(precios, limit=40)
+        
         catalog_list = []
         for p in precios:
             try:
