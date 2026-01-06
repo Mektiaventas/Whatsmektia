@@ -5802,6 +5802,101 @@ def obtener_todos_los_precios(config):
         print(f"Error obteniendo precios: {str(e)}")
         return []
         
+# Agrega esta función NUEVA en app.py (cerca de donde está obtener_todos_los_precios)
+def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=10):
+    """
+    NUEVA FUNCIÓN SEGURA: Busca productos por palabra clave en nombre/SKU
+    NO toca nada existente. Solo agrega esta función.
+    """
+    if config is None:
+        config = obtener_configuracion_por_host()
+    
+    try:
+        conn = get_db_connection(config)
+        cursor = conn.cursor(dictionary=True)
+        
+        # CONSULTA SEGURA con parámetros
+        query = """
+            SELECT 
+                sku, categoria, subcategoria, linea, modelo,
+                servicio, descripcion, precio_menudeo, precio_mayoreo,
+                imagen, status_ws
+            FROM precios 
+            WHERE (
+                servicio LIKE %s OR 
+                sku LIKE %s OR 
+                descripcion LIKE %s OR
+                modelo LIKE %s
+            )
+            AND status_ws = 'activo'
+            ORDER BY servicio
+            LIMIT %s
+        """
+        
+        # Usar wildcards para búsqueda parcial
+        search_term = f"%{palabra_clave}%"
+        params = [search_term, search_term, search_term, search_term, limite]
+        
+        cursor.execute(query, params)
+        productos = cursor.fetchall()
+        
+        cursor.close()
+        conn.close()
+        
+        app.logger.info(f"🔍 Búsqueda por palabra clave '{palabra_clave}': {len(productos)} resultados")
+        return productos
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error en búsqueda por palabra clave: {e}")
+        # FALLBACK SEGURO: devolver lista vacía, no excepción
+        return []
+# Agrega esta función también (es solo lectura, no modifica BD)
+def detectar_categoria_del_mensaje(mensaje):
+    """
+    Detecta automáticamente si el mensaje menciona una categoría conocida
+    Devuelve la categoría detectada o None
+    """
+    mensaje_lower = mensaje.lower()
+    
+    # LISTA SEGURA de categorías principales (usa las tuyas)
+    categorias_principales = [
+        "Micrómetro de Exterior",
+        "Calibrador Vernier", 
+        "Indicador de Cuadrante",
+        "Medidor de Altura",
+        "Micrómetro de Interior",
+        "BOREMATIC",
+        "HOLTEST",
+        "LITEMATIC",
+        "Calibrador Digital",
+        "Bloques Patrón"
+    ]
+    
+    # Mapeo simple de palabras clave → categoría
+    mapeo_keywords = {
+        "micrómetro": "Micrómetro de Exterior",
+        "micrometro": "Micrómetro de Exterior",
+        "calibrador": "Calibrador Vernier",
+        "vernier": "Calibrador Vernier",
+        "calibre": "Calibrador Vernier",
+        "indicador": "Indicador de Cuadrante",
+        "altura": "Medidor de Altura",
+        "boremat": "BOREMATIC",
+        "holtest": "HOLTEST",
+        "litematic": "LITEMATIC",
+        "digital": "Calibrador Digital",
+        "bloque": "Bloques Patrón",
+        "patrón": "Bloques Patrón"
+    }
+    
+    # 1. Buscar por palabras clave simples
+    for keyword, categoria in mapeo_keywords.items():
+        if keyword in mensaje_lower:
+            return categoria
+    
+    # 2. Si no encuentra, devolver None (la IA usará búsqueda normal)
+    return None
+    
 def obtener_datos_de_transferencia(config):
     try:
         db = get_db_connection(config)
@@ -9556,9 +9651,19 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 producto_aplica = "NO_APLICA"
                 app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
         
-        # --- Carga de catálogos y configuración (SIN CAMBIOS) ---
-        precios = obtener_todos_los_precios(config) or []
-        texto_catalogo = build_texto_catalogo(precios, limit=40)
+        # --- Carga de catálogos y configuración CON FILTRO INTELIGENTE ---
+# FILTRO 1: Si el mensaje es sobre productos, buscar SOLO productos relevantes
+if producto_aplica == "SI_APLICA" and texto:
+    # Buscar por palabra clave en el mensaje
+    precios = obtener_productos_por_palabra_clave(texto[:25], config, limite=30)
+    app.logger.info(f"🔍 Búsqueda filtrada por: '{texto[:25]}' -> {len(precios)} productos")
+else:
+    # FILTRO 2: Si no es sobre productos, cargar SOLO algunos productos como ejemplo
+    precios_completos = obtener_todos_los_precios(config) or []
+    precios = precios_completos[:20]  # ← ¡SOLO 20 PRODUCTOS MÁXIMO!
+    app.logger.info(f"📦 Carga mínima: {len(precios)} productos de ejemplo")
+
+texto_catalogo = build_texto_catalogo(precios, limit=40)
 
         catalog_list = []
         for p in precios:
