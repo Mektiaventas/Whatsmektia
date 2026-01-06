@@ -5839,10 +5839,10 @@ def obtener_productos_por_categoria(categoria, config=None, limite=200):
         return obtener_productos_por_palabra_clave(categoria[:15], config, limite=100)
         
 # Agrega esta función NUEVA en app.py (cerca de donde está obtener_todos_los_precios)
-def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=10):
+def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150):
     """
-    NUEVA FUNCIÓN SEGURA: Busca productos por palabra clave en nombre/SKU
-    NO toca nada existente. Solo agrega esta función.
+    Búsqueda INTELIGENTE: busca principalmente en descripción y otros campos
+    Prioriza coincidencias EXACTAS en descripción para encontrar medidas como "6"" o "300mm"
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5851,27 +5851,103 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=10):
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # CONSULTA SEGURA con parámetros
+        # Limpiar y preparar términos de búsqueda
+        texto_limpio = palabra_clave.strip().lower()
+        
+        # Extraer números y posibles medidas (6", 300mm, etc.)
+        numeros = re.findall(r'\d+', texto_limpio)
+        medidas_especiales = []
+        
+        # Detectar medidas comunes
+        patrones_medidas = [
+            (r'(\d+)\s*["""]', '"'),        # 6"
+            (r'(\d+)\s*pulg', 'pulgada'),   # 6 pulg
+            (r'(\d+)\s*mm', 'mm'),          # 300mm
+            (r'(\d+)\s*cm', 'cm'),          # 15cm
+            (r'(\d+)\s*\/', '/'),           # 12/
+            (r'\.(\d+)', '.')               # .001
+        ]
+        
+        for patron, unidad in patrones_medidas:
+            matches = re.findall(patron, texto_limpio)
+            for match in matches:
+                if isinstance(match, tuple):
+                    valor = match[0]
+                else:
+                    valor = match
+                medidas_especiales.append(f"{valor}{unidad}")
+        
+        # CONSULTA INTELIGENTE: Priorizar DESCIPCIÓN sobre otros campos
         query = """
             SELECT 
-                sku, categoria, subcategoria, linea, modelo,
-                servicio, descripcion, precio_menudeo, precio_mayoreo,
-                imagen, status_ws
+                sku, categoria, subcategoria, servicio, modelo,
+                descripcion, medidas, precio_menudeo, precio_mayoreo,
+                imagen, costo, status_ws,
+                -- Puntuación de relevancia
+                CASE 
+                    -- MÁXIMA prioridad: descripción contiene la palabra exacta
+                    WHEN descripcion LIKE %s THEN 10
+                    -- ALTA prioridad: servicio contiene la palabra
+                    WHEN servicio LIKE %s THEN 9
+                    -- MEDIA prioridad: sku contiene la palabra
+                    WHEN sku LIKE %s THEN 8
+                    -- BAJA prioridad: otros campos
+                    WHEN modelo LIKE %s THEN 7
+                    WHEN categoria LIKE %s THEN 6
+                    WHEN subcategoria LIKE %s THEN 5
+                    ELSE 0
+                END AS relevancia
             FROM precios 
             WHERE (
-                servicio LIKE %s OR 
-                sku LIKE %s OR 
+                -- Buscar en TODOS los campos importantes
                 descripcion LIKE %s OR
-                modelo LIKE %s
+                servicio LIKE %s OR
+                sku LIKE %s OR
+                modelo LIKE %s OR
+                categoria LIKE %s OR
+                subcategoria LIKE %s
             )
-            AND status_ws = 'activo'
-            ORDER BY servicio
+            AND (status_ws IS NULL OR status_ws = 'activo')
+            ORDER BY relevancia DESC, servicio
             LIMIT %s
         """
         
-        # Usar wildcards para búsqueda parcial
-        search_term = f"%{palabra_clave}%"
-        params = [search_term, search_term, search_term, search_term, limite]
+        # Preparar términos de búsqueda
+        termino_general = f"%{texto_limpio}%"
+        
+        # Si hay medidas especiales, buscar por ellas también
+        if medidas_especiales:
+            # Agregar condiciones extra para medidas
+            condiciones_extra = []
+            for medida in medidas_especiales:
+                condiciones_extra.append("descripcion LIKE %s")
+            
+            if condiciones_extra:
+                # Modificar query para incluir medidas
+                query = query.replace(
+                    "WHERE (",
+                    f"WHERE (({' OR '.join(condiciones_extra)}) OR ("
+                ).replace(
+                    ") AND (status_ws",
+                    ")) AND (status_ws"
+                )
+        
+        # Parámetros en el ORDEN CORRECTO para la query
+        params = []
+        
+        # Para el CASE (6 parámetros)
+        params.extend([termino_general] * 6)
+        
+        # Para el WHERE (6 parámetros básicos)
+        params.extend([termino_general] * 6)
+        
+        # Si hay medidas, agregar sus parámetros
+        if medidas_especiales:
+            for medida in medidas_especiales:
+                params.append(f"%{medida}%")
+        
+        # Finalmente el límite
+        params.append(limite)
         
         cursor.execute(query, params)
         productos = cursor.fetchall()
@@ -5879,13 +5955,34 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=10):
         cursor.close()
         conn.close()
         
-        app.logger.info(f"🔍 Búsqueda por palabra clave '{palabra_clave}': {len(productos)} resultados")
+        app.logger.info(f"🔍 Búsqueda inteligente por '{palabra_clave[:30]}': {len(productos)} resultados")
+        
+        # Log detallado de lo que se encontró
+        if productos:
+            app.logger.info("📋 Primeros 3 resultados:")
+            for i, p in enumerate(productos[:3]):
+                desc = (p.get('descripcion') or '')[:80]
+                app.logger.info(f"   {i+1}. {p.get('servicio')} - {desc}")
+        
         return productos
         
     except Exception as e:
-        app.logger.error(f"❌ Error en búsqueda por palabra clave: {e}")
-        # FALLBACK SEGURO: devolver lista vacía, no excepción
-        return []
+        app.logger.error(f"❌ Error en búsqueda inteligente: {e}")
+        # FALLBACK SEGURO: búsqueda simple
+        try:
+            conn = get_db_connection(config)
+            cursor = conn.cursor(dictionary=True)
+            cursor.execute(
+                "SELECT * FROM precios WHERE descripcion LIKE %s LIMIT %s",
+                (f"%{palabra_clave[:20]}%", min(50, limite))
+            )
+            productos = cursor.fetchall()
+            cursor.close()
+            conn.close()
+            return productos
+        except:
+            return []  # Último fallback
+            
 # Agrega esta función también (es solo lectura, no modifica BD)
 def detectar_categoria_del_mensaje(mensaje):
     """
@@ -9689,41 +9786,44 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
 
 
-                # --- Carga de catálogos y configuración CON FILTRO INTELIGENTE ---
-        # Para bases de datos grandes (12,000+ productos)
+        # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
-            # PRIMERO: Detectar categoría específica del mensaje
-            categoria_detectada = detectar_categoria_del_mensaje(texto)
+            # BÚSQUEDA INTELIGENTE: usar la función mejorada
+            precios = obtener_productos_por_palabra_clave(texto, config, limite=200)
+            app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
-            if categoria_detectada:
-                # 🎯 OPTIMIZACIÓN: Buscar SOLO en la categoría detectada
-                precios = obtener_productos_por_categoria(categoria_detectada, config, limite=200)
-                app.logger.info(f"🎯 Búsqueda por categoría: '{categoria_detectada}' -> {len(precios)} productos")
-            else:
-                # 🎯 Búsqueda por palabra clave dentro de TODA la BD (pero filtrada)
-                precios = obtener_productos_por_palabra_clave(texto[:20], config, limite=150)
-                app.logger.info(f"🔍 Búsqueda por palabra clave: '{texto[:20]}' -> {len(precios)} productos")
-            
-            # Si aún no hay suficientes resultados, agregar algunos extras
+            # Si encuentra pocos, intentar con categoría detectada
             if len(precios) < 30:
+                categoria_detectada = detectar_categoria_del_mensaje(texto)
+                if categoria_detectada:
+                    productos_categoria = obtener_productos_por_categoria(categoria_detectada, config, limite=100)
+                    # Combinar sin duplicados
+                    skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
+                    for prod in productos_categoria:
+                        if prod.get('sku') not in skus_existentes:
+                            precios.append(prod)
+                    app.logger.info(f"🎯 +{len(productos_categoria)} de categoría '{categoria_detectada}'")
+            
+            # Último recurso: agregar algunos productos generales
+            if len(precios) < 40:
                 precios_completos = obtener_todos_los_precios(config) or []
-                extras = precios_completos[:50]
-                # Evitar duplicados
+                extras = precios_completos[:60]
                 skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
+                agregados = 0
                 for extra in extras:
-                    if extra.get('sku') not in skus_existentes:
+                    if extra.get('sku') not in skus_existentes and agregados < 30:
                         precios.append(extra)
-                        skus_existentes.add(extra.get('sku'))
-                app.logger.info(f"➕ Agregados productos extra, total: {len(precios)}")
+                        agregados += 1
+                app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
                 
         else:
-            # Para conversaciones NO sobre productos: mínimo necesario
+            # Conversaciones generales: carga mínima
             precios_completos = obtener_todos_los_precios(config) or []
-            precios = precios_completos[:80]  # 80 productos para contexto general
+            precios = precios_completos[:80]
             app.logger.info(f"📦 Carga general: {len(precios)} productos")
 
         texto_catalogo = build_texto_catalogo(precios, limit=40)
-
+        
         
         
         catalog_list = []
