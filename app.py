@@ -617,8 +617,22 @@ def logout():
     flash('Sesión cerrada', 'info')
     return redirect(url_for('login'))
 
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
+#def allowed_file(filename):
+#    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
+# === FUNCIÓN allowed_file ahora importada desde módulo ===
+try:
+    from app.utils.helpers import allowed_file
+except ImportError:
+    # Fallback por si algo sale mal (mantener compatibilidad)
+    ALLOWED_EXTENSIONS = {
+        'pdf', 'txt', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+        'mp4', 'mov', 'webm', 'avi', 'mkv', 'ogg', 'mpeg',
+        'xlsx', 'xls', 'csv', 'docx', 'doc', 
+        'ppt', 'pptx', 'mp3', 'wav', 'ogg', 'm4a',
+        'zip', 'rar', '7z', 'rtf'
+    }
+    def allowed_file(filename):
+        return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 def _get_or_create_session_id():
     sid = session.get('sid')
     if not sid:
