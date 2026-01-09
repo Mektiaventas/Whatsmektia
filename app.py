@@ -9726,14 +9726,27 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         try:
             ds_prompt = (
                 "Tu única tarea: leyendo el historial de conversación y el mensaje actual, "
-                "decide SI el cliente está pidiendo información sobre un producto (precio, disponibilidad, catálogo, SKU, características, fotos, etc.).\n\n"
+                "decide SI el cliente está pidiendo información sobre un PRODUCTO O SERVICIO ESPECÍFICO "
+                "(precio, disponibilidad, características técnicas, SKU específico, fotos, comparación entre modelos, cómo comprar).\n\n"
+                "INSTRUCCIONES ESPECÍFICAS:\n"
+                "1. Si el usuario pide un 'plan de estudios', 'catálogo PDF', 'documento', 'folleto', 'tríptico', 'PDF', 'archivo' o similar → responde EXACTAMENTE: 'NO_APLICA'\n"
+                "2. Si el usuario pide 'más información', 'detalles', 'descripción' sobre algo mencionado → responde EXACTAMENTE: 'SI_APLICA'\n"
+                "3. Si el usuario pregunta por precios específicos, disponibilidad, SKUs, imágenes de productos → responde EXACTAMENTE: 'SI_APLICA'\n"
+                "4. Si es una consulta general o saludo → responde EXACTAMENTE: 'NO_APLICA'\n\n"
                 "RESPONDE SOLO CON UNA PALABRA EXACTA: SI_APLICA  o  NO_APLICA\n"
                 "No añadas explicaciones, ejemplos, ni signos adicionales.\n\n"
                 "HISTORIAL:\n"
                 f"{historial_text.strip()}\n\n"
                 "MENSAJE ACTUAL:\n"
                 f"{texto or ''}\n\n"
-                "Si el usuario solicita precio, catálogo, SKU, características técnicas, imágenes del producto, disponibilidad, comparación entre modelos o cómo comprar un producto, responde SI_APLICA. En cualquier otro caso responde NO_APLICA."
+                "Ejemplos claros:\n"
+                "- 'plan de estudios de mecatrónica' → NO_APLICA (es documento)\n"
+                "- 'catálogo de productos' → NO_APLICA (es documento)\n"
+                "- 'precio del curso de mecatrónica' → SI_APLICA (es producto/servicio)\n"
+                "- 'imagen del producto X' → SI_APLICA\n"
+                "- 'más información sobre mantenimiento' → SI_APLICA\n"
+                "- 'hola' → NO_APLICA\n"
+                "- 'qué programas tienes?' → SI_APLICA (pregunta por productos/servicios)\n"
             )
 
             headers_ds = {
