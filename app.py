@@ -6229,16 +6229,65 @@ def buscar_sku_en_texto(texto, precios):
     """
     if not texto or not precios:
         return None
+    
     texto_lower = texto.lower()
+    
+    # PRIMERO: Intentar extraer un código de producto del texto
+    # (para casos como "Descripción de este producto: MM-VJ127")
+    codigo_extraido = extraer_codigo_producto(texto)
+    if codigo_extraido:
+        # Buscar si el código extraído está en precios
+        for p in precios:
+            sku = (p.get('sku') or '').strip()
+            modelo = (p.get('modelo') or '').strip()
+            
+            # Comparar insensitivo
+            if (sku and sku.lower() == codigo_extraido.lower()) or \
+               (modelo and modelo.lower() == codigo_extraido.lower()):
+                return sku or codigo_extraido
+    
+    # SEGUNDO: Búsqueda por subcadena (comportamiento original)
     for p in precios:
         sku = (p.get('sku') or '').strip()
         modelo = (p.get('modelo') or '').strip()
+        
         # Check SKU and modelo presence (case-insensitive)
         if sku and sku.lower() in texto_lower:
             return sku
         if modelo and modelo.lower() in texto_lower:
             # prefer returning SKU if exists for that product
             return sku or modelo
+    
+    return None
+
+def extraer_codigo_producto(texto):
+    """
+    Extrae posibles códigos de producto de un texto.
+    """
+    import re
+    
+    # Patrones comunes
+    patrones = [
+        r'producto:\s*([A-Za-z0-9\-_]+)',    # "producto: MM-VJ127"
+        r'código:\s*([A-Za-z0-9\-_]+)',      # "código: MM-VJ127"  
+        r'referencia:\s*([A-Za-z0-9\-_]+)',  # "referencia: MM-VJ127"
+        r'sku:\s*([A-Za-z0-9\-_]+)',         # "sku: MM-VJ127"
+        r'modelo:\s*([A-Za-z0-9\-_]+)',      # "modelo: MM-VJ127"
+        # Patrones de códigos comunes
+        r'([A-Z]{2}-[A-Z]{2}\d{3})',         # XX-XX123
+        r'([A-Z]{2}-\d{4,6})',               # XX-12345
+        r'([A-Z]{3}-\d{3,5})',               # XXX-1234
+        r'(\b[A-Z0-9\-]{6,12}\b)',           # Códigos generales
+    ]
+    
+    for patron in patrones:
+        match = re.search(patron, texto, re.IGNORECASE)
+        if match:
+            codigo = match.group(1).strip()
+            # Limpiar posibles signos de puntuación al final
+            codigo = codigo.rstrip('.,;:')
+            return codigo
+    
     return None
 
 def actualizar_estado_conversacion(numero, contexto, accion, datos=None, config=None):
