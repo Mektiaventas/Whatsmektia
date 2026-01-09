@@ -9870,7 +9870,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
             # BÚSQUEDA INTELIGENTE: usar la función mejorada
-            precios = obtener_productos_por_palabra_clave(texto, config, limite=200)
+            precios = obtener_productos_por_palabra_clave(texto, config, limite=200, contexto_ia=producto_aplica)
             app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
             # Si encuentra pocos, intentar con categoría detectada
