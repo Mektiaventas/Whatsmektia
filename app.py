@@ -44,7 +44,7 @@ import threading
 from urllib.parse import urlparse 
 from os.path import basename, join 
 import os # Asegurar que 'os' también esté importado/disponible
-
+from difflib import SequenceMatcher
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
