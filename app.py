@@ -5871,35 +5871,33 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150):
         # CONSULTA INTELIGENTE: Priorizar DESCIPCIÓN sobre otros campos
         query = """
             SELECT 
-                sku, categoria, subcategoria, servicio, modelo,
-                descripcion, medidas, precio_menudeo, precio_mayoreo,
-                imagen, costo, status_ws,
+                sku, categoria, subcategoria, linea, modelo,
+                descripcion, medidas, costo, precio_mayoreo, precio_menudeo,
+                imagen, status_ws,
                 -- Puntuación de relevancia
                 CASE 
                     -- MÁXIMA prioridad: descripción contiene la palabra exacta
                     WHEN descripcion LIKE %s THEN 10
-                    -- ALTA prioridad: servicio contiene la palabra
-                    WHEN servicio LIKE %s THEN 9
+                    -- ALTA prioridad: categoria contiene la palabra
+                    WHEN categoria LIKE %s THEN 9
                     -- MEDIA prioridad: sku contiene la palabra
                     WHEN sku LIKE %s THEN 8
                     -- BAJA prioridad: otros campos
-                    WHEN modelo LIKE %s THEN 7
-                    WHEN categoria LIKE %s THEN 6
-                    WHEN subcategoria LIKE %s THEN 5
+                    WHEN subcategoria LIKE %s THEN 7
+                    WHEN modelo LIKE %s THEN 6
                     ELSE 0
                 END AS relevancia
             FROM precios 
             WHERE (
                 -- Buscar en TODOS los campos importantes
                 descripcion LIKE %s OR
-                servicio LIKE %s OR
-                sku LIKE %s OR
-                modelo LIKE %s OR
                 categoria LIKE %s OR
-                subcategoria LIKE %s
+                sku LIKE %s OR
+                subcategoria LIKE %s OR
+                modelo LIKE %s
             )
             AND (status_ws IS NULL OR status_ws = 'activo')
-            ORDER BY relevancia DESC, servicio
+            ORDER BY relevancia DESC, sku
             LIMIT %s
         """
         
@@ -5926,11 +5924,13 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150):
         # Parámetros en el ORDEN CORRECTO para la query
         params = []
         
-        # Para el CASE (6 parámetros)
-        params.extend([termino_general] * 6)
+        # Para el CASE (5 parámetros) - ORDEN EXACTO como en CASE
+        # descripcion, categoria, sku, subcategoria, modelo
+        params.extend([termino_general, termino_general, termino_general, termino_general, termino_general])
         
-        # Para el WHERE (6 parámetros básicos)
-        params.extend([termino_general] * 6)
+        # Para el WHERE (5 parámetros básicos) - ORDEN EXACTO como en WHERE
+        # descripcion, categoria, sku, subcategoria, modelo
+        params.extend([termino_general, termino_general, termino_general, termino_general, termino_general])
         
         # Si hay medidas, agregar sus parámetros
         if medidas_especiales:
@@ -5952,8 +5952,9 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150):
         if productos:
             app.logger.info("📋 Primeros 3 resultados:")
             for i, p in enumerate(productos[:3]):
+                sku = p.get('sku', 'N/A')
                 desc = (p.get('descripcion') or '')[:80]
-                app.logger.info(f"   {i+1}. {p.get('servicio')} - {desc}")
+                app.logger.info(f"   {i+1}. SKU: {sku} - {desc}")  # <-- CORREGIDO
         
         return productos
         
