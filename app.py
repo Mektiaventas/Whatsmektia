@@ -5891,27 +5891,81 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
         # PRIMERO: Intentar detectar automáticamente si es SKU
         # (sin depender de categorías predefinidas)
         
-        # Detección simple de patrones de SKU
-        def es_probable_sku(texto):
-            # Patrones comunes de SKUs en general (no específicos de muebles)
+        # Detección MEJORADA de SKU - busca SKU DENTRO del texto
+        def extraer_posible_sku_del_texto(texto):
+            """
+            Extrae un posible SKU de un texto, incluso si hay texto alrededor.
+            Ejemplo: 'Descripción de este producto: MM-VJ127' → 'MM-VJ127'
+            """
             import re
-            texto = texto.upper().replace(' ', '')
             
-            # Patrones genéricos que funcionan para cualquier negocio
-            patrones = [
-                r'^[A-Z]{2,3}-[A-Z0-9]{3,6}$',    # MM-VJ127, AB-1234
-                r'^[A-Z]{2,3}\d{3,6}$',          # ABC123, AB12345
-                r'^\d{3,6}[A-Z]{2,3}$',          # 123ABC, 12345AB
-                r'^[A-Z0-9]{5,10}$',             # ABC123DEF, 123ABC456
-                r'^[A-Z]{2}-\d{3}[A-Z]?$',       # XX-123A
-                r'^\d{2,3}[A-Z]\d{2,3}$',        # 12A345
+            # Primero buscar patrones con prefijos comunes
+            patrones_con_prefijo = [
+                r'producto:\s*([A-Za-z0-9\-]+)',
+                r'código:\s*([A-Za-z0-9\-]+)', 
+                r'referencia:\s*([A-Za-z0-9\-]+)',
+                r'sku:\s*([A-Za-z0-9\-]+)',
+                r'modelo:\s*([A-Za-z0-9\-]+)',
             ]
             
-            for patron in patrones:
-                if re.match(patron, texto):
-                    return True
-            return False
+            for patron in patrones_con_prefijo:
+                match = re.search(patron, texto, re.IGNORECASE)
+                if match:
+                    sku = match.group(1).strip()
+                    app.logger.info(f"🔍 SKU extraído con prefijo: '{sku}'")
+                    return sku
+            
+            # Luego buscar patrones de SKU directamente en el texto
+            patrones_sku = [
+                r'[A-Z]{2}-[A-Z]{2}\d{3}',      # MM-VJ127
+                r'[A-Z]{2}-\d{4,6}',            # AB-12345
+                r'[A-Z]{3}-\d{3,5}',            # ABC-1234
+                r'\b[A-Z0-9]{3,6}-[A-Z0-9]{3,6}\b', # Códigos con guión
+                r'\b[A-Z]{2}\d{3,6}\b',         # AB12345
+                r'\b\d{3,6}[A-Z]{2,3}\b',       # 123ABC
+            ]
+            
+            for patron in patrones_sku:
+                match = re.search(patron, texto, re.IGNORECASE)
+                if match:
+                    sku = match.group(0).strip()
+                    app.logger.info(f"🔍 SKU encontrado en texto: '{sku}'")
+                    return sku
+            
+            return None
         
+        # Intentar extraer SKU del texto
+        posible_sku = extraer_posible_sku_del_texto(texto_limpio)
+        
+        # Si se extrajo un SKU, buscar por ese SKU
+        if posible_sku:
+            app.logger.info(f"🔍 SKU detectado: '{posible_sku}' - Buscando por SKU")
+            
+            # Buscar SKU exacto (case-insensitive)
+            cursor.execute(
+                "SELECT * FROM precios WHERE UPPER(sku) = UPPER(%s) LIMIT 1",
+                (posible_sku,)
+            )
+            producto_exacto = cursor.fetchone()
+            
+            if producto_exacto:
+                app.logger.info(f"✅ SKU exacto encontrado: {producto_exacto.get('sku')}")
+                cursor.close()
+                conn.close()
+                return [producto_exacto]
+            
+            # Buscar SKU como substring
+            cursor.execute(
+                "SELECT * FROM precios WHERE UPPER(sku) LIKE UPPER(CONCAT('%', %s, '%')) LIMIT %s",
+                (posible_sku, limite)
+            )
+            resultados_sku = cursor.fetchall()
+            
+            if resultados_sku:
+                app.logger.info(f"✅ Encontrados {len(resultados_sku)} productos por SKU")
+                cursor.close()
+                conn.close()
+                return resultados_sku
         # Si parece SKU, buscar por SKU primero
         if es_probable_sku(texto_limpio):
             app.logger.info(f"🔍 Detectado como probable SKU")
