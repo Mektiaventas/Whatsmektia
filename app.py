@@ -5268,6 +5268,7 @@ def enviar_catalogo(numero, original_text=None, config=None):
     si no existe envía un resumen textual del catálogo (primeros 20 productos).
     Usa la descripción del PDF para decidir cuál enviar.
     """
+    app.logger.info(f"🎯 DEBUG enviar_catalogo llamado con texto: '{original_text}'")
     from flask import has_request_context, request
     if config is None:
         config = obtener_configuracion_por_host()
