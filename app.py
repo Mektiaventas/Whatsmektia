@@ -5068,6 +5068,10 @@ def seleccionar_mejor_doc(docs, query):
     o None si no hay una coincidencia significativa.
     """
     try:
+        app.logger.info(f"🎯 DEBUG seleccionar_mejor_doc: Query recibida = '{query}'")
+        app.logger.info(f"🎯 DEBUG Número de documentos: {len(docs) if docs else 0}")
+        for i, doc in enumerate(docs[:3]):  # Muestra solo primeros 3
+            app.logger.info(f"🎯 DEBUG Doc {i}: filename='{doc.get('filename')}', desc='{doc.get('descripcion')}'")
         if not docs:
             return None
         if not query or not str(query).strip():
@@ -5186,6 +5190,7 @@ def seleccionar_mejor_doc(docs, query):
         
         if best_score >= umbral_minimo:
             app.logger.info(f"📚 seleccionar_mejor_doc: '{q[:50]}...' -> score={best_score:.2f} filename={best.get('filename') if best else None}")
+            app.logger.info(f"🎯 DEBUG Documento seleccionado: '{best.get('filename') if best else 'None'}' con score: {best_score}")
             return best
         else:
             app.logger.warning(f"⚠️ seleccionar_mejor_doc: score insuficiente ({best_score:.2f} < {umbral_minimo}) para '{q[:50]}...'")
