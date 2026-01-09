@@ -5073,9 +5073,19 @@ def seleccionar_mejor_doc(docs, query):
         if not query or not str(query).strip():
             return docs[0]
 
-        q = str(query).lower()
-        q_tokens = set(re.findall(r'\w{3,}', q))
-
+        # Normalizar y limpiar la query
+        q = str(query).lower().strip()
+        
+        # Mejor tokenización que incluya letras con acentos y números
+        q_tokens = set(re.findall(r'[a-záéíóúñü0-9]{3,}', q))
+        
+        # Palabras clave específicas para planes de estudio
+        palabras_clave_carreras = {
+            'mecatronica': ['mecatronica', 'mecatrónica', 'mecatro'],
+            'mantenimiento': ['mantenimiento', 'manten', 'industrial'],
+            'diplomado': ['diplomado', 'curso', 'capacitacion']
+        }
+        
         best = None
         best_score = 0.0
         now_ts = time.time()
@@ -5084,44 +5094,104 @@ def seleccionar_mejor_doc(docs, query):
             score = 0.0
             desc = (d.get('descripcion') or '').lower()
             fname = (d.get('filename') or '').lower()
-
-            # tokens overlap with description (más peso)
-            desc_tokens = set(re.findall(r'\w{3,}', desc))
-            common_desc = q_tokens & desc_tokens
-            score += len(common_desc) * 3.0
-
-            # tokens overlap with filename (menos peso)
-            fname_tokens = set(re.findall(r'\w{3,}', fname.replace('_', ' ')))
-            common_fname = q_tokens & fname_tokens
-            score += len(common_fname) * 1.5
-
-            # Si la query incluye palabras exactas de la descripción más puntuación
-            for t in q_tokens:
-                if t and t in desc:
-                    score += 0.5
-
-            # Ligero bonus por recencia (favor documentos más recientes)
+            
+            # Texto completo para búsqueda
+            texto_completo = f"{desc} {fname}"
+            
+            # 1. COINCIDENCIA EXACTA DE CARRERA (máxima prioridad)
+            carrera_encontrada = False
+            for carrera, variantes in palabras_clave_carreras.items():
+                # Verificar si la query menciona esta carrera
+                query_tiene_carrera = any(v in q for v in variantes)
+                # Verificar si el documento es de esta carrera
+                doc_es_de_carrera = any(v in texto_completo for v in variantes)
+                
+                if query_tiene_carrera and doc_es_de_carrera:
+                    # Coincidencia EXACTA: ¡BINGO!
+                    score += 50.0
+                    carrera_encontrada = True
+                elif query_tiene_carrera and not doc_es_de_carrera:
+                    # Penalizar documentos que NO son de la carrera solicitada
+                    score -= 30.0
+                elif not query_tiene_carrera and doc_es_de_carrera:
+                    # Documento es de otra carrera no solicitada
+                    score -= 10.0
+            
+            # 2. TOKENS OVERLAP con mejor tokenización
+            # Tokenizar el texto del documento (incluyendo acentos)
+            texto_tokens = set(re.findall(r'[a-záéíóúñü0-9]{3,}', texto_completo))
+            common_tokens = q_tokens & texto_tokens
+            
+            # Ponderar más los tokens importantes
+            tokens_importantes = {'plan', 'estudio', 'carrera', 'programa', 'materia', 'asignatura'}
+            for token in common_tokens:
+                if token in tokens_importantes:
+                    score += 3.0
+                elif len(token) > 5:  # Palabras más largas = más significativas
+                    score += 2.0
+                else:
+                    score += 1.0
+            
+            # 3. BÚSQUEDA DE FRASE COMPLETA (para "plan de estudios")
+            # Si la query contiene "plan de estudios", buscar esa frase completa
+            if 'plan de estudio' in q or 'plan estudio' in q:
+                if 'plan de estudio' in texto_completo or 'plan estudio' in texto_completo:
+                    score += 20.0
+            
+            # 4. SIMILITUD DE TEXTO (difflib para match más flexible)
+            # Comparar similitud entre la query y la descripción
+            similitud_desc = SequenceMatcher(None, q, desc[:100]).ratio()
+            score += similitud_desc * 10.0
+            
+            # 5. POSICIÓN DE LOS TOKENS (priorizar tokens al inicio)
+            # Si "mecatronica" está al inicio de la descripción, más relevante
+            for token in q_tokens:
+                if len(token) > 4:
+                    pos_desc = desc.find(token)
+                    pos_fname = fname.find(token)
+                    
+                    if pos_desc >= 0:
+                        # Mientras más cerca del inicio, más puntuación
+                        if pos_desc < 20:
+                            score += 5.0
+                        elif pos_desc < 50:
+                            score += 2.0
+                    
+                    if pos_fname >= 0:
+                        score += 3.0  # Coincidencia en filename es importante
+            
+            # 6. RECENCIA (bonus menor)
             try:
                 created = d.get('created_at')
                 if created:
-                    # normalized recency bonus (0..1)
                     age_seconds = (now_ts - created.timestamp()) if hasattr(created, 'timestamp') else 0
                     recency_bonus = max(0, 1 - (age_seconds / (60 * 60 * 24 * 30)))  # 30 días
-                    score += recency_bonus * 0.5
+                    score += recency_bonus * 1.0  # Bonus más pequeño
             except Exception:
                 pass
-
+            
+            # 7. EVITAR CONFUSIONES ESPECÍFICAS
+            # Si el usuario pidió Mecatrónica pero el documento es de Mantenimiento
+            if any(v in q for v in palabras_clave_carreras['mecatronica']):
+                if any(v in texto_completo for v in palabras_clave_carreras['mantenimiento']):
+                    score -= 100.0  # Penalización MÁS FUERTE por confusión
+            
             if score > best_score:
                 best_score = score
                 best = d
 
-        # Umbral mínimo para considerar "relevante"
-        if best_score >= 1.0:
-            app.logger.info(f"📚 seleccionar_mejor_doc: mejor score={best_score} filename={best.get('filename') if best else None}")
+        # Umbral MÁS ALTO para considerar "relevante"
+        # Requerir al menos una coincidencia significativa
+        umbral_minimo = 10.0  # Aumentado significativamente
+        
+        if best_score >= umbral_minimo:
+            app.logger.info(f"📚 seleccionar_mejor_doc: '{q[:50]}...' -> score={best_score:.2f} filename={best.get('filename') if best else None}")
             return best
-
-        app.logger.info(f"📚 seleccionar_mejor_doc: ningún documento con score suficiente (best={best_score}), usar el más reciente")
-        return docs[0]
+        else:
+            app.logger.warning(f"⚠️ seleccionar_mejor_doc: score insuficiente ({best_score:.2f} < {umbral_minimo}) para '{q[:50]}...'")
+            # Si no hay buen match, es mejor NO enviar nada que enviar algo incorrecto
+            return None
+            
     except Exception as e:
         app.logger.warning(f"⚠️ seleccionar_mejor_doc error: {e}")
         return docs[0] if docs else None
