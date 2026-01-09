@@ -1737,7 +1737,7 @@ Envia maximo 60 servicios.
         data = response.json()
         respuesta_ia = data['choices'][0]['message']['content'].strip()
         
-        app.logger.info(f"✅ Respuesta IA recibida: {len(respuesta_ia)} caracteres")
+        app.logger.info(f"✅ Respuesta IA recibida: {(respuesta_ia)}")
         
         # INTENTAR MÚLTIPLES MÉTODOS DE EXTRACCIÓN JSON
         servicios_extraidos = None
@@ -1760,6 +1760,7 @@ Envia maximo 60 servicios.
         if not servicios_extraidos:
             try:
                 servicios_extraidos = json.loads(respuesta_ia)
+                app.logger.info(f"🎯 ACCIÓN QUE VA A TOMAR LA IA: {servicios_extraidos}")
                 app.logger.info("✅ JSON parseado directamente")
             except json.JSONDecodeError as e:
                 app.logger.warning(f"⚠️ JSON directo falló: {e}")
