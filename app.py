@@ -5966,35 +5966,6 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
                 cursor.close()
                 conn.close()
                 return resultados_sku
-        # Si parece SKU, buscar por SKU primero
-        if es_probable_sku(texto_limpio):
-            app.logger.info(f"🔍 Detectado como probable SKU")
-            
-            # Buscar SKU exacto (case-insensitive)
-            cursor.execute(
-                "SELECT * FROM precios WHERE UPPER(sku) = UPPER(%s) LIMIT 1",
-                (texto_limpio,)
-            )
-            producto_exacto = cursor.fetchone()
-            
-            if producto_exacto:
-                app.logger.info(f"✅ SKU exacto encontrado: {producto_exacto.get('sku')}")
-                cursor.close()
-                conn.close()
-                return [producto_exacto]
-            
-            # Buscar SKU como substring
-            cursor.execute(
-                "SELECT * FROM precios WHERE UPPER(sku) LIKE UPPER(CONCAT('%', %s, '%')) LIMIT %s",
-                (texto_limpio, limite)
-            )
-            resultados_sku = cursor.fetchall()
-            
-            if resultados_sku:
-                app.logger.info(f"✅ Encontrados {len(resultados_sku)} productos por SKU")
-                cursor.close()
-                conn.close()
-                return resultados_sku
         
         # SEGUNDO: Si no es SKU o no encontró, buscar en TODOS los campos
         # Priorizar por relevancia (similar a tu query original)
