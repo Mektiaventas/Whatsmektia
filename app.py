@@ -19,6 +19,8 @@ import math
 import mysql.connector 
 from flask import Flask, send_from_directory, Response, request, render_template, redirect, url_for, abort, flash, jsonify, current_app
 import requests
+from app.config.settings import PREFIJOS_PAIS
+from app.utils.filters import format_time_24h, whatsapp_format, public_image_url, get_country_flag
 from dotenv import load_dotenv
 import pandas as pd
 import openpyxl
@@ -67,49 +69,19 @@ except Exception:
 processed_messages = {}
 tz_mx = pytz.timezone('America/Mexico_City')
 guardado = True
-load_dotenv()  # Cargar desde archivo específico
 app = Flask(__name__)
 app.secret_key = os.getenv("SECRET_KEY", "cualquier-cosa")
 app.config['MAX_CONTENT_LENGTH'] = 200 * 1024 * 1024  # 50 MB
 app.logger.setLevel(logging.INFO)
 
-@app.template_filter('format_time_24h')
-def format_time_24h(dt):
-    if not dt:
-        return ""
-    try:
-        if dt.tzinfo is None:
-            dt = tz_mx.localize(dt)
-        else:
-            dt = dt.astimezone(tz_mx)
-        return dt.strftime('%d/%m %H:%M')
-    except Exception as e:
-        app.logger.error(f"Error formateando fecha {dt}: {e}")
-        return ""
-
-@app.template_filter('whatsapp_format')
-def whatsapp_format(text): 
-    """Convierte formato de WhatsApp (*texto* -> negrita, _texto_ -> cursiva) a HTML"""
-    if not text:
-        return ""
-    
-    # ELIMINAR ESPACIOS INICIALES
-    text = text.lstrip()
-    
-    # Negritas: *texto* -> <strong>texto</strong>
-    text = re.sub(r'\*(.*?)\*', r'<strong>\1</strong>', text)
-    
-    # Cursivas: _texto_ -> <em>texto</em>
-    text = re.sub(r'_(.*?)_', r'<em>\1</em>', text)
-     
-    # Tachado: ~texto~ -> <del>texto</del>
-    text = re.sub(r'~(.*?)~', r'<del>\1</del>', text)
-    
-    return text 
-# ——— Env vars ———
 GOOD_MORNING_THREAD_STARTED = False
 GOOGLE_CLIENT_SECRET_FILE = os.getenv("GOOGLE_CLIENT_SECRET_FILE")    
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN")
+# Registrar template filters
+app.jinja_env.filters["format_time_24h"] = format_time_24h
+app.jinja_env.filters["whatsapp_format"] = whatsapp_format
+app.jinja_env.filters["public_img"] = public_image_url
+app.jinja_env.filters["bandera"] = get_country_flag
 MESSENGER_VERIFY_TOKEN_GLOBAL = os.getenv("MESSENGER_VERIFY_TOKEN", VERIFY_TOKEN)
 DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -318,48 +290,6 @@ PREFIJOS_PAIS = {
     '34': 'es', '51': 'pe', '56': 'cl', '58': 've', '593': 'ec',
     '591': 'bo', '507': 'pa', '502': 'gt'
 }
-def public_image_url(imagen_url):
-    """Normalize image reference for templates: robust handling of filenames, subpaths and absolute URLs."""
-    try:
-        if not imagen_url:
-            return ''
-        imagen_url = str(imagen_url).strip()
-
-        # Keep data URIs and absolute URLs
-        if imagen_url.startswith('data:') or imagen_url.startswith('http://') or imagen_url.startswith('https://'):
-            return imagen_url
-
-        # Keep app-absolute paths (already public)
-        if imagen_url.startswith('/uploads/') or imagen_url.startswith('/static/') or imagen_url.startswith('/'):
-            return imagen_url
-
-        from os.path import basename
-        fname = basename(imagen_url)
-
-        if not fname:
-            return imagen_url
-
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Priorizar la búsqueda en la carpeta de subidas general /uploads/
-        # (para chats de usuarios) y si falla, buscar en /uploads/productos/
-        try:
-            # Intento 1: Servir desde /uploads/ (usando 'serve_uploaded_file' de la línea 3307)
-            
-            return url_for('serve_product_image', filename=fname)
-        except Exception:
-            # Intento 2: Fallback a /uploads/productos/ (usando 'serve_product_image' de la línea 1221)
-            try: 
-                return url_for('serve_uploaded_file', filename=fname)
-            except Exception:
-                # Si ambos fallan, devuelve el nombre del archivo (probablemente roto)
-                return imagen_url
-        # --- FIN DE LA CORRECCIÓN ---
-
-    except Exception:
-        # Último recurso si todo el bloque 'try' principal falla
-        return imagen_url
-
-app.add_template_filter(public_image_url, 'public_img')
 #holi que tal
 #muy bien   
 def get_clientes_conn():
@@ -3840,40 +3770,8 @@ def debug_dominio():
     """
 
 # --- Modificación en la definición de la función ---
-def get_country_flag(numero):
-    """
-    Determina la URL de la bandera o ícono de la plataforma basado en el número.
-    Prioridad: 1. Telegram Icono, 2. Bandera de País, 3. Icono de WhatsApp por defecto.
-    """
-    if not numero:
-        return None
-    numero = str(numero)
-    
-    # --- 1. LÓGICA: ÍCONO DE TELEGRAM (MÁXIMA PRIORIDAD) ---
-    if numero.startswith('tg_'):
-        # Devuelve la URL estática del ícono de Telegram
-        return url_for('static', filename='icons/telegram-icon.png')
-    
-    # --- 2. LÓGICA: BANDERA DE PAÍS (WHATSAPP) ---
-    # Limpia el número quitando el '+' si existe (ej. +52449...)
-    numero_limpio = numero.lstrip('+')
-    
-    # Busca el prefijo de país más largo posible (3, 2 o 1 dígito)
-    for i in range(3, 0, -1):
-        prefijo = numero_limpio[:i]
-        
-        # Asume que PREFIJOS_PAIS es un diccionario global que mapea '52' -> 'mx'
-        if prefijo in PREFIJOS_PAIS:
-            codigo = PREFIJOS_PAIS[prefijo]
-            # Devuelve la bandera del país
-            return f"https://flagcdn.com/24x18/{codigo}.png"
-            
-    # --- 3. LÓGICA: IMAGEN LOCAL POR DEFECTO PARA WHATSAPP (FALLBACK) ---
-    # Si no se detectó prefijo de país conocido ni era Telegram
-    return url_for('static', filename='icons/whatsapp-icon.png')
 
 SUBTABS = ['negocio', 'personalizacion', 'precios', 'restricciones', 'asesores', 'leads']
-app.add_template_filter(get_country_flag, 'bandera')
 
 # app.py (Reemplazar kanban_data)
 @app.route('/debug-hora')
@@ -10851,10 +10749,10 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
 def obtener_configuracion_por_host():
     """Obtiene la configuración basada en el host"""
     try:
-        from flask import has_request_context
+        from flask import has_request_context, request
         if not has_request_context():
             return NUMEROS_CONFIG['524495486142']  # Default
-        
+
         host = request.headers.get('Host', '').lower()
         
         if 'unilova' in host:
