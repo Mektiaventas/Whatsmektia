@@ -265,6 +265,12 @@ from whatsapp import (
     enviar_documento,  # ← Asegúrate de que esta esté incluida
     enviar_mensaje_voz
 ) 
+# AGREGAR ESTO INMEDIATAMENTE DESPUÉS:
+print(f"🖨️ PRINT ======== VERIFICACIÓN DE TEXTO_A_VOZ ========")
+print(f"🖨️ PRINT - ¿Función texto_a_voz existe?: {'SÍ' if 'texto_a_voz' in locals() else 'NO'}")
+if 'texto_a_voz' in locals():
+    print(f"🖨️ PRINT - Función: {texto_a_voz}")
+    print(f"🖨️ PRINT - Tipo: {type(texto_a_voz)}")
 # AGREGAR ESTO:
 print(f"🖨️ PRINT - Importando texto_a_voz desde whatsapp.py")
 print(f"🖨️ PRINT - texto_a_voz tipo: {type(texto_a_voz)}")
