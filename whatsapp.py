@@ -272,16 +272,19 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     
     logger = logging.getLogger(__name__)
     
-    # AGREGAR LOS LOGS DE DEPURACIÓN
-    logger.info(f"🎤 DEBUG texto_a_voz - Entrando con texto: {texto[:100]}...")
+    # LOGS DETALLADOS
+    logger.info(f"🎤 DEBUG texto_a_voz - INICIANDO función")
+    logger.info(f"🎤 DEBUG texto_a_voz - texto: {texto[:100]}")
     logger.info(f"🎤 DEBUG texto_a_voz - filename: {filename}, voz: {voz}")
     
-    # Obtener OPENAI_API_KEY de las variables de entorno
+    # Obtener OPENAI_API_KEY
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
-    logger.info(f"🎤 DEBUG texto_a_voz - OPENAI_API_KEY configurada: {'Sí' if OPENAI_API_KEY else 'No'}")
+    logger.info(f"🎤 DEBUG texto_a_voz - OPENAI_API_KEY existe: {'SÍ' if OPENAI_API_KEY else 'NO'}")
+    if OPENAI_API_KEY:
+        logger.info(f"🎤 DEBUG texto_a_voz - OPENAI_API_KEY primeros 10: {OPENAI_API_KEY[:10]}...")
     
     if not OPENAI_API_KEY:
-        logger.error("🔴 La clave de OPENAI_API_KEY no está configurada.")
+        logger.error("🔴 ERROR texto_a_voz: OPENAI_API_KEY no está configurada")
         return None
 
     client = OpenAI(api_key=OPENAI_API_KEY)
@@ -292,60 +295,77 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         VOZ_A_USAR = voz.strip()
     else:
         VOZ_A_USAR = VOZ_DEFECTO
+    
+    logger.info(f"🎤 DEBUG texto_a_voz - Voz a usar: {VOZ_A_USAR}")
 
-    # Definir UPLOAD_FOLDER (usar variable de entorno o ruta por defecto)
+    # Definir UPLOAD_FOLDER
     UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER') or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads')
     logger.info(f"🎤 DEBUG texto_a_voz - UPLOAD_FOLDER: {UPLOAD_FOLDER}")
     
     # Asegurar que el directorio existe
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    logger.info(f"🎤 DEBUG texto_a_voz - Directorio creado/verificado: {UPLOAD_FOLDER}")
     
     output_path = os.path.join(UPLOAD_FOLDER, f"{filename}.ogg")
+    logger.info(f"🎤 DEBUG texto_a_voz - output_path: {output_path}")
     
     try:
         # 2. Llamada a la API de OpenAI TTS
-        logger.info(f"🎤 DEBUG texto_a_voz - Llamando a OpenAI TTS con voz: {VOZ_A_USAR}")
+        logger.info(f"🎤 DEBUG texto_a_voz - Llamando a OpenAI TTS...")
+        
         response = client.audio.speech.create(
             model="tts-1",
             voice=VOZ_A_USAR, 
             input=texto,
-            response_format="opus" # <-- Formato requerido por Telegram
+            response_format="opus"
         )
         
+        logger.info(f"🎤 DEBUG texto_a_voz - OpenAI TTS respondió exitosamente")
+        
         # 3. Guardar archivo OGG/OPUS (ruta local)
+        logger.info(f"🎤 DEBUG texto_a_voz - Guardando archivo en: {output_path}")
         response.stream_to_file(output_path)
         
-        # AGREGAR LOG DESPUÉS DE GUARDAR EL ARCHIVO
-        logger.info(f"🎤 DEBUG texto_a_voz - Audio generado en: {output_path}")
-        logger.info(f"🎤 DEBUG texto_a_voz - Tamaño del archivo: {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes")
+        # VERIFICAR SI EL ARCHIVO SE CREÓ
+        logger.info(f"🎤 DEBUG texto_a_voz - Archivo guardado. Verificando existencia...")
+        
+        if os.path.exists(output_path):
+            file_size = os.path.getsize(output_path)
+            logger.info(f"🎤 DEBUG texto_a_voz - ¡ARCHIVO CREADO EXITOSAMENTE!")
+            logger.info(f"🎤 DEBUG texto_a_voz - Tamaño del archivo: {file_size} bytes")
+            logger.info(f"🎤 DEBUG texto_a_voz - Ruta completa: {output_path}")
+        else:
+            logger.error(f"🔴 ERROR texto_a_voz - El archivo NO se creó en: {output_path}")
+            logger.error(f"🔴 ERROR texto_a_voz - Verificando permisos del directorio...")
+            logger.error(f"🔴 ERROR texto_a_voz - Permisos de UPLOAD_FOLDER: {oct(os.stat(UPLOAD_FOLDER).st_mode)[-3:]}")
+            return None
         
         # 4. Construir URL pública (para WhatsApp)
         dominio_conf = config.get('dominio') if isinstance(config, dict) else None
         dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
         
-        # 💥 FORZAR HTTPS para compatibilidad total con WhatsApp y Telegram
+        # FORZAR HTTPS
         if not dominio.startswith('http'):
             dominio = 'https://' + dominio
         if dominio.startswith('http://'):
              dominio = dominio.replace('http://', 'https://')
 
-        # Asumir que /uploads/ es servido públicamente (o usar /proxy-audio/ si está configurado)
-        # Usaremos el proxy que configuramos en app.py para servirlo desde la ruta local de forma segura
         audio_url_publica = f"{dominio.rstrip('/')}/proxy-audio/{os.path.basename(output_path)}"
 
-        # AGREGAR LOG CON LA URL PÚBLICA
-        logger.info(f"🎤 DEBUG texto_a_voz - URL pública: {audio_url_publica}")
+        logger.info(f"🎤 DEBUG texto_a_voz - URL pública generada: {audio_url_publica}")
+        logger.info(f"🎤 DEBUG texto_a_voz - FINALIZANDO función exitosamente")
         
-        logger.info(f"🌐 URL pública generada (proxy): {audio_url_publica} (Ruta local: {output_path})")
-        
-        # DEVOLVER la URL pública, aunque el archivo exista localmente
         return audio_url_publica
         
     except Exception as e:
-        logger.error(f"🔴 Error al llamar a la API de OpenAI TTS: {e}")
+        logger.error(f"🔴 ERROR texto_a_voz - Excepción en OpenAI TTS: {e}")
+        logger.error(f"🔴 ERROR texto_a_voz - Tipo de error: {type(e).__name__}")
         import traceback
-        logger.error(f"🔴 Traceback: {traceback.format_exc()}")
+        logger.error(f"🔴 ERROR texto_a_voz - Traceback completo:")
+        logger.error(traceback.format_exc())
         return None
+
+
 
 
 def enviar_mensaje(numero, texto, config=None):
