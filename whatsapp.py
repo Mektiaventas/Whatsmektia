@@ -267,33 +267,44 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     import os
     import requests
     from openai import OpenAI
+    from urllib.parse import urlparse
+    import logging
     
-    try:
-        from app import UPLOAD_FOLDER, OPENAI_API_KEY, app # Asegurar que las variables globales son accesibles
-    except ImportError:
-        logger.error("🔴 No se pudo importar UPLOAD_FOLDER o OPENAI_API_KEY desde app.")
-        return None
-    # AGREGAR AQUÍ EL PRIMER LOG:
+    logger = logging.getLogger(__name__)
+    
+    # AGREGAR LOS LOGS DE DEPURACIÓN
     logger.info(f"🎤 DEBUG texto_a_voz - Entrando con texto: {texto[:100]}...")
     logger.info(f"🎤 DEBUG texto_a_voz - filename: {filename}, voz: {voz}")
-
+    
+    # Obtener OPENAI_API_KEY de las variables de entorno
+    OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+    logger.info(f"🎤 DEBUG texto_a_voz - OPENAI_API_KEY configurada: {'Sí' if OPENAI_API_KEY else 'No'}")
+    
     if not OPENAI_API_KEY:
         logger.error("🔴 La clave de OPENAI_API_KEY no está configurada.")
         return None
 
     client = OpenAI(api_key=OPENAI_API_KEY)
     
-    # 1. Definición del Tono/Voz (la lógica ya la implementamos)
+    # 1. Definición del Tono/Voz
     VOZ_DEFECTO = "nova"
     if voz and isinstance(voz, str) and voz.strip() in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer']:
         VOZ_A_USAR = voz.strip()
     else:
         VOZ_A_USAR = VOZ_DEFECTO
 
+    # Definir UPLOAD_FOLDER (usar variable de entorno o ruta por defecto)
+    UPLOAD_FOLDER = os.getenv('UPLOAD_FOLDER') or os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'uploads')
+    logger.info(f"🎤 DEBUG texto_a_voz - UPLOAD_FOLDER: {UPLOAD_FOLDER}")
+    
+    # Asegurar que el directorio existe
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    
     output_path = os.path.join(UPLOAD_FOLDER, f"{filename}.ogg")
     
     try:
         # 2. Llamada a la API de OpenAI TTS
+        logger.info(f"🎤 DEBUG texto_a_voz - Llamando a OpenAI TTS con voz: {VOZ_A_USAR}")
         response = client.audio.speech.create(
             model="tts-1",
             voice=VOZ_A_USAR, 
@@ -304,9 +315,10 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         # 3. Guardar archivo OGG/OPUS (ruta local)
         response.stream_to_file(output_path)
         
-        # AGREGAR AQUÍ EL SEGUNDO LOG (después de guardar el archivo):
+        # AGREGAR LOG DESPUÉS DE GUARDAR EL ARCHIVO
         logger.info(f"🎤 DEBUG texto_a_voz - Audio generado en: {output_path}")
-
+        logger.info(f"🎤 DEBUG texto_a_voz - Tamaño del archivo: {os.path.getsize(output_path) if os.path.exists(output_path) else 0} bytes")
+        
         # 4. Construir URL pública (para WhatsApp)
         dominio_conf = config.get('dominio') if isinstance(config, dict) else None
         dominio = dominio_conf or os.getenv('MI_DOMINIO') or 'http://localhost:5000'
@@ -320,10 +332,10 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         # Asumir que /uploads/ es servido públicamente (o usar /proxy-audio/ si está configurado)
         # Usaremos el proxy que configuramos en app.py para servirlo desde la ruta local de forma segura
         audio_url_publica = f"{dominio.rstrip('/')}/proxy-audio/{os.path.basename(output_path)}"
-        
-        # AGREGAR AQUÍ EL TERCER LOG:
-        logger.info(f"🎤 DEBUG texto_a_voz - URL pública: {audio_url_publica}")
 
+        # AGREGAR LOG CON LA URL PÚBLICA
+        logger.info(f"🎤 DEBUG texto_a_voz - URL pública: {audio_url_publica}")
+        
         logger.info(f"🌐 URL pública generada (proxy): {audio_url_publica} (Ruta local: {output_path})")
         
         # DEVOLVER la URL pública, aunque el archivo exista localmente
@@ -331,7 +343,10 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         
     except Exception as e:
         logger.error(f"🔴 Error al llamar a la API de OpenAI TTS: {e}")
+        import traceback
+        logger.error(f"🔴 Traceback: {traceback.format_exc()}")
         return None
+
 
 def enviar_mensaje(numero, texto, config=None):
     if config is None:
