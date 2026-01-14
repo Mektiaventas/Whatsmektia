@@ -265,6 +265,11 @@ from whatsapp import (
     enviar_documento,  # ← Asegúrate de que esta esté incluida
     enviar_mensaje_voz
 ) 
+# AGREGAR ESTO:
+print(f"🖨️ PRINT - Importando texto_a_voz desde whatsapp.py")
+print(f"🖨️ PRINT - texto_a_voz tipo: {type(texto_a_voz)}")
+print(f"🖨️ PRINT - texto_a_voz ubicación: {texto_a_voz.__module__ if hasattr(texto_a_voz, '__module__') else 'N/A'}")
+
 from files import (extraer_texto_pdf,
 extraer_texto_e_imagenes_pdf, extraer_texto_excel,
 extraer_texto_csv,
