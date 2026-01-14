@@ -10294,13 +10294,23 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 
             should_respond_with_voice = es_audio 
             
-            if should_respond_with_voice and respuesta_text: 
+            if should_respond_with_voice and respuesta_text:
+                # AGREGAR ESTO:
+                print(f"🖨️ PRINT ======== SECCIÓN AUDIO ========")
+                print(f"🖨️ PRINT - should_respond_with_voice: {should_respond_with_voice}")
+                print(f"🖨️ PRINT - respuesta_text existe: {bool(respuesta_text)}")
+                print(f"🖨️ PRINT - Llamando a texto_a_voz...")
+                
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
                 app.logger.info(f"🎤 DEBUG - Entrando a generar audio")
                 app.logger.info(f"🎤 DEBUG - texto_a_voz será llamado con: {respuesta_text[:100]}")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
-                    audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado) 
+                    print(f"🖨️ PRINT - filename: {filename}")
+                    audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
+                    
+                    print(f"🖨️ PRINT - audio_url_publica retornado: {audio_url_publica}")
+                    print(f"🖨️ PRINT - Tipo: {type(audio_url_publica)}")
                     
                     if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
                         filename_only = basename(urlparse(audio_url_publica).path)    
