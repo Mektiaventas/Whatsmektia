@@ -273,6 +273,9 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     except ImportError:
         logger.error("🔴 No se pudo importar UPLOAD_FOLDER o OPENAI_API_KEY desde app.")
         return None
+    # AGREGAR AQUÍ EL PRIMER LOG:
+    logger.info(f"🎤 DEBUG texto_a_voz - Entrando con texto: {texto[:100]}...")
+    logger.info(f"🎤 DEBUG texto_a_voz - filename: {filename}, voz: {voz}")
 
     if not OPENAI_API_KEY:
         logger.error("🔴 La clave de OPENAI_API_KEY no está configurada.")
@@ -300,6 +303,9 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         
         # 3. Guardar archivo OGG/OPUS (ruta local)
         response.stream_to_file(output_path)
+        
+        # AGREGAR AQUÍ EL SEGUNDO LOG (después de guardar el archivo):
+        logger.info(f"🎤 DEBUG texto_a_voz - Audio generado en: {output_path}")
 
         # 4. Construir URL pública (para WhatsApp)
         dominio_conf = config.get('dominio') if isinstance(config, dict) else None
@@ -314,6 +320,9 @@ def texto_a_voz(texto, filename, config=None, voz=None):
         # Asumir que /uploads/ es servido públicamente (o usar /proxy-audio/ si está configurado)
         # Usaremos el proxy que configuramos en app.py para servirlo desde la ruta local de forma segura
         audio_url_publica = f"{dominio.rstrip('/')}/proxy-audio/{os.path.basename(output_path)}"
+        
+        # AGREGAR AQUÍ EL TERCER LOG:
+        logger.info(f"🎤 DEBUG texto_a_voz - URL pública: {audio_url_publica}")
 
         logger.info(f"🌐 URL pública generada (proxy): {audio_url_publica} (Ruta local: {output_path})")
         
