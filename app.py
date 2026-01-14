@@ -10291,6 +10291,8 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
             
             if should_respond_with_voice and respuesta_text: 
                 app.logger.info(f"🎤 Usuario envió audio, generando respuesta de voz...")
+                app.logger.info(f"🎤 DEBUG - Entrando a generar audio")
+                app.logger.info(f"🎤 DEBUG - texto_a_voz será llamado con: {respuesta_text[:100]}")
                 try:
                     filename = f"respuesta_{numero}_{int(time.time())}"
                     audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado) 
@@ -10349,6 +10351,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent_audio = False
                 
                 if audio_url_publica:
+                    app.logger.info(f"🎤 DEBUG - texto_a_voz retornó: {audio_url_publica}")
                     # NOTA: enviar_mensaje_voz solo funciona para WhatsApp.
                     # Messenger no tiene API de "voz", se debe enviar como 'file' o 'audio' genérico,
                     # lo cual `enviar_mensaje_voz` no soporta.
@@ -10367,6 +10370,7 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                          registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
                          return True
                     else:
+                         app.logger.error(f"🔴 DEBUG - texto_a_voz retornó None o falló")
                          app.logger.warning("⚠️ Envío de audio falló. Enviando como texto.")
                         
                 # Fallback a texto (WhatsApp y Messenger)
