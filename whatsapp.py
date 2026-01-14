@@ -269,7 +269,12 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     from openai import OpenAI
     from urllib.parse import urlparse
     import logging
-    
+
+    # FORZAR CON PRINT - ESTO DEBE APARECER EN LA CONSOLA
+    print(f"🖨️ PRINT ============ TEXTO_A_VOZ INICIANDO ============")
+    print(f"🖨️ PRINT - Texto: {texto[:100]}")
+    print(f"🖨️ PRINT - Filename: {filename}")
+    print(f"🖨️ PRINT - Voz: {voz}")
     logger = logging.getLogger(__name__)
     
     # LOGS DETALLADOS
@@ -351,7 +356,9 @@ def texto_a_voz(texto, filename, config=None, voz=None):
              dominio = dominio.replace('http://', 'https://')
 
         audio_url_publica = f"{dominio.rstrip('/')}/proxy-audio/{os.path.basename(output_path)}"
-
+        # Al final de la función, antes de return:
+        print(f"🖨️ PRINT ============ TEXTO_A_VOZ FINALIZANDO ============")
+        print(f"🖨️ PRINT - Retornando: {audio_url_publica}")
         logger.info(f"🎤 DEBUG texto_a_voz - URL pública generada: {audio_url_publica}")
         logger.info(f"🎤 DEBUG texto_a_voz - FINALIZANDO función exitosamente")
         
