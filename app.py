@@ -12936,41 +12936,21 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy-audio/<filename>')
+@app.route('/proxy_audio/<path:filename>')
 def proxy_audio(filename):
-    """
-    Sirve archivos de audio (OGG/MP3) desde UPLOAD_FOLDER localmente.
-    """
-    from werkzeug.exceptions import abort
-    import os
-
-    try:
-        # --- SOLUCIÓN AL PROBLEMA DE RUTA ---
-        # Obtenemos la ruta real de la carpeta donde está este archivo app.py
-        base_dir = os.path.abspath(os.path.dirname(__file__))
+    # Definimos la ruta absoluta a la carpeta de subidas
+    uploads_dir = os.path.join(app.root_path, 'uploads')
+    
+    # Registramos en el log para ver qué está pidiendo el sistema
+    # app.logger.info(f"🔍 Solicitando audio: {filename} en {uploads_dir}")
+    
+    # Verificamos si el archivo existe
+    if not os.path.exists(os.path.join(uploads_dir, filename)):
+        app.logger.error(f"❌ Archivo no encontrado físicamente: {filename}")
+        return abort(404)
         
-        # Construimos la ruta absoluta a 'uploads' subiendo un nivel si es necesario
-        # Si tu carpeta 'uploads' está en la raíz del proyecto, esto la encontrará:
-        ruta_real_uploads = os.path.join(base_dir, 'uploads')
-
-        # Log de diagnóstico para que lo veas en consola
-        app.logger.info(f"📂 Intentando servir audio desde: {ruta_real_uploads}/{filename}")
-
-        if not os.path.exists(os.path.join(ruta_real_uploads, filename)):
-            app.logger.error(f"❌ El archivo NO existe en el disco: {ruta_real_uploads}/{filename}")
-            abort(404)
-
-        return send_from_directory(
-            directory=ruta_real_uploads, 
-            path=filename,
-            mimetype='audio/ogg',
-            as_attachment=False
-        )
-
-    except Exception as e:
-        app.logger.error(f"🔴 ERROR en proxy_audio para {filename}: {e}")
-        abort(404)
-
+    return send_from_directory(uploads_dir, filename)
+    
 
 
 
