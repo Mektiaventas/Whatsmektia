@@ -169,56 +169,52 @@ def obtener_imagen_whatsapp(image_id, config=None):
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
-        # Intentar obtener token del config dict
-        token = None
-        if isinstance(config, dict):
-            token = config.get('whatsapp_token')
-        # Fallbacks no modificados aquí asumen que la app proporciona variables de entorno si no hay config
+        # 1. Configuración de Token
         if config is None:
             try:
                 from app import obtener_configuracion_por_host
                 config = obtener_configuracion_por_host()
             except Exception:
-                config = None
+                config = {}
 
+        token = config.get('whatsapp_token') if isinstance(config, dict) else None
+        
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
-        headers = {'Authorization': f'Bearer {config["whatsapp_token"]}'}
+        headers = {'Authorization': f'Bearer {token}'}
+        
         logger.info(f"📥 Solicitando metadata de audio: {url}")
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         metadata = response.json()
         download_url = metadata.get('url')
-        logger.info(f"🔗 URL de descarga: {download_url}")
         
         audio_response = requests.get(download_url, headers=headers, timeout=30)
         audio_response.raise_for_status()
         
-        # Verificar tipo de contenido
-        content_type = audio_response.headers.get('content-type')
-        logger.info(f"🎧 Tipo de contenido: {content_type}")
-        if 'audio' not in content_type:
-            logger.error(f"🔴 Archivo no es audio: {content_type}")
-            return None, None
-        
-        # Guardar archivo
-        try:
-            from app import UPLOAD_FOLDER
-            uploads = UPLOAD_FOLDER
-        except Exception:
-            uploads = os.path.join(os.path.dirname(__file__), '..', 'uploads')
+        # 2. RUTA MAESTRA FORZADA (Para evitar la carpeta fantasma)
+        uploads = "/home/ubuntu/Whatsmektia/uploads"
         os.makedirs(uploads, exist_ok=True)
+        
         audio_path = os.path.join(uploads, f"audio_{audio_id}.ogg")
+        
+        # 3. Guardar el archivo
         with open(audio_path, 'wb') as f:
             f.write(audio_response.content)
-        logger.info(f"💾 Audio guardado en: {audio_path}")
         
-        # Generar URL pública
-        # Nota: la app construye https://{config['dominio']}/uploads/...
-        audio_url = f"https://{config['dominio']}/uploads/audio_{audio_id}.ogg"
+        logger.info(f"💾 Audio guardado exitosamente en: {audio_path}")
+        
+        # 4. Generar URL pública USANDO EL PROXY
+        # Cambiamos /uploads/ por /proxy-audio/ para que Flask lo gestione
+        dominio = config.get('dominio', 'unilova.mektia.com')
+        audio_url = f"https://{dominio}/proxy-audio/audio_{audio_id}.ogg"
+        
         return audio_path, audio_url
+
     except Exception as e:
         logger.error(f"🔴 Error en obtener_audio_whatsapp: {str(e)}")
         return None, None
+
+
 
 def transcribir_audio_con_openai(audio_path):
     try:
