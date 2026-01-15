@@ -10375,13 +10375,16 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                 sent_audio = False
                 
                 if audio_url_publica:
-                    app.logger.info(f"🎤 DEBUG - texto_a_voz retornó: {audio_url_publica}")
-                    # NOTA: enviar_mensaje_voz solo funciona para WhatsApp.
-                    # Messenger no tiene API de "voz", se debe enviar como 'file' o 'audio' genérico,
-                    # lo cual `enviar_mensaje_voz` no soporta.
+                    # --- CORRECCIÓN DE ENVÍO ---
+                    # Extraemos el nombre del archivo (ej: respuesta_123.ogg)
+                    filename_only = os.path.basename(urlparse(audio_url_publica).path)
                     
-                    # (Si el número es 'fb_', esto fallará, lo cual es un error en el código de whatsapp.py)
-                    # (Como solo me pediste actualizar enviar_mensaje, esta lógica se mantiene)
+                    # Forzamos la URL para que use nuestro PROXY (esto arregla el reproductor en WA)
+                    audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
+                    
+                    app.logger.info(f"🔗 URL Proxy enviada a WhatsApp: {audio_url_publica}")
+                    
+                    # Enviamos el audio con la URL del proxy
                     sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
                     
                     if sent_audio:
