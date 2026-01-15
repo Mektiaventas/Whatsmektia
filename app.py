@@ -443,13 +443,16 @@ def proteger_rutas():
     # Permitir archivos estáticos gestionados por Flask
     if request.endpoint and request.endpoint.startswith('static'):
         return
-
+        
+    # Endpoints que sirven archivos/depuración (si los tienes)
     # Permitir accesos directos a rutas públicas por path (uploads y subpaths)
     public_path_prefixes = (
         '/uploads/',
         '/uploads',   # cubrir '/uploads' sin slash final
         '/static/images/',
         '/static/audio/',
+        '/proxy-audio/',   # <--- AGREGA ESTA LÍNEA (con guion medio como sale en tu log)
+        '/proxy_audio/',   # <--- AGREGA ESTA TAMBIÉN (con guion bajo por seguridad)
     )
     if request.path and any(request.path.startswith(p) for p in public_path_prefixes):
         return
@@ -460,6 +463,7 @@ def proteger_rutas():
         'serve_uploaded_file',
         'debug_image',
         'debug_image_full',
+        'proxy-audio',
         'proxy_audio',
         'debug_headers',
         'debug_dominio',
