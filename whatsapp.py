@@ -28,13 +28,15 @@ logger = logging.getLogger(__name__)
 def obtener_archivo_whatsapp(media_id, config=None):
     """Obtiene archivos de WhatsApp y los guarda localmente"""
     if config is None:
-        # Existe la expectativa de que la app provea obtener_configuracion_por_host si no se pasa config
-        try:
-            from app import obtener_configuracion_por_host
-            config = obtener_configuracion_por_host()
-        except Exception:
-            config = None
-    
+    try:
+        # Ahora que es modular, importamos desde el archivo principal
+        # donde reside la lógica de los tenants
+        from app import obtener_configuracion_por_host
+        config = obtener_configuracion_por_host()
+    except ImportError:
+        # Si esto falla, es porque el nombre del paquete cambió en el path
+        # Intentamos una importación relativa si es necesario
+        config = None
     try:
         # 1. Obtener metadata del archivo
         url_metadata = f"https://graph.facebook.com/v18.0/{media_id}"
