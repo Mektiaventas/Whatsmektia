@@ -12936,28 +12936,43 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy-audio/<filename>') # 🔄 Cambiado a <filename>
+@app.route('/proxy-audio/<filename>')
 def proxy_audio(filename):
     """
     Sirve archivos de audio (OGG/MP3) desde UPLOAD_FOLDER localmente.
-    Esto permite que WhatsApp/Telegram descarguen el archivo generado.
     """
     from werkzeug.exceptions import abort
-    
+    import os
+
     try:
-        # Servir el archivo directamente desde la carpeta de subidas
-        # El nombre del archivo ya está 'secured' por texto_a_voz
+        # --- SOLUCIÓN AL PROBLEMA DE RUTA ---
+        # Obtenemos la ruta real de la carpeta donde está este archivo app.py
+        base_dir = os.path.abspath(os.path.dirname(__file__))
+        
+        # Construimos la ruta absoluta a 'uploads' subiendo un nivel si es necesario
+        # Si tu carpeta 'uploads' está en la raíz del proyecto, esto la encontrará:
+        ruta_real_uploads = os.path.join(base_dir, 'uploads')
+
+        # Log de diagnóstico para que lo veas en consola
+        app.logger.info(f"📂 Intentando servir audio desde: {ruta_real_uploads}/{filename}")
+
+        if not os.path.exists(os.path.join(ruta_real_uploads, filename)):
+            app.logger.error(f"❌ El archivo NO existe en el disco: {ruta_real_uploads}/{filename}")
+            abort(404)
+
         return send_from_directory(
-            directory=UPLOAD_FOLDER, 
-            path=filename, # Usamos path=filename para ser explícitos
-            mimetype='audio/ogg', # Forzamos el MIME type correcto para notas de voz
+            directory=ruta_real_uploads, 
+            path=filename,
+            mimetype='audio/ogg',
             as_attachment=False
         )
 
     except Exception as e:
-        app.logger.error(f"🔴 ERROR 500 en proxy_audio para {filename}: {e}")
-        # Retornar un error 404 o 500 si el archivo no se encuentra o hay un fallo
+        app.logger.error(f"🔴 ERROR en proxy_audio para {filename}: {e}")
         abort(404)
+
+
+
 
 @app.route('/privacy-policy')
 def privacy_policy():
