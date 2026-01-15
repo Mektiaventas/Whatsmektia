@@ -451,6 +451,7 @@ def proteger_rutas():
         '/uploads',   # cubrir '/uploads' sin slash final
         '/static/images/',
         '/static/audio/',
+        '/proxy-audio',   # <--- AGREGA ESTA LÍNEA (con guion medio como sale en tu log pero sin slash al final)
         '/proxy-audio/',   # <--- AGREGA ESTA LÍNEA (con guion medio como sale en tu log)
         '/proxy_audio/',   # <--- AGREGA ESTA TAMBIÉN (con guion bajo por seguridad)
     )
@@ -12940,20 +12941,24 @@ def guardar_alias_contacto(numero, config=None):
 
     # ——— Páginas legales —
 
-@app.route('/proxy_audio/<path:filename>')
+@app.route('/proxy-audio/<path:filename>')  # <--- CAMBIADO A GUION MEDIO
+@app.route('/proxy_audio/<path:filename>')  # <--- MANTENEMOS AMBOS POR SI ACASO
 def proxy_audio(filename):
     # Definimos la ruta absoluta a la carpeta de subidas
     uploads_dir = os.path.join(app.root_path, 'uploads')
     
-    # Registramos en el log para ver qué está pidiendo el sistema
-    # app.logger.info(f"🔍 Solicitando audio: {filename} en {uploads_dir}")
+    file_path = os.path.join(uploads_dir, filename)
+    
+    # Log para depuración
+    app.logger.info(f"🔍 Intentando servir audio desde: {file_path}")
     
     # Verificamos si el archivo existe
-    if not os.path.exists(os.path.join(uploads_dir, filename)):
-        app.logger.error(f"❌ Archivo no encontrado físicamente: {filename}")
+    if not os.path.exists(file_path):
+        app.logger.error(f"❌ Archivo no encontrado físicamente: {file_path}")
         return abort(404)
         
-    return send_from_directory(uploads_dir, filename)
+    # Forzamos el mimetype a audio/ogg para que WhatsApp lo acepte sin problemas
+    return send_from_directory(uploads_dir, filename, mimetype='audio/ogg')
     
 
 
