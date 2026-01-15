@@ -12947,25 +12947,34 @@ def guardar_alias_contacto(numero, config=None):
         return '', 204
 
     # ——— Páginas legales —
-
-@app.route('/proxy-audio/<path:filename>')  # <--- CAMBIADO A GUION MEDIO
-@app.route('/proxy_audio/<path:filename>')  # <--- MANTENEMOS AMBOS POR SI ACASO
+@app.route('/proxy-audio/<path:filename>')
+@app.route('/proxy_audio/<path:filename>')
 def proxy_audio(filename):
-    # Definimos la ruta absoluta a la carpeta de subidas
-    # Usamos la ruta absoluta que confirmamos en el terminal
-    uploads_dir = "/home/ubuntu/Whatsmektia/uploads"
-    file_path = os.path.join(uploads_dir, filename)
+    """
+    Sirve archivos de audio o documentos de forma pública para WhatsApp,
+    buscando únicamente en las carpetas organizadas por host.
+    """
+    # 1. Identificar quién pide el archivo (ej: 'unilova')
+    config = obtener_configuracion_por_host()
+    tenant_slug = config.get('dominio', 'default').split('.')[0]
     
-    # Log para depuración
-    app.logger.info(f"🔍 Intentando servir audio desde: {file_path}")
+    # 2. Definir las rutas donde SÍ permitimos buscar
+    # Buscamos en /uploads/docs/tenant/ y en /uploads/productos/tenant/
+    search_paths = [
+        os.path.join(app.config['UPLOAD_FOLDER'], 'docs', tenant_slug),
+        os.path.join(app.config['UPLOAD_FOLDER'], 'productos', tenant_slug)
+    ]
     
-    # Verificamos si el archivo existe
-    if not os.path.exists(file_path):
-        app.logger.error(f"❌ Archivo no encontrado físicamente: {file_path}")
-        return abort(404)
-        
-    # Forzamos el mimetype a audio/ogg para que WhatsApp lo acepte sin problemas
-    return send_from_directory(uploads_dir, filename, mimetype='audio/ogg')
+    for folder in search_paths:
+        file_path = os.path.join(folder, filename)
+        if os.path.exists(file_path):
+            app.logger.info(f"📂 Sirviendo archivo desde host {tenant_slug}: {file_path}")
+            return send_from_directory(folder, filename)
+
+    # 3. Si llega aquí, el archivo no está en las carpetas del host
+    app.logger.error(f"❌ Archivo {filename} no encontrado para el host: {tenant_slug}")
+    return "Archivo no encontrado en la ruta del host", 404
+
     
 
 
