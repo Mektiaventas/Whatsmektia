@@ -5336,7 +5336,8 @@ def enviar_catalogo(numero, original_text=None, config=None):
                 base = dominio if dominio.startswith('http') else f"https://{dominio}"
 
             tenant_slug = mejor.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
-            file_url = f"{base}/uploads/docs/{tenant_slug}/{filename}"
+            # Usamos el proxy para que WhatsApp pueda descargar el archivo sin bloqueos
+            file_url = f"{base}/proxy-audio/{filename}"
             app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
 
             sent = enviar_documento(numero, file_url, filename, config)
