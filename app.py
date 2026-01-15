@@ -12945,8 +12945,8 @@ def guardar_alias_contacto(numero, config=None):
 @app.route('/proxy_audio/<path:filename>')  # <--- MANTENEMOS AMBOS POR SI ACASO
 def proxy_audio(filename):
     # Definimos la ruta absoluta a la carpeta de subidas
-    uploads_dir = os.path.join(app.root_path, 'uploads')
-    
+    # Usamos la ruta absoluta que confirmamos en el terminal
+    uploads_dir = "/home/ubuntu/Whatsmektia/uploads"
     file_path = os.path.join(uploads_dir, filename)
     
     # Log para depuración
