@@ -11594,17 +11594,19 @@ def enviar_manual():
             app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
             
             if allowed_file(archivo.filename):
-                
-                # Guardar archivo en carpeta del host
+                # DETERMINAR CARPETA DEL CLIENTE (TENANT)
                 tenant_slug = config.get('dominio', 'default').split('.')[0]
+                # Definir ruta: /uploads/docs/nombre_cliente/
                 docs_dir = os.path.join(UPLOAD_FOLDER, 'docs', tenant_slug)
                 os.makedirs(docs_dir, exist_ok=True)
+                # Nombre único con prefijo manual
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
+                # La nueva ruta absoluta
                 filepath = os.path.join(docs_dir, filename)
+                # GUARDAR DIRECTO EN LA CARPETA DEL HOST
                 archivo.save(filepath)
-                
-                app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
-                
+                app.logger.info(f"✅ Archivo guardado en carpeta del host: {filepath}")
+
                 # Determinar tipo de archivo
                 file_ext = os.path.splitext(filename)[1].lower()
                 
