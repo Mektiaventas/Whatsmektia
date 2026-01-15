@@ -11594,10 +11594,15 @@ def enviar_manual():
             app.logger.info(f"📤 Procesando archivo: {archivo.filename}")
             
             if allowed_file(archivo.filename):
-                # Guardar archivo temporalmente
+                
+                # Guardar archivo en carpeta del host
+                tenant_slug = config.get('dominio', 'default').split('.')[0]
+                docs_dir = os.path.join(UPLOAD_FOLDER, 'docs', tenant_slug)
+                os.makedirs(docs_dir, exist_ok=True)
                 filename = secure_filename(f"manual_{int(time.time())}_{archivo.filename}")
-                filepath = os.path.join(UPLOAD_FOLDER, filename)
+                filepath = os.path.join(docs_dir, filename)
                 archivo.save(filepath)
+                
                 app.logger.info(f"💾 Archivo guardado temporalmente: {filepath}")
                 
                 # Determinar tipo de archivo
