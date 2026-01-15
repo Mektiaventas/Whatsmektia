@@ -268,16 +268,21 @@ def texto_a_voz(texto, filename, config=None, voz=None):
 
     logger = logging.getLogger(__name__)
     
-    # 1. FORZAR RUTA ABSOLUTA (Aquí estaba el error)
-    # Usamos la ruta donde sabemos que los archivos son visibles
-    UPLOAD_FOLDER = "/home/ubuntu/Whatsmektia/uploads"
+    # 1. IDENTIFICAR CLIENTE Y RUTA (CORREGIDO)
+    # Detectamos el slug (ej: unilova) desde la config
+    tenant_slug = (config.get('dominio', 'default').split('.')[0]) if isinstance(config, dict) else 'default'
     
-    # Asegurar que el directorio existe con los permisos correctos
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    # Definimos la ruta hacia la subcarpeta docs del cliente
+    BASE_UPLOAD = "/home/ubuntu/Whatsmektia/uploads"
+    TARGET_FOLDER = os.path.join(BASE_UPLOAD, "docs", tenant_slug)
+    
+    # Asegurar que la subcarpeta del cliente existe
+    os.makedirs(TARGET_FOLDER, exist_ok=True)
 
-    # Limpiamos el filename para evitar que termine en .ogg.ogg
+    # Limpiamos el filename y definimos la ruta final en la subcarpeta
     clean_filename = filename.replace('.ogg', '').replace('.mp3', '')
-    output_path = os.path.join(UPLOAD_FOLDER, f"{clean_filename}.ogg")
+    output_path = os.path.join(TARGET_FOLDER, f"{clean_filename}.ogg")
+    
 
     logger.info(f"🎤 TTS - Texto a procesar: {texto[:50]}...")
     logger.info(f"🎤 TTS - Guardando en: {output_path}")
