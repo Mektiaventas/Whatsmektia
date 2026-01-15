@@ -565,7 +565,7 @@ def logout():
 #    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS 
 # === FUNCIÓN allowed_file ahora importada desde módulo ===
 try:
-    from app.utils.helpers import allowed_file
+    from app.utils.helpers import allowed_file, crear_estructura_tenant, verificar_carpetas_completas
 except ImportError:
     # Fallback por si algo sale mal (mantener compatibilidad)
     ALLOWED_EXTENSIONS = {
@@ -583,7 +583,14 @@ def _get_or_create_session_id():
         sid = os.urandom(16).hex()
         session['sid'] = sid
     return sid
-
+@app.route('/crear-folders-cliente/<tenant_slug>', methods=['POST'])
+def ruta_crear_folders(tenant_slug):
+    # Esto llama a la lógica que pusimos en helpers.py
+    resultado = crear_estructura_tenant(tenant_slug)
+    if resultado:
+        return {"status": "success", "message": "Carpetas creadas correctamente."}, 200
+    else:
+        return {"status": "exists", "message": "La estructura ya existía."}, 200
 def _ensure_sesiones_table(conn):
     cur = conn.cursor()
     cur.execute("""
