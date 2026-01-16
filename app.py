@@ -1647,7 +1647,33 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         app.logger.error(f"🔴 Error en analizar_imagen_y_responder: {e}")
         app.logger.error(traceback.format_exc())
         return None
-
+        
+def filtrar_resultados_consultivos(productos, limite_consultivo=30):
+    """
+    Analiza la lista de productos encontrados.
+    Si hay más de 'limite_consultivo', extrae criterios para que la IA pregunte.
+    """
+    total = len(productos)
+    
+    if total > limite_consultivo:
+        # Extraer opciones únicas para ayudar al usuario a decidir
+        categorias = list(set([p.get('categoria') for p in productos if p.get('categoria')]))[:6]
+        subcats = list(set([p.get('subcategoria') for p in productos if p.get('subcategoria')]))[:6]
+        
+        return {
+            "estado": "PEDIR_FILTRO",
+            "total_encontrados": total,
+            "sugerencias": {
+                "categorias": categorias,
+                "subcategorias": subcats
+            }
+        }
+    
+    return {
+        "estado": "MOSTRAR_PRODUCTOS",
+        "productos": productos[:limite_consultivo]
+    }
+    
 def analizar_archivo_con_ia(texto_archivo, tipo_negocio, config=None):
     """Analiza el contenido del archivo usando IA"""
     if config is None:
