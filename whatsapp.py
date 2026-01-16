@@ -196,7 +196,7 @@ def obtener_audio_whatsapp(audio_id, config=None):
         # 2. RUTA ORGANIZADA POR CLIENTE
         # Definimos la base y aseguramos que exista la subcarpeta del cliente
         uploads_base = "/home/ubuntu/Whatsmektia/uploads"
-        target_dir = os.path.join(uploads_base, "docs", tenant_slug)
+        target_dir = os.path.join(uploads_base, "audios", tenant_slug)
         os.makedirs(target_dir, exist_ok=True)
         
         # El archivo ahora se guarda en: uploads/docs/unilova/audio_xxx.ogg
@@ -278,7 +278,7 @@ def texto_a_voz(texto, filename, config=None, voz=None):
     
     # Definimos la ruta hacia la subcarpeta docs del cliente
     BASE_UPLOAD = "/home/ubuntu/Whatsmektia/uploads"
-    TARGET_FOLDER = os.path.join(BASE_UPLOAD, "docs", tenant_slug)
+    TARGET_FOLDER = os.path.join(BASE_UPLOAD, "audios", tenant_slug)
     
     # Asegurar que la subcarpeta del cliente existe
     os.makedirs(TARGET_FOLDER, exist_ok=True)
