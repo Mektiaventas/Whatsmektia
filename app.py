@@ -10247,7 +10247,13 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
                     else:
                         app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
                 else:
-                    enviar_documento(numero, document_field, os.path.basename(document_field), config)
+                    # --- CAMBIO AQUÍ: Usar la lógica inteligente en lugar de confiar en document_field ---
+                    app.logger.info(f"📚 Usando enviar_catalogo para validar documento: {document_field}")
+                    sent = enviar_catalogo(numero, original_text=texto, config=config)
+                    
+                    if not sent:
+                        # Si falló enviar el PDF, al menos enviamos el texto que preparó la IA
+                        enviar_mensaje(numero, respuesta_text, config)
                 
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
