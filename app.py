@@ -11760,49 +11760,46 @@ def enviar_manual():
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
     conn = get_db_connection(config)
-    # Importante: usar dictionary=True para mapear nombres de columnas
-    cursor = conn.cursor(dictionary=True)
+    cursor = conn.cursor() # Cursor estándar (tuplas)
 
     try:
-        # 1. OBTENER DATOS DE LA TABLA
-        # Usamos 'contenido_extra' y 'respuesta_contenido_extra' que es donde están las URLs
-        cursor.execute("SELECT contenido_extra, respuesta_contenido_extra, dominio FROM conversaciones WHERE numero=%s;", (numero,))
+        # 1. Buscamos las columnas por índice: 0:contenido_extra, 1:respuesta_contenido_extra, 2:dominio
+        query = "SELECT contenido_extra, respuesta_contenido_extra, dominio FROM conversaciones WHERE numero=%s"
+        cursor.execute(query, (numero,))
         filas = cursor.fetchall()
+        
+        app.logger.info(f"🧹 Iniciando limpieza para {numero}. Registros encontrados: {len(filas)}")
 
         for fila in filas:
-            # Determinamos la carpeta del tenant (ej: unilova)
-            tenant_name = fila.get('dominio') or 'default'
+            # fila[0] = contenido_extra, fila[1] = respuesta_contenido_extra, fila[2] = dominio
+            url_cliente = fila[0]
+            url_ia = fila[1]
+            tenant_name = fila[2] if fila[2] else 'unilova'
+            
             uploads_dir = os.path.join('/home/ubuntu/Whatsmektia/uploads/audios', tenant_name)
 
-            # Revisamos las dos columnas de archivos
-            for url_archivo in [fila.get('contenido_extra'), fila.get('respuesta_contenido_extra')]:
-                if url_archivo and any(url_archivo.lower().endswith(ext) for ext in ['.ogg', '.pdf', '.jpg', '.png', '.jpeg']):
-                    
-                    # Extraer 'audio_123.ogg' de 'http://.../audio_123.ogg'
-                    nombre_fichero = os.path.basename(url_archivo)
+            for url in [url_cliente, url_ia]:
+                if url and any(ext in url.lower() for ext in ['.ogg', '.pdf', '.jpg', '.png']):
+                    # Limpiamos la URL por si tiene parámetros extra
+                    nombre_fichero = os.path.basename(url.split('?')[0])
                     ruta_fisica = os.path.join(uploads_dir, nombre_fichero)
 
                     if os.path.exists(ruta_fisica):
-                        try:
-                            os.remove(ruta_fisica)
-                            app.logger.info(f"🗑️ Eliminado del disco: {ruta_fisica}")
-                        except Exception as e:
-                            app.logger.error(f"❌ Error al borrar archivo físico: {e}")
+                        os.remove(ruta_fisica)
+                        app.logger.info(f"🗑️ ARCHIVO ELIMINADO: {ruta_fisica}")
                     else:
-                        app.logger.debug(f"🔍 Archivo no encontrado en: {ruta_fisica}")
+                        app.logger.info(f"❓ No encontrado en disco: {ruta_fisica}")
 
-        # 2. ELIMINAR DE BASE DE DATOS
-        cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
+        # 2. Proceder al borrado de la BD
+        cursor.execute("DELETE FROM conversaciones WHERE numero=%s", (numero,))
         try:
-            cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
+            cursor.execute("DELETE FROM chat_meta WHERE numero=%s", (numero,))
         except:
             pass
 
         conn.commit()
-        app.logger.info(f"✅ Chat y archivos de {numero} limpiados exitosamente.")
-
     except Exception as e:
-        app.logger.error(f"🔴 Error en eliminar_chat: {e}")
+        app.logger.error(f"🔴 Error crítico: {e}")
     finally:
         cursor.close()
         conn.close()
