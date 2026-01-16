@@ -12976,29 +12976,29 @@ def guardar_alias_contacto(numero, config=None):
 def proxy_audio(filename):
     """
     Sirve archivos de audio o documentos de forma pública para WhatsApp,
-    buscando únicamente en las carpetas organizadas por host.
+    buscando en las carpetas organizadas por host (audios, docs, productos).
     """
     # 1. Identificar quién pide el archivo (ej: 'unilova')
     config = obtener_configuracion_por_host()
     tenant_slug = config.get('dominio', 'default').split('.')[0]
     
-    # 2. Definir las rutas donde SÍ permitimos buscar
-    # Buscamos en /uploads/docs/tenant/ y en /uploads/productos/tenant/
+    # 2. Definir las rutas donde permitimos buscar (Incluimos 'audios')
     search_paths = [
+        os.path.join(app.config['UPLOAD_FOLDER'], 'audios', tenant_slug),
         os.path.join(app.config['UPLOAD_FOLDER'], 'docs', tenant_slug),
         os.path.join(app.config['UPLOAD_FOLDER'], 'productos', tenant_slug)
     ]
     
+    # 3. Buscar el archivo en las carpetas del cliente
     for folder in search_paths:
         file_path = os.path.join(folder, filename)
         if os.path.exists(file_path):
             app.logger.info(f"📂 Sirviendo archivo desde host {tenant_slug}: {file_path}")
             return send_from_directory(folder, filename)
 
-    # 3. Si llega aquí, el archivo no está en las carpetas del host
+    # 4. Fallback: Si no está en las carpetas del cliente, error
     app.logger.error(f"❌ Archivo {filename} no encontrado para el host: {tenant_slug}")
     return "Archivo no encontrado en la ruta del host", 404
-
     
 
 
