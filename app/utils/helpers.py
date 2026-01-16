@@ -6,7 +6,7 @@ def crear_estructura_tenant(tenant_slug):
     Retorna True si creó algo, False si ya todo existía.
     """
     base_path = "/home/ubuntu/Whatsmektia/uploads"
-    folders = ['docs', 'logos', 'pdfs', 'productos']
+    folders = ['docs', 'logos', 'pdfs', 'productos', 'audios']
     se_creo_algo = False
     
     for folder in folders:
@@ -22,7 +22,7 @@ def verificar_carpetas_completas(tenant_slug):
     Revisa si las 4 carpetas existen para saber si deshabilitar el botón.
     """
     base_path = "/home/ubuntu/Whatsmektia/uploads"
-    folders = ['docs', 'logos', 'pdfs', 'productos']
+    folders = ['docs', 'logos', 'pdfs', 'productos', 'audios']
     
     return all(os.path.exists(os.path.join(base_path, f, tenant_slug)) for f in folders)
     
