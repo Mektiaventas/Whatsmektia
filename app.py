@@ -1548,105 +1548,88 @@ def asociar_imagenes_con_ia(servicios, imagenes, texto_pdf):
         return asociar_imagenes_productos(servicios, imagenes)
 
 # Nueva función: analiza una imagen (base64) junto con contexto y devuelve texto de respuesta
+# Embudo de Selección": si hay más de 30 productos, la IA no los muestra, sino que pide filtros. Si hay menos de 30, los presenta.
 def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None, config=None):
     """
-    Analiza una imagen recibida por WhatsApp y genera una respuesta usando IA.
-    - numero: número del usuario que envió la imagen
-    - imagen_base64: data:image/...;base64,... (string) o None
-    - caption: texto que acompañó la imagen
-    - public_url: ruta pública donde se guardó la imagen (opcional)
-    - config: tenant config opcional
-    Retorna: texto de respuesta (string) o None si falla
+    Versión Optimizada: Identifica productos y decide si filtrar o mostrar
+    según la cantidad de resultados encontrados (Límite 30).
     """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # 1) Obtener catálogo resumido para contexto (limitado para no exceder tokens)
-        precios = obtener_todos_los_precios(config) or []
-        productos_lines = []
-        for p in precios[:1000]:
-            nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:120]
-            sku = (p.get('sku') or '').strip()
-            precio = p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ''
-            imagen = p.get('imagen') or ''
-            productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio} | Imagen:{imagen}")
+        # 1. BÚSQUEDA INTELIGENTE (No cargamos todo, buscamos por lo que el usuario escribió)
+        termino = caption if (caption and len(caption) > 2) else "productos"
+        # Buscamos un poco más del límite para saber si debemos filtrar
+        productos_db = obtener_productos_por_palabra_clave(termino, config, limite=50)
+        
+        total_encontrados = len(productos_db)
+        productos_texto = ""
+        instruccion_extra = ""
 
-        productos_texto = "\n".join(productos_lines) if productos_lines else "No hay productos cargados."
+        # 2. LÓGICA DE FILTRADO CONSULTIVO
+        if total_encontrados > 30:
+            # Extraemos categorías y subcategorías únicas para que la IA pregunte
+            cats = list(set([p.get('categoria') for p in productos_db if p.get('categoria')]))[:5]
+            subcats = list(set([p.get('subcategoria') for p in productos_db if p.get('subcategoria')]))[:5]
+            
+            productos_texto = "DEMASIADOS RESULTADOS."
+            instruccion_extra = (
+                f"\nAVISO: Se encontraron {total_encontrados} productos. Es demasiado para WhatsApp. "
+                f"NO listes los productos. Dile al usuario que hay muchas opciones y "
+                f"ayúdalo a filtrar preguntando si busca algo de estas categorías: {cats} "
+                f"o estas subcategorías: {subcats}."
+            )
+        elif total_encontrados > 0:
+            # Cantidad manejable: preparamos la lista para la IA
+            productos_lines = []
+            for p in productos_db:
+                nombre = (p.get('servicio') or p.get('modelo') or p.get('sku') or '')[:100]
+                sku = (p.get('sku') or '').strip()
+                precio = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
+                productos_lines.append(f"- {nombre} | SKU:{sku} | Precio:{precio}")
+            productos_texto = "\n".join(productos_lines)
+            instruccion_extra = "\nPresenta estos productos al cliente de forma amable y breve."
+        else:
+            productos_texto = "No se encontraron productos exactos en el catálogo."
+            instruccion_extra = "\nNo encontré el producto. Pide al usuario más detalles o el nombre exacto."
 
-        # 2) Construir prompt claro para la IA multimodal
+        # 3. CONSTRUCCIÓN DEL PROMPT PARA OPENAI
         system_prompt = (
-            "Eres un asistente que identifica productos y contexto a partir de imágenes recibidas por WhatsApp. "
-            "Usa SOLO la información disponible en el catálogo y el historial para responder al cliente. "
-            "Si la imagen coincide con un producto del catálogo, responde con el nombre del producto, SKU, precio y una breve recomendación. "
-            "Si no puedes identificar, pregunta al usuario por más detalles (por ejemplo: '¿Qué SKU o nombre tiene este producto?'). "
-            "Mantén la respuesta breve y orientada al cliente."
+            f"Eres un asesor experto para el negocio: {config.get('nombre_negocio', 'nuestro comercio')}. "
+            "Tu objetivo es identificar productos y asesorar al cliente. "
+            "Si hay muchos resultados, actúa como un filtro consultivo. Si hay pocos, actúa como vendedor. "
+            "Mantén tus respuestas breves, ideales para WhatsApp."
         )
 
         user_content = [
-            {"type": "text", "text": f"Usuario: {numero}\nCaption: {caption or ''}\nCatalogo (resumido):\n{productos_texto}"},
+            {"type": "text", "text": f"Usuario: {numero}\nCaption: {caption or ''}\n\nContexto de Inventario:\n{productos_texto}\n{instruccion_extra}"},
         ]
 
-        # 3) Adjuntar la imagen (si viene base64) para que el modelo la analice
+        # Adjuntar imagen si existe
         if imagen_base64:
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": imagen_base64}
-            })
+            user_content.append({"type": "image_url", "image_url": {"url": imagen_base64}})
         elif public_url:
-            # fallback a la URL pública si no hay base64
-            user_content.append({
-                "type": "image_url",
-                "image_url": {"url": public_url}
-            })
+            user_content.append({"type": "image_url", "image_url": {"url": public_url}})
 
-        # 4) Llamada al cliente OpenAI (misma forma que ya usas en otras funciones)
+        # 4. LLAMADA A LA IA
         client_local = OpenAI(api_key=OPENAI_API_KEY)
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content}
-        ]
-
-        # Preferir modelo multimodal disponible en tu stack (ejemplo re-uso de gpt-4o en el repo)
         response = client_local.chat.completions.create(
-            model="gpt-4o",  # ajusta si usas otro modelo
-            messages=messages,
-            max_tokens=800,
+            model="gpt-4o", 
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_content}
+            ],
+            max_tokens=500,
             temperature=0.2
         )
 
-        # Extraer texto resultante
-        text_response = ""
-        try:
-            text_response = response.choices[0].message.content
-            if isinstance(text_response, list):
-                # si viene como estructura multimodal, concatenar textos
-                parts = []
-                for item in text_response:
-                    if isinstance(item, dict) and item.get('type') == 'text' and item.get('text'):
-                        parts.append(item.get('text'))
-                    elif isinstance(item, str):
-                        parts.append(item)
-                text_response = "\n".join(parts)
-        except Exception:
-            # Fallback a raw string si la estructura es diferente
-            try:
-                text_response = str(response)
-            except:
-                text_response = None
-
-        if not text_response:
-            app.logger.info("ℹ️ IA no devolvió texto útil al analizar la imagen")
-            return None
-
-        # 5) Post-procesado: limpiar espacios excesivos
-        text_response = re.sub(r'\n\s+\n', '\n\n', text_response).strip()
-        return text_response
+        text_response = response.choices[0].message.content
+        return text_response.strip()
 
     except Exception as e:
         app.logger.error(f"🔴 Error en analizar_imagen_y_responder: {e}")
-        app.logger.error(traceback.format_exc())
-        return None
+        return "Lo siento, tuve un problema al procesar la imagen. ¿Podrías decirme el nombre del producto?"
         
 def filtrar_resultados_consultivos(productos, limite_consultivo=30):
     """
