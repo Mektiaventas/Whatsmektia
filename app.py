@@ -11755,26 +11755,56 @@ def enviar_manual():
         app.logger.error(traceback.format_exc())
     
     return redirect(url_for('ver_chat', numero=numero)) 
-
+    
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
+    # Usamos el dominio para identificar la subcarpeta (unilova)
+    dominio = config.get('dominio', '') 
+    # Extraemos 'unilova' de 'www.unilova.mektia.com'
+    tenant_name = dominio.split('.')[1] if '.' in dominio else 'default'
+    
     conn = get_db_connection(config)
-    cursor = conn.cursor()
-    
-    # Solo eliminar conversaciones, NO contactos
-    cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
-    
-    # Opcional: también eliminar de chat_meta si usas kanban
+    cursor = conn.cursor(dictionary=True)
+
     try:
-        cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
-    except:
-        pass  # Ignorar si la tabla no existe
-    
-    conn.commit()
-    cursor.close()
-    conn.close()
-    
+        # RUTA EXACTA según tu ls: /home/ubuntu/Whatsmektia/uploads/audios/unilova
+        uploads_dir = os.path.join('/home/ubuntu/Whatsmektia/uploads/audios', tenant_name)
+        
+        app.logger.info(f"🧹 Buscando archivos para borrar en: {uploads_dir}")
+
+        # 1. BUSCAR ARCHIVOS
+        cursor.execute("SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s;", (numero,))
+        filas = cursor.fetchall()
+        
+        for fila in filas:
+            for contenido in [fila.get('mensaje'), fila.get('respuesta')]:
+                if contenido and any(contenido.lower().endswith(ext) for ext in ['.ogg', '.pdf', '.jpg', '.png', '.jpeg']):
+                    
+                    nombre_archivo = os.path.basename(contenido)
+                    ruta_fisica = os.path.join(uploads_dir, nombre_archivo)
+                    
+                    if os.path.exists(ruta_fisica):
+                        try:
+                            os.remove(ruta_fisica)
+                            app.logger.info(f"🗑️ Eliminado: {ruta_fisica}")
+                        except Exception as e:
+                            app.logger.error(f"❌ Error al borrar {ruta_fisica}: {e}")
+
+        # 2. ELIMINAR DE BASE DE DATOS
+        cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
+        try:
+            cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
+        except:
+            pass  
+
+        conn.commit()
+    except Exception as e:
+        app.logger.error(f"🔴 Error en eliminar_chat: {e}")
+    finally:
+        cursor.close()
+        conn.close()
+
     IA_ESTADOS.pop(numero, None)
     return redirect(url_for('ver_chats'))
 
