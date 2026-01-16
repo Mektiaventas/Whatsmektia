@@ -11759,46 +11759,48 @@ def enviar_manual():
 @app.route('/chats/<numero>/eliminar', methods=['POST'])
 def eliminar_chat(numero):
     config = obtener_configuracion_por_host()
-    # Usamos el dominio para identificar la subcarpeta (unilova)
-    dominio = config.get('dominio', '') 
-    # Extraemos 'unilova' de 'www.unilova.mektia.com'
-    tenant_name = dominio.split('.')[1] if '.' in dominio else 'default'
-    
     conn = get_db_connection(config)
+    # Importante: usar dictionary=True para mapear nombres de columnas
     cursor = conn.cursor(dictionary=True)
 
     try:
-        # RUTA EXACTA según tu ls: /home/ubuntu/Whatsmektia/uploads/audios/unilova
-        uploads_dir = os.path.join('/home/ubuntu/Whatsmektia/uploads/audios', tenant_name)
-        
-        app.logger.info(f"🧹 Buscando archivos para borrar en: {uploads_dir}")
-
-        # 1. BUSCAR ARCHIVOS
-        cursor.execute("SELECT mensaje, respuesta FROM conversaciones WHERE numero=%s;", (numero,))
+        # 1. OBTENER DATOS DE LA TABLA
+        # Usamos 'contenido_extra' y 'respuesta_contenido_extra' que es donde están las URLs
+        cursor.execute("SELECT contenido_extra, respuesta_contenido_extra, dominio FROM conversaciones WHERE numero=%s;", (numero,))
         filas = cursor.fetchall()
-        
+
         for fila in filas:
-            for contenido in [fila.get('mensaje'), fila.get('respuesta')]:
-                if contenido and any(contenido.lower().endswith(ext) for ext in ['.ogg', '.pdf', '.jpg', '.png', '.jpeg']):
+            # Determinamos la carpeta del tenant (ej: unilova)
+            tenant_name = fila.get('dominio') or 'default'
+            uploads_dir = os.path.join('/home/ubuntu/Whatsmektia/uploads/audios', tenant_name)
+
+            # Revisamos las dos columnas de archivos
+            for url_archivo in [fila.get('contenido_extra'), fila.get('respuesta_contenido_extra')]:
+                if url_archivo and any(url_archivo.lower().endswith(ext) for ext in ['.ogg', '.pdf', '.jpg', '.png', '.jpeg']):
                     
-                    nombre_archivo = os.path.basename(contenido)
-                    ruta_fisica = os.path.join(uploads_dir, nombre_archivo)
-                    
+                    # Extraer 'audio_123.ogg' de 'http://.../audio_123.ogg'
+                    nombre_fichero = os.path.basename(url_archivo)
+                    ruta_fisica = os.path.join(uploads_dir, nombre_fichero)
+
                     if os.path.exists(ruta_fisica):
                         try:
                             os.remove(ruta_fisica)
-                            app.logger.info(f"🗑️ Eliminado: {ruta_fisica}")
+                            app.logger.info(f"🗑️ Eliminado del disco: {ruta_fisica}")
                         except Exception as e:
-                            app.logger.error(f"❌ Error al borrar {ruta_fisica}: {e}")
+                            app.logger.error(f"❌ Error al borrar archivo físico: {e}")
+                    else:
+                        app.logger.debug(f"🔍 Archivo no encontrado en: {ruta_fisica}")
 
         # 2. ELIMINAR DE BASE DE DATOS
         cursor.execute("DELETE FROM conversaciones WHERE numero=%s;", (numero,))
         try:
             cursor.execute("DELETE FROM chat_meta WHERE numero=%s;", (numero,))
         except:
-            pass  
+            pass
 
         conn.commit()
+        app.logger.info(f"✅ Chat y archivos de {numero} limpiados exitosamente.")
+
     except Exception as e:
         app.logger.error(f"🔴 Error en eliminar_chat: {e}")
     finally:
