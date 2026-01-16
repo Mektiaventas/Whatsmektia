@@ -11626,7 +11626,8 @@ def enviar_manual():
                     dominio = config.get('dominio') or request.url_root.rstrip('/')
                     if not dominio.startswith('http'):
                         dominio = f"https://{dominio}"
-                    public_url = f"{dominio}/uploads/{filename}"
+                    # Usamos proxy-audio para que el sistema busque en las subcarpetas automáticamente
+                    public_url = f"{dominio}/proxy-audio/{filename}"
                     
                     app.logger.info(f"🌐 URL pública generada: {public_url}")
                     
