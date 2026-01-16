@@ -12053,46 +12053,59 @@ def borrar_pdf_configuracion(doc_id):
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SELECT filename, filepath FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
+        # Obtenemos los datos necesarios, incluyendo el tenant_slug si existe
+        cursor.execute("SELECT filename, filepath, tenant_slug FROM documents_publicos WHERE id = %s LIMIT 1", (doc_id,))
         doc = cursor.fetchone()
+        
         if not doc:
             cursor.close(); conn.close()
             flash('❌ Documento no encontrado', 'error')
             return redirect(url_for('configuracion_tab', tab='negocio'))
 
         filename = doc.get('filename')
-        # Ruta esperada en uploads/docs
-        docs_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs')
-        filepath = os.path.join(docs_dir, filename)
+        # Detectamos el slug del cliente actual
+        tenant_slug = doc.get('tenant_slug') or config.get('dominio', '').split('.')[0] or 'default'
+        
+        # --- LÓGICA DE BORRADO INTELIGENTE ---
+        # Definimos las dos rutas posibles: la nueva organizada y la antigua raíz
+        ruta_organizada = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', tenant_slug, filename)
+        ruta_raiz = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'docs', filename)
 
-        # Intentar eliminar archivo del disco si existe
-        try:
-            if os.path.isfile(filepath):
-                os.remove(filepath)
-                app.logger.info(f"🗑️ Archivo eliminado de disco: {filepath}")
-            else:
-                app.logger.info(f"ℹ️ Archivo no encontrado en disco (posiblemente ya eliminado): {filepath}")
-        except Exception as e:
-            app.logger.warning(f"⚠️ No se pudo eliminar archivo físico: {e}")
+        # Decidimos cuál existe para borrarla
+        filepath_a_borrar = None
+        if os.path.isfile(ruta_organizada):
+            filepath_a_borrar = ruta_organizada
+        elif os.path.isfile(ruta_raiz):
+            filepath_a_borrar = ruta_raiz
 
-        # Eliminar registro DB
+        # Intentar eliminar archivo físico
+        if filepath_a_borrar:
+            try:
+                os.remove(filepath_a_borrar)
+                app.logger.info(f"🗑️ Archivo eliminado físicamente: {filepath_a_borrar}")
+            except Exception as e:
+                app.logger.warning(f"⚠️ No se pudo eliminar archivo físico en {filepath_a_borrar}: {e}")
+        else:
+            app.logger.info(f"ℹ️ El archivo {filename} no existía en disco, procediendo solo con borrar registro.")
+
+        # --- ELIMINAR REGISTRO DE BASE DE DATOS ---
         try:
             cursor.execute("DELETE FROM documents_publicos WHERE id = %s", (doc_id,))
             conn.commit()
             flash('✅ Catálogo eliminado correctamente', 'success')
-            app.logger.info(f"✅ Registro documents_publicos eliminado: id={doc_id} filename={filename}")
+            app.logger.info(f"✅ Registro eliminado de DB: id={doc_id} filename={filename}")
         except Exception as e:
             conn.rollback()
             flash('❌ Error eliminando el registro en la base de datos', 'error')
-            app.logger.error(f"🔴 Error eliminando registro documents_publicos: {e}")
+            app.logger.error(f"🔴 Error DB borrar_pdf: {e}")
         finally:
             cursor.close(); conn.close()
 
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
     except Exception as e:
-        app.logger.error(f"🔴 Error en borrar_pdf_configuracion: {e}")
-        flash('❌ Error eliminando el catálogo', 'error')
+        app.logger.error(f"🔴 Error general en borrar_pdf_configuracion: {e}")
+        flash('❌ Error al procesar la solicitud de borrado', 'error')
         return redirect(url_for('configuracion_tab', tab='negocio'))
 
 @app.route('/configuracion/<tab>', methods=['GET','POST'])
