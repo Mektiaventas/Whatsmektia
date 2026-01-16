@@ -169,7 +169,7 @@ def obtener_imagen_whatsapp(image_id, config=None):
 
 def obtener_audio_whatsapp(audio_id, config=None):
     try:
-        # 1. Configuración de Token
+        # 1. Configuración de Token y Tenant
         if config is None:
             try:
                 from app import obtener_configuracion_por_host
@@ -178,11 +178,13 @@ def obtener_audio_whatsapp(audio_id, config=None):
                 config = {}
 
         token = config.get('whatsapp_token') if isinstance(config, dict) else None
+        # Detectar el slug del cliente (ej: unilova, ofitodo)
+        tenant_slug = config.get('dominio', 'default').split('.')[0] if isinstance(config, dict) else 'default'
         
         url = f"https://graph.facebook.com/v18.0/{audio_id}"
         headers = {'Authorization': f'Bearer {token}'}
         
-        logger.info(f"📥 Solicitando metadata de audio: {url}")
+        logger.info(f"📥 Solicitando metadata de audio ({tenant_slug}): {url}")
         response = requests.get(url, headers=headers, timeout=30)
         response.raise_for_status()
         metadata = response.json()
@@ -191,20 +193,23 @@ def obtener_audio_whatsapp(audio_id, config=None):
         audio_response = requests.get(download_url, headers=headers, timeout=30)
         audio_response.raise_for_status()
         
-        # 2. RUTA MAESTRA FORZADA (Para evitar la carpeta fantasma)
-        uploads = "/home/ubuntu/Whatsmektia/uploads"
-        os.makedirs(uploads, exist_ok=True)
+        # 2. RUTA ORGANIZADA POR CLIENTE
+        # Definimos la base y aseguramos que exista la subcarpeta del cliente
+        uploads_base = "/home/ubuntu/Whatsmektia/uploads"
+        target_dir = os.path.join(uploads_base, "docs", tenant_slug)
+        os.makedirs(target_dir, exist_ok=True)
         
-        audio_path = os.path.join(uploads, f"audio_{audio_id}.ogg")
+        # El archivo ahora se guarda en: uploads/docs/unilova/audio_xxx.ogg
+        audio_path = os.path.join(target_dir, f"audio_{audio_id}.ogg")
         
         # 3. Guardar el archivo
         with open(audio_path, 'wb') as f:
             f.write(audio_response.content)
         
-        logger.info(f"💾 Audio guardado exitosamente en: {audio_path}")
+        logger.info(f"💾 Audio de {tenant_slug} guardado en: {audio_path}")
         
         # 4. Generar URL pública USANDO EL PROXY
-        # Cambiamos /uploads/ por /proxy-audio/ para que Flask lo gestione
+        # El proxy se encarga de buscarlo en la subcarpeta correcta
         dominio = config.get('dominio', 'unilova.mektia.com')
         audio_url = f"https://{dominio}/proxy-audio/audio_{audio_id}.ogg"
         
@@ -213,7 +218,6 @@ def obtener_audio_whatsapp(audio_id, config=None):
     except Exception as e:
         logger.error(f"🔴 Error en obtener_audio_whatsapp: {str(e)}")
         return None, None
-
 
 
 def transcribir_audio_con_openai(audio_path):
