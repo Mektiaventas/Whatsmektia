@@ -6000,34 +6000,41 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
         
         # SEGUNDO: Si no es SKU o no encontró, buscar en TODOS los campos
         # Priorizar por relevancia (similar a tu query original)
-        app.logger.info(f"🔍 Búsqueda general en todos los campos")
+        # ESTRATEGIA: Búsqueda Jerárquica (Categoría -> Subcategoría -> Descripción -> SKU)
+        app.logger.info(f"🔍 Búsqueda Multicapa para: '{texto_limpio}'")
         
         query_general = """
             SELECT 
                 *,
                 CASE 
-                    WHEN LOWER(categoria) LIKE %s THEN 10
-                    WHEN LOWER(subcategoria) LIKE %s THEN 9
-                    WHEN LOWER(sku) LIKE %s THEN 8
-                    WHEN LOWER(modelo) LIKE %s THEN 7
-                    WHEN LOWER(descripcion) LIKE %s THEN 6
+                    WHEN LOWER(categoria) = %s THEN 100          -- Coincidencia exacta en categoría
+                    WHEN LOWER(categoria) LIKE %s THEN 80        -- Categoría parcial
+                    WHEN LOWER(subcategoria) LIKE %s THEN 60     -- Subcategoría
+                    WHEN LOWER(descripcion) LIKE %s THEN 40      -- Descripción detallada
+                    WHEN LOWER(sku) LIKE %s THEN 20              -- SKU (al final por ser técnico)
                     ELSE 0
                 END AS relevancia
             FROM precios 
             WHERE (
-                LOWER(categoria) LIKE %s OR
-                LOWER(subcategoria) LIKE %s OR
-                LOWER(sku) LIKE %s OR
-                LOWER(modelo) LIKE %s OR
-                LOWER(descripcion) LIKE %s
+                LOWER(categoria) LIKE %s OR 
+                LOWER(subcategoria) LIKE %s OR 
+                LOWER(descripcion) LIKE %s OR
+                LOWER(sku) LIKE %s
             )
-            AND (status_ws IS NULL OR status_ws = 'activo')
-            ORDER BY relevancia DESC, sku
+            AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ')
+            ORDER BY relevancia DESC, descripcion ASC
             LIMIT %s
         """
         
-        termino = f"%{texto_lower}%"
-        params = [termino] * 5 + [termino] * 5 + [limite]
+        termino_exacto = texto_lower
+        termino_like = f"%{texto_lower}%"
+        
+        # Parámetros: 5 para el CASE y 4 para el WHERE + limite
+        params = [
+            termino_exacto, termino_like, termino_like, termino_like, termino_like, # CASE
+            termino_like, termino_like, termino_like, termino_like,                # WHERE
+            limite
+        ]
         
         cursor.execute(query_general, params)
         resultados = cursor.fetchall()
