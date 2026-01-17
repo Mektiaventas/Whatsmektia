@@ -6131,7 +6131,7 @@ def obtener_datos_de_transferencia(config):
         
 def obtener_producto_por_sku_o_nombre(query, config=None):
     """
-    Busca un producto en la tabla `precios` por SKU, modelo o servicio que coincida con `query`.
+    Busca un producto en la tabla `precios` por SKU, modelo o descripcion que coincida con `query`.
     Retorna la fila completa (dict) o None.
     """
     if config is None:
@@ -6147,21 +6147,22 @@ def obtener_producto_por_sku_o_nombre(query, config=None):
 
         # Intentos: SKU exacto -> modelo exacto -> servicio LIKE -> modelo LIKE -> sku LIKE
         # Normalizar posibles formatos
-        candidates = [
-            ("SELECT * FROM precios WHERE sku = %s LIMIT 1", (q,)),
-            ("SELECT * FROM precios WHERE LOWER(modelo) = LOWER(%s) LIMIT 1", (q,)),
-            ("SELECT * FROM precios WHERE LOWER(servicio) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
-            ("SELECT * FROM precios WHERE LOWER(modelo) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
-            ("SELECT * FROM precios WHERE LOWER(sku) LIKE LOWER(CONCAT('%', %s, '%')) LIMIT 1", (q,)),
-        ]
-
-        for sql, params in candidates:
-            try:
-                cursor.execute(sql, params)
-                row = cursor.fetchone()
-                if row:
-                    cursor.close(); conn.close()
-                    return row
+        # Una sola consulta que busca en las 3 columnas al mismo tiempo
+        sql = """
+            SELECT * FROM precios 
+            WHERE sku = %s 
+               OR LOWER(modelo) = LOWER(%s)
+               OR LOWER(descripcion) LIKE LOWER(CONCAT('%', %s, '%'))
+               OR LOWER(modelo) LIKE LOWER(CONCAT('%', %s, '%'))
+               OR LOWER(sku) LIKE LOWER(CONCAT('%', %s, '%'))
+            LIMIT 1
+        """
+        # Pasamos 'q' para cada una de las marcas de posición (%s)
+        cursor.execute(sql, (q, q, q, q, q))
+        row = cursor.fetchone()
+        
+        cursor.close(); conn.close()
+        return row
             except Exception:
                 # ignora errores en cada intento y sigue con el siguiente
                 continue
