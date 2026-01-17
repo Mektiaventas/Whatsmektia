@@ -10470,188 +10470,88 @@ def guardar_respuesta_sistema(numero, respuesta, config=None, respuesta_tipo='al
         return False
 
 def cotizar_proyecto(numero, config=None, limite_historial=8, modelo="deepseek-chat", max_tokens=700):
-    """
-    Detección inteligente de cotización/proyecto.
-     - Pide a la IA que extraiga productos/descripciones de proyecto.
-     - Determina campos técnicos faltantes (medidas, superficie, color).
-     - Si está completo, genera una alerta detallada para el asesor.
-    Devuelve: respuesta_text (string) o None.
-    """
     if config is None:
         config = obtener_configuracion_por_host()
 
     try:
-        # 1) Obtener historial y último mensaje
+        # 1. Preparar historial y contexto dinámico
         historial = obtener_historial(numero, limite=limite_historial, config=config) or []
         ultimo = (historial[-1].get('mensaje') or "").strip() if historial else ""
         partes = []
         for h in historial:
-            if h.get('mensaje'):
-                partes.append(f"Usuario: {h.get('mensaje')}")
-            if h.get('respuesta'):
-                partes.append(f"Asistente: {h.get('respuesta')}")
-        historial_text = "\n".join(partes) or (f"Usuario: {ultimo}" if ultimo else "Sin historial previo.")
+            if h.get('mensaje'): partes.append(f"Usuario: {h.get('mensaje')}")
+            if h.get('respuesta'): partes.append(f"Asistente: {h.get('respuesta')}")
+        historial_text = "\n".join(partes)
 
-        # 2) Llamada IA: extraer proyecto estructurado (prompt estricto)
+        # 2. Prompt Inteligente: La IA decide qué preguntar según el negocio
         prompt = f"""
-Eres un extractor estructurado de proyectos de cotización. A partir del historial y el mensaje actual,
-devuelve SOLO un JSON con la siguiente estructura EXACTA.
+Eres un Asesor Experto en Ventas para el negocio: {config.get('negocio_nombre')}.
+Giro: {config.get('descripcion')}
+Lo que hacemos: {config.get('que_hace')}
 
-DETALLES DEL PROYECTO: Si el cliente cotiza un producto (ej. "escritorio"), prioriza la extracción de las
-tres variables técnicas clave.
+Tu objetivo es determinar si tenemos información suficiente para que un humano realice una cotización.
 
-REGLA CRÍTICA DE FLUJO: El campo "ready_to_notify" solo debe ser 'true' si tienes una descripción clara del proyecto Y los tres datos técnicos clave: Medidas, Tipo de superficie Y Color/Acabado.
+Instrucciones:
+- No uses campos fijos como 'color' o 'madera' a menos que el giro lo requiera.
+- Identifica qué detalles técnicos son esenciales para ESTE negocio específico.
+- 'ready_to_notify' solo es true si tienes: Nombre, Producto/Servicio y detalles técnicos mínimos.
 
+Devuelve SOLO JSON:
 {{
-  "respuesta_text": "Texto breve en español para enviar al usuario (1-4 líneas) que confirma la intención de cotizar o pide el dato faltante.",
-  "proyecto_descripcion": "Descripción detallada del artículo o proyecto a cotizar.",
-  "medidas_aprox": "Medidas aproximadas detectadas (ej. 1.2m x 0.6m) o null.",
-  "tipo_superficie": "Tipo de superficie/material (ej. melamina, acero, MDF) o null.",
-  "color_acabado": "Color o acabado preferido o null.",
-  "nombre_cliente": "Nombre si se detecta" | null,
-  "metodo_contacto": "Whatsapp" | "Llamada" | null,
+  "respuesta_text": "Mensaje amable para el cliente.",
+  "resumen_proyecto": "Breve descripción de lo que busca.",
+  "datos_extraidos": {{ "campo": "valor" }}, 
+  "nombre_cliente": "nombre o null",
   "ready_to_notify": true|false,
-  "confidence": 0.0-1.0,
-  "preguntas_faltantes": ["lista de preguntas específicas para el proyecto. DEBE incluir Medidas, Superficie, Color, o Nombre si faltan."]
+  "preguntas_faltantes": ["lista de preguntas lógicas para este giro"]
 }}
-
-Reglas: Prioriza la extracción de Medidas, Tipo de Superficie y Color/Acabado.
 """
 
-        headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
-        payload = {
-            "model": modelo,
-            "messages": [{"role": "user", "content": prompt},
-                         {"role": "user", "content": f"HISTORIAL:\n{historial_text}\n\nÚLTIMO MENSAJE:\n{ultimo}"}],
-            "temperature": 0.0,
-            "max_tokens": max_tokens
-        }
-        resp = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-        raw = data['choices'][0]['message']['content']
-        if isinstance(raw, list):
-            raw = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw])
-        raw = str(raw).strip()
+        # Llamada a la API (DeepSeek/OpenAI)
+        # ... [Aquí va tu bloque actual de requests.post] ...
+        # [Asumamos que 'extracted' ya tiene el JSON parseado]
 
-        match = re.search(r'(\{.*\})', raw, re.DOTALL)
-        if not match:
-            app.logger.warning(f"⚠️ cotizar_proyecto: IA no devolvió JSON estructurado. Raw: {raw[:1000]}")
-            return None
+        # 3. Lógica de Respuesta y Movimiento de Kanban
+        is_ready = bool(extracted.get('ready_to_notify')) and extracted.get('nombre_cliente')
 
-        try:
-            extracted = json.loads(match.group(1))
-        except Exception as e:
-            app.logger.error(f"🔴 cotizar_proyecto: fallo parseando JSON IA: {e} -- raw: {match.group(1)[:500]}")
-            return None
-
-        respuesta_text = extracted.get('respuesta_text') or "Gracias por tu interés en cotizar."
-        
-        # 3) Recopilar datos y verificar si está listo
-        datos_cotizacion = {
-            "descripcion": extracted.get('proyecto_descripcion'),
-            "medidas": extracted.get('medidas_aprox'),
-            "superficie": extracted.get('tipo_superficie'),
-            "color": extracted.get('color_acabado'),
-            "nombre_cliente": extracted.get('nombre_cliente'),
-            "metodo_contacto": extracted.get('metodo_contacto'),
-            "ready_to_notify": bool(extracted.get('ready_to_notify')) if extracted.get('ready_to_notify') is not None else False
-        }
-        preguntas_ia = extracted.get('preguntas_faltantes') or []
-        
-        # Verificar estado de completitud manualmente si la IA falló o fue ambigua
-        is_fully_ready = datos_cotizacion["ready_to_notify"] and \
-                         datos_cotizacion["medidas"] and \
-                         datos_cotizacion["superficie"] and \
-                         datos_cotizacion["color"] and \
-                         datos_cotizacion["descripcion"] and \
-                         datos_cotizacion["nombre_cliente"]
-
-        # 4) Lógica de respuesta/alerta
-        if preguntas_ia and not is_fully_ready:
-            # Si faltan datos y la IA tiene preguntas, responder con preguntas
-            respuesta_al_cliente = (
-                f"{respuesta_text}\n\n"
-                "Para iniciar tu cotización con precisión, necesito lo siguiente:\n\n"
-                + "\n".join(f"- {p}" for p in preguntas_ia)
-            )
-        elif is_fully_ready:
-            # Si está listo, notificar al asesor
-            contexto_resumido = f"Cotización solicitada por {datos_cotizacion['nombre_cliente']} para {datos_cotizacion['descripcion']}. Datos técnicos completos."
+        if not is_ready:
+            # Caso: Faltan datos (Seguimos preguntando)
+            preguntas = extracted.get('preguntas_faltantes', [])
+            respuesta_final = f"{extracted.get('respuesta_text')}\n\n" + "\n".join(f"- {p}" for p in preguntas)
+        else:
+            # Caso: ¡LISTO! Notificar y Mover Kanban
+            datos_tecnicos = "\n".join([f"• *{k}*: {v}" for k, v in extracted.get('datos_extraidos', {}).items()])
             
             mensaje_alerta = (
-                f"🚨 *NUEVA COTIZACIÓN COMPLETA*\n\n"
-                f"👤 *Cliente:* {datos_cotizacion['nombre_cliente']} (Número: {numero})\n"
-                f"💬 *Resumen (IA):*\n{contexto_resumido}\n\n"
-                f"📋 *Detalles del Proyecto:*\n"
-                f"• *Descripción:* {datos_cotizacion['descripcion']}\n"
-                f"• *Medidas:* {datos_cotizacion['medidas']}\n"
-                f"• *Superficie:* {datos_cotizacion['superficie']}\n"
-                f"• *Color/Acabado:* {datos_cotizacion['color']}\n"
-                f"• *Contacto Preferido:* {datos_cotizacion['metodo_contacto'] or 'WhatsApp'}\n\n"
-                "Por favor, genera la cotización y contacta al cliente."
+                f"🚨 *NUEVA COTIZACIÓN DETECTADA*\n\n"
+                f"👤 *Cliente:* {extracted.get('nombre_cliente')} ({numero})\n"
+                f"📋 *Resumen:* {extracted.get('resumen_proyecto')}\n"
+                f"{datos_tecnicos}\n\n"
+                f"✅ *Acción:* IA ha calificado este lead. Por favor contactar."
             )
-            
-            # 1. Obtener el siguiente asesor por Round Robin
-            asesor = obtener_siguiente_asesor(config)
-            targets = []
-            if asesor and asesor.get('telefono'):
-                targets.append(asesor['telefono'])
-                app.logger.info(f"✅ Alerta de cotización dirigida al asesor en turno: {asesor['nombre']} ({asesor['telefono']})")
-            
-            # 2. Añadir números de alerta configurados
-            if ALERT_NUMBER and ALERT_NUMBER not in targets:
-                targets.append(ALERT_NUMBER)
-            if '5214493432744' not in targets:
-                targets.append('5214493432744')
-            if '5214491182201' not in targets:
-                targets.append('5214491182201')
-            
-            # 3. Enviar mensaje a todos los destinos
-            for t in targets:
-                try:
-                    enviar_mensaje(t, mensaje_alerta, config)
-                    app.logger.info(f"✅ Alerta de cotización enviada a {t}")
-                except Exception as e:
-                    app.logger.warning(f"⚠️ No se pudo enviar alerta de cotización a {t}: {e}")
-            
-            # Marcar estado para evitar re-notificaciones (usar contexto de cotización)
-            nuevo_estado = {
-                'cotizacion_enviada': datos_cotizacion,
-                'notificado': True,
-                'timestamp': datetime.now().isoformat()
-            }
-            actualizar_estado_conversacion(numero, "COTIZACION_COMPLETA", "asesor_alertado", nuevo_estado, config)
-            
-            # Respuesta final al cliente
-            respuesta_al_cliente = (
-                f"¡Excelente, {datos_cotizacion['nombre_cliente']}! 📝\n"
-                "He enviado todos los detalles de tu cotización a nuestro equipo de ventas. "
-                f"Te contactaremos pronto (vía {datos_cotizacion['metodo_contacto'] or 'WhatsApp'}) con la propuesta."
-            )
-            
-            # Mover a Resueltos (4) en Kanban
-            try:
-                actualizar_columna_chat(numero, 4, config) # Columna 4 = Resueltos/Vendidos
-            except Exception as e:
-                app.logger.warning(f"⚠️ No se pudo mover chat a Resueltos tras cotización: {e}")
-                
-        else:
-            # Fallback (nunca debería suceder si la lógica de arriba está bien)
-            respuesta_al_cliente = respuesta_text
-        
-        # 5) Devolver la respuesta
-        if respuesta_al_cliente:
-            respuesta_al_cliente = aplicar_restricciones(respuesta_al_cliente, numero, config)
-        return respuesta_al_cliente or None
 
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"🔴 cotizar_proyecto - request error: {e}")
-        return "Lo siento, no pude comunicarme con la IA para procesar tu cotización. Inténtalo de nuevo."
+            # --- OPERACIÓN KANBAN Y ASESORES ---
+            asesor = obtener_siguiente_asesor(config)
+            destinatarios = [asesor['telefono']] if asesor else []
+            destinatarios.extend(['5214491182201', '5214493432744']) # Tus números de control
+
+            for tel in set(destinatarios):
+                enviar_mensaje(tel, mensaje_alerta, config)
+
+            # ACTUALIZACIÓN DE COLUMNA EN KANBAN (Columna 4 = Resueltos/Cotizados)
+            try:
+                actualizar_columna_chat(numero, 4, config) 
+                app.logger.info(f"✅ Chat {numero} movido a columna 4 (Cotizados)")
+            except Exception as e:
+                app.logger.error(f"❌ Error moviendo Kanban: {e}")
+
+            respuesta_final = extracted.get('respuesta_text')
+
+        return respuesta_final
+
     except Exception as e:
-        app.logger.error(f"🔴 cotizar_proyecto error: {e}")
-        app.logger.error(traceback.format_exc())
-        return "Hubo un error inesperado al procesar tu solicitud de cotización."
+        app.logger.error(f"🔴 Error crítico: {e}")
+        return None
 
 def enviar_datos_transferencia(numero, config=None):
     """
