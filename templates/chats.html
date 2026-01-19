@@ -1,4 +1,4 @@
- {% extends "base.html" %}
+{% extends "base.html" %}
 {% block title %}Conversaciones{% endblock %}
 
 {% block content %}
@@ -250,7 +250,7 @@
                         </div>
                         {% if msg.respuesta %}
                         <div class="audio-transcription">
-                            <strong>Transcripción:</strong> {{ msg.transcripcion_audio | whatsapp_format | safe }}
+                            <strong>Transcripción:</strong> {{ msg.transcripcion_respuesta_audio | whatsapp_format | safe }}
                         </div>  
                         {% endif %}
                     </div>
