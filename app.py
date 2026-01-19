@@ -8631,6 +8631,10 @@ def webhook():
             return 'Invalid entry structure', 400
 
         change = entry['changes'][0]['value']
+        # --- AÑADE ESTO AQUÍ ---
+        if 'statuses' in change:
+            return 'OK', 200
+        # -----------------------
         mensajes = change.get('messages', [])
         if not mensajes:
             app.logger.info("⚠️ Webhook: no messages in payload")
