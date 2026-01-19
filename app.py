@@ -11325,11 +11325,17 @@ def ver_chat(numero):
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
-                   -- Incluir la transcripción si está en el campo 'mensaje' y es un audio
+                   -- CORRECCIÓN: La transcripción de la IZQUIERDA (Usuario) es 'mensaje'
                    CASE 
                        WHEN tipo_mensaje = 'audio' THEN mensaje 
                        ELSE NULL 
                    END AS transcripcion_audio,
+
+                   -- CORRECCIÓN: La transcripción de la DERECHA (IA) es 'respuesta'
+                   CASE 
+                       WHEN respuesta_tipo_mensaje = 'audio' THEN respuesta 
+                       ELSE NULL 
+                   END AS transcripcion_respuesta_audio,
                    
                    -- Nuevas columnas para la respuesta del BOT
                    respuesta_tipo_mensaje,
