@@ -3110,10 +3110,16 @@ def get_chat_messages(telefono):
         cursor.execute("""
             SELECT id, numero, mensaje, respuesta, timestamp, imagen_url, es_imagen,
                    tipo_mensaje, contenido_extra,
+                   -- Transcripción Usuario
                    CASE 
                        WHEN tipo_mensaje = 'audio' THEN mensaje 
                        ELSE NULL 
                    END AS transcripcion_audio,
+                   -- Transcripción IA (La que te salía mal)
+                   CASE 
+                       WHEN respuesta_tipo_mensaje = 'audio' THEN respuesta 
+                       ELSE NULL 
+                   END AS transcripcion_respuesta_audio,
                    respuesta_tipo_mensaje,
                    respuesta_contenido_extra
             FROM conversaciones 
