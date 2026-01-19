@@ -9751,35 +9751,44 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     """
-    Flujo unificado para procesar un mensaje entrante.
+    Flujo unificado optimizado: Vía Rápida -> Kanban -> IA
     """ 
+    # 1. Verificación de IA Activa
     ia_activa = IA_ESTADOS.get(numero, {}).get('activa', True)
     if not ia_activa:
-        app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento IA.")
-        return False # <-- ESTE RETURN DEBE SER TRUE
-    # --- VÍA RÁPIDA DE CONTACTO (POSICIÓN CORREGIDA) ---
+        app.logger.info(f"ℹ️ IA desactivada para {numero}, omitiendo procesamiento.")
+        return True # Retornamos True para que el webhook no reintente
+
+    # 2. --- VÍA RÁPIDA DE CONTACTO (INTERCEPCIÓN TEMPRANA) ---
+    # Normalizamos el texto aquí para usarlo en todo el proceso
     texto_norm = (texto or "").strip().lower()
-    # Buscamos si alguna de estas palabras clave está contenida en el mensaje
-    keywords_contacto = ['donde estan', 'donde se encuentran', 'ubicacion', 'ubicación', 'direccion', 'dirección', 'donde estan ubicados']
+    
+    # Si el texto está vacío (a veces pasa en webhooks), intentamos sacarlo del objeto msg
+    if not texto_norm and msg and 'text' in msg:
+        texto_norm = msg['text'].get('body', "").strip().lower()
+
+    keywords_contacto = ['donde estan', 'donde se encuentran', 'ubicacion', 'ubicación', 'direccion', 'dirección', 'donde estan ubicados', 'donde se ubican']
     
     if not es_imagen and not es_audio and any(kw in texto_norm for kw in keywords_contacto):
-        app.logger.info(f"🚀 Vía rápida detectada: {texto_norm}")
+        app.logger.info(f"🚀 [VIA RAPIDA] Solicitud de contacto detectada: {texto_norm}")
         
         cfg_full = load_config(config) 
         negocio_data = cfg_full.get('negocio', {})
         respuesta_contacto = negocio_contact_block(negocio_data)
         
-        # Usamos la función global
+        # Respuesta inmediata
         enviar_mensaje(numero, respuesta_contacto, config)
         registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
-        return True
-        #---------------------------------------------
+        
+        return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
+
+    # 3. --- FLUJO NORMAL (KANBAN E IA) ---
     try:
-        # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
+        # Lógica de Kanban
         try:
             mover_chat_si_no_hay_respuesta_ia(numero, config)
         except Exception as e:
-            app.logger.error(f"🔴 Fallo al mover chat si no hay respuesta IA para {numero}: {e}")
+            app.logger.error(f"🔴 Fallo al mover chat (no respuesta): {e}")
             
         if config is None:
             config = obtener_configuracion_por_host()
@@ -9787,25 +9796,15 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         try:
             mover_chat_si_es_primera_respuesta_ia(numero, config)
         except Exception as e:
-            app.logger.error(f"🔴 Fallo al mover chat por primera respuesta IA: {e}")
-            
-        cfg_full = load_config(config) 
-        tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
+            app.logger.error(f"🔴 Fallo al mover chat (primera respuesta): {e}")
 
-        texto_norm = (texto or "").strip().lower()
-        # --- AÑADE ESTO AQUÍ: Vía rápida de contacto ---
-        keywords_contacto = ['donde estan', 'ubicacion', 'ubicación', 'donde se encuentran', 'direccion', 'dirección']
-        if not es_imagen and not es_audio and any(kw in texto_norm for kw in keywords_contacto):
-            app.logger.info(f"🚀 Vía rápida: Solicitud de contacto detectada para {numero}")
-            
-            # Extraer datos y generar el bloque
-            negocio_data = cfg_full.get('negocio', {})
-            respuesta_contacto = negocio_contact_block(negocio_data)
-            
-            # Enviar y registrar (WA/FB)
-            enviar_mensaje(numero, respuesta_contacto, config)
-            registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
-            return True 
+        # Cargar configuración completa para el resto del proceso
+        cfg_full = load_config(config) 
+        
+        # --- A partir de aquí sigue tu lógica de Análisis de Imagen o DeepSeek ---
+        # (El código que ya tenías para gpt-4o o productos)
+        
+        # ... resto del código ..
         # -----------------------------------------------
         # --- INICIO: ANÁLISIS DE IMAGEN CON OPENAI (L7214) ---
         if es_imagen and imagen_base64:
