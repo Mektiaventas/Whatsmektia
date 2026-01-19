@@ -9750,6 +9750,9 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                imagen_base64=None, public_url=None, transcripcion=None,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
+    # AGREGA ESTA LÍNEA AQUÍ MISMO PARA SABER QUE ESTAMOS EN EL ARCHIVO CORRECTO
+    print(f"DEBUG_TOTAL - Recibido: {texto} de {numero}") 
+    app.logger.info(f"DEBUG_TOTAL - Recibido: {texto}")
     """
     Flujo unificado optimizado: Vía Rápida -> Kanban -> IA
     """ 
