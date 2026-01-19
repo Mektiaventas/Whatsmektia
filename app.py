@@ -9775,7 +9775,20 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         tono_configurado = cfg_full.get('personalizacion', {}).get('tono')
 
         texto_norm = (texto or "").strip().lower()
-
+        # --- AÑADE ESTO AQUÍ: Vía rápida de contacto ---
+        keywords_contacto = ['donde estan', 'ubicacion', 'ubicación', 'donde se encuentran', 'direccion', 'dirección']
+        if not es_imagen and not es_audio and any(kw in texto_norm for kw in keywords_contacto):
+            app.logger.info(f"🚀 Vía rápida: Solicitud de contacto detectada para {numero}")
+            
+            # Extraer datos y generar el bloque
+            negocio_data = cfg_full.get('negocio', {})
+            respuesta_contacto = negocio_contact_block(negocio_data)
+            
+            # Enviar y registrar (WA/FB)
+            enviar_mensaje(numero, respuesta_contacto, config)
+            registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
+            return True 
+        # -----------------------------------------------
         # --- INICIO: ANÁLISIS DE IMAGEN CON OPENAI (L7214) ---
         if es_imagen and imagen_base64:
             app.logger.info(f"🖼️ Detectada imagen, llamando a OpenAI (gpt-4o) para análisis...")
