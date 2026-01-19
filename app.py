@@ -9770,9 +9770,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     if not texto_norm and msg and 'text' in msg:
         texto_norm = msg['text'].get('body', "").strip().lower()
 
-    keywords_contacto = ['donde estan', 'donde se encuentran', 'ubicacion', 'ubicación', 'direccion', 'dirección', 'donde estan ubicados', 'donde se ubican']
+    # Usamos Regex para detectar la raíz de las palabras (ignora comas, signos y variaciones)
+    patron_contacto = r"(ubic|direcc|donde\s*(estan|se\s*encuentran|se\s*ubican|es))"
     
-    if not es_imagen and not es_audio and any(kw in texto_norm for kw in keywords_contacto):
+    if not es_imagen and not es_audio and re.search(patron_contacto, texto_norm):
         app.logger.info(f"🚀 [VIA RAPIDA] Solicitud de contacto detectada: {texto_norm}")
         
         cfg_full = load_config(config) 
