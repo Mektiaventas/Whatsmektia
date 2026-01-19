@@ -45,6 +45,7 @@ from urllib.parse import urlparse
 from os.path import basename, join 
 import os # Asegurar que 'os' también esté importado/disponible
 from difflib import SequenceMatcher
+from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
@@ -9758,19 +9759,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         return False # <-- ESTE RETURN DEBE SER TRUE
     # --- VÍA RÁPIDA DE CONTACTO (POSICIÓN CORREGIDA) ---
     texto_norm = (texto or "").strip().lower()
-    keywords_contacto = ['donde estan', 'ubicacion', 'ubicación', 'donde se encuentran', 'direccion', 'dirección']
+    # Buscamos si alguna de estas palabras clave está contenida en el mensaje
+    keywords_contacto = ['donde estan', 'donde se encuentran', 'ubicacion', 'ubicación', 'direccion', 'dirección', 'donde estan ubicados']
     
     if not es_imagen and not es_audio and any(kw in texto_norm for kw in keywords_contacto):
-        app.logger.info(f"🚀 Vía rápida: Solicitud de contacto detectada para {numero}")
+        app.logger.info(f"🚀 Vía rápida detectada: {texto_norm}")
+        
         cfg_full = load_config(config) 
         negocio_data = cfg_full.get('negocio', {})
         respuesta_contacto = negocio_contact_block(negocio_data)
         
-        from whatsapp import enviar_mensaje # Asegurar import
+        # Usamos la función global
         enviar_mensaje(numero, respuesta_contacto, config)
         registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
-        return True 
-    # --------------------------------------------------
+        return True
+        #---------------------------------------------
     try:
         # --- Lógica de inicialización y Kanban (SIN CAMBIOS) ---
         try:
