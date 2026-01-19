@@ -3057,52 +3057,29 @@ def autenticar_google_calendar(config=None):
 
 def negocio_contact_block(negocio):
     """
-    Formatea los datos de contacto del negocio desde la configuración.
-    Si algún campo no está configurado muestra 'No disponible' (evita inventos).
+    Formatea los datos de contacto del negocio de forma directa y rápida.
+    Elimina llamadas a la API para evitar rodeos y lentitud.
     """
     if not negocio or not isinstance(negocio, dict):
-        return "DATOS DEL NEGOCIO:\nDirección: No disponible\nTeléfono: No disponible\nCorreo: No disponible\n\nNota: Los datos no están configurados en el sistema."
+        return "📍 DATOS DEL NEGOCIO:\nNo disponibles en este momento."
 
-    direccion = (negocio.get('direccion') or '').strip()
-    telefono = (negocio.get('telefono') or '').strip()
-    correo = (negocio.get('correo') or '').strip()
+    # Extraer y limpiar datos
+    direccion = (negocio.get('direccion') or 'No disponible').strip()
+    telefono = (negocio.get('telefono') or 'No disponible').strip()
+    correo = (negocio.get('correo') or 'No disponible').strip()
 
-    # Normalizar teléfono para mostrar (no modificar DB)
-    telefono_display = telefono or 'No disponible'
-    correo_display = correo or 'No disponible'
-    direccion_display = direccion or 'No disponible'
-    prompt_comentario = f"""
-        Te acaban de hacer una solicitud de datos, 
-        no me des ningun dato, solo has un comentario agradable expresando
-        que estas a su servicio, algo parecido a decir claro que si.
-        """
-        
-    headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
-        "Content-Type": "application/json"
-    }
-        
-    payload = {
-        "model": "deepseek-chat",
-        "messages": [{"role": "user", "content": prompt_comentario}],
-        "temperature": 0.3,
-        "max_tokens": 500
-    }
-    response = requests.post(DEEPSEEK_API_URL, headers=headers, json=payload, timeout=30)
-    response.raise_for_status()
-        
-    data = response.json()
-    respuestita = data['choices'][0]['message']['content'].strip()
+    # Construir el bloque de texto directamente
+    # Usamos un saludo predefinido para ahorrar tiempo y tokens
     block = (
-        f"{respuestita}\n\n"
-        "📍 DATOS DEL NEGOCIO:\n\n"
-        f"• Dirección: {direccion_display}\n"
-        f"• Teléfono: {telefono_display}\n"
-        f"• Correo: {correo_display}\n\n"
-        "Visitanos pronto!"
+        "¡Claro que sí! Con gusto te comparto nuestros datos de contacto:\n\n"
+        "📍 **DATOS DEL NEGOCIO:**\n"
+        f"• Dirección: {direccion}\n"
+        f"• Teléfono: {telefono}\n"
+        f"• Correo: {correo}\n\n"
+        "¡Estamos a tus órdenes para cualquier duda!"
     )
     return block
-
+    
 @app.route('/chat/<telefono>/messages')
 @login_required
 def get_chat_messages(telefono):
