@@ -5837,7 +5837,7 @@ def obtener_productos_por_categoria(categoria, config=None, limite=200):
         cursor = conn.cursor(dictionary=True)
         
         query = """
-            SELECT sku, categoria, subcategoria, servicio, modelo,
+            SELECT sku, categoria, subcategoria, descripcion, modelo,
                    descripcion, precio_menudeo, precio_mayoreo, imagen
             FROM precios 
             WHERE categoria = %s
