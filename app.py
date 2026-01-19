@@ -10341,6 +10341,9 @@ Claves del JSON:
             if should_respond_with_voice and respuesta_text:
                 # AGREGAR ESTO:
                 print(f"🖨️ PRINT ======== SECCIÓN AUDIO ========")
+                # --- ESTA ES LA LÍNEA QUE FALTA ---
+                tono_configurado = config.get('tono_voz', 'nova') 
+                # ----------------------------------
                 print(f"🖨️ PRINT - should_respond_with_voice: {should_respond_with_voice}")
                 print(f"🖨️ PRINT - respuesta_text existe: {bool(respuesta_text)}")
                 print(f"🖨️ PRINT - Llamando a texto_a_voz...")
