@@ -9951,10 +9951,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
                 
         else:
-            # Conversaciones generales: carga mínima
-            precios_completos = obtener_todos_los_precios(config) or []
-            precios = precios_completos[:80]
-            app.logger.info(f"📦 Carga general: {len(precios)} productos")
+            # Conversaciones generales: no cargamos productos para ahorrar recursos
+            precios = [] 
+            app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
 
         texto_catalogo = build_texto_catalogo(precios, limit=40)
         
