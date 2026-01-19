@@ -5842,7 +5842,7 @@ def obtener_productos_por_categoria(categoria, config=None, limite=200):
             FROM precios 
             WHERE categoria = %s
             AND (status_ws IS NULL OR status_ws = 'activo')
-            ORDER BY servicio
+            ORDER BY descripcion
             LIMIT %s
         """
         
@@ -10036,7 +10036,7 @@ que el servidor debe ejecutar. Dispones de:
 - Tu nombre es "{ia_nombre}" y el negocio se llama "{negocio_nombre}".
 - Descripción del negocio: {negocio_descripcion_short}
 - Cual es tu rol?: {negocio_que_hace_short}
-- Catálogo (estructura JSON con sku, servicio, precios): se incluye en el mensaje del usuario.
+- Catálogo (estructura JSON con sku, descripcion, precios): se incluye en el mensaje del usuario.
 - Estos son temas que si llegan a aparecer en el mensaje, debes de pasar a un asesor {contexto_adicional}
 - Datos de transferencia (estructura JSON): se incluye en el mensaje del usuario.
 
