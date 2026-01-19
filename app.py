@@ -6163,12 +6163,6 @@ def obtener_producto_por_sku_o_nombre(query, config=None):
         
         cursor.close(); conn.close()
         return row
-            except Exception:
-                # ignora errores en cada intento y sigue con el siguiente
-                continue
-
-        cursor.close(); conn.close()
-        return None
     except Exception as e:
         app.logger.error(f"🔴 obtener_producto_por_sku_o_nombre error: {e}")
         return None
