@@ -6272,13 +6272,14 @@ def obtener_precio(servicio_nombre: str, config):
     cursor.execute("""
         SELECT precio_mayoreo, precio_menudeo
         FROM precios
-        WHERE LOWER(servicio)=LOWER(%s)
+        WHERE LOWER(descripcion)=LOWER(%s)
         LIMIT 1;
     """, (servicio_nombre,))
     res = cursor.fetchone()
     cursor.close()
     conn.close()
     if res:
+        # res[0] es precio_mayoreo, res[1] es precio_menudeo
         return Decimal(res[0]), res[1]
     return None
 
