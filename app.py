@@ -9957,8 +9957,20 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
-            # BÚSQUEDA INTELIGENTE: usar la función mejorada
+            # 1. BUSQUEDA DE IMAGEN AUTOMÁTICA (Vía Rápida)
+            # Si el usuario menciona un SKU o modelo, buscamos si tiene imagen para enviarla de inmediato
             precios = obtener_productos_por_palabra_clave(texto, config, limite=200, contexto_ia=producto_aplica)
+            
+            # Si encontramos exactamente un producto o pocos, y tienen imagen, la enviamos YA.
+            for p in precios[:2]: # Revisamos los primeros 2 resultados
+                img_url = p.get('imagen')
+                sku_p = p.get('sku', '')
+                # Si el SKU del producto está contenido en el mensaje del usuario
+                if img_url and sku_p.lower() in texto.lower():
+                    app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen detectada para SKU: {sku_p}")
+                    enviar_imagen(numero, img_url, config)
+                    # No hacemos return aquí para que la IA también pueda dar la explicación de precio/detalles
+            
             app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
             # Si encuentra pocos, intentar con categoría detectada
