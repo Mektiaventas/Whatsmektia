@@ -6011,7 +6011,7 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
                 LOWER(categoria) LIKE %s OR 
                 LOWER(subcategoria) LIKE %s OR 
                 LOWER(descripcion) LIKE %s OR
-                LOWER(sku) LIKE %s
+                %s LIKE CONCAT('%', LOWER(sku), '%') -- Buscamos si el SKU está en la frase
             )
             AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ')
             ORDER BY relevancia DESC, descripcion ASC
