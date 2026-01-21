@@ -430,123 +430,70 @@ def enviar_mensaje(numero, texto, config=None):
         return False 
 
 def enviar_imagen(numero, image_url, config=None):
-    """Enviar imagen: si se pasa nombre de archivo simple, construir URL pública usando config['dominio']
-       y enviar por link. NO buscar archivos en disco ni subirlos a Graph en este versión.
     """
-    if config is None:
-        try:
-            from app import obtener_configuracion_por_host
-            config = obtener_configuracion_por_host()
-        except Exception:
-            config = None
-
+    Envía una imagen a WhatsApp construyendo la URL pública basada en el tenant,
+    siguiendo la misma lógica multitenant que el audio.
+    """
     try:
+        # 1. Configuración de Token y Tenant
+        if config is None:
+            try:
+                from app import obtener_configuracion_por_host
+                config = obtener_configuracion_por_host()
+            except Exception:
+                config = {}
+
         cfg = config or {}
-        phone_id = cfg.get('phone_number_id') if isinstance(cfg, dict) else None
-        token = cfg.get('whatsapp_token') if isinstance(cfg, dict) else None
+        phone_id = cfg.get('phone_number_id')
+        token = cfg.get('whatsapp_token')
+        
+        # Detectar el slug del cliente (ej: ofitodo, unilova)
+        dominio = cfg.get('dominio', 'app.mektia.com')
+        tenant_slug = dominio.split('.')[0] if dominio else 'default'
 
         if not phone_id or not token:
-            logger.error("🔴 enviar_imagen: falta phone_number_id o whatsapp_token (config/ENV)")
+            logger.error(f"🔴 enviar_imagen ({tenant_slug}): falta phone_id o token")
             return False
 
-        if not isinstance(image_url, str) or not image_url.strip():
-            logger.error("🔴 enviar_imagen: image_url inválida")
-            return False
+        # 2. CONSTRUIR URL PÚBLICA (Siguiendo la estructura de Nginx que acabamos de validar)
+        # image_url suele ser solo el nombre del archivo: "imagen.png"
+        filename = os.path.basename(image_url.strip())
+        
+        # Aseguramos que el dominio tenga https
+        base_url = dominio if dominio.startswith('http') else f"https://{dominio}"
+        
+        # La ruta que confirmamos con CURL: /uploads/productos/{tenant}/{archivo}
+        public_url = f"{base_url.rstrip('/')}/uploads/productos/{tenant_slug}/{filename}"
 
-        img = image_url.strip()
+        # 3. Enviar a Meta via Graph API
+        url_api = f"https://graph.facebook.com/v21.0/{phone_id}/messages"
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': numero,
+            'type': 'image',
+            'image': {'link': public_url}
+        }
 
-        # If already absolute URL or data: use as-is
-        if img.startswith('http://') or img.startswith('https://') or img.startswith('data:'):
-            public_url = img
-            logger.info(f"ℹ️ enviar_imagen: recibida URL absoluta/data, enviando tal cual: {public_url}")
+        logger.info(f"📤 Enviando imagen ({tenant_slug}): {public_url} a {numero}")
+        
+        r = requests.post(url_api, headers=headers, json=payload, timeout=15)
+        
+        if r.status_code in (200, 201, 202):
+            logger.info(f"✅ Imagen enviada correctamente a {numero}")
+            return True
         else:
-            # Treat the value as a filename (basename) and build candidate public URLs using tenant/domain
-            dominio = None
-            tenant_slug = None
-            try:
-                dominio = cfg.get('dominio') or os.getenv('MI_DOMINIO')
-            except Exception:
-                dominio = os.getenv('MI_DOMINIO', None)
-            if not dominio:
-                # last-resort: try request.url_root if running in request context
-                try:
-                    from flask import request
-                    dominio = request.url_root.rstrip('/')
-                except Exception:
-                    dominio = None
-
-            # derive tenant slug from domain if possible
-            if dominio:
-                if dominio.startswith('http'):
-                    host_part = dominio.replace('https://', '').replace('http://', '').split('/')[0]
-                else:
-                    host_part = dominio.split('/')[0]
-                tenant_slug = host_part.split('.')[0] if host_part else None
-
-            # Build ordered candidate URLs (tenant-aware first)
-            candidates = []
-            filename_only = os.path.basename(img)
-            if dominio:
-                base = dominio if dominio.startswith('http') else f"https://{dominio}"
-                if tenant_slug:
-                    candidates.append(f"{base.rstrip('/')}/uploads/productos/{tenant_slug}/{filename_only}")
-                candidates.append(f"{base.rstrip('/')}/uploads/productos/{filename_only}")
-                candidates.append(f"{base.rstrip('/')}/uploads/{filename_only}")
-                candidates.append(f"{base.rstrip('/')}/static/images/{filename_only}")
-            else:
-                # fallback: relative paths (Graph likely can't fetch these)
-                candidates.append(f"/uploads/productos/{filename_only}")
-                candidates.append(f"/uploads/{filename_only}")
-                candidates.append(f"/static/images/{filename_only}")
-
-            # Try HEAD on candidates and pick first reachable (status < 400)
-            public_url = None
-            for c in candidates:
-                try:
-                    # Only perform HEAD on absolute URLs (start with http)
-                    if c.startswith('http://') or c.startswith('https://'):
-                        head = requests.head(c, timeout=6, allow_redirects=True)
-                        if head.status_code < 400:
-                            public_url = c
-                            logger.info(f"✅ enviar_imagen: candidate reachable (HEAD {head.status_code}): {c}")
-                            break
-                        else:
-                            logger.info(f"⚠️ enviar_imagen: candidate HEAD returned {head.status_code}: {c}")
-                    else:
-                        # not absolute -> skip HEAD but remember as fallback
-                        if public_url is None:
-                            public_url = c
-                except Exception as e:
-                    logger.info(f"⚠️ enviar_imagen: HEAD check failed for {c}: {e}")
-                    # keep trying next candidate
-
-            # If none reachable, use the first candidate (allow Graph to attempt fetch)
-            if not public_url and candidates:
-                public_url = candidates[0]
-                logger.warning(f"⚠️ enviar_imagen: ningún candidate HEAD OK; usando fallback candidate: {public_url}")
-
-        # Send image by link using Graph API
-        try:
-            url = f"https://graph.facebook.com/v23.0/{phone_id}/messages"
-            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
-            payload = {'messaging_product':'whatsapp','to':numero,'type':'image','image':{'link': public_url}}
-            logger.info(f"📤 enviar_imagen (link) -> to={numero} phone_number_id={phone_id} image_link={public_url}")
-            r = requests.post(url, headers=headers, json=payload, timeout=15)
-            status = getattr(r, 'status_code', 'n/a')
-            body_preview = (r.text or '')[:1000]
-            if status in (200, 201, 202):
-                logger.info(f"✅ enviar_imagen OK (status={status}) - resp_preview: {body_preview}")
-                return True
-            logger.error(f"🔴 enviar_imagen FAILED status={status} - resp_preview: {body_preview}")
-            return False
-        except Exception as e:
-            logger.error(f"🔴 Exception sending image link: {e}")
+            logger.error(f"🔴 Error Meta API: {r.status_code} - {r.text}")
             return False
 
     except Exception as e:
-        logger.error(f"Exception enviar_imagen: {e}")
+        logger.error(f"🔴 Excepción en enviar_imagen: {str(e)}")
         return False
-
+        
 def enviar_documento(numero, file_url, filename, config=None):
     """Enviar documento por link con logging diagnóstico y mejor manejo de URLs."""
     if config is None:
