@@ -5941,12 +5941,11 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
             
             # Luego buscar patrones de SKU directamente en el texto
             patrones_sku = [
-                r'[A-Z]{2}-[A-Z]{2}\d{3}',      # MM-VJ127
-                r'[A-Z]{2}-\d{4,6}',            # AB-12345
-                r'[A-Z]{3}-\d{3,5}',            # ABC-1234
-                r'\b[A-Z0-9]{3,6}-[A-Z0-9]{3,6}\b', # Códigos con guión
-                r'\b[A-Z]{2}\d{3,6}\b',         # AB12345
-                r'\b\d{3,6}[A-Z]{2,3}\b',       # 123ABC
+                r'[A-Z]{1,4}-[A-Z]{1,4}\d{1,6}',  # Detecta MM-D1007, OF-H123, etc.
+                r'[A-Z]{2,4}-\d{3,6}',            # AB-12345
+                r'\b[A-Z0-9]{2,6}-[A-Z0-9]{2,6}\b', # Códigos genéricos con guion
+                r'\b[A-Z]{2,3}\d{3,6}\b',          # MM1007
+                r'\b\d{3,6}[A-Z]{2,3}\b',          # 123MM
             ]
             
             for patron in patrones_sku:
