@@ -7516,7 +7516,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
     if respuesta_media_url and not respuesta_media_url.startswith('http'):
         subdominio = config.get('dominio')
         # Construimos la URL usando el dominio del tenant actual
-        respuesta_media_url = f"https://{subdominio}/static/productos/{respuesta_media_url}"
+        respuesta_media_url = f"https://{subdominio}/uploads/productos/{respuesta_media_url}"
     # ------------------------------------------
     
     try:
