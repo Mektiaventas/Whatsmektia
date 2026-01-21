@@ -10261,6 +10261,7 @@ Claves del JSON:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
                 msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
                 registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
+                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}'")
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
@@ -10268,6 +10269,7 @@ Claves del JSON:
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
                 sent = enviar_imagen(numero, image_field, config)
+                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}'")
                 if respuesta_text:
                     if numero.startswith('tg_'):
                         telegram_token = config.get('telegram_token')
