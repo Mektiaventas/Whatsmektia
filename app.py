@@ -9978,6 +9978,16 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen detectada para SKU: {sku_p}")
                     enviar_imagen(numero, img_url, config)
                     # No hacemos return aquí para que la IA también pueda dar la explicación de precio/detalles
+                    # --- AÑADE ESTO AQUÍ PARA QUE APAREZCA EN EL DASHBOARD ---
+                    actualizar_respuesta(
+                        numero=numero,
+                        mensaje=texto,
+                        respuesta=f"Imagen enviada automáticamente (SKU: {sku_p})",
+                        config=config,
+                        respuesta_tipo='imagen',           # <--- Indispensable
+                        respuesta_media_url=img_url        # <--- Indispensable
+                    )
+                    # -------------------------------------------------------
             
             app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
