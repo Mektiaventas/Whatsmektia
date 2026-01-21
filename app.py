@@ -1942,17 +1942,26 @@ def guardar_servicios_desde_pdf(servicios, config=None):
         
         for servicio in servicios['servicios']:
             try:
-                # Handle image if present
+                # Handle image if present (Multi-tenant Fix)
                 imagen_nombre = servicio.get('imagen', '')
                 if imagen_nombre:
-                    # Check if image exists
-                    img_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_nombre)
+                    # 1. Obtener la carpeta específica de este cliente
+                    productos_dir, _ = get_productos_dir_for_config(config)
+                    
+                    # 2. Construir la ruta completa dentro de la carpeta del cliente
+                    img_path = os.path.join(productos_dir, imagen_nombre)
+                    
+                    # 3. Verificar si la imagen existe en la carpeta del tenant
                     if os.path.exists(img_path):
-                        app.logger.info(f"✅ Imagen encontrada para {servicio.get('servicio')}: {imagen_nombre}")
+                        app.logger.info(f"✅ Imagen encontrada en carpeta tenant ({config['subdominio']}): {imagen_nombre}")
                     else:
-                        imagen_nombre = ''  # Reset if image doesn't exist
-                        app.logger.warning(f"⚠️ Imagen no encontrada: {img_path}")
-            
+                        # Fallback opcional: buscar en la carpeta raíz por si son imágenes viejas
+                        legacy_path = os.path.join(UPLOAD_FOLDER, 'productos', imagen_nombre)
+                        if os.path.exists(legacy_path):
+                             app.logger.info(f"ℹ️ Imagen encontrada en carpeta legacy: {imagen_nombre}")
+                        else:
+                            imagen_nombre = ''  # Reset si no existe en ningún lado
+                            app.logger.warning(f"⚠️ Imagen no encontrada en ninguna ubicación: {imagen_nombre}")
                 # Preparar campos
                 campos = [
                     servicio.get('sku', '').strip(),
@@ -1981,7 +1990,7 @@ def guardar_servicios_desde_pdf(servicios, config=None):
                 ]
             
                 # Validar precios
-                for i in [8, 9, 10, 11]:  # índices de precios y costo
+                for i in [8, 9, 16, 17]:  # índices de precios y costo
                     try:
                         precio_limpio = re.sub(r'[^\d.]', '', str(campos[i]))
                         campos[i] = f"{float(precio_limpio):.2f}" if precio_limpio else "0.00"
