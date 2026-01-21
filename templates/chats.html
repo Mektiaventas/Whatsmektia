@@ -1562,10 +1562,11 @@ function buildMessageKeyFor(m) {
                 });
 
                 if (hasNewMessages) {
+                    appendImageMessagesToPanel(data.messages); // ← AGREGAR PARA IMÁGENES
                     // Procesar todos los mensajes nuevos
                     appendUserMessagesToPanel(data.messages);
                     // appendAIResponsesToPanel(data.messages);
-                    appendImageMessagesToPanel(data.messages); // ← AGREGAR PARA IMÁGENES
+                    
 
                     // Actualizar timestamp
                     if (maxTs > lastMessageTimestamp) {
