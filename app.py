@@ -10280,12 +10280,21 @@ Claves del JSON:
                         enviar_mensaje(numero, respuesta_text, config) 
                 
                 bot_media_url_to_save = image_field
-                
-                registrar_respuesta_bot(
-                    numero, texto, respuesta_text, config,
-                    incoming_saved=incoming_saved,
-                    respuesta_tipo='imagen',
-                    respuesta_media_url=bot_media_url_to_save
+                # CAMBIO AQUÍ: Usamos la función que realmente impacta la DB con los tipos correctos
+                actualizar_respuesta(
+                    numero=numero, 
+                    mensaje=texto, 
+                    respuesta=respuesta_text, 
+                    config=config,
+                    respuesta_tipo='imagen',           # <--- Para que el JS sepa que es imagen
+                    respuesta_media_url=bot_media_url_to_save # <--- La URL de la silla
+
+            
+                # registrar_respuesta_bot(
+                #    numero, texto, respuesta_text, config,
+                #    incoming_saved=incoming_saved,
+                #    respuesta_tipo='imagen',
+                #    respuesta_media_url=bot_media_url_to_save
                 )
                 return True
             except Exception as e:
