@@ -98,7 +98,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 # ——— Configuración Multi-Tenant ——— #
 # Reemplaza tu bloque NUMEROS_CONFIG (línea 92) con este:
 NUMEROS_CONFIG = {
-    '524495486142': {  # Número de Mektia
+    '524495486824': {  # Número de Mektia Old: 524495486142
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -198,7 +198,7 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'DRASGO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'DRASGO_PAGE_ACCESS_TOKEN'
     },
-    '524495486824': {  # Número de Lacse
+    '1111111111111': {  # Número de Lacse, Old:524495486824
         'phone_number_id': os.getenv("LACSE_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("LACSE_WHATSAPP_TOKEN"),    
         'db_host': os.getenv("LACSE_DB_HOST"),                  
@@ -243,7 +243,7 @@ for tenant_key, config_data in NUMEROS_CONFIG.items():
 
 app.logger.info(f"🗺️ FACEBOOK_PAGE_MAP cargado dinámicamente con {len(FACEBOOK_PAGE_MAP)} páginas.")
 
-DEFAULT_CONFIG = NUMEROS_CONFIG['524495486142']
+DEFAULT_CONFIG = NUMEROS_CONFIG['524495486824']
 WHATSAPP_TOKEN = DEFAULT_CONFIG['whatsapp_token']
 DB_HOST = DEFAULT_CONFIG['db_host']
 DB_USER = DEFAULT_CONFIG['db_user']
@@ -10920,7 +10920,7 @@ def obtener_configuracion_por_host():
     try:
         from flask import has_request_context, request
         if not has_request_context():
-            return NUMEROS_CONFIG['524495486142']  # Default
+            return NUMEROS_CONFIG['524495486824']  # Default
 
         host = request.headers.get('Host', '').lower()
         
@@ -10961,15 +10961,15 @@ def obtener_configuracion_por_host():
         # DETECCIÓN LACSE
         if 'lacse' in host:
             app.logger.info("✅ Configuración detectada: Lacse")
-            return NUMEROS_CONFIG['524495486824']
+            return NUMEROS_CONFIG['1111111111111']
         
         # DEFAULT MEKTIA
         app.logger.info("✅ Configuración por defecto: Mektia")
-        return NUMEROS_CONFIG['524495486142']
+        return NUMEROS_CONFIG['524495486824']
             
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
-        return NUMEROS_CONFIG['524495486142']
+        return NUMEROS_CONFIG['524495486824']
 
 @app.route('/diagnostico')
 def diagnostico():
