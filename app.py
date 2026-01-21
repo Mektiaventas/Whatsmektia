@@ -7510,6 +7510,14 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
     """Actualiza la respuesta para un mensaje ya guardado"""
     if config is None:
         config = obtener_configuracion_por_host()
+        
+    # --- NUEVA LÓGICA DINÁMICA MULTITENANT ---
+    # Si recibimos un nombre de archivo (ej: imagen.png) en lugar de una URL completa (http...)
+    if respuesta_media_url and not respuesta_media_url.startswith('http'):
+        subdominio = config.get('dominio')
+        # Construimos la URL usando el dominio del tenant actual
+        respuesta_media_url = f"https://{subdominio}/static/productos/{respuesta_media_url}"
+    # ------------------------------------------
     
     try:
         # Asegurar que el contacto existe
