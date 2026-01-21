@@ -5998,11 +5998,12 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
             SELECT 
                 *,
                 CASE 
-                    WHEN LOWER(categoria) = %s THEN 100          -- Coincidencia exacta en categoría
-                    WHEN LOWER(categoria) LIKE %s THEN 80        -- Categoría parcial
-                    WHEN LOWER(subcategoria) LIKE %s THEN 60     -- Subcategoría
-                    WHEN LOWER(descripcion) LIKE %s THEN 40      -- Descripción detallada
-                    WHEN LOWER(sku) LIKE %s THEN 20              -- SKU (al final por ser técnico)
+                    WHEN LOWER(sku) = %s THEN 110
+                    WHEN LOWER(categoria) = %s THEN 100
+                    WHEN LOWER(categoria) LIKE %s THEN 80
+                    WHEN LOWER(subcategoria) LIKE %s THEN 60
+                    WHEN LOWER(descripcion) LIKE %s THEN 40
+                    WHEN LOWER(sku) LIKE %s THEN 30
                     ELSE 0
                 END AS relevancia
             FROM precios 
@@ -6010,21 +6011,29 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
                 LOWER(categoria) LIKE %s OR 
                 LOWER(subcategoria) LIKE %s OR 
                 LOWER(descripcion) LIKE %s OR
-                %s LIKE CONCAT('%', LOWER(sku), '%') -- Buscamos si el SKU está en la frase
+                LOWER(sku) LIKE %s OR
+                %s LIKE CONCAT('%%', LOWER(sku), '%%')
             )
             AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ')
             ORDER BY relevancia DESC, descripcion ASC
             LIMIT %s
         """
         
-        termino_exacto = texto_lower
-        termino_like = f"%{texto_lower}%"
+        texto_para_like = f"%{texto_lower}%"
         
-        # Parámetros: 5 para el CASE y 4 para el WHERE + limite
         params = [
-            termino_exacto, termino_like, termino_like, termino_like, termino_like, # CASE
-            termino_like, termino_like, termino_like, termino_like,                # WHERE
-            limite
+            texto_lower,      # CASE: sku exacto
+            texto_lower,      # CASE: categoria exacta
+            texto_para_like,  # CASE: categoria like
+            texto_para_like,  # CASE: subcategoria like
+            texto_para_like,  # CASE: descripcion like
+            texto_para_like,  # CASE: sku like
+            texto_para_like,  # WHERE: categoria
+            texto_para_like,  # WHERE: subcategoria
+            texto_para_like,  # WHERE: descripcion
+            texto_para_like,  # WHERE: sku parcial
+            texto_lower,      # WHERE: búsqueda de SKU dentro de frase
+            limite            # LIMIT
         ]
         
         cursor.execute(query_general, params)
@@ -6047,7 +6056,7 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
             cursor = conn.cursor(dictionary=True)
             cursor.execute(
                 "SELECT * FROM precios WHERE descripcion LIKE %s LIMIT %s",
-                (f"%{texto_limpio[:20]}%", min(50, limite))
+                (f"%{texto_limpio}%", f"%{texto_limpio}%", min(50, limite))
             )
             productos = cursor.fetchall()
             cursor.close()
