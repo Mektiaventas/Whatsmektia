@@ -10035,18 +10035,42 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         catalog_list = []
         for p in precios:
             try:
+                # Extraer campos individuales
+                categoria = (p.get('categoria') or '').strip()
+                linea = (p.get('linea') or '').strip()
+                modelo = (p.get('modelo') or '').strip()
+                subcategoria = (p.get('subcategoria') or '').strip()
+                descripcion = (p.get('descripcion') or '').strip()
+                
+                # Construir nombre de servicio descriptivo
+                # Prioridad: categoria + linea + modelo (lo más descriptivo)
+                servicio_descriptivo = f"{categoria} {linea} {modelo}".strip()
+                
+                # Si está vacío, usar fallback progresivo
+                if not servicio_descriptivo:
+                    servicio_descriptivo = modelo or subcategoria or categoria or ''
+                
+                # Limpiar descripción para evitar HTML o caracteres extraños
+                descripcion_limpia = descripcion.replace('https://', '').strip()
+                
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
-                    "servicio": (p.get('subcategoria') or p.get('categoria') or p.get('modelo') or '').strip(),
+                    "categoria": categoria,  # NUEVO - ayuda a la IA a clasificar
+                    "subcategoria": subcategoria,  # NUEVO - información adicional
+                    "linea": linea,  # NUEVO - información adicional
+                    "servicio": servicio_descriptivo,  # MEJORADO - más descriptivo
+                    "modelo": modelo,  # NUEVO - ayuda a identificar
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
                     "mensualidad": str(p.get('mensualidad') or ""),
                     "imagen": str(p.get('imagen') or ""),
-                    "descripcion": str(p.get('descripcion') or "")
+                    "descripcion": descripcion_limpia  # MEJORADO - limpio
                 })
-            except Exception:
+            except Exception as e:
+                app.logger.error(f"Error construyendo catalog_list item: {e}")
                 continue
+
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
