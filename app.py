@@ -10052,7 +10052,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 # Limpiar descripción (remover URLs)
                 descripcion_limpia = descripcion
                 if 'http://' in descripcion_limpia or 'https://' in descripcion_limpia:
-                    import re
+                    
                     descripcion_limpia = re.sub(r'https?://\S+', '', descripcion_limpia).strip()
                 
                 catalog_list.append({
