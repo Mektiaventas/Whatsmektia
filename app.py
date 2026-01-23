@@ -10215,8 +10215,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 if img_url and sku_p and sku_p.lower() in texto.lower():
                      enviar_imagen(numero, img_url, config)
 
-            # Estrategias de llenado si hay pocos resultados
-            if len(precios) < 30:
+             # Estrategias de llenado si hay pocos resultados
+             if len(precios) < 30:
                 cat_det = detectar_categoria_del_mensaje(texto)
                 if cat_det:
                     prods = obtener_productos_por_categoria(cat_det, config, limite=100)
@@ -10224,7 +10224,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     for prod in prods:
                         if prod.get('sku') not in skus: precios.append(prod)
             
-            if len(precios) < 40:
+             if len(precios) < 40:
                 todos = obtener_todos_los_precios(config) or []
                 skus = {p.get('sku') for p in precios}
                 c = 0
