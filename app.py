@@ -10205,8 +10205,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 if img_url and sku_p and sku_p.lower() in texto.lower():
                      app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen por SKU: {sku_p}")
                      enviar_imagen(numero, img_url, config)
-
-            app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
+                app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
             # Si encuentra pocos, intentar con categoría detectada (Backup)
             if len(precios) < 30:
