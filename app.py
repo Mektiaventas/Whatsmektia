@@ -10142,16 +10142,134 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
+            # ========== AGREGAR CONTEXTO DEL HISTORIAL ==========
+            contexto_busqueda = texto
+            
+            # Detectar si el usuario hace referencia a algo mencionado antes
+            palabras_referencia = [
+                'sus', 'esos', 'esas', 'estos', 'estas',
+                'la imagen', 'las imagenes', 'las imágenes', 'imagen',
+                'el producto', 'los productos', 'ese', 'esa',
+                'el modelo', 'los modelos', 'ese escritorio', 'esa silla',
+                'primer', 'primero', 'primera', 'segundo', 'tercero',
+                'ultimo', 'última', 'último'
+            ]
+            
+            # Si el mensaje es corto Y contiene palabras de referencia
+            mensaje_lower = texto.lower()
+            es_referencia = any(palabra in mensaje_lower for palabra in palabras_referencia)
+            
+            if len(texto.split()) <= 8 and es_referencia:
+                app.logger.info(f"🔗 Detectada referencia en mensaje corto: '{texto}'")
+                
+                # Buscar en el historial categorías/productos mencionados
+                categorias_en_historial = []
+                productos_en_historial = []
+                
+                for h in historial[-3:]:  # Últimos 3 mensajes
+                    msg_hist = h.get('mensaje', '').lower()
+                    resp_hist = h.get('respuesta', '').lower()
+                    
+                    # Buscar categorías mencionadas
+                    categorias_conocidas = ['escritorio', 'silla', 'mesa', 'archivero', 'pupitre']
+                    for cat in categorias_conocidas:
+                        if cat in msg_hist or cat in resp_hist:
+                            if cat not in categorias_en_historial:
+                                categorias_en_historial.append(cat)
+                    
+                    # Buscar SKUs mencionados (patrón XX-XXXX)
+                    skus_encontrados = re.findall(r'\b([A-Z]{2,4}-[A-Z0-9]{2,6})\b', msg_hist + ' ' + resp_hist, re.IGNORECASE)
+                    for sku in skus_encontrados:
+                        if sku.upper() not in productos_en_historial:
+                            productos_en_historial.append(sku.upper())
+                
+                # Si encontramos categorías o productos, usar eso para la búsqueda
+                if categorias_en_historial:
+                    contexto_busqueda = f"{categorias_en_historial[0]} {texto}"
+                    app.logger.info(f"🔗 Contexto ampliado con categoría del historial: '{contexto_busqueda}'")
+                elif productos_en_historial:
+                    contexto_busqueda = f"{productos_en_historial[0]} {texto}"
+                    app.logger.info(f"🔗 Contexto ampliado con SKU del historial: '{contexto_busqueda}'")
+                else:
+                    # Incluir las últimas 2 respuestas de la IA en el contexto
+                    respuestas_ia = [h.get('respuesta', '') for h in historial[-2:] if h.get('respuesta')]
+                    if respuestas_ia:
+                        # Extraer palabras clave de la última respuesta (primeras 50 chars)
+                        ultima_respuesta = respuestas_ia[-1][:100]
+                        contexto_busqueda = f"{ultima_respuesta} {texto}"
+                        app.logger.info(f"🔗 Contexto ampliado con respuesta anterior")
+            # =====================================================
+
+            
             # 1. BUSQUEDA DE IMAGEN AUTOMÁTICA (Vía Rápida)
             # Si el usuario menciona un SKU o modelo, buscamos si tiene imagen para enviarla de inmediato
             precios = obtener_productos_por_palabra_clave(texto, config, limite=200, contexto_ia=producto_aplica)
             
-            # Si encontramos exactamente un producto o pocos, y tienen imagen, la enviamos YA.
-            for p in precios[:2]: # Revisamos los primeros 2 resultados
+         
+            # ========== ENVÍO AUTOMÁTICO DE IMÁGENES MEJORADO ==========
+            
+            # Detectar si el usuario pide imágenes/fotos
+            solicita_imagen = any(palabra in texto.lower() for palabra in [
+                'imagen', 'imagenes', 'imágenes', 'foto', 'fotos',
+                'ver', 'muestra', 'muéstrame', 'enseña', 'envía',
+                'comparte', 'compartir', 'manda', 'mandas'
+            ])
+            
+            if solicita_imagen and precios:
+                app.logger.info(f"🖼️ Usuario solicita imágenes, enviando automáticamente...")
+                
+                # Determinar cuántas imágenes enviar
+                cantidad_imagenes = 3  # Por defecto 3
+                
+                # Si menciona "todas", enviar más
+                if 'todas' in texto.lower() or 'todos' in texto.lower():
+                    cantidad_imagenes = min(8, len(precios))
+                # Si menciona "primera", "primero", "uno", enviar solo 1
+                elif any(x in texto.lower() for x in ['primera', 'primero', 'uno', 'una']):
+                    cantidad_imagenes = 1
+                
+                imagenes_enviadas = 0
+                for p in precios[:cantidad_imagenes]:
+                    img_url = p.get('imagen')
+                    sku_p = p.get('sku', '')
+                    modelo = p.get('modelo', '')
+                    
+                    if img_url and img_url.strip():
+                        try:
+                            app.logger.info(f"🚀 Enviando imagen automática: {sku_p} - {modelo}")
+                            enviar_imagen(numero, img_url, config)
+                            
+                            # Registrar en el historial
+                            actualizar_respuesta(
+                                numero=numero,
+                                mensaje=texto,
+                                respuesta=f"Imagen enviada: {modelo} (SKU: {sku_p})",
+                                config=config,
+                                respuesta_tipo='imagen',
+                                respuesta_media_url=img_url
+                            )
+                            
+                            imagenes_enviadas += 1
+                            
+                            # Pequeña pausa entre imágenes para no saturar
+                            if imagenes_enviadas > 1:
+                                import time
+                                time.sleep(0.5)
+                                
+                        except Exception as e:
+                            app.logger.error(f"❌ Error enviando imagen {sku_p}: {e}")
+                
+                if imagenes_enviadas > 0:
+                    app.logger.info(f"✅ Enviadas {imagenes_enviadas} imágenes automáticamente")
+            
+            # FALLBACK: Si menciona SKU específico, enviar su imagen
+            for p in precios[:5]:
                 img_url = p.get('imagen')
                 sku_p = p.get('sku', '')
                 # Si el SKU del producto está contenido en el mensaje del usuario
                 if img_url and sku_p.lower() in texto.lower():
+
+                
                     app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen detectada para SKU: {sku_p}")
                     enviar_imagen(numero, img_url, config)
                     # No hacemos return aquí para que la IA también pueda dar la explicación de precio/detalles
@@ -10329,6 +10447,17 @@ Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 6) Responde SOLO con un JSON válido.
 
 7) Campo 'respuesta_text': Conciso (1-3 líneas máximo).
+8) **CONTEXTO Y REFERENCIAS:**
+   - Si el usuario dice "sus imágenes", "esos", "el primero", etc., se refiere a productos mencionados antes
+   - NO hagas una búsqueda nueva, usa los productos del catálogo actual
+   - Si el historial muestra que hablaban de "escritorios", mantén ese contexto
+   - Cuando envíes imágenes, indica claramente de QUÉ producto es cada imagen
+
+9) **ENVÍO DE IMÁGENES:**
+   - Si el usuario pide "imágenes" o "fotos", el sistema YA las envió automáticamente
+   - Tu respuesta debe ser breve: "Te envié las imágenes de [PRODUCTOS]"
+   - NO digas "te envío" si ya se enviaron, di "te envié" o "ya te las envié"
+   - Menciona qué productos son las imágenes que se enviaron
 
 ESTRUCTURA DEL CATÁLOGO:
 - sku: código único
