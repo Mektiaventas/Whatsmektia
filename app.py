@@ -5048,7 +5048,153 @@ def get_plan_status_for_user(user_email, config=None):
         'mensajes_consumidos': conversaciones_consumidas,
         'mensajes_disponibles': mensajes_disponibles
     }
+def normalizar_texto_busqueda(texto):
+    """
+    Normaliza texto para búsquedas:
+    - Convierte a minúsculas
+    - Elimina acentos
+    - Elimina caracteres especiales excepto espacios, guiones y números
+    """
+    import unicodedata
+    
+    if not texto:
+        return ""
+    
+    # Minúsculas
+    texto = texto.lower()
+    
+    # Eliminar acentos
+    texto = ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
+    )
+    
+    # Limpiar caracteres especiales (mantener letras, números, espacios, guiones)
+    texto = re.sub(r'[^a-z0-9\s\-]', ' ', texto)
+    
+    # Normalizar espacios múltiples
+    texto = ' '.join(texto.split())
+    
+    return texto.strip()
 
+
+def extraer_palabras_clave_inteligente(texto):
+    """
+    Extrae palabras clave relevantes de un mensaje.
+    Elimina palabras de relleno pero mantiene colores, números, medidas, etc.
+    """
+    # Normalizar
+    texto_norm = normalizar_texto_busqueda(texto)
+    
+    # Palabras de relleno que NO son útiles para búsqueda
+    stopwords = {
+        'me', 'puedes', 'pueden', 'puede', 'podria', 'podrias',
+        'quiero', 'quiere', 'quisiera', 'necesito', 'necesita',
+        'busco', 'buscas', 'busca', 'recomendar', 'recomiendan',
+        'mostrar', 'muestra', 'ver', 'tengo', 'tiene', 'hay',
+        'tienes', 'tenemos', 'hola', 'buenos', 'dias', 'tardes',
+        'noches', 'favor', 'gracias', 'por', 'para', 'con',
+        'sin', 'de', 'del', 'en', 'un', 'una', 'unos', 'unas',
+        'el', 'la', 'los', 'las', 'mandas', 'manda', 'envia',
+        'envias', 'imagen', 'foto', 'precio', 'costo', 'cuanto',
+        'cuesta', 'vale', 'info', 'informacion', 'datos'
+    }
+    
+    # Dividir en palabras
+    palabras = texto_norm.split()
+    
+    # Filtrar: eliminar stopwords pero mantener palabras de 2+ caracteres
+    # (números, colores, medidas son importantes aunque sean cortas)
+    palabras_clave = []
+    for palabra in palabras:
+        # Si es un número o tiene números, siempre incluir (ej: "150kg", "180cm")
+        if any(c.isdigit() for c in palabra):
+            palabras_clave.append(palabra)
+        # Si no es stopword y tiene más de 2 caracteres
+        elif palabra not in stopwords and len(palabra) > 2:
+            palabras_clave.append(palabra)
+    
+    return palabras_clave
+
+
+def detectar_tipo_busqueda(palabras_clave, texto_original):
+    """
+    Detecta qué tipo de búsqueda está haciendo el usuario.
+    Retorna un dict con el tipo y los términos específicos.
+    """
+    texto_norm = normalizar_texto_busqueda(texto_original)
+    
+    resultado = {
+        'tipo': 'general',
+        'categoria_terminos': [],
+        'caracteristicas': [],  # color, medidas, peso, etc.
+        'sku_candidato': None
+    }
+    
+    # 1. Detectar si menciona SKU (patrones comunes)
+    sku_patterns = [
+        r'\b([A-Z]{2,4}-[A-Z0-9]{2,6})\b',  # MM-ES101, OFH-D1001
+        r'\b([A-Z]{2,4}[0-9]{3,6})\b'        # MM101, OFH1001
+    ]
+    
+    for pattern in sku_patterns:
+        match = re.search(pattern, texto_original, re.IGNORECASE)
+        if match:
+            resultado['sku_candidato'] = match.group(1).upper()
+            resultado['tipo'] = 'sku'
+            break
+    
+    # 2. Detectar categorías principales
+    categorias_map = {
+        'escritorio': ['escritorio', 'escritorios', 'desk'],
+        'silla': ['silla', 'sillas', 'chair', 'asiento', 'asientos'],
+        'mesa': ['mesa', 'mesas', 'table'],
+        'archivero': ['archivero', 'archiveros', 'gabinete', 'gabinetes'],
+        'librero': ['librero', 'libreros', 'estante', 'estantes']
+    }
+    
+    for categoria, variantes in categorias_map.items():
+        for variante in variantes:
+            if variante in texto_norm:
+                resultado['categoria_terminos'].append(categoria)
+                if resultado['tipo'] == 'general':
+                    resultado['tipo'] = 'categoria'
+                break
+    
+    # 3. Detectar líneas/tipos
+    lineas_map = {
+        'ejecutiva': ['ejecutiva', 'ejecutivo', 'ejecutivas', 'ejecutivos'],
+        'directiva': ['directiva', 'directivo', 'directivas', 'directivos'],
+        'operativa': ['operativa', 'operativo', 'operativas', 'operativos'],
+        'visita': ['visita', 'visitante']
+    }
+    
+    for linea, variantes in lineas_map.items():
+        for variante in variantes:
+            if variante in texto_norm:
+                resultado['categoria_terminos'].append(linea)
+                break
+    
+    # 4. Detectar características especiales
+    # Colores
+    colores = ['blanco', 'negro', 'grafito', 'silver', 'gris', 'azul', 'rojo', 'verde']
+    for color in colores:
+        if color in texto_norm:
+            resultado['caracteristicas'].append(('color', color))
+    
+    # Medidas (números seguidos de cm, m, kg)
+    medidas = re.findall(r'(\d+)\s*(cm|m|kg|kilos)', texto_norm)
+    for valor, unidad in medidas:
+        resultado['caracteristicas'].append(('medida', f"{valor}{unidad}"))
+    
+    # Capacidad de peso
+    if 'aguante' in texto_norm or 'soporta' in texto_norm or 'peso' in texto_norm:
+        # Buscar números cercanos
+        numeros = re.findall(r'\d+', texto_norm)
+        if numeros:
+            resultado['caracteristicas'].append(('capacidad_peso', numeros[0]))
+    
+    return resultado
 def build_texto_catalogo(precios, limit=20):
     """Construye un texto resumen del catálogo (hasta `limit` items)."""
     if not precios:
@@ -5857,11 +6003,11 @@ def obtener_productos_por_categoria(categoria, config=None, limite=200):
 
 def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, contexto_ia=None):
     """
-    Búsqueda INTELIGENTE CON AYUDA DE IA:
-    1. Usa el contexto de IA (product-detector) para saber QUÉ buscar
-    2. SI_APLICA → Buscar productos relevantes
-    3. NO_APLICA → No buscar productos
-    4. CATEGORIA_ESPECIFICA → Buscar por categoría específica
+    Búsqueda INTELIGENTE MULTICAPA:
+    1. Extrae palabras clave del mensaje
+    2. Detecta tipo de búsqueda (SKU, categoría, características)
+    3. Busca por prioridad: categoría > subcategoría > línea > modelo > descripción
+    4. Normaliza para ignorar acentos y mayúsculas
     """
     if config is None:
         config = obtener_configuracion_por_host()
@@ -5871,30 +6017,27 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
         cursor = conn.cursor(dictionary=True)
         
         texto_limpio = palabra_clave.strip()
-        texto_lower = texto_limpio.lower()
         
-        app.logger.info(f"🔍 Buscando: '{texto_limpio}' | Contexto IA: {contexto_ia}")
+        app.logger.info(f"🔍 BÚSQUEDA INTELIGENTE: '{texto_limpio}' | Contexto IA: {contexto_ia}")
         
-        # ANALIZAR CONTEXTO DE IA para decidir estrategia de búsqueda
-        # contexto_ia puede ser: 'SI_APLICA', 'NO_APLICA', 'CATEGORIA_ESPECIFICA', etc.
+        # ========== PASO 1: ANÁLISIS DEL MENSAJE ==========
         
-        # ESTRATEGIA 1: Si la IA dice que NO aplica productos, no buscar
+        # Estrategia NO_APLICA (conversación general)
         if contexto_ia == 'NO_APLICA':
             app.logger.info("🔍 IA dice NO_APLICA → No buscar productos")
             cursor.close()
             conn.close()
             return []
         
-        # ESTRATEGIA 2: Si la IA detectó categoría específica, buscar por categoría
-        elif contexto_ia and contexto_ia.startswith('CATEGORIA_'):
-            # Extraer la categoría (ej: "CATEGORIA_SILLAS")
+        # Estrategia CATEGORIA_ESPECIFICA (IA ya identificó categoría)
+        if contexto_ia and contexto_ia.startswith('CATEGORIA_'):
             categoria = contexto_ia.replace('CATEGORIA_', '').lower()
-            app.logger.info(f"🔍 IA detectó categoría específica: {categoria}")
+            app.logger.info(f"🎯 IA detectó categoría específica: {categoria}")
             
             query_categoria = """
                 SELECT * FROM precios 
                 WHERE (LOWER(categoria) LIKE %s OR LOWER(subcategoria) LIKE %s)
-                AND (status_ws IS NULL OR status_ws = 'activo')
+                AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ')
                 ORDER BY sku
                 LIMIT %s
             """
@@ -5909,138 +6052,157 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
                 conn.close()
                 return resultados
         
-        # ESTRATEGIA 3: Búsqueda normal (SI_APLICA o sin contexto claro)
-        # Aquí la IA no dio información específica, hacer búsqueda inteligente
+        # ========== PASO 2: EXTRACCIÓN INTELIGENTE ==========
         
-        # PRIMERO: Intentar detectar automáticamente si es SKU
-        # (sin depender de categorías predefinidas)
+        palabras_clave = extraer_palabras_clave_inteligente(texto_limpio)
+        tipo_busqueda = detectar_tipo_busqueda(palabras_clave, texto_limpio)
         
-        # Detección MEJORADA de SKU - busca SKU DENTRO del texto
-        def extraer_posible_sku_del_texto(texto):
-            """
-            Extrae un posible SKU de un texto, incluso si hay texto alrededor.
-            Ejemplo: 'Descripción de este producto: MM-VJ127' → 'MM-VJ127'
-            """
-            import re
-            
-            # Primero buscar patrones con prefijos comunes
-            patrones_con_prefijo = [
-                r'producto:\s*([A-Za-z0-9\-]+)',
-                r'código:\s*([A-Za-z0-9\-]+)', 
-                r'referencia:\s*([A-Za-z0-9\-]+)',
-                r'sku:\s*([A-Za-z0-9\-]+)',
-                r'modelo:\s*([A-Za-z0-9\-]+)',
-            ]
-            
-            for patron in patrones_con_prefijo:
-                match = re.search(patron, texto, re.IGNORECASE)
-                if match:
-                    sku = match.group(1).strip()
-                    app.logger.info(f"🔍 SKU extraído con prefijo: '{sku}'")
-                    return sku
-            
-            # Luego buscar patrones de SKU directamente en el texto
-            patrones_sku = [
-                r'([A-Z]{2,4}-\d{3,6}[A-Z]?)', # Detecta MM-D1007 o MM-D1007A
-                r'([A-Z]{2,4}-?[A-Z]{1,2}\d{3,6})', # Detecta MM-VJ127
-                r'\b([A-Z0-9]{2,6}-[A-Z0-9]{2,6})\b',
-                r'\b([A-Z]{2,4}\d{3,6})\b',
-            ]
-            
-            for patron in patrones_sku:
-                match = re.search(patron, texto, re.IGNORECASE)
-                if match:
-                    sku = match.group(0).strip()
-                    app.logger.info(f"🔍 SKU encontrado en texto: '{sku}'")
-                    return sku
-            
-            return None
+        app.logger.info(f"🔑 Palabras clave: {palabras_clave}")
+        app.logger.info(f"🎯 Tipo búsqueda: {tipo_busqueda['tipo']}")
+        app.logger.info(f"📋 Detalles: categorías={tipo_busqueda['categoria_terminos']}, características={tipo_busqueda['caracteristicas']}")
         
-        # Intentar extraer SKU del texto
-        posible_sku = extraer_posible_sku_del_texto(texto_limpio)
+        # ========== PASO 3: BÚSQUEDA POR SKU (MÁXIMA PRIORIDAD) ==========
         
-        # Si se extrajo un SKU, buscar por ese SKU
-        if posible_sku:
-            app.logger.info(f"🔍 SKU detectado: '{posible_sku}' - Buscando por SKU")
+        if tipo_busqueda['sku_candidato']:
+            sku = tipo_busqueda['sku_candidato']
+            app.logger.info(f"🎯 Búsqueda por SKU detectado: {sku}")
             
-            # Buscar SKU exacto (case-insensitive)
+            # Buscar SKU exacto
             cursor.execute(
-                "SELECT * FROM precios WHERE UPPER(sku) = UPPER(%s) LIMIT 1",
-                (posible_sku,)
+                "SELECT * FROM precios WHERE UPPER(sku) = %s LIMIT 1",
+                (sku.upper(),)
             )
             producto_exacto = cursor.fetchone()
             
             if producto_exacto:
-                app.logger.info(f"✅ SKU exacto encontrado: {producto_exacto.get('sku')}")
-                cursor.close()
-                conn.close()
-                return [producto_exacto]
-            
-            # Buscar SKU como substring
-            cursor.execute(
-                "SELECT * FROM precios WHERE UPPER(sku) LIKE UPPER(CONCAT('%', %s, '%')) LIMIT %s",
-                (posible_sku, limite)
-            )
-            resultados_sku = cursor.fetchall()
-            
-            if resultados_sku:
-                app.logger.info(f"✅ Encontrados {len(resultados_sku)} productos por SKU")
-                cursor.close()
-                conn.close()
-                return resultados_sku
+                app.logger.info(f"✅ SKU exacto encontrado: {sku}")
+                
+                # Si además mencionó características (color, medida), filtrar en descripción
+                if tipo_busqueda['caracteristicas']:
+                    desc = producto_exacto.get('descripcion', '').lower()
+                    cumple = True
+                    for tipo_carac, valor in tipo_busqueda['caracteristicas']:
+                        if valor not in desc:
+                            app.logger.info(f"⚠️ SKU {sku} no cumple con {tipo_carac}={valor}")
+                            cumple = False
+                            break
+                    
+                    if not cumple:
+                        app.logger.info(f"ℹ️ SKU encontrado pero no cumple características solicitadas")
+                        # Continuar con búsqueda normal
+                    else:
+                        cursor.close()
+                        conn.close()
+                        return [producto_exacto]
+                else:
+                    cursor.close()
+                    conn.close()
+                    return [producto_exacto]
         
-        # SEGUNDO: Si no es SKU o no encontró, buscar en TODOS los campos
-        # Priorizar por relevancia (similar a tu query original)
-        # ESTRATEGIA: Búsqueda Jerárquica (Categoría -> Subcategoría -> Descripción -> SKU)
-        app.logger.info(f"🔍 Búsqueda Multicapa para: '{texto_limpio}'")
+        # ========== PASO 4: BÚSQUEDA MULTICAPA INTELIGENTE ==========
         
-        query_general = """
+        # Construir query dinámica basada en palabras clave
+        
+        if not palabras_clave:
+            app.logger.warning("⚠️ No se pudieron extraer palabras clave, usando búsqueda amplia")
+            palabras_clave = [normalizar_texto_busqueda(texto_limpio)]
+        
+        # Construir condiciones WHERE para cada capa
+        conditions = []
+        params = []
+        
+        for palabra in palabras_clave:
+            palabra_like = f"%{palabra}%"
+            
+            # Buscar en TODAS las columnas importantes
+            conditions.append("""
+                (LOWER(categoria) LIKE %s OR 
+                 LOWER(subcategoria) LIKE %s OR 
+                 LOWER(linea) LIKE %s OR 
+                 LOWER(modelo) LIKE %s OR 
+                 LOWER(descripcion) LIKE %s OR
+                 LOWER(sku) LIKE %s)
+            """)
+            
+            # 6 parámetros por palabra (uno por cada columna)
+            params.extend([palabra_like] * 6)
+        
+        where_clause = " OR ".join(conditions)
+        
+        # Sistema de PUNTUACIÓN por relevancia (prioridad por columna)
+        relevancia_parts = []
+        relevancia_params = []
+        
+        for idx, palabra in enumerate(palabras_clave):
+            palabra_like = f"%{palabra}%"
+            peso = 100 - (idx * 10)  # Primera palabra más importante
+            
+            relevancia_parts.append(f"""
+                CASE 
+                    WHEN LOWER(categoria) LIKE %s THEN {peso}
+                    WHEN LOWER(subcategoria) LIKE %s THEN {peso - 10}
+                    WHEN LOWER(linea) LIKE %s THEN {peso - 20}
+                    WHEN LOWER(modelo) LIKE %s THEN {peso - 30}
+                    WHEN LOWER(descripcion) LIKE %s THEN {peso - 40}
+                    WHEN LOWER(sku) LIKE %s THEN {peso - 50}
+                    ELSE 0
+                END
+            """)
+            
+            relevancia_params.extend([palabra_like] * 6)
+        
+        # Sumar todas las puntuaciones
+        relevancia_sum = " + ".join(relevancia_parts)
+        
+        query = f"""
             SELECT 
                 *,
-                CASE 
-                    WHEN LOWER(sku) = %s THEN 110
-                    WHEN LOWER(categoria) = %s THEN 100
-                    WHEN LOWER(categoria) LIKE %s THEN 80
-                    WHEN LOWER(subcategoria) LIKE %s THEN 60
-                    WHEN LOWER(descripcion) LIKE %s THEN 40
-                    WHEN LOWER(sku) LIKE %s THEN 30
-                    ELSE 0
-                END AS relevancia
+                ({relevancia_sum}) AS relevancia
             FROM precios 
-            WHERE (
-                LOWER(categoria) LIKE %s OR 
-                LOWER(subcategoria) LIKE %s OR 
-                LOWER(descripcion) LIKE %s OR
-                LOWER(sku) LIKE %s OR
-                %s LIKE CONCAT('%%', LOWER(sku), '%%')
-            )
+            WHERE ({where_clause})
             AND (status_ws IS NULL OR status_ws = 'activo' OR status_ws = ' ')
-            ORDER BY relevancia DESC, descripcion ASC
+            ORDER BY relevancia DESC, categoria ASC, linea ASC
             LIMIT %s
         """
         
-        texto_para_like = f"%{texto_lower}%"
+        all_params = relevancia_params + params + [limite]
         
-        params = [
-            texto_lower,      # CASE: sku exacto
-            texto_lower,      # CASE: categoria exacta
-            texto_para_like,  # CASE: categoria like
-            texto_para_like,  # CASE: subcategoria like
-            texto_para_like,  # CASE: descripcion like
-            texto_para_like,  # CASE: sku like
-            texto_para_like,  # WHERE: categoria
-            texto_para_like,  # WHERE: subcategoria
-            texto_para_like,  # WHERE: descripcion
-            texto_para_like,  # WHERE: sku parcial
-            texto_lower,      # WHERE: búsqueda de SKU dentro de frase
-            limite            # LIMIT
-        ]
-        
-        cursor.execute(query_general, params)
+        cursor.execute(query, all_params)
         resultados = cursor.fetchall()
         
+        # ========== PASO 5: FILTRADO POST-BÚSQUEDA (CARACTERÍSTICAS) ==========
+        
+        # Si el usuario especificó características (color, medida, peso), filtrar
+        if tipo_busqueda['caracteristicas'] and resultados:
+            app.logger.info(f"🔧 Aplicando filtro de características: {tipo_busqueda['caracteristicas']}")
+            
+            resultados_filtrados = []
+            for producto in resultados:
+                desc = normalizar_texto_busqueda(producto.get('descripcion', ''))
+                cumple = True
+                
+                for tipo_carac, valor in tipo_busqueda['caracteristicas']:
+                    valor_norm = normalizar_texto_busqueda(valor)
+                    if valor_norm not in desc:
+                        cumple = False
+                        break
+                
+                if cumple:
+                    resultados_filtrados.append(producto)
+            
+            if resultados_filtrados:
+                app.logger.info(f"✅ Filtrados: {len(resultados)} → {len(resultados_filtrados)} productos cumplen características")
+                resultados = resultados_filtrados
+            else:
+                app.logger.warning(f"⚠️ Ningún producto cumple características exactas, devolviendo todos")
+        
+        # ========== PASO 6: LOGGING Y RETORNO ==========
+        
         if resultados:
-            app.logger.info(f"✅ Encontrados {len(resultados)} productos en búsqueda general")
+            app.logger.info(f"✅ Encontrados {len(resultados)} productos")
+            # Log primeros 3 para debug
+            for idx, p in enumerate(resultados[:3]):
+                app.logger.info(f"  {idx+1}. {p.get('sku')} - {p.get('categoria')} {p.get('linea')} {p.get('modelo')} (relevancia: {p.get('relevancia', 0)})")
         else:
             app.logger.info(f"❌ No se encontraron productos")
         
@@ -6050,13 +6212,20 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
         
     except Exception as e:
         app.logger.error(f"❌ Error en búsqueda inteligente: {e}")
-        # FALLBACK simple
+        app.logger.error(traceback.format_exc())
+        
+        # FALLBACK: búsqueda simple
         try:
             conn = get_db_connection(config)
             cursor = conn.cursor(dictionary=True)
+            texto_norm = normalizar_texto_busqueda(texto_limpio)
+            
             cursor.execute(
-                "SELECT * FROM precios WHERE descripcion LIKE %s LIMIT %s",
-                (f"%{texto_limpio}%", f"%{texto_limpio}%", min(50, limite))
+                """SELECT * FROM precios 
+                   WHERE LOWER(descripcion) LIKE %s 
+                   OR LOWER(categoria) LIKE %s
+                   LIMIT %s""",
+                (f"%{texto_norm}%", f"%{texto_norm}%", min(50, limite))
             )
             productos = cursor.fetchall()
             cursor.close()
