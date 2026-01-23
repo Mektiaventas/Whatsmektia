@@ -10231,13 +10231,13 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                             agregados += 1
                     app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
             
-            else:
-                 # Si no aplica producto, logueamos y precios se queda en []
-                 app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
-    
-            # ================================================================
-            # FIN DEL BLOQUE CORREGIDO
-            # ================================================================
+        else:
+             # Si no aplica producto, logueamos y precios se queda en []
+             app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
+
+        # ================================================================
+        # FIN DEL BLOQUE CORREGIDO
+        # ================================================================
         texto_catalogo = build_texto_catalogo(precios, limit=40)
         
         
