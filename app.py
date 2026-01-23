@@ -10168,8 +10168,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 
                 for h in historial[-3:]:  # Últimos 3 mensajes
                     msg_hist = h.get('mensaje', '').lower()
-                    resp_hist = h.get('respuesta', '').lower()
-                    
+                    respuesta_raw = h.get('respuesta') or ""
+                    resp_hist = respuesta_raw.lower()
+                                        
                     # Buscar categorías mencionadas
                     categorias_conocidas = ['escritorio', 'silla', 'mesa', 'archivero', 'pupitre']
                     for cat in categorias_conocidas:
