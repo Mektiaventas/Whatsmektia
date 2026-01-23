@@ -10207,37 +10207,37 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                      enviar_imagen(numero, img_url, config)
                 app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
-            # Si encuentra pocos, intentar con categoría detectada (Backup)
-            if len(precios) < 30:
-                categoria_detectada = detectar_categoria_del_mensaje(texto)
-                if categoria_detectada:
-                    productos_categoria = obtener_productos_por_categoria(categoria_detectada, config, limite=100)
-                    # Combinar sin duplicados
+                # Si encuentra pocos, intentar con categoría detectada (Backup)
+                if len(precios) < 30:
+                    categoria_detectada = detectar_categoria_del_mensaje(texto)
+                    if categoria_detectada:
+                        productos_categoria = obtener_productos_por_categoria(categoria_detectada, config, limite=100)
+                        # Combinar sin duplicados
+                        skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
+                        for prod in productos_categoria:
+                            if prod.get('sku') not in skus_existentes:
+                                precios.append(prod)
+                        app.logger.info(f"🎯 +{len(productos_categoria)} de categoría '{categoria_detectada}'")
+                
+                # Último recurso: agregar algunos productos generales
+                if len(precios) < 40:
+                    precios_completos = obtener_todos_los_precios(config) or []
+                    extras = precios_completos[:60]
                     skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
-                    for prod in productos_categoria:
-                        if prod.get('sku') not in skus_existentes:
-                            precios.append(prod)
-                    app.logger.info(f"🎯 +{len(productos_categoria)} de categoría '{categoria_detectada}'")
+                    agregados = 0
+                    for extra in extras:
+                        if extra.get('sku') not in skus_existentes and agregados < 30:
+                            precios.append(extra)
+                            agregados += 1
+                    app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
             
-            # Último recurso: agregar algunos productos generales
-            if len(precios) < 40:
-                precios_completos = obtener_todos_los_precios(config) or []
-                extras = precios_completos[:60]
-                skus_existentes = {p.get('sku') for p in precios if p.get('sku')}
-                agregados = 0
-                for extra in extras:
-                    if extra.get('sku') not in skus_existentes and agregados < 30:
-                        precios.append(extra)
-                        agregados += 1
-                app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
-        
-        else:
-             # Si no aplica producto, logueamos y precios se queda en []
-             app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
-
-        # ================================================================
-        # FIN DEL BLOQUE CORREGIDO
-        # ================================================================
+            else:
+                 # Si no aplica producto, logueamos y precios se queda en []
+                 app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
+    
+            # ================================================================
+            # FIN DEL BLOQUE CORREGIDO
+            # ================================================================
         texto_catalogo = build_texto_catalogo(precios, limit=40)
         
         
