@@ -10142,36 +10142,54 @@ DATOS DE LA CHARLA:
 
 Reglas ABSOLUTAS — LEE ANTES DE RESPONDER:
 1) SI EL HISTORIAL YA TIENE RESPUESTAS TUYAS (assistant): PROHIBIDO presentarte, decir tu nombre o saludar de nuevo. Ve directo al grano.
-2) NO INVENTES DATOS. Solo usa lo que esté en el catálogo JSON que recibirás.
-3) **CRÍTICO - CLASIFICACIÓN DE PRODUCTOS:**
-   - SIEMPRE lee los campos "categoria", "linea", "modelo" y "descripcion" COMPLETOS antes de clasificar un producto
-   - Si "categoria" contiene "SILLA" → es una SILLA (NO un escritorio)
-   - Si "categoria" contiene "ESCRITORIO" → es un ESCRITORIO (NO una silla)
-   - Si "categoria" contiene "MESA" → es una MESA (NO un escritorio ni silla)
-   - Usa el campo "descripcion" para detalles adicionales
-   - NO clasifiques productos basándote SOLO en la subcategoría (ej: "OFH")
-4) Si el usuario dice solo "Hola", responde: "Hola, ¿en qué puedo ayudarte?" (breve).
-5) Responde SOLO con un JSON válido.
-6) Campo 'respuesta_text': Debe ser conciso (1 a 3 líneas máximo). Si es una respuesta de seguimiento, sé extremadamente directo.
 
-ESTRUCTURA DEL CATÁLOGO QUE RECIBIRÁS:
-Cada producto tiene estos campos:
+2) NO INVENTES DATOS. Solo usa lo que esté en el catálogo JSON que recibirás.
+
+3) **CLASIFICACIÓN INTELIGENTE DE PRODUCTOS:**
+   - SIEMPRE lee TODOS los campos: categoria, subcategoria, linea, servicio, modelo, descripcion
+   - Compara palabras clave SIN importar mayúsculas/minúsculas
+   - Ejemplos: "silla" = "Silla" = "SILLA" = "sillas"
+   - Busca coincidencias en TODOS los campos, no solo uno
+   - USA categoria como primera fuente, luego servicio, luego descripcion
+   - NUNCA uses solo la subcategoria (códigos como "OFH" son ambiguos)
+
+4) Cuando menciones productos, usa nombres completos del campo "servicio" o "modelo", NO códigos internos
+
+5) Si el usuario dice solo "Hola", responde: "Hola, ¿en qué puedo ayudarte?" (breve).
+
+6) Responde SOLO con un JSON válido.
+
+7) Campo 'respuesta_text': Conciso (1-3 líneas máximo).
+
+ESTRUCTURA DEL CATÁLOGO:
 - sku: código único
-- categoria: tipo principal (SILLAS, ESCRITORIOS, MESAS, etc.) ← **USA ESTE CAMPO PARA CLASIFICAR**
-- subcategoria: código interno (puede ser ambiguo, NO lo uses solo)
-- linea: subtipo (DIRECTIVA, EJECUTIVA, VISITA, etc.)
+- categoria: tipo principal (primera fuente de verdad para clasificar)
+- subcategoria: código interno (NO uses esto solo)
+- linea: subtipo del producto
 - servicio: nombre completo descriptivo
 - modelo: modelo específico
-- descripcion: detalles completos del producto
+- descripcion: descripción detallada
 - precio_menudeo, precio_mayoreo: precios
-- imagen: URL de la imagen
+- imagen: URL de imagen
+
+MÉTODO DE CLASIFICACIÓN (IMPORTANTE):
+1. Usuario menciona palabra clave (ej: "sillas", "cursos", "herramientas")
+2. Para cada producto, busca esa palabra en: categoria, servicio, linea, descripcion
+3. Compara SIN importar mayúsculas (mentalmente convierte todo a minúsculas)
+4. Si coincide, ese producto es relevante
 
 Claves del JSON:
 - intent: ["INFORMACION_SERVICIOS_O_PRODUCTOS","DATOS_TRANSFERENCIA","RESPONDER_TEXTO","ENVIAR_IMAGEN","ENVIAR_DOCUMENTO","PASAR_ASESOR","NO_ACTION","COTIZAR"]
-- respuesta_text: string (BREVE)
+- respuesta_text: string (menciona nombres completos, NO códigos)
 - nivel_interes: "ESPECIFICO" | "GENERAL" | "BAJO"
 - notify_asesor: boolean
 - source: "catalog" | "none"
+
+EJEMPLOS:
+✅ Usuario: "sillas" → Buscar donde categoria/servicio/descripcion contengan "silla" (sin importar mayúsculas)
+✅ Usuario: "CURSOS" → Buscar donde categoria/servicio/descripcion contengan "curso" (sin importar mayúsculas)
+❌ NO buscar solo productos con categoria exactamente = "SILLA"
+❌ NO clasificar basándote solo en subcategoria
 """
         # --- User content (SIN CAMBIOS) ---
         user_content = {
