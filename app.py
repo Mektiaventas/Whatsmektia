@@ -10148,11 +10148,11 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             
             palabras_referencia = [
                 'sus', 'esos', 'esas', 'estos', 'estas',
-                'la imagen', 'las imagenes', 'las imágenes', 'imagen',
-                'el producto', 'los productos', 'ese', 'esa',
+                'la imagen', 'las imagenes', 'las imágenes', 'imagen',  'fotos',  'foto',
+                'el producto', 'los productos', 'ese', 'esa', 'muestras',  'muestrame',
                 'el modelo', 'los modelos', 'ese escritorio', 'esa silla',
                 'primer', 'primero', 'primera', 'segundo', 'tercero',
-                'ultimo', 'última', 'último'
+                'ultimo', 'última', 'último', 'ver mas',  'ver más'
             ]
             
             mensaje_lower = texto.lower()
