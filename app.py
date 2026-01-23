@@ -10071,32 +10071,44 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
         
-        # --- DeepSeek prompt: detectar si el mensaje solicita información de producto (SIN CAMBIOS) ---
+        
+        # ================================================================
+        # INICIO DEL BLOQUE CORREGIDO (Inteligencia Contextual DeepSeek)
+        # ================================================================
+        
+        # --- DeepSeek Product Detection & Context Retrieval (UPDATED) ---
         producto_aplica = "NO_APLICA"
+        contexto_busqueda = texto 
+        contexto_ia_final = "SI_APLICA" # Valor por defecto
+
         try:
+            app.logger.info(f"🔎 Analizando intención con DeepSeek: {texto[:50]}...")
+            
+            # Construimos el historial para el prompt
+            historial_objs = obtener_historial(numero, limite=5, config=config)
+            historial_text = ""
+            for h in historial_objs:
+                msg_h = h.get('mensaje') or ""
+                resp_h = h.get('respuesta') or ""
+                if msg_h: historial_text += f"U: {msg_h}\n"
+                if resp_h: historial_text += f"A: {resp_h}\n"
+
+            # 1. PROMPT MEJORADO: Ahora pedimos "SEARCH: término"
             ds_prompt = (
-                "Tu única tarea: leyendo el historial de conversación y el mensaje actual, "
-                "decide SI el cliente está pidiendo información sobre un PRODUCTO O SERVICIO ESPECÍFICO "
-                "(precio, disponibilidad, características técnicas, SKU específico, fotos, comparación entre modelos, cómo comprar).\n\n"
-                "INSTRUCCIONES ESPECÍFICAS:\n"
-                "1. Si el usuario pide un 'plan de estudios', 'catálogo PDF', 'documento', 'folleto', 'tríptico', 'PDF', 'archivo' o similar → responde EXACTAMENTE: 'NO_APLICA'\n"
-                "2. Si el usuario pide 'más información', 'detalles', 'descripción' sobre algo mencionado → responde EXACTAMENTE: 'SI_APLICA'\n"
-                "3. Si el usuario pregunta por precios específicos, disponibilidad, SKUs, imágenes de productos → responde EXACTAMENTE: 'SI_APLICA'\n"
-                "4. Si es una consulta general o saludo → responde EXACTAMENTE: 'NO_APLICA'\n\n"
-                "RESPONDE SOLO CON UNA PALABRA EXACTA: SI_APLICA  o  NO_APLICA\n"
-                "No añadas explicaciones, ejemplos, ni signos adicionales.\n\n"
+                "Eres un experto en ventas y recuperación de contexto.\n"
+                "Tu objetivo es determinar si el usuario quiere ver/comprar un producto y QUÉ producto es.\n"
+                "Instrucciones:\n"
+                "1. Si el usuario pide un producto, precio, foto, o hace referencia a uno anterior (ej: 'el último', 'esa silla', 'tienes en negro?'), responde con:\n"
+                "SEARCH: <término de búsqueda preciso basado en el historial o mensaje actual>\n"
+                "2. Si es charla casual, saludo, o no tiene intención de compra/ver producto, responde: NO_APLICA\n\n"
+                "Ejemplos:\n"
+                "- U: 'precio de silla x' -> SEARCH: silla x\n"
+                "- U: 'quiero ver el último' (Historial: Escritorio Hamilton) -> SEARCH: Escritorio Hamilton\n"
+                "- U: 'hola' -> NO_APLICA\n\n"
                 "HISTORIAL:\n"
                 f"{historial_text.strip()}\n\n"
                 "MENSAJE ACTUAL:\n"
-                f"{texto or ''}\n\n"
-                "Ejemplos claros:\n"
-                "- 'plan de estudios de mecatrónica' → NO_APLICA (es documento)\n"
-                "- 'catálogo de productos' → NO_APLICA (es documento)\n"
-                "- 'precio del curso de mecatrónica' → SI_APLICA (es producto/servicio)\n"
-                "- 'imagen del producto X' → SI_APLICA\n"
-                "- 'más información sobre mantenimiento' → SI_APLICA\n"
-                "- 'hola' → NO_APLICA\n"
-                "- 'qué programas tienes?' → SI_APLICA (pregunta por productos/servicios)\n"
+                f"{texto or ''}\n"
             )
 
             headers_ds = {
@@ -10107,7 +10119,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 "model": "deepseek-chat",
                 "messages": [{"role": "user", "content": ds_prompt}],
                 "temperature": 0.0,
-                "max_tokens": 16
+                "max_tokens": 100
             }
 
             resp_ds = requests.post(DEEPSEEK_API_URL, headers=headers_ds, json=payload_ds, timeout=8)
@@ -10116,103 +10128,59 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             raw_ds = ds_data['choices'][0]['message']['content']
             if isinstance(raw_ds, list):
                 raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
-            raw_ds = (raw_ds or "").strip().upper()
+            raw_ds = (raw_ds or "").strip()
 
-            m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds)
-            if m:
-                producto_aplica = m.group(1)
-            else:
-                producto_aplica = "SI_APLICA" if any(
-                    kw in (texto or "").lower() for kw in
-                    ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', '¿tiene', 'foto', 'imagen', '¿cuánto', 'cotización', 'precio?', 'precio ']
-                ) else "NO_APLICA"
-
-            app.logger.info(f"🔎 DeepSeek product-detector -> {producto_aplica} (raw: {raw_ds[:200]})")
-        except Exception as e:
-            app.logger.warning(f"⚠️ DeepSeek detection failed: {e}; using keyword fallback")
-            combined = (texto or "") + "\n" + (historial_text or "")
-            if any(kw in combined.lower() for kw in ['precio', 'catalogo', 'catálogo', 'sku', 'disponibilidad', 'foto', 'imagen', 'cotización', 'precio?', '¿cuánto']):
+            # 2. PARSING MEJORADO: Detectar "SEARCH:"
+            if "SEARCH:" in raw_ds:
                 producto_aplica = "SI_APLICA"
-                app.logger.info("🔎 Fallback product-detector -> SI_APLICA")
+                parts = raw_ds.split("SEARCH:", 1)
+                if len(parts) > 1:
+                    found_term = parts[1].strip().split('\n')[0].strip().strip('"').strip("'")
+                    if len(found_term) > 2:
+                        contexto_busqueda = found_term
+                        app.logger.info(f"🔍 IA Refined Search: '{contexto_busqueda}'")
+            elif "SI_APLICA" in raw_ds:
+                producto_aplica = "SI_APLICA"
             else:
-                producto_aplica = "NO_APLICA"
-                app.logger.info(f"🔎 Fallback product-detector -> {producto_aplica}")
+                 # Fallback regex original por seguridad
+                 m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds.upper())
+                 if m:
+                     producto_aplica = m.group(1)
+                 else:
+                     # Keyword fallback final
+                     if any(kw in (texto or "").lower() for kw in ['precio', 'catalogo', 'foto', 'imagen', 'cuanto']):
+                        producto_aplica = "SI_APLICA"
+
+            app.logger.info(f"🔎 DeepSeek result -> {producto_aplica} (raw: {raw_ds[:100]})")
+            
+        except Exception as e:
+            app.logger.warning(f"⚠️ DeepSeek detection failed: {e}; using fallback")
+            if any(kw in (texto or "").lower() for kw in ['precio', 'catalogo', 'foto', 'imagen', 'cuanto']):
+                producto_aplica = "SI_APLICA"
+
+        # --- Carga de catálogos y ENVÍO DE IMÁGENES ---
+        precios = [] # Inicializamos vacío por defecto
         
-
-
-        # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
-            # ========== AGREGAR CONTEXTO DEL HISTORIAL (CORREGIDO) ==========
-            contexto_busqueda = texto
-            contexto_ia_final = producto_aplica # Por defecto es SI_APLICA
-            
-            palabras_referencia = [
-                'sus', 'esos', 'esas', 'estos', 'estas',
-                'la imagen', 'las imagenes', 'las imágenes', 'imagen',  'fotos',  'foto',
-                'el producto', 'los productos', 'ese', 'esa', 'muestras',  'muestrame',
-                'el modelo', 'los modelos', 'ese escritorio', 'esa silla',
-                'primer', 'primero', 'primera', 'segundo', 'tercero',
-                'ultimo', 'última', 'último', 'ver mas',  'ver más'
-            ]
-            
-            mensaje_lower = texto.lower()
-            es_referencia = any(palabra in mensaje_lower for palabra in palabras_referencia)
-            
-            if len(texto.split()) <= 8 and es_referencia:
-                app.logger.info(f"🔗 Detectada referencia en mensaje corto: '{texto}'")
-                
-                categorias_en_historial = []
-                # Buscamos del más reciente al más antiguo
-                for h in reversed(historial[-3:]): 
-                    msg_hist = (h.get('mensaje') or "").lower()
-                    resp_hist = (h.get('respuesta') or "").lower()
-                                        
-                    categorias_conocidas = ['escritorio', 'silla', 'mesa', 'archivero', 'pupitre']
-                    for cat in categorias_conocidas:
-                        if cat in msg_hist or cat in resp_hist:
-                            if cat not in categorias_en_historial:
-                                categorias_en_historial.append(cat)
-                
-                if categorias_en_historial:
-                    cat_final = categorias_en_historial[0]
-                    contexto_busqueda = f"{cat_final} {texto}"
-                    # CLAVE: Forzamos a la base de datos a filtrar por COLUMNA categoría
-                    contexto_ia_final = f"CATEGORIA_{cat_final.upper()}" 
-                    app.logger.info(f"🎯 CATEGORÍA DETECTADA: {cat_final}. Filtrando estrictamente.")
-            # =====================================================
-
-            
-            # 1. BUSQUEDA DE IMAGEN AUTOMÁTICA (Vía Rápida)
-            # Si el usuario menciona un SKU o modelo, buscamos si tiene imagen para enviarla de inmediato
-            # INSERTA ESTO:
-            # Llamada con el contexto de categoría forzado para evitar "colados"
-            precios = obtener_productos_por_palabra_clave(
+             # Búsqueda con el contexto refinado por la IA (contexto_busqueda)
+             precios = obtener_productos_por_palabra_clave(
                 contexto_busqueda, 
                 config, 
                 limite=200, 
                 contexto_ia=contexto_ia_final
-            )           
-         
-            # ========== ENVÍO AUTOMÁTICO DE IMÁGENES MEJORADO ==========
-            
-            # Detectar si el usuario pide imágenes/fotos
-            solicita_imagen = any(palabra in texto.lower() for palabra in [
+             )
+             
+             # ========== ENVÍO AUTOMÁTICO DE IMÁGENES ==========
+             solicita_imagen = any(palabra in texto.lower() for palabra in [
                 'imagen', 'imagenes', 'imágenes', 'foto', 'fotos',
-                'ver', 'muestra', 'muéstrame', 'enseña', 'envía',
-                'comparte', 'compartir', 'manda', 'mandas'
-            ])
-            
-            if solicita_imagen and precios:
+                'ver', 'muestra', 'muéstrame', 'enseña', 'envía', 'manda', 'compart'
+             ])
+             
+             if solicita_imagen and precios:
                 app.logger.info(f"🖼️ Usuario solicita imágenes, enviando automáticamente...")
-                
-                # Determinar cuántas imágenes enviar
-                cantidad_imagenes = 3  # Por defecto 3
-                
-                # Si menciona "todas", enviar más
-                if 'todas' in texto.lower() or 'todos' in texto.lower():
-                    cantidad_imagenes = min(8, len(precios))
-                # Si menciona "primera", "primero", "uno", enviar solo 1
-                elif any(x in texto.lower() for x in ['primera', 'primero', 'uno', 'una']):
+                cantidad_imagenes = 3
+                # Si pide especificamente uno o el ultimo
+                if any(x in texto.lower() for x in ['primera', 'primero', 'uno', 'una', 'el ultimo', 'el último', 'la ultima', 'la última']):
                     cantidad_imagenes = 1
                 
                 imagenes_enviadas = 0
@@ -10220,60 +10188,27 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     img_url = p.get('imagen')
                     sku_p = p.get('sku', '')
                     modelo = p.get('modelo', '')
-                    
                     if img_url and img_url.strip():
                         try:
-                            app.logger.info(f"🚀 Enviando imagen automática: {sku_p} - {modelo}")
+                            app.logger.info(f"🚀 Enviando imagen: {sku_p}")
                             enviar_imagen(numero, img_url, config)
-                            
-                            # Registrar en el historial
-                            actualizar_respuesta(
-                                numero=numero,
-                                mensaje=texto,
-                                respuesta=f"Imagen enviada: {modelo} (SKU: {sku_p})",
-                                config=config,
-                                respuesta_tipo='imagen',
-                                respuesta_media_url=img_url
-                            )
-                            
+                            actualizar_respuesta(numero, texto, f"Imagen enviada: {modelo}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                             imagenes_enviadas += 1
-                            
-                            # Pequeña pausa entre imágenes para no saturar
-                            if imagenes_enviadas > 1:
-                                import time
-                                time.sleep(0.5)
-                                
+                            if imagenes_enviadas > 1: time.sleep(0.5)
                         except Exception as e:
-                            app.logger.error(f"❌ Error enviando imagen {sku_p}: {e}")
-                
-                if imagenes_enviadas > 0:
-                    app.logger.info(f"✅ Enviadas {imagenes_enviadas} imágenes automáticamente")
-            
-            # FALLBACK: Si menciona SKU específico, enviar su imagen
-            for p in precios[:5]:
+                            app.logger.error(f"❌ Error enviando imagen: {e}")
+
+             # Fallback SKU exacto (Vía rápida)
+             for p in precios[:5]:
                 img_url = p.get('imagen')
                 sku_p = p.get('sku', '')
-                # Si el SKU del producto está contenido en el mensaje del usuario
-                if img_url and sku_p.lower() in texto.lower():
+                if img_url and sku_p and sku_p.lower() in texto.lower():
+                     app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen por SKU: {sku_p}")
+                     enviar_imagen(numero, img_url, config)
 
-                
-                    app.logger.info(f"🚀 [VIA RAPIDA] Enviando imagen detectada para SKU: {sku_p}")
-                    enviar_imagen(numero, img_url, config)
-                    # No hacemos return aquí para que la IA también pueda dar la explicación de precio/detalles
-                    # --- AÑADE ESTO AQUÍ PARA QUE APAREZCA EN EL DASHBOARD ---
-                    actualizar_respuesta(
-                        numero=numero,
-                        mensaje=texto,
-                        respuesta=f"Imagen enviada automáticamente (SKU: {sku_p})",
-                        config=config,
-                        respuesta_tipo='imagen',           # <--- Indispensable
-                        respuesta_media_url=img_url        # <--- Indispensable
-                    )
-                    # -------------------------------------------------------
-            
             app.logger.info(f"🔍 Búsqueda inteligente: '{texto[:30]}' -> {len(precios)} productos")
             
-            # Si encuentra pocos, intentar con categoría detectada
+            # Si encuentra pocos, intentar con categoría detectada (Backup)
             if len(precios) < 30:
                 categoria_detectada = detectar_categoria_del_mensaje(texto)
                 if categoria_detectada:
@@ -10296,12 +10231,14 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         precios.append(extra)
                         agregados += 1
                 app.logger.info(f"➕ Agregados {agregados} extras, total: {len(precios)}")
-                
+        
         else:
-            # Conversaciones generales: no cargamos productos para ahorrar recursos
-            precios = [] 
-            app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
+             # Si no aplica producto, logueamos y precios se queda en []
+             app.logger.info(f"📦 Carga omitida: No se requieren productos para esta consulta general.")
 
+        # ================================================================
+        # FIN DEL BLOQUE CORREGIDO
+        # ================================================================
         texto_catalogo = build_texto_catalogo(precios, limit=40)
         
         
