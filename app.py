@@ -10142,10 +10142,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
 
         # --- Carga de catálogos y configuración CON BÚSQUEDA MEJORADA ---
         if producto_aplica == "SI_APLICA" and texto:
-            # ========== AGREGAR CONTEXTO DEL HISTORIAL ==========
+            # ========== AGREGAR CONTEXTO DEL HISTORIAL (CORREGIDO) ==========
             contexto_busqueda = texto
+            contexto_ia_final = producto_aplica # Por defecto es SI_APLICA
             
-            # Detectar si el usuario hace referencia a algo mencionado antes
             palabras_referencia = [
                 'sus', 'esos', 'esas', 'estos', 'estas',
                 'la imagen', 'las imagenes', 'las imágenes', 'imagen',
@@ -10155,57 +10155,43 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 'ultimo', 'última', 'último'
             ]
             
-            # Si el mensaje es corto Y contiene palabras de referencia
             mensaje_lower = texto.lower()
             es_referencia = any(palabra in mensaje_lower for palabra in palabras_referencia)
             
             if len(texto.split()) <= 8 and es_referencia:
                 app.logger.info(f"🔗 Detectada referencia en mensaje corto: '{texto}'")
                 
-                # Buscar en el historial categorías/productos mencionados
                 categorias_en_historial = []
-                productos_en_historial = []
-                
-                for h in historial[-3:]:  # Últimos 3 mensajes
-                    msg_hist = h.get('mensaje', '').lower()
-                    respuesta_raw = h.get('respuesta') or ""
-                    resp_hist = respuesta_raw.lower()
+                # Buscamos del más reciente al más antiguo
+                for h in reversed(historial[-3:]): 
+                    msg_hist = (h.get('mensaje') or "").lower()
+                    resp_hist = (h.get('respuesta') or "").lower()
                                         
-                    # Buscar categorías mencionadas
                     categorias_conocidas = ['escritorio', 'silla', 'mesa', 'archivero', 'pupitre']
                     for cat in categorias_conocidas:
                         if cat in msg_hist or cat in resp_hist:
                             if cat not in categorias_en_historial:
                                 categorias_en_historial.append(cat)
-                    
-                    # Buscar SKUs mencionados (patrón XX-XXXX)
-                    skus_encontrados = re.findall(r'\b([A-Z]{2,4}-[A-Z0-9]{2,6})\b', msg_hist + ' ' + resp_hist, re.IGNORECASE)
-                    for sku in skus_encontrados:
-                        if sku.upper() not in productos_en_historial:
-                            productos_en_historial.append(sku.upper())
                 
-                # Si encontramos categorías o productos, usar eso para la búsqueda
                 if categorias_en_historial:
-                    contexto_busqueda = f"{categorias_en_historial[0]} {texto}"
-                    app.logger.info(f"🔗 Contexto ampliado con categoría del historial: '{contexto_busqueda}'")
-                elif productos_en_historial:
-                    contexto_busqueda = f"{productos_en_historial[0]} {texto}"
-                    app.logger.info(f"🔗 Contexto ampliado con SKU del historial: '{contexto_busqueda}'")
-                else:
-                    # Incluir las últimas 2 respuestas de la IA en el contexto
-                    respuestas_ia = [h.get('respuesta', '') for h in historial[-2:] if h.get('respuesta')]
-                    if respuestas_ia:
-                        # Extraer palabras clave de la última respuesta (primeras 50 chars)
-                        ultima_respuesta = respuestas_ia[-1][:100]
-                        contexto_busqueda = f"{ultima_respuesta} {texto}"
-                        app.logger.info(f"🔗 Contexto ampliado con respuesta anterior")
+                    cat_final = categorias_en_historial[0]
+                    contexto_busqueda = f"{cat_final} {texto}"
+                    # CLAVE: Forzamos a la base de datos a filtrar por COLUMNA categoría
+                    contexto_ia_final = f"CATEGORIA_{cat_final.upper()}" 
+                    app.logger.info(f"🎯 CATEGORÍA DETECTADA: {cat_final}. Filtrando estrictamente.")
             # =====================================================
 
             
             # 1. BUSQUEDA DE IMAGEN AUTOMÁTICA (Vía Rápida)
             # Si el usuario menciona un SKU o modelo, buscamos si tiene imagen para enviarla de inmediato
-            precios = obtener_productos_por_palabra_clave(texto, config, limite=200, contexto_ia=producto_aplica)
-            
+            # INSERTA ESTO:
+            # Llamada con el contexto de categoría forzado para evitar "colados"
+            precios = obtener_productos_por_palabra_clave(
+                contexto_busqueda, 
+                config, 
+                limite=200, 
+                contexto_ia=contexto_ia_final
+            )           
          
             # ========== ENVÍO AUTOMÁTICO DE IMÁGENES MEJORADO ==========
             
