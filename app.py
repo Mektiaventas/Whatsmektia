@@ -10035,7 +10035,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         catalog_list = []
         for p in precios:
             try:
-                # Extraer campos individuales
+                # Extraer y normalizar campos
                 categoria = (p.get('categoria') or '').strip()
                 linea = (p.get('linea') or '').strip()
                 modelo = (p.get('modelo') or '').strip()
@@ -10043,29 +10043,31 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 descripcion = (p.get('descripcion') or '').strip()
                 
                 # Construir nombre de servicio descriptivo
-                # Prioridad: categoria + linea + modelo (lo más descriptivo)
                 servicio_descriptivo = f"{categoria} {linea} {modelo}".strip()
                 
-                # Si está vacío, usar fallback progresivo
+                # Si está vacío, usar fallback
                 if not servicio_descriptivo:
                     servicio_descriptivo = modelo or subcategoria or categoria or ''
                 
-                # Limpiar descripción para evitar HTML o caracteres extraños
-                descripcion_limpia = descripcion.replace('https://', '').strip()
+                # Limpiar descripción (remover URLs)
+                descripcion_limpia = descripcion
+                if 'http://' in descripcion_limpia or 'https://' in descripcion_limpia:
+                    import re
+                    descripcion_limpia = re.sub(r'https?://\S+', '', descripcion_limpia).strip()
                 
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
-                    "categoria": categoria,  # NUEVO - ayuda a la IA a clasificar
-                    "subcategoria": subcategoria,  # NUEVO - información adicional
-                    "linea": linea,  # NUEVO - información adicional
-                    "servicio": servicio_descriptivo,  # MEJORADO - más descriptivo
-                    "modelo": modelo,  # NUEVO - ayuda a identificar
+                    "categoria": categoria,           # NUEVO
+                    "subcategoria": subcategoria,     # NUEVO
+                    "linea": linea,                   # NUEVO
+                    "servicio": servicio_descriptivo, # MEJORADO
+                    "modelo": modelo,                 # NUEVO
                     "precio_menudeo": str(p.get('precio_menudeo') or p.get('precio') or p.get('costo') or ""),
                     "precio_mayoreo": str(p.get('precio_mayoreo') or ""),
                     "inscripcion": str(p.get('inscripcion') or ""),
                     "mensualidad": str(p.get('mensualidad') or ""),
                     "imagen": str(p.get('imagen') or ""),
-                    "descripcion": descripcion_limpia  # MEJORADO - limpio
+                    "descripcion": descripcion_limpia  # MEJORADO
                 })
             except Exception as e:
                 app.logger.error(f"Error construyendo catalog_list item: {e}")
