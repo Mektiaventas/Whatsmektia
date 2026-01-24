@@ -10296,14 +10296,32 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 medidas = p.get('medidas') or ''
                 descripcion = (p.get('descripcion') or '')[:100] # Cortamos descripción si es muy larga
                 
-                # Construimos la "Ficha Técnica" bonita
+                # --- PASO 1: FICHA INTELIGENTE (Detecta si es curso o mueble) ---
+                # 1. Título: Prioridad SKU (que es el nombre en UNILOVA)
+                titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
+                
+                # 2. Lógica de Precios dinámica
+                precios_detalle = ""
+                inscrip = p.get('inscripcion')
+                mensual = p.get('mensualidad')
+                
+                if inscrip and str(inscrip) != '0.00':
+                    precios_detalle = f"💰 Inscripción: ${inscrip}\n💳 Mensualidad: ${mensual}"
+                else:
+                    precios_detalle = f"💲 Precio: ${p.get('precio_menudeo') or p.get('precio') or 'Consultar'}"
+
+                # 3. Medidas: Solo si existen y no son un espacio vacío o cero
+                medidas_val = str(p.get('medidas') or "").strip()
+                texto_medidas = f"📏 Medidas: {medidas_val}\n" if medidas_val and medidas_val != '0' else ""
+
+                # 4. Construcción final
                 ficha_texto = (
-                    f"🔹 *{modelo}*\n"
-                    f"💲 Precio: ${precio}\n"
+                    f"🔹 *{titulo_ficha}*\n"
+                    f"{precios_detalle}\n"
+                    f"{texto_medidas}"
+                    f"📝 {(p.get('descripcion') or '')[:120]}...\n"
+                    f"🆔 SKU: {p.get('sku', 'S/N')}"
                 )
-                if medidas: ficha_texto += f"📏 Medidas: {medidas}\n"
-                if descripcion: ficha_texto += f"📝 {descripcion}...\n"
-                ficha_texto += f"🆔 SKU: {sku_p}"
 
                 if img_url and img_url.strip():
                     try:
