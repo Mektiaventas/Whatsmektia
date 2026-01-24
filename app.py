@@ -10312,10 +10312,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             print("="*50 + "\n")
             # --- HASTA AQUÍ ---
     
-            # Esta es la línea que ya tienes, no la borres, solo asegúrate que lo de arriba esté antes
-            processed_ok = procesar_mensaje_unificado(
-                msg=msg,
-                numero=numero,
             generar_respuesta_deepseek(
                 numero=numero,
                 texto=texto,
