@@ -10159,18 +10159,18 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         productos_para_ficha = [] # Lista de productos seleccionados
 
         if producto_aplica == "SI_APLICA" and texto:
-             precios = obtener_productos_por_palabra_clave(
+            precios = obtener_productos_por_palabra_clave(
                 contexto_busqueda, 
                 config, 
                 limite=200, 
                 contexto_ia=contexto_ia_final
-             )
+            )
              
-             solicita_imagen = solicita_imagen_ia
-             if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
-                 solicita_imagen = True
+            solicita_imagen = solicita_imagen_ia
+            if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
+                solicita_imagen = True
 
-             if solicita_imagen and precios:
+            if solicita_imagen and precios:
                 # Filtro Estricto
                 terminos_clave = [t for t in contexto_busqueda.split() if len(t) > 3]
                 precios_imagenes = precios
@@ -10179,8 +10179,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     precios_filtrados = [
                         p for p in precios 
                         if termino_fuerte in (p.get('modelo') or '').lower() or 
-                           termino_fuerte in (p.get('descripcion') or '').lower() or
-                           termino_fuerte in (p.get('servicio') or '').lower()
+                            termino_fuerte in (p.get('descripcion') or '').lower() or
+                            termino_fuerte in (p.get('servicio') or '').lower()
                     ]
                     if precios_filtrados:
                         precios_imagenes = precios_filtrados
@@ -10190,19 +10190,19 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 if 'todas' in texto.lower():
                     cantidad_imagenes = min(8, len(precios_imagenes))
                 elif len(contexto_busqueda) > 10 and len(precios_imagenes) > 0:
-                     cantidad_imagenes = 1
+                    cantidad_imagenes = 1
                 
                 # Guardamos los productos elegidos
                 productos_para_ficha = precios_imagenes[:cantidad_imagenes]
                 app.logger.info(f"⏳ Se prepararon {len(productos_para_ficha)} fichas de producto.")
 
-             # Fallback SKU exacto
-             for p in precios[:5]:
+            # Fallback SKU exacto
+            for p in precios[:5]:
                 img_url = p.get('imagen')
                 sku_p = p.get('sku', '')
                 if img_url and sku_p and sku_p.lower() in texto.lower():
-                     if p not in productos_para_ficha:
-                         productos_para_ficha.insert(0, p)
+                    if p not in productos_para_ficha:
+                        productos_para_ficha.insert(0, p)
 
             # Rellenar catálogo (solo para el contexto de DeepSeek si hiciera falta)
             if len(precios) < 30:
@@ -10223,7 +10223,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         c += 1
         
         else:
-             app.logger.info(f"📦 Consulta general, no se cargan productos.")
+            app.logger.info(f"📦 Consulta general, no se cargan productos.")
 
         # --- 1. PRIMERO: GENERAR RESPUESTA DE INTRODUCCIÓN ---
         # DeepSeek dará una intro breve si detectó SHOW: YES
