@@ -10269,7 +10269,16 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         c += 1
         
         else:
-            app.logger.info(f"📦 Consulta general, no se cargan productos.")
+            app.logger.info(f"📦 Consulta general (Charla/Identidad), llamando a IA...")
+            generar_respuesta_deepseek(
+                numero=numero,
+                texto=texto,
+                precios=[], 
+                historial=obtener_historial(numero, limite=6, config=config),
+                config=config,
+                incoming_saved=incoming_saved,
+                es_audio=es_audio
+            )
 
         # --- 1. PRIMERO: GENERAR RESPUESTA DE INTRODUCCIÓN ---
         # DeepSeek dará una intro breve si detectó SHOW: YES
