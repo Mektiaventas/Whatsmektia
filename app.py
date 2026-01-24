@@ -10073,7 +10073,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
         
         # ================================================================
-        # INICIO DEL BLOQUE - IA TOTAL (Detecta Producto + Intención de Ver)
+        # INICIO DEL BLOQUE - IA TOTAL CON FILTRO ESTRICTO
         # ================================================================
         
         # --- DeepSeek Product & Visual Intent Detection ---
@@ -10099,7 +10099,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 "Analiza el mensaje y el historial.\n"
                 "Instrucciones de Respuesta:\n"
                 "1. Si el usuario busca un producto, responde: SEARCH: <término preciso>\n"
-                "2. Si la intención implica VER, MOSTRAR, RECIBIR o CONOCER el producto (ej: 'mándame esos', 'quiero ver el último', 'fotos', 'cómo es', 'items'), agrega al final: | SHOW: YES\n"
+                "2. Si la intención implica VER, MOSTRAR, RECIBIR o CONOCER el producto (ej: 'mándame esos', 'quiero ver el último', 'fotos', 'cómo es', 'items', 'la imagen'), agrega al final: | SHOW: YES\n"
                 "3. Si solo pregunta un dato técnico o precio sin intención visual inmediata, usa: | SHOW: NO\n"
                 "4. Si no es sobre productos, responde: NO_APLICA\n\n"
                 "Ejemplos:\n"
@@ -10136,16 +10136,19 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if "SEARCH:" in raw_ds:
                 producto_aplica = "SI_APLICA"
                 # Extraemos la parte del contenido
-                rest = raw_ds.split("SEARCH:", 1)[1].strip()
-                
-                # Detectamos si la IA decidió mostrar imagen
-                if "SHOW: YES" in rest or "SHOW:YES" in rest:
-                    solicita_imagen_ia = True
-                    app.logger.info("📸 La IA decidió que el usuario quiere ver imágenes (SHOW: YES)")
-                
-                # Limpiamos el término de búsqueda (quitamos el flag de SHOW)
-                contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")
-                app.logger.info(f"🔍 IA Search: '{contexto_busqueda}'")
+                try:
+                    rest = raw_ds.split("SEARCH:", 1)[1].strip()
+                    
+                    # Detectamos si la IA decidió mostrar imagen
+                    if "SHOW: YES" in rest or "SHOW:YES" in rest:
+                        solicita_imagen_ia = True
+                        app.logger.info("📸 La IA decidió que el usuario quiere ver imágenes (SHOW: YES)")
+                    
+                    # Limpiamos el término de búsqueda (quitamos el flag de SHOW)
+                    contexto_busqueda = rest.split('|')[0].strip().strip('"').strip("'")
+                    app.logger.info(f"🔍 IA Search: '{contexto_busqueda}'")
+                except IndexError:
+                    pass
 
             elif "SI_APLICA" in raw_ds:
                 producto_aplica = "SI_APLICA"
@@ -10173,29 +10176,47 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 contexto_ia=contexto_ia_final
              )
              
-             # ========== AQUÍ ESTÁ EL CAMBIO CLAVE ==========
-             # Ya no usamos una lista manual de palabras. 
-             # Si la IA dijo SHOW: YES, enviamos.
+             # ========== LÓGICA DE ENVÍO ==========
              solicita_imagen = solicita_imagen_ia
              
-             # Backup: Si la IA falló en poner el flag pero el usuario dijo explícitamente "foto", ayudamos un poco.
-             # (Esto es opcional, pero seguro).
-             if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla']):
+             # Backup: Si la IA falló en poner el flag pero el usuario dijo explícitamente "foto", ayudamos.
+             if not solicita_imagen and any(x in texto.lower() for x in ['foto', 'imagen', 'verla', 'muestras', 'enseñas']):
                  solicita_imagen = True
 
              if solicita_imagen and precios:
-                app.logger.info(f"🖼️ Enviando imágenes por decisión de IA...")
+                app.logger.info(f"🖼️ Enviando imágenes (Filtro Estricto activado)...")
                 
-                # Lógica inteligente de cantidad
+                # --- FILTRO ESTRICTO POST-BÚSQUEDA ---
+                # Si la IA buscó algo específico (ej: "Sainz"), filtramos los resultados que NO lo contengan
+                # para evitar enviar "Hamilton" solo porque salió en la búsqueda amplia.
+                terminos_clave = [t for t in contexto_busqueda.split() if len(t) > 3] # Ignoramos palabras cortas como "de", "el"
+                if terminos_clave:
+                    # Nos quedamos con el último término significativo (suele ser el modelo, ej: "Sainz")
+                    termino_fuerte = terminos_clave[-1].lower()
+                    precios_filtrados = [
+                        p for p in precios 
+                        if termino_fuerte in (p.get('modelo') or '').lower() or 
+                           termino_fuerte in (p.get('descripcion') or '').lower() or
+                           termino_fuerte in (p.get('servicio') or '').lower()
+                    ]
+                    # Si el filtro nos deja con algo, lo usamos. Si nos deja vacíos, volvemos al original.
+                    if precios_filtrados:
+                        app.logger.info(f"🧹 Filtro estricto aplicado: {len(precios)} -> {len(precios_filtrados)} items (Termino: {termino_fuerte})")
+                        precios_imagenes = precios_filtrados
+                    else:
+                        precios_imagenes = precios
+                else:
+                    precios_imagenes = precios
+
+                # Lógica de cantidad
                 cantidad_imagenes = 3
                 if 'todas' in texto.lower():
-                    cantidad_imagenes = 8
-                # Si la búsqueda es muy específica (ej: "Escritorio Sainz 120"), mandamos menos para no saturar
-                elif len(contexto_busqueda) > 10 and len(precios) > 0:
+                    cantidad_imagenes = min(8, len(precios_imagenes))
+                elif len(contexto_busqueda) > 10 and len(precios_imagenes) > 0:
                      cantidad_imagenes = 1
                 
                 imagenes_enviadas = 0
-                for p in precios[:cantidad_imagenes]:
+                for p in precios_imagenes[:cantidad_imagenes]:
                     img_url = p.get('imagen')
                     sku_p = p.get('sku', '')
                     modelo = p.get('modelo', '')
@@ -10215,8 +10236,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 if img_url and sku_p and sku_p.lower() in texto.lower():
                      enviar_imagen(numero, img_url, config)
 
-             # Estrategias de llenado si hay pocos resultados
-             if len(precios) < 30:
+            # Estrategias de llenado si hay pocos resultados (Solo para el catálogo de texto final)
+            if len(precios) < 30:
                 cat_det = detectar_categoria_del_mensaje(texto)
                 if cat_det:
                     prods = obtener_productos_por_categoria(cat_det, config, limite=100)
@@ -10224,7 +10245,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     for prod in prods:
                         if prod.get('sku') not in skus: precios.append(prod)
             
-             if len(precios) < 40:
+            if len(precios) < 40:
                 todos = obtener_todos_los_precios(config) or []
                 skus = {p.get('sku') for p in precios}
                 c = 0
