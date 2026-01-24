@@ -9955,7 +9955,18 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         if not config:
             from app import obtener_configuracion_por_host # Import local para evitar círculos
             config = obtener_configuracion_por_host()
-
+        
+        # --- COPIA Y PEGA DESDE AQUÍ ---
+        print("\n" + "="*50)
+        print("🚨 DEBUG DE IDENTIDAD EN WEBHOOK")
+        if config:
+            print(f"🤖 IA_NOMBRE en DB: '{config.get('ia_nombre')}'")
+            print(f"🏢 NEGOCIO_NOMBRE en DB: '{config.get('negocio_nombre')}'")
+        else:
+            print("❌ ERROR: El objeto 'config' está vacío.")
+        print("="*50 + "\n")
+        # --- HASTA AQUÍ ---
+        
         # Buscamos los datos en la raíz o en el sub-diccionario 'negocio'
         # Esto es lo que permite que sea dinámico para cualquier subdominio
         data = config.get('negocio') if isinstance(config.get('negocio'), dict) else config
