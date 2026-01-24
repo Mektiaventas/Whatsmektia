@@ -9949,33 +9949,34 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 #----------------- Generar Respuesta de Deepseek-----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
     try:
-        # 1. Extraemos los valores exactos de tu configuración web
-        # (Si los nombres en tu DB son diferentes, cámbialos aquí abajo)
-        asistente = config.get('nombre_ia_personalizada') or config.get('nombre_ia') or "Asistente Virtual"
-        empresa = config.get('nombre_negocio') or "nuestra institución"
-        descripcion_negocio = config.get('descripcion_negocio') or ""
-        instrucciones_usuario = config.get('instrucciones_ia') or "Eres un asistente amable."
+        # --- USAMOS LAS LLAVES EXACTAS DE TU HTML ---
+        nombre_ia = config.get('ia_nombre') or "LOVA"
+        nombre_negocio = config.get('negocio_nombre') or "UNILOVA"
+        desc_negocio = config.get('descripcion') or ""
+        instrucciones_ia = config.get('que_hace') or ""
+        contexto_cerebro = config.get('contexto_adicional') or ""
 
-        # 2. Contexto de lo que encontró la base de datos (Productos o Carreras)
-        contexto_productos = ""
+        # --- PREPARAR LOS RESULTADOS (CARRERAS/PRODUCTOS) ---
+        contexto_items = ""
         if precios:
             lineas = []
-            for p in precios[:10]:
-                # En UNILOVA, 'modelo' podría ser el nombre de la carrera/servicio
-                item = p.get('modelo') or p.get('servicio') or p.get('nombre') or 'Opción'
-                valor = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
-                lineas.append(f"- {item} | Info: ${valor}")
-            contexto_productos = "RESULTADOS ENCONTRADOS EN EL SISTEMA:\n" + "\n".join(lineas)
+            for p in precios:
+                # Intentamos sacar el nombre de la carrera del PDF o producto
+                item = p.get('modelo') or p.get('servicio') or p.get('nombre') or 'Programa disponible'
+                lineas.append(f"- {item}")
+            contexto_items = "CARRERAS/CATÁLOGO ENCONTRADO:\n" + "\n".join(lineas)
         else:
-            contexto_productos = "No se encontraron resultados específicos en el catálogo actualmente."
+            contexto_items = "No se encontraron coincidencias específicas en el catálogo."
 
-        # 3. Prompt que usa TODA la configuración del usuario
+        # --- EL PROMPT QUE RESPETA TU IDENTIDAD ---
         system_prompt = (
-            f"Eres {asistente}, el asistente oficial de {empresa}.\n"
-            f"Perfil del negocio: {descripcion_negocio}\n"
-            f"Instrucciones adicionales: {instrucciones_usuario}\n\n"
-            "Misión actual: Saludar brevemente y anunciar que vas a mostrar la información solicitada.\n"
-            "REGLA: Máximo 15-20 palabras. No menciones detalles técnicos, solo da paso a las fichas."
+            f"Eres {nombre_ia}, el asistente oficial de {nombre_negocio}.\n"
+            f"Sobre nosotros: {desc_negocio}\n"
+            f"Tu objetivo: {instrucciones_ia}\n"
+            f"Información adicional: {contexto_cerebro}\n\n"
+            f"REGLA DE SALUDO: Saluda diciendo claramente: '¡Hola! Soy {nombre_ia} de {nombre_negocio}.'"
+            "\nSi hay resultados en el catálogo, solo anúncialos de forma muy breve y natural."
+            "\nRespuesta máxima: 20 palabras."
         )
 
         headers = {
@@ -9987,20 +9988,20 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "model": "deepseek-chat",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"CATÁLOGO DISPONIBLE:\n{contexto_productos}\n\nMENSAJE DEL CLIENTE: {texto}"}
+                {"role": "user", "content": f"{contexto_items}\n\nCLIENTE DICE: {texto}"}
             ],
-            "temperature": 0.3
+            "temperature": 0.4
         }
 
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
         respuesta_texto = resp.json()['choices'][0]['message']['content']
 
-        # 4. Envío y Registro (Usando la función local de app.py)
+        # ENVIAR Y REGISTRAR
         from whatsapp import enviar_mensaje
         enviar_mensaje(numero, respuesta_texto, config)
         
-        # Llamamos directamente a la función que ya existe en tu archivo
+        # Llamada directa a la función en app.py
         registrar_respuesta_bot(numero, texto, respuesta_texto, config, incoming_saved=incoming_saved)
         
         return True
