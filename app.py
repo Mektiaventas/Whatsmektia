@@ -10008,6 +10008,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                                incoming_saved=False, es_mi_numero=False, es_archivo=False):
     # AGREGA ESTA LÍNEA AQUÍ MISMO PARA SABER QUE ESTAMOS EN EL ARCHIVO CORRECTO
     print(f"DEBUG_TOTAL - Recibido: {texto} de {numero}") 
+    # --- TEST DE CARGA DE CONFIGURACION ---
+    print(f"🚨 TEST CONFIG: ia_nombre={config.get('ia_nombre')} | negocio={config.get('negocio_nombre')}")
+    print(f"🚨 TEST DICCIONARIO: {list(config.keys())}")
     app.logger.info(f"DEBUG_TOTAL - Recibido: {texto}")
     """
     Flujo unificado optimizado: Vía Rápida -> Kanban -> IA
