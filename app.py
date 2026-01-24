@@ -10302,6 +10302,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         else:
             # ESTO DEBE SALIR SI O SI EN EL LOG
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+            app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {config.keys() if config else 'CONFIG ES NONE'}")
+            app.logger.error(f"🏢 SUBDOMINIO: {subdominio if 'subdominio' in locals() else 'NO DEFINIDO'}")
             app.logger.error(f"🚨 DEBUG IDENTIDAD: {config.get('ia_nombre') if config else 'SIN CONFIG'}")
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
