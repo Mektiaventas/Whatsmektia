@@ -9949,34 +9949,19 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 #----------------- Generar Respuesta de Deepseek-----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
     try:
-        # --- USAMOS LAS LLAVES EXACTAS DE TU HTML ---
-        nombre_ia = config.get('ia_nombre') or "LOVA"
-        nombre_negocio = config.get('negocio_nombre') or "UNILOVA"
-        desc_negocio = config.get('descripcion') or ""
-        instrucciones_ia = config.get('que_hace') or ""
-        contexto_cerebro = config.get('contexto_adicional') or ""
+        # Extraemos los datos reales configurados por el usuario en la web
+        nombre_ia = config.get('ia_nombre') or "tu asistente"
+        nombre_negocio = config.get('negocio_nombre') or "nuestra empresa"
+        instrucciones = config.get('que_hace') or "Estoy para servirte."
 
-        # --- PREPARAR LOS RESULTADOS (CARRERAS/PRODUCTOS) ---
-        contexto_items = ""
-        if precios:
-            lineas = []
-            for p in precios:
-                # Intentamos sacar el nombre de la carrera del PDF o producto
-                item = p.get('modelo') or p.get('servicio') or p.get('nombre') or 'Programa disponible'
-                lineas.append(f"- {item}")
-            contexto_items = "CARRERAS/CATÁLOGO ENCONTRADO:\n" + "\n".join(lineas)
-        else:
-            contexto_items = "No se encontraron coincidencias específicas en el catálogo."
-
-        # --- EL PROMPT QUE RESPETA TU IDENTIDAD ---
+        # Construimos el prompt dinámico
         system_prompt = (
-            f"Eres {nombre_ia}, el asistente oficial de {nombre_negocio}.\n"
-            f"Sobre nosotros: {desc_negocio}\n"
-            f"Tu objetivo: {instrucciones_ia}\n"
-            f"Información adicional: {contexto_cerebro}\n\n"
-            f"REGLA DE SALUDO: Saluda diciendo claramente: '¡Hola! Soy {nombre_ia} de {nombre_negocio}.'"
-            "\nSi hay resultados en el catálogo, solo anúncialos de forma muy breve y natural."
-            "\nRespuesta máxima: 20 palabras."
+            f"Eres {nombre_ia}, el asistente virtual de {nombre_negocio}. "
+            f"Tu personalidad: Amable, servicial y cálida. "
+            f"Tu objetivo principal: {instrucciones}. \n\n"
+            f"REGLA DE ORO: Saluda siempre de forma natural. Ejemplo: '¡Hola! Soy {nombre_ia}, el asistente de {nombre_negocio}, ¡es un gusto saludarte! ¿En qué puedo apoyarte hoy?' "
+            "\nSi hay información en el catálogo, menciónala brevemente con entusiasmo. "
+            "\nUsa un tono humano, evita ser robótico o seco. Máximo 25 palabras."
         )
 
         headers = {
@@ -9988,26 +9973,22 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "model": "deepseek-chat",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"{contexto_items}\n\nCLIENTE DICE: {texto}"}
+                {"role": "user", "content": f"MENSAJE DEL CLIENTE: {texto}"}
             ],
-            "temperature": 0.4
+            "temperature": 0.7 # Subimos la temperatura para que sea menos 'seco'
         }
 
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
         respuesta_texto = resp.json()['choices'][0]['message']['content']
 
-        # ENVIAR Y REGISTRAR
         from whatsapp import enviar_mensaje
         enviar_mensaje(numero, respuesta_texto, config)
-        
-        # Llamada directa a la función en app.py
         registrar_respuesta_bot(numero, texto, respuesta_texto, config, incoming_saved=incoming_saved)
         
         return True
-
     except Exception as e:
-        app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
+        app.logger.error(f"🔴 Error: {e}")
         return False
         
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
