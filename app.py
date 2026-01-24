@@ -10300,6 +10300,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         c += 1
         
         else:
+            # === PASO A: REINSERCIÓN DE IDENTIDAD (Lo que "ya jalaba") ===
+            try:
+                data_db = load_config(config)
+                if data_db and 'negocio' in data_db:
+                    config.update(data_db['negocio'])
+                    config.update(data_db['personalizacion'])
+                    config.update(data_db['restricciones'])
+                    # Con esto, config['ia_nombre'] ya tiene el valor real de la DB
+            except Exception as e:
+                app.logger.error(f"❌ Falló load_config en el else: {e}")
+            # ============================================================
             # ESTO DEBE SALIR SI O SI EN EL LOG
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {config.keys() if config else 'CONFIG ES NONE'}")
