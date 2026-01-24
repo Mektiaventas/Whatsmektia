@@ -10070,8 +10070,84 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 historial_text += f"Usuario: {h.get('mensaje')}\n"
             if h.get('respuesta'):
                 historial_text += f"Asistente: {h.get('respuesta')}\n"
+
+
+
+                
+#----------------- Generar Respuesta de Deepseek-----------------
+def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
+    """
+    Función auxiliar para generar la respuesta de texto (introducción o explicación)
+    usando DeepSeek antes de enviar las fichas de producto.
+    """
+    try:
+        # 1. Preparar el contexto de productos para la IA
+        contexto_productos = ""
+        if precios:
+            lineas = []
+            for p in precios[:15]: # Limitamos para no saturar el prompt
+                nombre = p.get('modelo') or p.get('servicio') or 'Producto'
+                sku = p.get('sku', 'S/N')
+                precio = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
+                lineas.append(f"- {nombre} (SKU: {sku}) | Precio: ${precio}")
+            contexto_productos = "PRODUCTOS ENCONTRADOS:\n" + "\n".join(lineas)
+        else:
+            contexto_productos = "No se encontraron productos específicos en esta búsqueda."
+
+        # 2. Construir el Historial para la IA
+        historial_texto = ""
+        for h in historial:
+            u = h.get('mensaje') or ""
+            a = h.get('respuesta') or ""
+            if u: historial_texto += f"Usuario: {u}\n"
+            if a: historial_texto += f"Asistente: {a}\n"
+
+        # 3. Prompt del Sistema
+        system_prompt = (
+            f"Eres un vendedor experto de {config.get('dominio', 'nuestra tienda')}.\n"
+            "Tu objetivo es saludar al cliente y presentarle las opciones de forma amable.\n"
+            "REGLA CRÍTICA: Si vas a mostrar productos, responde SOLO con una frase breve de introducción "
+            "(ej: '¡Claro! Aquí tienes los escritorios que encontré:'). NO des detalles técnicos ni precios "
+            "aquí, porque el sistema enviará fichas automáticas justo después de tu mensaje."
+        )
+
+        # 4. Llamada a DeepSeek
+        headers = {
+            "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
+            "Content-Type": "application/json"
+        }
         
+        payload = {
+            "model": "deepseek-chat",
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"HISTORIAL:\n{historial_texto}\n\n{contexto_productos}\n\nMENSAJE USUARIO: {texto}"}
+            ],
+            "temperature": 0.7
+        }
+
+        resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        respuesta_texto = data['choices'][0]['message']['content']
+
+        # 5. Enviar el mensaje de texto al usuario
+        from whatsapp import enviar_mensaje
+        enviar_mensaje(numero, respuesta_texto, config)
         
+        # Registrar la respuesta en la base de datos
+        from app import registrar_respuesta_bot # Asegúrate de que el import sea correcto según tu estructura
+        registrar_respuesta_bot(numero, texto, respuesta_texto, config, incoming_saved=incoming_saved)
+        
+        return True
+
+    except Exception as e:
+        current_app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
+        # Fallback simple si falla la IA
+        enviar_mensaje(numero, "Aquí tienes la información que solicitaste:", config)
+        return False
+#--------------- Fin de Generar Respuesta de Deepseek -----------------------------
+
         # ================================================================
         # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
         # ================================================================
