@@ -1559,6 +1559,7 @@ def analizar_imagen_y_responder(numero, imagen_base64, caption, public_url=None,
         config = obtener_configuracion_por_host()
 
     try:
+        print(f"DEBUG 2 (Imagen): ia_nombre={config.get('ia_nombre')}, negocio={config.get('negocio_nombre')}")
         # 1. BÚSQUEDA INTELIGENTE (No cargamos todo, buscamos por lo que el usuario escribió)
         termino = caption if (caption and len(caption) > 2) else "productos"
         # Buscamos un poco más del límite para saber si debemos filtrar
@@ -9949,6 +9950,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 #----------------- Generar Respuesta de Deepseek-----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
     try:
+        print(f"DEBUG 1 (DeepSeek): ia_nombre={config.get('ia_nombre')}, negocio={config.get('negocio_nombre')}")
         # Si config viene como None o vacío, intentamos usar la configuración global del host
         if not config:
             from app import obtener_configuracion_por_host # Import local para evitar círculos
@@ -10472,6 +10474,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         info_negocio_dinamica = f'Descripción: {negocio_descripcion_short} | Rol: {negocio_que_hace_short}' if not ia_ya_respondio else "Responde directo a la duda sin dar descripciones del negocio."
 
         # --- System prompt (REEMPLAZO COMPLETO) ---
+        print(f"DEBUG 3 (IA TOTAL): ia_nombre={config.get('ia_nombre')}, negocio={config.get('negocio_nombre')}")
         system_prompt = f"""
 Eres {ia_nombre}, el asistente de {negocio_nombre}. 
 Instrucciones de tu personalidad: {negocio_que_hace_short}
