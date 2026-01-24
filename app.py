@@ -9948,42 +9948,36 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 
 #----------------- Generar Respuesta de Deepseek-----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
-    """
-    Función auxiliar para generar la respuesta de texto (introducción o explicación)
-    usando DeepSeek antes de enviar las fichas de producto.
-    """
     try:
-        # 1. Preparar el contexto de productos para la IA
+        # 1. Extraemos los valores exactos de tu configuración web
+        # (Si los nombres en tu DB son diferentes, cámbialos aquí abajo)
+        asistente = config.get('nombre_ia_personalizada') or config.get('nombre_ia') or "Asistente Virtual"
+        empresa = config.get('nombre_negocio') or "nuestra institución"
+        descripcion_negocio = config.get('descripcion_negocio') or ""
+        instrucciones_usuario = config.get('instrucciones_ia') or "Eres un asistente amable."
+
+        # 2. Contexto de lo que encontró la base de datos (Productos o Carreras)
         contexto_productos = ""
         if precios:
             lineas = []
-            for p in precios[:15]: # Limitamos para no saturar el prompt
-                nombre = p.get('modelo') or p.get('servicio') or 'Producto'
-                sku = p.get('sku', 'S/N')
-                precio = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
-                lineas.append(f"- {nombre} (SKU: {sku}) | Precio: ${precio}")
-            contexto_productos = "PRODUCTOS ENCONTRADOS:\n" + "\n".join(lineas)
+            for p in precios[:10]:
+                # En UNILOVA, 'modelo' podría ser el nombre de la carrera/servicio
+                item = p.get('modelo') or p.get('servicio') or p.get('nombre') or 'Opción'
+                valor = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
+                lineas.append(f"- {item} | Info: ${valor}")
+            contexto_productos = "RESULTADOS ENCONTRADOS EN EL SISTEMA:\n" + "\n".join(lineas)
         else:
-            contexto_productos = "No se encontraron productos específicos en esta búsqueda."
+            contexto_productos = "No se encontraron resultados específicos en el catálogo actualmente."
 
-        # 2. Construir el Historial para la IA
-        historial_texto = ""
-        for h in historial:
-            u = h.get('mensaje') or ""
-            a = h.get('respuesta') or ""
-            if u: historial_texto += f"Usuario: {u}\n"
-            if a: historial_texto += f"Asistente: {a}\n"
-
-        # 3. Prompt del Sistema
+        # 3. Prompt que usa TODA la configuración del usuario
         system_prompt = (
-            f"Eres un vendedor experto de {config.get('dominio', 'nuestra tienda')}.\n"
-            "Tu objetivo es saludar al cliente y presentarle las opciones de forma amable.\n"
-            "REGLA CRÍTICA: Si vas a mostrar productos, responde SOLO con una frase breve de introducción "
-            "(ej: '¡Claro! Aquí tienes los escritorios que encontré:'). NO des detalles técnicos ni precios "
-            "aquí, porque el sistema enviará fichas automáticas justo después de tu mensaje."
+            f"Eres {asistente}, el asistente oficial de {empresa}.\n"
+            f"Perfil del negocio: {descripcion_negocio}\n"
+            f"Instrucciones adicionales: {instrucciones_usuario}\n\n"
+            "Misión actual: Saludar brevemente y anunciar que vas a mostrar la información solicitada.\n"
+            "REGLA: Máximo 15-20 palabras. No menciones detalles técnicos, solo da paso a las fichas."
         )
 
-        # 4. Llamada a DeepSeek
         headers = {
             "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
             "Content-Type": "application/json"
@@ -9993,30 +9987,26 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "model": "deepseek-chat",
             "messages": [
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"HISTORIAL:\n{historial_texto}\n\n{contexto_productos}\n\nMENSAJE USUARIO: {texto}"}
+                {"role": "user", "content": f"CATÁLOGO DISPONIBLE:\n{contexto_productos}\n\nMENSAJE DEL CLIENTE: {texto}"}
             ],
-            "temperature": 0.7
+            "temperature": 0.3
         }
 
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
         resp.raise_for_status()
-        data = resp.json()
-        respuesta_texto = data['choices'][0]['message']['content']
+        respuesta_texto = resp.json()['choices'][0]['message']['content']
 
-        # 5. Enviar el mensaje de texto al usuario
+        # 4. Envío y Registro (Usando la función local de app.py)
         from whatsapp import enviar_mensaje
         enviar_mensaje(numero, respuesta_texto, config)
         
-        # Registrar la respuesta en la base de datos
-        from app import registrar_respuesta_bot # Asegúrate de que el import sea correcto según tu estructura
+        # Llamamos directamente a la función que ya existe en tu archivo
         registrar_respuesta_bot(numero, texto, respuesta_texto, config, incoming_saved=incoming_saved)
         
         return True
-            
+
     except Exception as e:
-        current_app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
-        # Fallback simple si falla la IA
-        enviar_mensaje(numero, "Aquí tienes la información que solicitaste:", config)
+        app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
         return False
         
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
