@@ -10285,6 +10285,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 incoming_saved=incoming_saved,
                 es_audio=es_audio
             )
+            return True  # <--- ESTO evitará que el código siga bajando y mande otro saludo
 
         # --- 1. PRIMERO: GENERAR RESPUESTA DE INTRODUCCIÓN ---
         # DeepSeek dará una intro breve si detectó SHOW: YES
