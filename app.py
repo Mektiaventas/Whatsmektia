@@ -10232,11 +10232,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         precios_imagenes = precios_filtrados
 
                 # Seleccionar cantidad
-                cantidad_imagenes = 3
+                # --- PASO 2: LÓGICA DE CANTIDAD SEGÚN EL CATÁLOGO ---
+                # Si el usuario pide "todas", mandamos hasta 10.
                 if 'todas' in texto.lower():
-                    cantidad_imagenes = min(8, len(precios_imagenes))
-                elif len(contexto_busqueda) > 10 and len(precios_imagenes) > 0:
-                    cantidad_imagenes = 1
+                    cantidad_imagenes = min(10, len(precios_imagenes))
+                else:
+                    # Si el catálogo devolvió pocos resultados (como las 2 carreras de Unilova),
+                    # los mandamos todos. Si devolvió muchísimos (como Ofitodo), mandamos solo 3.
+                    if len(precios_imagenes) <= 4:
+                        cantidad_imagenes = len(precios_imagenes)
+                    else:
+                        cantidad_imagenes = 3
                 
                 # Guardamos los productos elegidos
                 productos_para_ficha = precios_imagenes[:cantidad_imagenes]
