@@ -9949,10 +9949,18 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 #----------------- Generar Respuesta de Deepseek-----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False):
     try:
-        # Extraemos los datos reales configurados por el usuario en la web
-        nombre_ia = config.get('ia_nombre') or "tu asistente"
-        nombre_negocio = config.get('negocio_nombre') or "nuestra empresa"
-        instrucciones = config.get('que_hace') or "Estoy para servirte."
+        # Si config viene como None o vacío, intentamos usar la configuración global del host
+        if not config:
+            from app import obtener_configuracion_por_host # Import local para evitar círculos
+            config = obtener_configuracion_por_host()
+
+        # Buscamos los datos en la raíz o en el sub-diccionario 'negocio'
+        # Esto es lo que permite que sea dinámico para cualquier subdominio
+        data = config.get('negocio') if isinstance(config.get('negocio'), dict) else config
+
+        nombre_ia = data.get('ia_nombre') or "tu asistente"
+        nombre_negocio = data.get('negocio_nombre') or "nuestra empresa"
+        instrucciones = data.get('que_hace') or "Estoy para servirte."
 
         # Construimos el prompt dinámico
         # --- PASO 1: IDENTIDAD ESTRICTA ---
