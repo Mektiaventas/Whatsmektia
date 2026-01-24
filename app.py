@@ -10301,6 +10301,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
         else:
             app.logger.info(f"📦 Consulta general (Charla/Identidad), llamando a IA...")
+            # --- COPIA Y PEGA DESDE AQUÍ ---
+            print("\n" + "="*50)
+            print("🚨 DEBUG DE IDENTIDAD EN WEBHOOK")
+            if config:
+                print(f"🤖 IA_NOMBRE en DB: '{config.get('ia_nombre')}'")
+                print(f"🏢 NEGOCIO_NOMBRE en DB: '{config.get('negocio_nombre')}'")
+            else:
+                print("❌ ERROR: El objeto 'config' está vacío.")
+            print("="*50 + "\n")
+            # --- HASTA AQUÍ ---
+    
+            # Esta es la línea que ya tienes, no la borres, solo asegúrate que lo de arriba esté antes
+            processed_ok = procesar_mensaje_unificado(
+                msg=msg,
+                numero=numero,
             generar_respuesta_deepseek(
                 numero=numero,
                 texto=texto,
