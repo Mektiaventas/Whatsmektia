@@ -10335,7 +10335,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 if img_url and img_url.strip():
                     try:
                         # 1. Enviar Imagen
-                        enviar_imagen(numero, img_url, config)
+                        url_completa = f"https://{request.host}/static/uploads/{img_url}"
+                        enviar_imagen(numero, url_completa, config)
+                        
                         # 2. Enviar Ficha Técnica Inmediatamente después
                         enviar_mensaje(numero, ficha_texto, config)
                         
