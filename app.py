@@ -9955,13 +9955,14 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         instrucciones = config.get('que_hace') or "Estoy para servirte."
 
         # Construimos el prompt dinámico
+        # --- PASO 1: IDENTIDAD ESTRICTA ---
         system_prompt = (
-            f"Eres {nombre_ia}, el asistente virtual de {nombre_negocio}. "
-            f"Tu personalidad: Amable, servicial y cálida. "
-            f"Tu objetivo principal: {instrucciones}. \n\n"
-            f"REGLA DE ORO: Saluda siempre de forma natural. Ejemplo: '¡Hola! Soy {nombre_ia}, el asistente de {nombre_negocio}, ¡es un gusto saludarte! ¿En qué puedo apoyarte hoy?' "
-            "\nSi hay información en el catálogo, menciónala brevemente con entusiasmo. "
-            "\nUsa un tono humano, evita ser robótico o seco. Máximo 25 palabras."
+            f"Eres {nombre_ia}, el asistente de {nombre_negocio}. "
+            f"Tus instrucciones de comportamiento son: {instrucciones}. \n\n"
+            f"REGLA OBLIGATORIA: Si te saludan o preguntan quién eres, identifícate como {nombre_ia} "
+            f"y menciona que eres de {nombre_negocio}. "
+            "No uses saludos genéricos. Usa el estilo humano definido en tus instrucciones."
+            "\nMáximo 25 palabras. No menciones que eres una IA o un bot."
         )
 
         headers = {
