@@ -11717,7 +11717,7 @@ def home():
         period=period,
         labels=labels,
         values=values,
-        plan_info=plan_info
+        plan_info=plan_info,
         pbi_url=pbi_url  # <--- 2. AGREGA ESTA VARIABLE AQUÍ
     )
 def _ensure_contactos_conversaciones_columns(config=None):
