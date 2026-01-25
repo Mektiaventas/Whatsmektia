@@ -99,6 +99,8 @@ client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 # Reemplaza tu bloque NUMEROS_CONFIG (línea 92) con este:
 NUMEROS_CONFIG = {
     '524495486824': {  # Número de Mektia Old: 524495486142
+        'nombre': 'Smartwhats',
+        'pbi_url': 'https://app.powerbi.com/reportEmbed?reportId=4050461d-9882-47dc-a08e-c2c19424cc71&autoAuth=true&ctid=e6463bd4-cb0c-4fb3-8b07-94f01ef35b6d',
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -111,6 +113,8 @@ NUMEROS_CONFIG = {
         'messenger_token_env': 'MEKTIA_PAGE_ACCESS_TOKEN'
     },
     '123': {  # Número de Unilova
+        'nombre': 'Unilova',
+        'pbi_url': 'https://app.powerbi.com/reportEmbed?reportId=6cda2032-b7fe-4b0c-8a77-b20422679480&autoAuth=true&ctid=e6463bd4-cb0c-4fb3-8b07-94f01ef35b6d',        
         'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("UNILOVA_DB_HOST"),
