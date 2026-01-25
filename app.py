@@ -100,7 +100,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 NUMEROS_CONFIG = {
     '524495486824': {  # Número de Mektia Old: 524495486142
         'nombre': 'Smartwhats',
-        'pbi_url': 'https://app.powerbi.com/reportEmbed?reportId=4050461d-9882-47dc-a08e-c2c19424cc71&autoAuth=true&ctid=e6463bd4-cb0c-4fb3-8b07-94f01ef35b6d',
+        'pbi_url': 'https://app.powerbi.com/view?r=eyJrIjoiZDFlOGMyNjQtOTI4OS00MzBkLTk5MzctODY4MGEwM2NkNWNhIiwidCI6ImU2NDYzYmQ0LWNiMGMtNGZiMy04YjA3LTk0ZjAxZWYzNWI2ZCJ9',
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
