@@ -11709,6 +11709,8 @@ def home():
     except Exception as e:
         app.logger.warning(f"⚠️ No se pudo obtener plan_info para el usuario: {e}")
         plan_info = None
+    # 1. PONES ESTA LÍNEA AQUÍ (justo antes del return):
+    pbi_url = config.get('pbi_url', '')
 
     return render_template('dashboard.html',
         chat_counts=chat_counts,
