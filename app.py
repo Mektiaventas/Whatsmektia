@@ -114,7 +114,7 @@ NUMEROS_CONFIG = {
     },
     '123': {  # Número de Unilova
         'nombre': 'Unilova',
-        'pbi_url': 'https://app.powerbi.com/reportEmbed?reportId=6cda2032-b7fe-4b0c-8a77-b20422679480&autoAuth=true&ctid=e6463bd4-cb0c-4fb3-8b07-94f01ef35b6d',        
+        'pbi_url': 'https://app.powerbi.com/view?r=eyJrIjoiMDVmOWRlNmMtZGIxOS00NmY4LWEyNDYtYjFlZTlhNjlkMWM4IiwidCI6ImU2NDYzYmQ0LWNiMGMtNGZiMy04YjA3LTk0ZjAxZWYzNWI2ZCJ9',        
         'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("UNILOVA_DB_HOST"),
