@@ -11718,6 +11718,7 @@ def home():
         labels=labels,
         values=values,
         plan_info=plan_info
+        pbi_url=pbi_url  # <--- 2. AGREGA ESTA VARIABLE AQUÍ
     )
 def _ensure_contactos_conversaciones_columns(config=None):
     """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
