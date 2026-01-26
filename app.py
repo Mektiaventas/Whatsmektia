@@ -5041,7 +5041,7 @@ def get_plan_status_for_user(user_email, config=None):
         'plan_name': plan_name,
         'mensajes_incluidos': mensajes_incluidos,
         'mensajes_consumidos': conversaciones_consumidas,
-        'mensajes_disponibles': mensajes_disponibles
+        'mensajes_disponibles': mensajes_disponibles,
         'pbi_url': pbi_url  # <--- Agrega esta línea
     }
     
