@@ -1,16 +1,15 @@
-{# Agrego la visualización del plan en la parte superior del dashboard #}
+{# Dashboard simplificado: Solo indicadores de plan y Power BI #}
 {% extends "base.html" %}
 {% block title %}Dashboard General{% endblock %}
 
 {% block content %}
 <style>
-    /* Layout tweaks: reduce vertical spacing to "subir" todo un poco */
     .header-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        margin-bottom: 0.5rem; 
+        margin-bottom: 1.5rem; 
         color: white;
     }
 
@@ -18,177 +17,84 @@
         color: white;
         margin: 0;
         font-size: 1.5rem;
-        flex: 1 1 auto;
-        min-width: 0; 
     }
 
     .plan-box {
         background: rgba(255,255,255,0.06);
-        padding: 8px 10px;
+        padding: 8px 12px;
         border-radius: 8px;
         color: #fff;
         display: inline-flex;
         align-items: center;
         gap: 10px;
-        flex-shrink: 0;
-        max-width: 420px;
         font-size: 0.9rem;
-        line-height: 1.2;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-
-    .plan-box .plan-details {
-        display: inline-flex;
-        gap: 12px;
-        align-items: center;
-        flex-wrap: wrap;
-    }
-
-    .plan-metric {
-        display: inline-block;
-        margin-right: 8px;
-        white-space: nowrap;
-    }
-
-    .tabs {
-        margin-bottom: 0.3rem; 
-    }
-
-    .tabs a {
-        padding: 8px 8px; 
-        text-decoration: none;
-        border-radius: 20px;
-        border: 2px solid #1f4e79;
-        color: #1f4e79;
-        margin-right: 10px;
-        display: inline-block;
-        margin-bottom: 8px;
-        cursor: pointer;
-        font-size: 0.95rem;
-    }
-
-    .tabs a.active {
-        background-color: #1f4e79;
-        color: white;
     }
 
     .stats {
-        margin-top: 6px; 
         display: flex;
         flex-wrap: wrap;
-        gap: 0.6rem;
-        align-items: flex-start;
-        justify-content: flex-start;
+        gap: 1rem;
+        margin-bottom: 2rem;
     }
 
     .stat-card {
         background: rgba(255, 255, 255, 0.95);
-        padding: 4px 8px;
-        border-radius: 8px;
+        padding: 15px;
+        border-radius: 12px;
         border-left: 6px solid #1f4e79;
-        width: auto;
-        flex: 1 1 calc(50% - 0.6rem); 
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-        font-size: 0.78rem;
-        align-items: center;
-        justify-content: center;
+        flex: 1;
+        min-width: 200px;
         text-align: center;
-        box-sizing: border-box;
-        min-height: 30px;
-    }
-
-    .stat-card > div {
-        font-size: 1.05rem;
-        font-weight: 600;
-        color: #222;
-        line-height: 1.1;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 100%;
-        box-sizing: border-box;
-        padding: 0;
-        margin-top: 2px;
-        overflow: visible; 
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     }
 
     .stat-card strong {
         display: block;
-        font-size: 0.78rem;
-        font-weight: 300;
-        color: #333;
-        margin-bottom: 2px;
-        line-height: 1;
+        font-size: 0.85rem;
+        color: #666;
+        margin-bottom: 5px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
     }
 
-    .chart-container {
-        margin-top: 1rem; 
-        width: 100%;
-        position: relative;
-        height: 400px;
+    .stat-card .value {
+        font-size: 1.8rem;
+        font-weight: 700;
+        color: #1f4e79;
     }
 
     @media (max-width: 768px) {
-        .header-row { flex-direction: column; align-items: stretch; }
-        .plan-box { max-width: 100%; }
-        .stats { flex-direction: column; gap: 0.5rem; }
+        .header-row { flex-direction: column; align-items: flex-start; }
+        .stats { flex-direction: column; }
     }
-
-    .tab-pane { display: none; }
-    .tab-pane.active { display: block; }
 </style>
 
-<div style="max-width: 1200px; margin: 0 auto; padding: 0.6rem 1rem;">
+<div style="max-width: 1200px; margin: 0 auto; padding: 1.5rem 1rem;">
+    
     <div class="header-row">
         <h1>Dashboard General</h1>
 
         {% if plan_info %}
-        <div class="plan-box" title="{{ plan_info.plan_name or ('Plan ID: ' ~ (plan_info.plan_id or 'N/A')) }}">
-            <strong style="margin-right:6px;">Plan Info:</strong>
-            <div class="plan-details">
-                <span class="plan-metric"><strong>Plan:</strong> {{ plan_info.plan_name or ('ID: ' ~ (plan_info.plan_id or 'N/A')) }}</span>
-                <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }}</span>
-                <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }}</span>
-                <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
-            </div>
+        <div class="plan-box">
+            <strong>Plan:</strong> {{ plan_info.plan_name or 'Activo' }}
         </div>
         {% endif %}
     </div>
 
-    <div class="tabs">
-        <a id="tab-conversaciones" data-tab="conversaciones" class="{{ 'active' if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') else '' }}">Resumen de Plan</a>
-        <a data-tab="overview" data-period="year" class="{{ 'active' if period == 'year' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=year">Histórico Mensual</a>
-        <a data-tab="overview" data-period="month" class="{{ 'active' if period == 'month' and request.args.get('tab') == 'overview' else '' }}" href="?tab=overview&period=month">Últimos 30 días</a>
-    </div>
-
-    <div id="pane-overview" class="tab-pane {% if request.args.get('tab') == 'overview' %}active{% endif %}">
-        <div class="chart-container">
-            <canvas id="barChart"></canvas>
+    <div class="stats">
+        <div class="stat-card">
+            <strong>Conversaciones Disponibles</strong>
+            <div id="planDisponibles" class="value">—</div>
+        </div>
+        <div class="stat-card">
+            <strong>Conversaciones Consumidas</strong>
+            <div id="planConsumidos" class="value">—</div>
         </div>
     </div>
-
-    <div id="pane-conversaciones" class="tab-pane {% if request.args.get('tab') == 'conversaciones' or not request.args.get('tab') %}active{% endif %}">
-        <div class="stats" style="margin-top:0;">
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones disponibles (plan):</strong>
-                <div id="planDisponibles">—</div>
-            </div>
-            <div class="stat-card" style="min-height:64px;height:64px;">
-                <strong>Conversaciones consumidas (plan):</strong>
-                <div id="planConsumidos">—</div>
-            </div>
-        </div>
-        </div>
 
     {% if pbi_url %}
-    <div class="pbi-section" style="margin-top: 2rem; background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
-        <h3 style="color: white; margin-bottom: 15px; font-size: 1.2rem; font-weight: 400; display: flex; align-items: center; gap: 10px;">
+    <div class="pbi-section" style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+        <h3 style="color: white; margin-bottom: 15px; font-size: 1.1rem; font-weight: 400; display: flex; align-items: center; gap: 10px;">
             <span style="color: #f2c811;">📊</span> Reporte Detallado de Negocio
         </h3>
         <div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
@@ -204,79 +110,8 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
-
 <script>
-  let overviewChart = null;
-  const CURRENT_PERIOD = '{{ period }}';
-
-  (function renderOverview(){
-      const ctx = document.getElementById('barChart') && document.getElementById('barChart').getContext('2d');
-      if (!ctx) return;
-      const rawValues = {{ values| tojson }};
-      const data = {
-            labels: {{ labels| tojson }},
-        datasets: [{
-            label: 'Mensajes por número',
-            data: rawValues,
-            backgroundColor: '#1f4e79'
-        }]
-      };
-      if (overviewChart) overviewChart.destroy();
-      overviewChart = new Chart(ctx, {
-        type: 'bar',
-        data: data,
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            datalabels: { anchor: 'end', align: 'end', color: '#fff', font: { weight: 'bold', size: 14 } }
-          },
-          scales: {
-            y: { beginAtZero: true, ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } },
-            x: { ticks: { color: 'white' }, grid: { color: 'rgba(255,255,255,0.1)' } }
-          }
-        },
-        plugins: [ChartDataLabels]
-      });
-  })();
-
-  function showTab(tab) {
-      document.querySelectorAll('.tabs a').forEach(a => a.classList.remove('active'));
-      if (tab === 'overview') {
-          let el = document.querySelector(`.tabs a[data-period="${CURRENT_PERIOD}"]`) || document.querySelector('.tabs a[data-tab="overview"]');
-          if (el) el.classList.add('active');
-      } else {
-          document.querySelectorAll(`.tabs a[data-tab="${tab}"]`).forEach(a => a.classList.add('active'));
-      }
-      document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
-      const pane = document.getElementById('pane-' + tab);
-      if (pane) pane.classList.add('active');
-      if (tab === 'conversaciones') loadConversacionesData();
-      setTimeout(() => { if (overviewChart) overviewChart.resize(); }, 200);
-  }
-
-  document.querySelectorAll('.tabs a').forEach(a => {
-      a.addEventListener('click', function(e){
-          const tab = this.getAttribute('data-tab') || 'overview';
-          const dp = this.getAttribute('data-period');
-          const url = new URL(window.location);
-          e.preventDefault();
-          if (dp) {
-              url.searchParams.set('tab', 'overview');
-              url.searchParams.set('period', dp);
-              window.location.href = url.toString();
-              return;
-          }
-          url.searchParams.set('tab', tab);
-          window.history.replaceState({}, '', url);
-          showTab(tab);
-      });
-  });
-
-  async function loadConversacionesData() {
+  async function loadPlanData() {
       try {
           const res = await fetch(`/dashboard/conversaciones-data?period=3months`);
           const json = await res.json();
@@ -286,22 +121,14 @@
           const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
           const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info?.mensajes_disponibles || 'N/A');
 
-          const elDisponibles = document.getElementById('planDisponibles');
-          const elConsumidos = document.getElementById('planConsumidos');
-          if (elDisponibles) elDisponibles.innerText = available;
-          if (elConsumidos) elConsumidos.innerText = consumed;
-
-          // SE ELIMINÓ EL RENDERIZADO DE LOS GRÁFICOS RESTANTES AQUÍ
+          document.getElementById('planDisponibles').innerText = available;
+          document.getElementById('planConsumidos').innerText = consumed;
       } catch (err) {
-          console.error('Error cargando datos de dashboard', err);
+          console.error('Error cargando datos del plan', err);
       }
   }
 
-  (function initTabFromUrl(){
-      const params = new URLSearchParams(window.location.search);
-      showTab(params.get('tab') === 'overview' ? 'overview' : 'conversaciones');
-  })();
-
-  window.addEventListener('resize', () => { if (overviewChart) overviewChart.resize(); });
+  // Cargar datos al iniciar
+  window.onload = loadPlanData;
 </script>
 {% endblock %}
