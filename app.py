@@ -4992,35 +4992,33 @@ def get_plan_for_domain(dominio):
     return None
 
 def get_plan_status_for_user(user_email, config=None):
-    # 1. Obtener la configuración si no existe
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # 2. Extraer el host/dominio
-    current_host = config.get('host') if config else None
+    # 1. Limpiamos el host (quitamos puertos si existen)
+    current_host = config.get('host', '').split(':')[0] 
     
-    # 3. USAR TU FUNCIÓN EXISTENTE PARA OBTENER EL PLAN
-    # Esta función ya busca en domain_plans y usa get_clientes_conn()
+    # DEBUG: Esto aparecerá en tu consola/terminal de Python
+    app.logger.info(f"🔍 BUSCANDO PLAN PARA EL DOMINIO: '{current_host}'")
+    
     plan_data = get_plan_for_domain(current_host)
     
     if plan_data:
+        app.logger.info(f"✅ PLAN ENCONTRADO: {plan_data}")
         mensajes_incluidos = int(plan_data.get('mensajes_incluidos') or 0)
         plan_id = plan_data.get('plan_id')
         plan_name = f"Plan {plan_id}"
     else:
-        # Si no encuentra el dominio en la tabla, aquí es donde estaba el 10000.
-        # Lo bajamos a 0 o un valor real de error para saber que no lo encontró.
-        app.logger.warning(f"⚠️ No se encontró plan en domain_plans para: {current_host}")
+        # DEBUG: Si entra aquí, el dominio no existe en la tabla domain_plans
+        app.logger.warning(f"❌ NO SE ENCONTRÓ EL DOMINIO '{current_host}' EN LA TABLA domain_plans")
         mensajes_incluidos = 0 
-        plan_name = "Sin Plan Asignado"
+        plan_name = "Dominio no registrado"
 
-    # --- 4. Cálculo de Consumo Dinámico (Mes Actual) ---
+    # --- Resto del código de consumo (el que ya tenías) ---
     conversaciones_consumidas = 0
     try:
         conn_t = get_db_connection(config)
         cur_t = conn_t.cursor()
-
-        # Sumamos las conversaciones del mes y año actual
         sql_sessions = """
             SELECT SUM(conversaciones) 
             FROM contactos 
@@ -5030,14 +5028,11 @@ def get_plan_status_for_user(user_email, config=None):
         cur_t.execute(sql_sessions)
         row = cur_t.fetchone()
         conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
-        
         cur_t.close()
         conn_t.close()
     except Exception as e:
-        app.logger.error(f"⚠️ Error al contar consumo en tenant: {e}")
         conversaciones_consumidas = 0
 
-    # --- 5. Cálculo de Disponibles ---
     mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
 
     return {
