@@ -11714,7 +11714,7 @@ def home():
         labels=labels,
         values=values,
         plan_info=plan_status, 
-        pbi_url=plan_status.get('pbi_url')) # <--- Asegúrate de que esto esté así
+        pbi_url=plan_status.get('pbi_url') # <--- Asegúrate de que esto esté así
     )
 
 def _ensure_contactos_conversaciones_columns(config=None):
