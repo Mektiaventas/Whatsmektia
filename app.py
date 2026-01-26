@@ -4992,33 +4992,36 @@ def get_plan_for_domain(dominio):
     return None
 
 def get_plan_status_for_user(user_email, config=None):
+    # 1. Asegurar que tenemos la config para el consumo
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # 1. Limpiamos el host (quitamos puertos si existen)
-    current_host = config.get('host', '').split(':')[0] 
+    # 2. OBTENER EL DOMINIO DIRECTAMENTE DEL NAVEGADOR
+    # request.host detecta 'smartwhats.mektia.com', 'unilova.mektia.com', etc.
+    raw_host = request.host.lower().split(':')[0] 
     
-    # DEBUG: Esto aparecerá en tu consola/terminal de Python
-    app.logger.info(f"🔍 BUSCANDO PLAN PARA EL DOMINIO: '{current_host}'")
+    app.logger.info(f"🔍 BUSCANDO PLAN PARA: '{raw_host}'")
     
-    plan_data = get_plan_for_domain(current_host)
+    # 3. Llamamos a tu función de búsqueda (la que ya limpia y busca candidatos)
+    plan_data = get_plan_for_domain(raw_host)
     
     if plan_data:
-        app.logger.info(f"✅ PLAN ENCONTRADO: {plan_data}")
+        app.logger.info(f"✅ PLAN ENCONTRADO: {plan_data['mensajes_incluidos']} mensajes.")
         mensajes_incluidos = int(plan_data.get('mensajes_incluidos') or 0)
         plan_id = plan_data.get('plan_id')
         plan_name = f"Plan {plan_id}"
     else:
-        # DEBUG: Si entra aquí, el dominio no existe en la tabla domain_plans
-        app.logger.warning(f"❌ NO SE ENCONTRÓ EL DOMINIO '{current_host}' EN LA TABLA domain_plans")
+        # Si llega aquí, es que 'unilova.mektia.com' NO está en la tabla domain_plans
+        app.logger.warning(f"❌ EL DOMINIO '{raw_host}' NO EXISTE EN domain_plans")
         mensajes_incluidos = 0 
-        plan_name = "Dominio no registrado"
+        plan_name = "Sin plan en DB"
 
-    # --- Resto del código de consumo (el que ya tenías) ---
+    # --- 4. Cálculo de Consumo (Mes Actual) ---
     conversaciones_consumidas = 0
     try:
         conn_t = get_db_connection(config)
         cur_t = conn_t.cursor()
+        # Automático: toma el mes y año en el que estamos hoy
         sql_sessions = """
             SELECT SUM(conversaciones) 
             FROM contactos 
@@ -5031,6 +5034,7 @@ def get_plan_status_for_user(user_email, config=None):
         cur_t.close()
         conn_t.close()
     except Exception as e:
+        app.logger.error(f"⚠️ Error sumando consumo: {e}")
         conversaciones_consumidas = 0
 
     mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
