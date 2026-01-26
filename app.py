@@ -100,8 +100,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)  # ✅
 # Reemplaza tu bloque NUMEROS_CONFIG (línea 92) con este:
 NUMEROS_CONFIG = {
     '524495486824': {  # Número de Mektia Old: 524495486142
-        'nombre': 'Smartwhats',
-        'pbi_url': 'https://app.powerbi.com/view?r=eyJrIjoiZDFlOGMyNjQtOTI4OS00MzBkLTk5MzctODY4MGEwM2NkNWNhIiwidCI6ImU2NDYzYmQ0LWNiMGMtNGZiMy04YjA3LTk0ZjAxZWYzNWI2ZCJ9',
         'phone_number_id': os.getenv("MEKTIA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("MEKTIA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("MEKTIA_DB_HOST"),
@@ -113,9 +111,7 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'MEKTIA_MESSENGER_PAGE_ID',
         'messenger_token_env': 'MEKTIA_PAGE_ACCESS_TOKEN'
     },
-    '123': {  # Número de Unilova
-        'nombre': 'Unilova',
-        'pbi_url': 'https://app.powerbi.com/view?r=eyJrIjoiMDVmOWRlNmMtZGIxOS00NmY4LWEyNDYtYjFlZTlhNjlkMWM4IiwidCI6ImU2NDYzYmQ0LWNiMGMtNGZiMy04YjA3LTk0ZjAxZWYzNWI2ZCJ9',        
+    '123': {  # Número de Unilova   
         'phone_number_id': os.getenv("UNILOVA_PHONE_NUMBER_ID"),
         'whatsapp_token': os.getenv("UNILOVA_WHATSAPP_TOKEN"),
         'db_host': os.getenv("UNILOVA_DB_HOST"),
