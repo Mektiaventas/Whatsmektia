@@ -1,4 +1,4 @@
-{# Dashboard simplificado: Solo indicadores de plan y Power BI #}
+{# Dashboard Minimalista: Solo información del plan y Power BI #}
 {% extends "base.html" %}
 {% block title %}Dashboard General{% endblock %}
 
@@ -9,7 +9,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 1rem;
-        margin-bottom: 1.5rem; 
+        margin-bottom: 2rem; 
         color: white;
     }
 
@@ -17,55 +17,48 @@
         color: white;
         margin: 0;
         font-size: 1.5rem;
+        font-weight: 300;
     }
 
     .plan-box {
         background: rgba(255,255,255,0.06);
-        padding: 8px 12px;
+        padding: 10px 15px;
         border-radius: 8px;
         color: #fff;
         display: inline-flex;
         align-items: center;
-        gap: 10px;
+        gap: 15px;
         font-size: 0.9rem;
+        border: 1px solid rgba(255,255,255,0.1);
     }
 
-    .stats {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
-        margin-bottom: 2rem;
+    .plan-metric strong {
+        color: #f2c811; /* Color dorado para resaltar etiquetas */
+        margin-right: 4px;
     }
 
-    .stat-card {
-        background: rgba(255, 255, 255, 0.95);
-        padding: 15px;
+    .pbi-section {
+        background: rgba(255,255,255,0.05);
+        padding: 20px;
         border-radius: 12px;
-        border-left: 6px solid #1f4e79;
-        flex: 1;
-        min-width: 200px;
-        text-align: center;
-        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        border: 1px solid rgba(255,255,255,0.1);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.4);
     }
 
-    .stat-card strong {
-        display: block;
-        font-size: 0.85rem;
-        color: #666;
-        margin-bottom: 5px;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
-
-    .stat-card .value {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #1f4e79;
+    /* Contenedor para mantener la proporción del reporte */
+    .iframe-container {
+        position: relative;
+        width: 100%;
+        height: 0;
+        padding-bottom: 56.25%; /* Relación 16:9 */
+        background: #000;
+        border-radius: 8px;
+        overflow: hidden;
     }
 
     @media (max-width: 768px) {
-        .header-row { flex-direction: column; align-items: flex-start; }
-        .stats { flex-direction: column; }
+        .header-row { flex-direction: column; align-items: stretch; text-align: center; }
+        .plan-box { justify-content: center; flex-wrap: wrap; }
     }
 </style>
 
@@ -76,28 +69,20 @@
 
         {% if plan_info %}
         <div class="plan-box">
-            <strong>Plan:</strong> {{ plan_info.plan_name or 'Activo' }}
+            <span class="plan-metric"><strong>Plan:</strong> {{ plan_info.plan_name or 'Activo' }}</span>
+            <span class="plan-metric"><strong>Incluye:</strong> {{ plan_info.mensajes_incluidos or 0 }}</span>
+            <span class="plan-metric"><strong>Consumidos:</strong> {{ plan_info.mensajes_consumidos or 0 }}</span>
+            <span class="plan-metric"><strong>Disponibles:</strong> {{ plan_info.mensajes_disponibles if plan_info.mensajes_disponibles is not none else 'N/A' }}</span>
         </div>
         {% endif %}
     </div>
 
-    <div class="stats">
-        <div class="stat-card">
-            <strong>Conversaciones Disponibles</strong>
-            <div id="planDisponibles" class="value">—</div>
-        </div>
-        <div class="stat-card">
-            <strong>Conversaciones Consumidas</strong>
-            <div id="planConsumidos" class="value">—</div>
-        </div>
-    </div>
-
     {% if pbi_url %}
-    <div class="pbi-section" style="background: rgba(255,255,255,0.05); padding: 20px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);">
+    <div class="pbi-section">
         <h3 style="color: white; margin-bottom: 15px; font-size: 1.1rem; font-weight: 400; display: flex; align-items: center; gap: 10px;">
             <span style="color: #f2c811;">📊</span> Reporte Detallado de Negocio
         </h3>
-        <div style="position: relative; width: 100%; height: 0; padding-bottom: 56.25%; background: #000; border-radius: 8px; overflow: hidden; box-shadow: 0 10px 30px rgba(0,0,0,0.5);">
+        <div class="iframe-container">
             <iframe 
                 title="Dashboard Power BI" 
                 src="{{ pbi_url }}" 
@@ -106,29 +91,13 @@
             </iframe>
         </div>
     </div>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: white; background: rgba(255,255,255,0.05); border-radius: 12px;">
+        <p>No hay un reporte de Power BI configurado para esta cuenta.</p>
+    </div>
     {% endif %}
 
 </div>
 
-<script>
-  async function loadPlanData() {
-      try {
-          const res = await fetch(`/dashboard/conversaciones-data?period=3months`);
-          const json = await res.json();
-          if (json.error) return;
-
-          const consumed = (json.plan_info && json.plan_info.mensajes_consumidos) ? json.plan_info.mensajes_consumidos : 0;
-          const included = (json.plan_info && json.plan_info.mensajes_incluidos) ? json.plan_info.mensajes_incluidos : null;
-          const available = (included !== null) ? Math.max(0, included - consumed) : (json.plan_info?.mensajes_disponibles || 'N/A');
-
-          document.getElementById('planDisponibles').innerText = available;
-          document.getElementById('planConsumidos').innerText = consumed;
-      } catch (err) {
-          console.error('Error cargando datos del plan', err);
-      }
-  }
-
-  // Cargar datos al iniciar
-  window.onload = loadPlanData;
-</script>
+{# No se requiere JavaScript adicional ya que eliminamos los contadores dinámicos #}
 {% endblock %}
