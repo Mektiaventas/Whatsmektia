@@ -11570,6 +11570,8 @@ def diagnostico():
 @login_required
 def home():
     config = obtener_configuracion_por_host()
+    # Obtenemos todo el paquete de información
+    plan_status = get_plan_status_for_user(session.get('user'), config=config)
     period = request.args.get('period', 'week')
     now = datetime.now()
     
@@ -11715,9 +11717,10 @@ def home():
         period=period,
         labels=labels,
         values=values,
-        plan_info=plan_info,
-        pbi_url=pbi_url  # <--- 2. AGREGA ESTA VARIABLE AQUÍ
+        plan_info=plan_status, 
+        pbi_url=plan_status.get('pbi_url')) # <--- Asegúrate de que esto esté así
     )
+
 def _ensure_contactos_conversaciones_columns(config=None):
     """Asegura que la tabla 'contactos' tenga las columnas 'conversaciones' (INT DEFAULT 0) y 'timestamp' (DATETIME DEFAULT NULL)."""
     if config is None:
