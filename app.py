@@ -46,6 +46,7 @@ from os.path import basename, join
 import os # Asegurar que 'os' también esté importado/disponible
 from difflib import SequenceMatcher
 from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
+from flask import request
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
