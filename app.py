@@ -4992,67 +4992,77 @@ def get_plan_for_domain(dominio):
     return None
 
 def get_plan_status_for_user(user_email, config=None):
-    # --- Lógica de Inicialización de Variables del Plan ---
-    plan_id = "DEFAULT_PLAN_ID"
-    plan_name = "Plan Básico"
-    # Límite de conversaciones del plan. Usamos un valor grande si no hay límite definido.
-    mensajes_incluidos = 10000 
+    # --- 1. Obtener Límite Real desde la BD Maestra ---
+    # Por defecto usamos valores de seguridad
+    mensajes_incluidos = 0
+    plan_name = "Plan Estándar"
     
-    # --- 1. Cálculo de Conversaciones Consumidas (CORRECCIÓN IMPLEMENTADA) ---
+    # Extraemos el host/dominio del config para buscarlo en domain_plans
+    current_host = config.get('host') if config else None
+
+    try:
+        # Abrimos conexión a la base de datos de 'clientes'
+        # Nota: Asegúrate de que 'get_db_connection_master' sea tu función para la BD global
+        conn_m = get_db_connection_master() 
+        cur_m = conn_m.cursor()
+        
+        sql_plan = """
+            SELECT mensajes_incluidos, plan_id 
+            FROM domain_plans 
+            WHERE dominio = %s LIMIT 1
+        """
+        cur_m.execute(sql_plan, (current_host,))
+        row_plan = cur_m.fetchone()
+        
+        if row_plan:
+            mensajes_incluidos = row_plan[0]
+            plan_id = row_plan[1]
+            plan_name = f"Plan {plan_id}"
+        
+        cur_m.close()
+        conn_m.close()
+    except Exception as e:
+        app.logger.error(f"❌ Error buscando plan para {current_host}: {e}")
+        mensajes_incluidos = 1000 # Fallback preventivo
+
+    # --- 2. Cálculo de Consumo Dinámico (Mes Actual) ---
     conversaciones_consumidas = 0
     
     try:
-        # Asegurarse de tener la configuración correcta de la DB del Tenant
         if config is None:
-            # Asume que esta función obtiene la configuración correcta para el tenant actual
             config = obtener_configuracion_por_host() 
             
         conn_t = get_db_connection(config)
         cur_t = conn_t.cursor()
 
-        # ✅ CONSULTA MODIFICADA: Suma de 'conversaciones' de 'contactos', filtrado por MONTH=11 y año actual (UTC_TIMESTAMP).
+        # ✅ CAMBIO: Usamos MONTH(CURRENT_DATE) para que sea automático
         sql_sessions = """
             SELECT SUM(conversaciones) 
             FROM contactos 
-            WHERE MONTH(fecha_actualizacion) = 11 
-              AND YEAR(fecha_actualizacion) = YEAR(UTC_TIMESTAMP())
+            WHERE MONTH(fecha_actualizacion) = MONTH(CURRENT_DATE())
+              AND YEAR(fecha_actualizacion) = YEAR(CURRENT_DATE())
         """ 
 
-        try:
-            cur_t.execute(sql_sessions)
-            row = cur_t.fetchone()
-            # Si hay resultado, úsalo; si es None, el consumo es 0
-            conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
-            app.logger.info(f"🔎 Conversaciones Consumidas (contactos.conversaciones, Nov) => {conversaciones_consumidas}")
-        except Exception as sql_err:
-            app.logger.warning(f"⚠️ Conteo de contactos.conversaciones (Nov) falló: {sql_err}")
-            conversaciones_consumidas = 0
-        finally:
-            # Es crucial cerrar el cursor y la conexión de la base de datos del tenant
-            if cur_t: cur_t.close()
-            if conn_t: conn_t.close()
-            
-    except Exception as e:
-        app.logger.error(f"❌ Error fatal al obtener el estado del plan para el usuario {user_email}: {e}")
-        # En caso de error, el consumo es 0 para evitar un crash en el dashboard
-        conversaciones_consumidas = 0
+        cur_t.execute(sql_sessions)
+        row = cur_t.fetchone()
+        conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
         
-    # --- 2. Cálculo de Disponibles ---
+        cur_t.close()
+        conn_t.close()
+    except Exception as e:
+        app.logger.error(f"⚠️ Error al contar consumo: {e}")
+        conversaciones_consumidas = 0
 
-    mensajes_disponibles = None
-    if mensajes_incluidos is not None:
-        # Los disponibles son el máximo entre 0 y la diferencia (nunca puede ser negativo)
-        mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
-
-    # --- 3. Retorno Final ---
+    # --- 3. Cálculo de Disponibles ---
+    mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
 
     return {
-        'plan_id': plan_id,
         'plan_name': plan_name,
         'mensajes_incluidos': mensajes_incluidos,
         'mensajes_consumidos': conversaciones_consumidas,
         'mensajes_disponibles': mensajes_disponibles
     }
+    
 def normalizar_texto_busqueda(texto):
     """
     Normaliza texto para búsquedas:
