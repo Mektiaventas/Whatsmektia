@@ -4979,7 +4979,7 @@ def get_plan_for_domain(dominio):
             try:
                 # Asegurar tabla si posible
                 _ensure_domain_plans_table(conn)
-                cur.execute("SELECT id, dominio, plan_id, mensajes_incluidos, created_at, updated_at FROM domain_plans WHERE dominio = %s LIMIT 1", (c,))
+                cur.execute("SELECT id, dominio, plan_id, mensajes_incluidos, pbi_url, created_at, updated_at FROM domain_plans WHERE dominio = %s LIMIT 1", (c,))
                 row = cur.fetchone()
                 if row:
                     cur.close(); conn.close()
@@ -5005,12 +5005,13 @@ def get_plan_status_for_user(user_email, config=None):
     
     # 3. Llamamos a tu función de búsqueda (la que ya limpia y busca candidatos)
     plan_data = get_plan_for_domain(raw_host)
+    pbi_url = None
     
     if plan_data:
         app.logger.info(f"✅ PLAN ENCONTRADO: {plan_data['mensajes_incluidos']} mensajes.")
         mensajes_incluidos = int(plan_data.get('mensajes_incluidos') or 0)
-        plan_id = plan_data.get('plan_id')
-        plan_name = f"Plan {plan_id}"
+        pbi_url = plan_data.get('pbi_url')
+        plan_name = f"Plan {plan_data.get('plan_id')}"
     else:
         # Si llega aquí, es que 'unilova.mektia.com' NO está en la tabla domain_plans
         app.logger.warning(f"❌ EL DOMINIO '{raw_host}' NO EXISTE EN domain_plans")
@@ -5045,6 +5046,7 @@ def get_plan_status_for_user(user_email, config=None):
         'mensajes_incluidos': mensajes_incluidos,
         'mensajes_consumidos': conversaciones_consumidas,
         'mensajes_disponibles': mensajes_disponibles
+        'pbi_url': pbi_url  # <--- Agrega esta línea
     }
     
 def normalizar_texto_busqueda(texto):
