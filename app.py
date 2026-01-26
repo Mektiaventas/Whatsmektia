@@ -4992,57 +4992,41 @@ def get_plan_for_domain(dominio):
     return None
 
 def get_plan_status_for_user(user_email, config=None):
-    # --- 1. Obtener Límite Real desde la BD Maestra ---
-    # Por defecto usamos valores de seguridad
-    mensajes_incluidos = 0
-    plan_name = "Plan Estándar"
+    # 1. Obtener la configuración si no existe
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    # Extraemos el host/dominio del config para buscarlo en domain_plans
+    # 2. Extraer el host/dominio
     current_host = config.get('host') if config else None
-
-    try:
-        # Abrimos conexión a la base de datos de 'clientes'
-        # Nota: Asegúrate de que 'get_db_connection_master' sea tu función para la BD global
-        conn_m = get_db_connection_master() 
-        cur_m = conn_m.cursor()
-        
-        sql_plan = """
-            SELECT mensajes_incluidos, plan_id 
-            FROM domain_plans 
-            WHERE dominio = %s LIMIT 1
-        """
-        cur_m.execute(sql_plan, (current_host,))
-        row_plan = cur_m.fetchone()
-        
-        if row_plan:
-            mensajes_incluidos = row_plan[0]
-            plan_id = row_plan[1]
-            plan_name = f"Plan {plan_id}"
-        
-        cur_m.close()
-        conn_m.close()
-    except Exception as e:
-        app.logger.error(f"❌ Error buscando plan para {current_host}: {e}")
-        mensajes_incluidos = 1000 # Fallback preventivo
-
-    # --- 2. Cálculo de Consumo Dinámico (Mes Actual) ---
-    conversaciones_consumidas = 0
     
+    # 3. USAR TU FUNCIÓN EXISTENTE PARA OBTENER EL PLAN
+    # Esta función ya busca en domain_plans y usa get_clientes_conn()
+    plan_data = get_plan_for_domain(current_host)
+    
+    if plan_data:
+        mensajes_incluidos = int(plan_data.get('mensajes_incluidos') or 0)
+        plan_id = plan_data.get('plan_id')
+        plan_name = f"Plan {plan_id}"
+    else:
+        # Si no encuentra el dominio en la tabla, aquí es donde estaba el 10000.
+        # Lo bajamos a 0 o un valor real de error para saber que no lo encontró.
+        app.logger.warning(f"⚠️ No se encontró plan en domain_plans para: {current_host}")
+        mensajes_incluidos = 0 
+        plan_name = "Sin Plan Asignado"
+
+    # --- 4. Cálculo de Consumo Dinámico (Mes Actual) ---
+    conversaciones_consumidas = 0
     try:
-        if config is None:
-            config = obtener_configuracion_por_host() 
-            
         conn_t = get_db_connection(config)
         cur_t = conn_t.cursor()
 
-        # ✅ CAMBIO: Usamos MONTH(CURRENT_DATE) para que sea automático
+        # Sumamos las conversaciones del mes y año actual
         sql_sessions = """
             SELECT SUM(conversaciones) 
             FROM contactos 
             WHERE MONTH(fecha_actualizacion) = MONTH(CURRENT_DATE())
               AND YEAR(fecha_actualizacion) = YEAR(CURRENT_DATE())
         """ 
-
         cur_t.execute(sql_sessions)
         row = cur_t.fetchone()
         conversaciones_consumidas = int(row[0]) if row and row[0] is not None else 0
@@ -5050,10 +5034,10 @@ def get_plan_status_for_user(user_email, config=None):
         cur_t.close()
         conn_t.close()
     except Exception as e:
-        app.logger.error(f"⚠️ Error al contar consumo: {e}")
+        app.logger.error(f"⚠️ Error al contar consumo en tenant: {e}")
         conversaciones_consumidas = 0
 
-    # --- 3. Cálculo de Disponibles ---
+    # --- 5. Cálculo de Disponibles ---
     mensajes_disponibles = max(0, mensajes_incluidos - conversaciones_consumidas)
 
     return {
