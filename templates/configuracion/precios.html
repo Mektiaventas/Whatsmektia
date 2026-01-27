@@ -530,9 +530,9 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="{{ url_for('serve_product_image', filename=precio.imagen) }}" alt="Producto">
                                     {% else %}
-                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="{{ url_for('serve_product_image', filename=precio.imagen) }}" alt="Producto">
                                     {% endif %}
                                     {% else %}
                                     -
@@ -636,9 +636,9 @@
                                 <td>
                                     {% if precio.imagen %}
                                     {% if precio.imagen.startswith('http') %}
-                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="{{ url_for('serve_product_image', filename=precio.imagen) }}" alt="Producto">
                                     {% else %}
-                                    <img class="imagen_tabla" src="/uploads/productos/{{ precio.imagen }}" ...>
+                                    <img class="imagen_tabla" src="{{ url_for('serve_product_image', filename=precio.imagen) }}" alt="Producto">
                                     {% endif %}
                                     {% else %}
                                     -
