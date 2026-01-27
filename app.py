@@ -2153,15 +2153,19 @@ def get_productos_dir_for_config(config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # LOG DE SEGURIDAD
-    app.logger.info(f"DEBUG: Config recibida en productos: {config}")
+    # Intentamos obtener el dominio de la config, si no, lo sacamos del host actual
+    dominio = config.get('dominio')
+    if not dominio:
+        from flask import request
+        dominio = request.host
+
+    # Limpiamos y obtenemos el slug (ej: ofitodo)
+    tenant_slug = dominio.split('.')[0].lower() if dominio else 'default'
     
-    dominio = (config.get('dominio') or '').strip().lower()
-    
-    # Si 'dominio' viene vacío, el slug será 'default' y NO encontrará la carpeta 'ofitodo'
-    tenant_slug = dominio.split('.')[0] if dominio else 'default'
-    
+    # Construimos la ruta dinámica
     productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', tenant_slug)
+    
+    app.logger.info(f"✅ Carpeta de productos definida: {productos_dir}")
     return productos_dir, tenant_slug
 
 def get_db_connection(config=None):
