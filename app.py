@@ -2152,20 +2152,18 @@ def subir_pdf_servicios():
         return redirect(url_for('configuracion_precios'))
 
 def get_productos_dir_for_config(config=None):
-    """Return (productos_dir, tenant_slug). Ensures uploads/productos/<tenant_slug> exists."""
-    # Obtenemos el host directamente del navegador (ej: ofitodo.mektia.com)
-    host = request.host.lower().split(':')[0]
+    if config is None:
+        config = obtener_configuracion_por_host()
     
-    # Extraemos la primera parte (ej: 'ofitodo')
-    tenant_slug = host.split('.')[0] if host else 'default'
+    # LOG DE SEGURIDAD
+    app.logger.info(f"DEBUG: Config recibida en productos: {config}")
     
-    # Construimos la ruta: uploads/productos/ofitodo
+    dominio = (config.get('dominio') or '').strip().lower()
+    
+    # Si 'dominio' viene vacío, el slug será 'default' y NO encontrará la carpeta 'ofitodo'
+    tenant_slug = dominio.split('.')[0] if dominio else 'default'
+    
     productos_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos', tenant_slug)
-    
-    # Creamos la carpeta si no existe
-    os.makedirs(productos_dir, exist_ok=True)
-    
-    app.logger.info(f"📁 Directorio de productos detectado: {productos_dir} (slug={tenant_slug})")
     return productos_dir, tenant_slug
 
 def get_db_connection(config=None):
