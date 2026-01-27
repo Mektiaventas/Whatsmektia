@@ -130,7 +130,7 @@
             </small>
             {% if datos.app_logo %}
             <div style="margin-top: 8px; padding: 5px; background: #f8f9fa; border-radius: 4px; display: inline-block;">
-                <img src="{{ datos.app_logo }}?v={{ range(1000, 9999) | random }}" alt="Logo actual" style="max-height: 40px;">
+                <img src="/static/uploads/logos/{{ datos.app_logo }}?v={{ range(1000, 9999) | random }}" alt="Logo actual" style="max-height: 40px;">
                 <input type="hidden" name="app_logo_actual" value="{{ datos.app_logo }}">
             </div>
             {% endif %}
