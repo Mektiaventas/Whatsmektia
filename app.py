@@ -1398,36 +1398,39 @@ def obtener_imagenes_por_sku(sku, config=None):
         app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
         return []
 
-@app.route('/uploads/productos/<path:filename>') # Cambiado a <path:filename>
+@app.route('/uploads/productos/<path:filename>')
 def serve_product_image(filename):
     try:
-        # 1. Detectar quién es el cliente (tenant)
+        # 1. Obtener la configuración y la carpeta del tenant
         config = obtener_configuracion_por_host()
         productos_dir, tenant_slug = get_productos_dir_for_config(config)
 
-        # 2. Intentar ruta absoluta (Si filename ya trae la carpeta ofitodo/)
-        base_uploads = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-        candidate_absolute = os.path.join(base_uploads, filename)
+        # 2. LIMPIEZA CLAVE: Si el filename ya trae el slug (ej. "ofitodo/imagen.png"), 
+        # extraemos solo el nombre del archivo para que no se duplique la carpeta.
+        pure_filename = os.path.basename(filename)
+
+        # 3. Intentar ruta relativa al tenant (La forma correcta: productos/ofitodo/imagen.png)
+        candidate_tenant = os.path.join(productos_dir, pure_filename)
         
-        # 3. Intentar ruta relativa al tenant (Solo el nombre del archivo)
-        candidate_tenant = os.path.join(productos_dir, filename)
+        # 4. Intentar ruta base (Por si acaso está en productos/imagen.png)
+        base_uploads = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+        candidate_absolute = os.path.join(base_uploads, pure_filename)
 
         if os.path.isfile(candidate_tenant):
-            app.logger.info(f"✅ Imagen encontrada en tenant: {tenant_slug}")
-            return send_from_directory(productos_dir, filename)
+            app.logger.info(f"✅ Imagen encontrada en tenant: {tenant_slug} -> {pure_filename}")
+            return send_from_directory(productos_dir, pure_filename)
             
         if os.path.isfile(candidate_absolute):
-            app.logger.info(f"✅ Imagen encontrada por ruta absoluta")
-            return send_from_directory(base_uploads, filename)
+            app.logger.info(f"✅ Imagen encontrada en ruta base -> {pure_filename}")
+            return send_from_directory(base_uploads, pure_filename)
 
-        # Si nada funciona, logueamos dónde buscó exactamente para debug
-        app.logger.error(f"❌ No existe en: {candidate_tenant} NI EN {candidate_absolute}")
+        # Si nada funciona, logueamos la ruta exacta donde falló
+        app.logger.error(f"❌ No existe en: {candidate_tenant}")
         abort(404)
         
     except Exception as e:
-        app.logger.error(f"🔴 Error crítico: {e}")
+        app.logger.error(f"🔴 Error crítico sirviendo imagen: {e}")
         abort(500)
-
 def asociar_imagenes_productos(servicios, imagenes):
     """Asocia imágenes extraídas con los productos correspondientes usando IA"""
     if not imagenes or not servicios or not servicios.get('servicios'):
