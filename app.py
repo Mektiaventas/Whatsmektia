@@ -1397,7 +1397,29 @@ def obtener_imagenes_por_sku(sku, config=None):
     except Exception as e:
         app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
         return []
+        
+@app.route('/static/uploads/logos/<path:filename>')
+def serve_logo(filename):
+    try:
+        config = obtener_configuracion_por_host()
+        _, tenant_slug = get_productos_dir_for_config(config)
+        
+        # Construimos la ruta: uploads/logos/{tenant_slug}
+        logo_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'logos', tenant_slug)
+        pure_filename = os.path.basename(filename)
 
+        # Validación: Si la carpeta del cliente no existe, lanzamos 404 de una vez
+        if not os.path.exists(logo_dir):
+            app.logger.warning(f"⚠️ La carpeta de logos para {tenant_slug} no existe: {logo_dir}")
+            abort(404)
+        
+        app.logger.info(f"🖼️ Sirviendo logo: {pure_filename} desde {tenant_slug}")
+        return send_from_directory(logo_dir, pure_filename)
+        
+    except Exception as e:
+        app.logger.error(f"❌ Error sirviendo logo para {tenant_slug}: {e}")
+        abort(404)
+    
 @app.route('/uploads/productos/<path:filename>')
 def serve_product_image(filename):
     try:
