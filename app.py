@@ -1398,22 +1398,23 @@ def obtener_imagenes_por_sku(sku, config=None):
         app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
         return []
         
-@app.route('/static/uploads/logos/<path:filename>')
+@app.route('/static/uploads/logos/<path:filename>', endpoint='custom_serve_logo')
 def serve_logo(filename):
     try:
         config = obtener_configuracion_por_host()
         _, tenant_slug = get_productos_dir_for_config(config)
         
-        # Esto convierte '/static/uploads/logos/imagen.png' en solo 'imagen.png'
+        # Extraemos solo el nombre del archivo (ej: logo_123.png)
         pure_filename = os.path.basename(filename)
         
+        # Ruta física: /home/ubuntu/Whatsmektia/uploads/logos/{tenant}/
         logo_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'logos', tenant_slug)
         
-        app.logger.info(f"🔍 [serve_logo] Tenant: {tenant_slug} | Archivo buscado: {pure_filename}")
+        app.logger.info(f"🚀 [SERVE_LOGO] Buscando {pure_filename} en {logo_dir}")
         
         return send_from_directory(logo_dir, pure_filename)
     except Exception as e:
-        app.logger.error(f"❌ Error en serve_logo para {tenant_slug}: {e}")
+        app.logger.error(f"❌ Error sirviendo logo: {e}")
         abort(404)
     
 @app.route('/uploads/productos/<path:filename>')
