@@ -860,20 +860,28 @@ def guardar_configuracion_negocio():
     if 'app_logo' in request.files and request.files['app_logo'].filename != '':
         logo = request.files['app_logo']
         filename = secure_filename(f"logo_{int(time.time())}_{logo.filename}")
-        upload_path = os.path.join(app.config['UPLOAD_FOLDER'], 'logos', filename)
         
-        # Asegúrate de que la carpeta existe
-        os.makedirs(os.path.dirname(upload_path), exist_ok=True)
+        # Identificar al cliente para la ruta física
+        _, tenant_slug = get_productos_dir_for_config(config)
         
-        # Guardar el archivo
+        # Construir la ruta a su carpeta específica: /uploads/logos/ofitodo/
+        logo_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'logos', tenant_slug)
+        os.makedirs(logo_dir, exist_ok=True)
+        
+        upload_path = os.path.join(logo_dir, filename)
+        
+        # Guardar el archivo físicamente en la carpeta del cliente
+        app.logger.info(f"💾 Guardando logo físicamente en: {upload_path}")
         logo.save(upload_path)
         
-        # Guardar la ruta en la BD
-        datos['app_logo'] = f"/static/uploads/logos/{filename}"
+        # Guardar SOLO el nombre limpio en la BD (ejemplo: logo_123.png)
+        datos['app_logo'] = filename
+        
     elif request.form.get('app_logo_actual'):
-        # Mantener el logo existente
-        datos['app_logo'] = request.form.get('app_logo_actual')
-    
+        # Al mantener el logo, también limpiamos la ruta por si viene con /static/...
+        logo_actual = request.form.get('app_logo_actual')
+        datos['app_logo'] = os.path.basename(logo_actual)
+        
     # Guardar en la base de datos
     conn = get_db_connection(config)
     cursor = conn.cursor()
