@@ -1398,36 +1398,34 @@ def obtener_imagenes_por_sku(sku, config=None):
         app.logger.error(f"Error obteniendo imágenes para SKU {sku}: {e}")
         return []
 
-@app.route('/uploads/productos/<filename>')
+@app.route('/uploads/productos/<path:filename>') # Cambiado a <path:filename>
 def serve_product_image(filename):
-    """Sirve imágenes de productos desde la carpeta tenant-aware:
-       uploads/productos/<tenant_slug>/<filename>
-       Hace fallback a uploads/productos/ y luego a uploads/ si no se encuentra."""
     try:
+        # 1. Detectar quién es el cliente (tenant)
         config = obtener_configuracion_por_host()
         productos_dir, tenant_slug = get_productos_dir_for_config(config)
 
-        # 1) Intentar carpeta tenant específica
-        candidate = os.path.join(productos_dir, filename)
-        if os.path.isfile(candidate):
+        # 2. Intentar ruta absoluta (Si filename ya trae la carpeta ofitodo/)
+        base_uploads = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
+        candidate_absolute = os.path.join(base_uploads, filename)
+        
+        # 3. Intentar ruta relativa al tenant (Solo el nombre del archivo)
+        candidate_tenant = os.path.join(productos_dir, filename)
+
+        if os.path.isfile(candidate_tenant):
+            app.logger.info(f"✅ Imagen encontrada en tenant: {tenant_slug}")
             return send_from_directory(productos_dir, filename)
+            
+        if os.path.isfile(candidate_absolute):
+            app.logger.info(f"✅ Imagen encontrada por ruta absoluta")
+            return send_from_directory(base_uploads, filename)
 
-        # 2) Fallback: carpeta legacy uploads/productos/
-        legacy_dir = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), 'productos')
-        candidate_legacy = os.path.join(legacy_dir, filename)
-        if os.path.isfile(candidate_legacy):
-            return send_from_directory(legacy_dir, filename)
-
-        # 3) Fallback adicional: raíz de uploads/
-        root_candidate = os.path.join(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-        if os.path.isfile(root_candidate):
-            return send_from_directory(app.config.get('UPLOAD_FOLDER', UPLOAD_FOLDER), filename)
-
-        # No encontrado
-        app.logger.info(f"❌ Imagen no encontrada: {filename} (tenant={tenant_slug})")
+        # Si nada funciona, logueamos dónde buscó exactamente para debug
+        app.logger.error(f"❌ No existe en: {candidate_tenant} NI EN {candidate_absolute}")
         abort(404)
+        
     except Exception as e:
-        app.logger.error(f"🔴 Error sirviendo imagen {filename}: {e}")
+        app.logger.error(f"🔴 Error crítico: {e}")
         abort(500)
 
 def asociar_imagenes_productos(servicios, imagenes):
