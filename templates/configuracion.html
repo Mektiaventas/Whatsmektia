@@ -1,7 +1,7 @@
 {% extends 'base.html' %}
 {% block title %}Configuración – {{ active|capitalize }}{% endblock %}
 {% block content %}
-<link rel="stylesheet" href="C:\Users\jedua\OneDrive\Documents\GitHub\Whatsmektia\static\css\styles.css">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
 <style>
     .form-text text-muted {
         color: white;
