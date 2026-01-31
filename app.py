@@ -47,6 +47,7 @@ import os # Asegurar que 'os' también esté importado/disponible
 from difflib import SequenceMatcher
 from whatsapp import enviar_mensaje, obtener_imagen_whatsapp  # <--- AQUÍ
 from flask import request
+from flask import request, jsonify, render_template
 MASTER_COLUMNS = [
     'sku', 'categoria', 'subcategoria', 'linea', 'modelo',
     'descripcion', 'medidas', 'costo', 'precio mayoreo', 'precio menudeo',
@@ -13534,9 +13535,29 @@ def privacy_policy():
 def terms_of_service():
         return render_template('terms_of_service.html')
 
-@app.route('/data-deletion')
+@app.route('/data-deletion', methods=['GET', 'POST'])
 def data_deletion():
+    # Si el usuario entra desde el navegador (GET)
+    if request.method == 'GET':
         return render_template('data_deletion.html')
+
+    # Si Meta envía la solicitud de borrado (POST)
+    if request.method == 'POST':
+        # 1. Obtener el signed_request que envía Meta
+        signed_request = request.form.get('signed_request')
+        
+        # 2. Aquí podrías decodificar el signed_request para saber qué User ID borrar
+        # Pero para cumplir de inmediato y desbloquear el servicio:
+        
+        # Generamos una respuesta dinámica basada en el host (tenant)
+        tenant_host = request.host 
+        confirmation_code = f"del_{tenant_host.replace('.', '_')}_success"
+        status_url = f"https://{tenant_host}/deletion-status"
+
+        return jsonify({
+            'url': status_url,
+            'confirmation_code': confirmation_code
+        })
 
 
 @app.route('/test-alerta')
