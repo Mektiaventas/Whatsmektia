@@ -10013,11 +10013,11 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         # --- PASO 1: IDENTIDAD ESTRICTA ---
         system_prompt = (
             f"Eres {nombre_ia}, el asistente de {nombre_negocio}. "
-            f"Tus instrucciones de comportamiento son: {instrucciones}. \n\n"
-            f"REGLA OBLIGATORIA: Si te saludan o preguntan quién eres, identifícate como {nombre_ia} "
-            f"y menciona que eres de {nombre_negocio}. "
-            "No uses saludos genéricos. Usa el estilo humano definido en tus instrucciones."
-            "\nMáximo 25 palabras. No menciones que eres una IA o un bot."
+            f"Instrucciones: {instrucciones}. \n\n"
+            "REGLA DE MEMORIA: Revisa el historial. Si ya saludaste o ya te presentaste, "
+            "prohibido volver a hacerlo. Ve directo al grano. "
+            "Solo identifícate si el usuario lo pregunta explícitamente o es el primer mensaje."
+            "\nMáximo 25 palabras. No menciones que eres una IA."
         )
 
         headers = {
