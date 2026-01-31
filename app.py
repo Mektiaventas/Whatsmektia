@@ -10019,6 +10019,21 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "Solo identifícate si el usuario lo pregunta explícitamente o es el primer mensaje."
             "\nMáximo 25 palabras. No menciones que eres una IA."
         )
+        # Armamos la memoria para que DeepSeek sepa qué se dijo antes
+        lista_mensajes = [{"role": "system", "content": system_prompt}]
+        
+        if historial:
+            for h in historial:
+                # Extraemos mensaje de usuario y respuesta de la IA
+                u_msg = h.get('mensaje')
+                a_msg = h.get('respuesta')
+                if u_msg:
+                    lista_mensajes.append({"role": "user", "content": u_msg})
+                if a_msg:
+                    lista_mensajes.append({"role": "assistant", "content": a_msg})
+
+        # Finalmente agregamos el mensaje que acaba de llegar
+        lista_mensajes.append({"role": "user", "content": texto})
 
         headers = {
             "Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}",
@@ -10027,11 +10042,8 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         
         payload = {
             "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"MENSAJE DEL CLIENTE: {texto}"}
-            ],
-            "temperature": 0.7 # Subimos la temperatura para que sea menos 'seco'
+            "messages": lista_mensajes, # <--- Usamos la lista con memoria
+            "temperature": 0.5 # bajamos la temperatura para que sea menos 'seco'
         }
 
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=10)
