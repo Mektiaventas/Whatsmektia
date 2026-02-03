@@ -9992,6 +9992,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         productos_para_ficha = [] # Lista de productos seleccionados
 
         if producto_aplica == "SI_APLICA" and texto:
+            # 1. Obtenemos la lista base de la base de datos
             precios = obtener_productos_por_palabra_clave(
                 contexto_busqueda, 
                 config, 
@@ -10004,36 +10005,49 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 solicita_imagen = True
 
             if solicita_imagen and precios:
-                # Filtro Estricto
-                terminos_clave = [t for t in contexto_busqueda.split() if len(t) > 3]
-                precios_imagenes = precios
-                if terminos_clave:
-                    termino_fuerte = terminos_clave[-1].lower()
-                    precios_filtrados = [
-                        p for p in precios 
-                        if termino_fuerte in (p.get('modelo') or '').lower() or 
-                            termino_fuerte in (p.get('descripcion') or '').lower() or
-                            termino_fuerte in (p.get('servicio') or '').lower()
-                    ]
-                    if precios_filtrados:
-                        precios_imagenes = precios_filtrados
-
-                # Seleccionar cantidad
-                # --- PASO 2: LÓGICA DE CANTIDAD SEGÚN EL CATÁLOGO ---
-                # Si el usuario pide "todas", mandamos hasta 10.
-                if 'todas' in texto.lower():
-                    cantidad_imagenes = min(10, len(precios_imagenes))
-                else:
-                    # Si el catálogo devolvió pocos resultados (como las 2 carreras de Unilova),
-                    # los mandamos todos. Si devolvió muchísimos (como Ofitodo), mandamos solo 3.
-                    if len(precios_imagenes) <= 4:
-                        cantidad_imagenes = len(precios_imagenes)
-                    else:
-                        cantidad_imagenes = 3
+                # --- LÓGICA DE BÚSQUEDA EN CASCADA ---
+                termino = contexto_busqueda.lower().strip()
+                texto_msg = texto.lower()
                 
-                # Guardamos los productos elegidos
+                # NIVEL 1: SKU (Identificador único)
+                match_sku = [p for p in precios if termino == (p.get('sku') or '').lower() or (p.get('sku') or '').lower() in texto_msg]
+                
+                # NIVEL 2: Modelo o Línea
+                match_modelo = [p for p in precios if termino in (p.get('modelo') or '').lower() or termino in (p.get('linea') or '').lower()]
+                
+                # NIVEL 3: Categoría o Subcategoría
+                match_categoria = [p for p in precios if termino in (p.get('categoria') or '').lower() or termino in (p.get('subcategoria') or '').lower()]
+                
+                # NIVEL 4: Descripción (La red más amplia)
+                match_desc = [p for p in precios if termino in (p.get('descripcion') or '').lower()]
+
+                # --- SELECCIÓN POR RELEVANCIA (Aquí se decide cuántas mandar) ---
+                if match_sku:
+                    app.logger.info("🎯 Coincidencia de alta precisión: SKU")
+                    precios_imagenes = match_sku
+                    cantidad_imagenes = 1  # Si es SKU, mandamos solo 1
+                elif match_modelo:
+                    app.logger.info("🏢 Coincidencia de precisión media: Modelo/Línea")
+                    precios_imagenes = match_modelo
+                    cantidad_imagenes = 1 if len(match_modelo) == 1 else 3
+                elif match_categoria:
+                    app.logger.info("📁 Coincidencia general: Categoría")
+                    precios_imagenes = match_categoria
+                    cantidad_imagenes = 3
+                else:
+                    app.logger.info("📝 Coincidencia amplia: Descripción")
+                    precios_imagenes = match_desc
+                    cantidad_imagenes = 3
+
+                # --- EXCEPCIÓN: Si el usuario pide explícitamente ver TODO ---
+                if any(w in texto_msg for w in ['todos', 'todas', 'todo', 'catálogo']):
+                    app.logger.info("📚 El usuario pidió ver todo el catálogo disponible.")
+                    precios_imagenes = precios 
+                    cantidad_imagenes = min(10, len(precios_imagenes))
+
+                # Guardamos los productos finales que se van a enviar
                 productos_para_ficha = precios_imagenes[:cantidad_imagenes]
-                app.logger.info(f"⏳ Se prepararon {len(productos_para_ficha)} fichas de producto.")
+                app.logger.info(f"⏳ Cascada finalizada. Mostrando {len(productos_para_ficha)} fichas.")
 
             # Fallback SKU exacto
             for p in precios[:5]:
