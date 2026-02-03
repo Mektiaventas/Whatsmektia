@@ -130,6 +130,7 @@ def _registrar_followup_db(cursor, conn, numero, estado, texto):
     except: pass
 
 def start_followup_scheduler(config_global):
+    return
     """
     Ahora recibe NUMEROS_CONFIG directamente desde app.py
     evitando que este archivo tenga que importar nada de fuera.
