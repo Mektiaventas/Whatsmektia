@@ -129,22 +129,20 @@ def _registrar_followup_db(cursor, conn, numero, estado, texto):
         conn.commit()
     except: pass
 
-def start_followup_scheduler():
+def start_followup_scheduler(config_global):
+    """
+    Ahora recibe NUMEROS_CONFIG directamente desde app.py
+    evitando que este archivo tenga que importar nada de fuera.
+    """
     def _worker():
-        # SOLUCIÓN AL ModuleNotFoundError: Importamos desde el path completo
-        try:
-            from app.config.settings import NUMEROS_CONFIG
-        except ImportError:
-            # Si falla, intentamos importar desde el objeto app si ya está cargado
-            from app import NUMEROS_CONFIG
-
-        print("⏰ Scheduler de Seguimiento INICIADO.")
+        print("⏰ Scheduler de Seguimiento INICIADO con configuración inyectada.")
         while True:
             try:
-                for tenant in NUMEROS_CONFIG:
-                    procesar_followups_automaticos(NUMEROS_CONFIG[tenant])
+                # Usamos la config que nos pasaron desde app.py
+                for tenant_key in config_global:
+                    procesar_followups_automaticos(config_global[tenant_key])
             except Exception as e:
-                logger.error(f"Error en worker: {e}")
+                print(f"Error en ciclo de leads: {e}")
             time.sleep(1800)
     
     t = threading.Thread(target=_worker, daemon=True)
