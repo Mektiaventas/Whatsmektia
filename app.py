@@ -11197,7 +11197,7 @@ def obtener_configuracion_por_host():
             return NUMEROS_CONFIG['524495486824']  # Default
         host = request.headers.get('Host', '').lower()
         config = None
-        subdominio = "mektia" # Default
+        subdominio = "smartwhats" # Default
         # DETECCIÓN UNILOVA
         if 'unilova' in host:
             app.logger.info("✅ Configuración detectada: Unilova")
