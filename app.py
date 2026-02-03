@@ -9803,7 +9803,21 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
         
         return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
-
+        
+    # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO (NUEVO) ---
+    # Si el usuario pide un humano o muestra frustración, cortamos el flujo de IA.
+    if detectar_intervencion_humana_ia(texto_norm, numero, config):
+        app.logger.info(f"⚠️ [HUMANO] El usuario {numero} requiere atención de un asesor.")
+        
+        # Esta función asigna al asesor (1 o 2), mueve el Kanban y manda el WhatsApp de alerta
+        exito_paso = pasar_contacto_asesor(numero, config=config)
+        
+        if exito_paso:
+            mensaje_confirmacion = "Entiendo. He solicitado que uno de nuestros asesores humanos tome el control de la conversación. Te contactarán por este medio a la brevedad. 👨‍💼"
+            enviar_mensaje(numero, mensaje_confirmacion, config)
+            registrar_respuesta_bot(numero, texto, mensaje_confirmacion, config, incoming_saved=incoming_saved)
+            return True # DETIENE TODO: No entra a la IA ni manda fichas.
+            
     # 3. --- FLUJO NORMAL (KANBAN E IA) ---
     try:
         # Lógica de Kanban
