@@ -10113,55 +10113,75 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 img_url = p.get('imagen')
                 sku_p = p.get('sku', '') or 'S/N'
                 modelo = p.get('modelo', '') or p.get('servicio', '') or 'Producto'
-                precio = p.get('precio_menudeo') or p.get('precio') or 'Consultar'
-                medidas = p.get('medidas') or ''
-                descripcion = (p.get('descripcion') or '')[:100] # Cortamos descripción si es muy larga
                 
-                # --- PASO 1: FICHA INTELIGENTE (Detecta si es curso o mueble) ---
-                # 1. Título: Prioridad SKU (que es el nombre en UNILOVA)
+                # --- PASO 1: TÍTULO DE LA FICHA ---
+                # Prioridad SKU (que suele ser el nombre comercial en tus registros)
                 titulo_ficha = p.get('sku') or p.get('modelo') or 'Producto'
                 
-                # 2. Lógica de Precios dinámica
-                precios_detalle = ""
-                inscrip = p.get('inscripcion')
-                mensual = p.get('mensualidad')
+                # --- PASO 2: LÓGICA DE PRECIOS DINÁMICA (BARRIDO DE COLUMNAS) ---
+                lineas_precios = []
                 
-                if inscrip and str(inscrip) != '0.00':
-                    precios_detalle = f"💰 Inscripción: ${inscrip}\n💳 Mensualidad: ${mensual}"
+                # Definimos todas las posibles columnas que pueden tener precios
+                mapeo_precios = [
+                    ('precio_menudeo', '💲 Precio Menudeo'),
+                    ('precio_mayoreo', '📦 Precio Mayoreo'),
+                    ('inscripcion', '💰 Inscripción'),
+                    ('mensualidad', '💳 Mensualidad'),
+                    ('precio', '💵 Precio')
+                ]
+
+                for llave, etiqueta in mapeo_precios:
+                    valor = p.get(llave)
+                    # Solo agregamos la línea si el valor es mayor a cero y no está vacío
+                    try:
+                        if valor and float(valor) > 0:
+                            lineas_precios.append(f"{etiqueta}: ${valor}")
+                    except (ValueError, TypeError):
+                        continue
+
+                # Unimos las líneas encontradas o ponemos un mensaje por defecto
+                if lineas_precios:
+                    precios_detalle = "\n".join(lineas_precios)
                 else:
-                    precios_detalle = f"💲 Precio: ${p.get('precio_menudeo') or p.get('precio') or 'Consultar'}"
+                    precios_detalle = "💲 Precio: Consultar"
 
-                # 3. Medidas: Solo si existen y no son un espacio vacío o cero
+                # --- PASO 3: MEDIDAS Y DESCRIPCIÓN ---
                 medidas_val = str(p.get('medidas') or "").strip()
-                texto_medidas = f"📏 Medidas: {medidas_val}\n" if medidas_val and medidas_val != '0' else ""
+                texto_medidas = f"📏 Medidas: {medidas_val}\n" if medidas_val and medidas_val not in ['0', '0.00', ''] else ""
+                
+                descripcion_corta = (p.get('descripcion') or '')[:120]
+                if len(p.get('descripcion') or '') > 120:
+                    descripcion_corta += "..."
 
-                # 4. Construcción final
+                # --- PASO 4: CONSTRUCCIÓN FINAL DEL TEXTO ---
                 ficha_texto = (
                     f"🔹 *{titulo_ficha}*\n"
                     f"{precios_detalle}\n"
                     f"{texto_medidas}"
-                    f"📝 {(p.get('descripcion') or '')[:120]}...\n"
-                    f"🆔 SKU: {p.get('sku', 'S/N')}"
+                    f"📝 {descripcion_corta}\n"
+                    f"🆔 SKU: {sku_p}"
                 )
 
+                # --- PASO 5: ENVÍO (IMAGEN + TEXTO) ---
                 if img_url and img_url.strip():
                     try:
                         # 1. Enviar Imagen
                         url_completa = f"https://{request.host}/static/uploads/{img_url}"
                         enviar_imagen(numero, url_completa, config)
                         
-                        # 2. Enviar Ficha Técnica Inmediatamente después
+                        # 2. Enviar Ficha Técnica (Texto)
                         enviar_mensaje(numero, ficha_texto, config)
                         
-                        # Registrar
+                        # Registrar en historial
                         actualizar_respuesta(numero, texto, f"Ficha enviada: {modelo}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                         
                         envios_exitosos += 1
-                        if envios_exitosos > 0: time.sleep(0.8) # Pausa un poco más larga para dar tiempo a que lleguen en orden
+                        if envios_exitosos > 0: 
+                            time.sleep(0.8) # Pausa para mantener el orden en WhatsApp
                     except Exception as e:
                         app.logger.error(f"❌ Error enviando ficha: {e}")
 
-        # Retornamos True para finalizar
+        # Retornamos True para finalizar el flujo
         return True
         
         # ================================================================
