@@ -761,3 +761,52 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
         import traceback
         logger.error(traceback.format_exc())
         return False 
+def enviar_plantilla_comodin(numero, nombre_cliente, mensaje_libre, config):
+    """
+    Envía una plantilla de utilidad/marketing para reactivar usuarios fuera de las 24h.
+    Rellena {{1}} con el nombre y {{2}} con el mensaje generado por IA.
+    """
+    NOMBRE_PLANTILLA = "notificacion_general_v2"
+    
+    try:
+        # Usamos v23.0 para mantener consistencia con el resto de tu archivo
+        url = f"https://graph.facebook.com/v23.0/{config['phone_number_id']}/messages"
+        headers = {
+            "Authorization": f"Bearer {config['whatsapp_token']}",
+            "Content-Type": "application/json"
+        }
+        
+        nombre_final = nombre_cliente if nombre_cliente else "Cliente"
+        mensaje_final = mensaje_libre if mensaje_libre else "Hola, ¿seguimos en contacto?"
+        
+        data = {
+            "messaging_product": "whatsapp",
+            "to": numero,
+            "type": "template",
+            "template": {
+                "name": NOMBRE_PLANTILLA,
+                "language": { "code": "es_MX" },
+                "components": [
+                    {
+                        "type": "body",
+                        "parameters": [
+                            { "type": "text", "text": nombre_final },
+                            { "type": "text", "text": mensaje_final }
+                        ]
+                    }
+                ]
+            }
+        }
+
+        response = requests.post(url, headers=headers, json=data, timeout=15)
+        
+        if response.status_code in [200, 201, 202]:
+            logger.info(f"✅ Plantilla comodín enviada a {numero}")
+            return True
+        else:
+            logger.error(f"🔴 Error enviando plantilla: {response.text}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"🔴 Excepción en enviar_plantilla_comodin: {e}")
+        return False
