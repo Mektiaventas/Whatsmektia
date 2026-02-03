@@ -11203,6 +11203,11 @@ def obtener_configuracion_por_host():
             app.logger.info("✅ Configuración detectada: Unilova")
             return NUMEROS_CONFIG['123']
             subdominio = "unilova"
+        # DETECCIÓN SMARTWHATS
+        elif 'smartwhats' in host:
+            app.logger.info("✅ Configuración detectada: Smartwhats")
+            return NUMEROS_CONFIG['524495486824']
+            subdominio = "smartwhats"
         # DETECCIÓN PORFIRIANNA
         elif 'laporfirianna' in host:
             app.logger.info("✅ Configuración detectada: La Porfirianna")
