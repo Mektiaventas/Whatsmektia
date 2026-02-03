@@ -762,6 +762,7 @@ def enviar_mensaje_voz(numero, audio_url, config=None):
         logger.error(traceback.format_exc())
         return False 
 def enviar_plantilla_comodin(numero, nombre_cliente, mensaje_libre, config):
+    return True
     """
     Envía una plantilla de utilidad/marketing para reactivar usuarios fuera de las 24h.
     Rellena {{1}} con el nombre y {{2}} con el mensaje generado por IA.
