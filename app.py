@@ -2467,66 +2467,6 @@ def generar_mensaje_seguimiento_ia(numero, config=None, tipo_interes='tibio'):
         app.logger.error(f"🔴 Error generando seguimiento IA: {e}")
         return "¿Sigues ahí? Avísame si necesitas más información. 👋" # Fallback
 
-def enviar_plantilla_comodin(numero, nombre_cliente, mensaje_libre, config):
-    """
-    Envía una plantilla de utilidad/marketing para reactivar usuarios fuera de las 24h.
-    Rellena {{1}} con el nombre y {{2}} con el mensaje generado por IA.
-    """
-    NOMBRE_PLANTILLA = "notificacion_general_v2"  # <--- ASEGURA QUE ESTE NOMBRE COINCIDA EN META
-    
-    try:
-        url = f"https://graph.facebook.com/v17.0/{config['phone_number_id']}/messages"
-        headers = {
-            "Authorization": f"Bearer {config['whatsapp_token']}",
-            "Content-Type": "application/json"
-        }
-        
-        # Limpiar datos para evitar errores de la API
-        nombre_final = nombre_cliente if nombre_cliente else "Cliente"
-        mensaje_final = mensaje_libre if mensaje_libre else "Hola, ¿seguimos en contacto?"
-        
-        data = {
-            "messaging_product": "whatsapp",
-            "to": numero,
-            "type": "template",
-            "template": {
-                "name": NOMBRE_PLANTILLA,
-                "language": {
-                    "code": "es_MX" 
-                },
-                "components": [
-                    {
-                        "type": "body",
-                        "parameters": [
-                            {
-                                "type": "text",
-                                "text": nombre_final  # Variable {{1}}
-                            },
-                            {
-                                "type": "text",
-                                "text": mensaje_final # Variable {{2}} (El mensaje de la IA)
-                            }
-                        ]
-                    }
-                ]
-            }
-        }
-
-        response = requests.post(url, headers=headers, json=data)
-        
-        if response.status_code in [200, 201]:
-            app.logger.info(f"✅ Plantilla comodín enviada a {numero} (Estado: Dormido)")
-            return True
-        else:
-            app.logger.error(f"🔴 Error enviando plantilla: {response.text}")
-            return False
-            
-    except Exception as e:
-        app.logger.error(f"🔴 Excepción en enviar_plantilla_comodin: {e}")
-        return False
-
-
-
 def crear_tablas_kanban(config=None):
     """Crea las tablas necesarias para el Kanban en la base de datos especificada"""
     if config is None:
