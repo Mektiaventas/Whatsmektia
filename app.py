@@ -11190,67 +11190,73 @@ def obtener_nombre_perfil_whatsapp(numero, config=None):
     return None
   
 def obtener_configuracion_por_host():
-    """Obtiene la configuración basada en el host"""
+    """Obtiene la configuración basada en el host de forma dinámica y segura"""
     try:
         from flask import has_request_context, request
         if not has_request_context():
-            return NUMEROS_CONFIG['524495486824']  # Default
-        host = request.headers.get('Host', '').lower()
+            return NUMEROS_CONFIG['524495486824']  # Default Mektia
+
+        # LIMPIEZA DEL HOST (La magia)
+        # Esto convierte 'unilova.mektia.com:5000' en 'unilova.mektia.com'
+        raw_host = request.host.lower().split(':')[0]
+        
         config = None
-        subdominio = "smartwhats" # Default
-        # DETECCIÓN UNILOVA
-        if 'unilova' in host:
-            app.logger.info("✅ Configuración detectada: Unilova")
-            return NUMEROS_CONFIG['123']
-            subdominio = "unilova"
-        # DETECCIÓN SMARTWHATS
-        elif 'smartwhats' in host:
-            app.logger.info("✅ Configuración detectada: Smartwhats")
-            return NUMEROS_CONFIG['524495486824']
-            subdominio = "smartwhats"
-        # DETECCIÓN PORFIRIANNA
-        elif 'laporfirianna' in host:
-            app.logger.info("✅ Configuración detectada: La Porfirianna")
-            return NUMEROS_CONFIG['524812372326']
-            subdominio = "laporfirianna"
-        # DETECCIÓN OFITODO
-        elif 'ofitodo' in host:
-            app.logger.info("✅ Configuración detectada: Ofitodo")
-            return NUMEROS_CONFIG['524495486324']
-            subdominio = "ofitodo"
-        # DETECCIÓN MAINDSTEEL
-        elif 'maindsteel' in host:
-            app.logger.info("✅ Configuración detectada: Maindsteel")
-            return NUMEROS_CONFIG['1011']
-            subdominio = "maindsteel"
-        # DETECCIÓN SUPAGPRUEBA
-        elif 'supagprueba' in host:
-            app.logger.info("✅ Configuración detectada: Supagprueba")
-            return NUMEROS_CONFIG['000']
-            subdominio = "supagprueba"
-        # DETECCIÓN SOIN3
-        elif 'soin3' in host:
-            app.logger.info("✅ Configuración detectada: Soin3")
-            return NUMEROS_CONFIG['003']
-            subdominio = "soin3"
-        # DETECCIÓN DRASGO
-        elif 'drasgo' in host:
-            app.logger.info("✅ Configuración detectada: Drasgo")
-            return NUMEROS_CONFIG['1012']
-            subdominio = "drasgo"
-        # DETECCIÓN LACSE
-        elif 'lacse' in host:
-            app.logger.info("✅ Configuración detectada: Lacse")
-            return NUMEROS_CONFIG['1111111111111']
-            subdominio = "lacse"
-        # LA PIEZA CLAVE:
-        if config:
-            config['subdominio_actual'] = subdominio
-            
+        subdominio = "mektia"  # Default inicial
+
+        # 1. BÚSQUEDA DINÁMICA (Para no tener que escribir cada cliente)
+        # Recorremos NUMEROS_CONFIG buscando si el host aparece en alguna configuración
+        for key, valor in NUMEROS_CONFIG.items():
+            # Si el dominio del cliente está en el host que pide el navegador
+            conf_dominio = valor.get('dominio', '').lower()
+            if conf_dominio and conf_dominio in raw_host:
+                config = valor
+                # Intentamos extraer el subdominio del host (ej: 'unilova')
+                subdominio = raw_host.split('.')[0]
+                break
+
+        # 2. BACKUP MANUAL (Tus IFs actuales por si el diccionario no tiene la llave 'dominio')
+        if not config:
+            if 'unilova' in raw_host:
+                config = NUMEROS_CONFIG.get('123')
+                subdominio = "unilova"
+            elif 'smartwhats' in raw_host:
+                config = NUMEROS_CONFIG.get('524495486824')
+                subdominio = "smartwhats"
+            elif 'laporfirianna' in raw_host:
+                config = NUMEROS_CONFIG.get('524812372326')
+                subdominio = "laporfirianna"
+            elif 'ofitodo' in raw_host:
+                config = NUMEROS_CONFIG.get('524495486324')
+                subdominio = "ofitodo"
+            elif 'maindsteel' in raw_host:
+                config = NUMEROS_CONFIG.get('1011')
+                subdominio = "maindsteel"
+            elif 'supagprueba' in raw_host:
+                config = NUMEROS_CONFIG.get('000')
+                subdominio = "supagprueba"
+            elif 'soin3' in raw_host:
+                config = NUMEROS_CONFIG.get('003')
+                subdominio = "soin3"
+            elif 'drasgo' in raw_host:
+                config = NUMEROS_CONFIG.get('1012')
+                subdominio = "drasgo"
+            elif 'lacse' in raw_host:
+                config = NUMEROS_CONFIG.get('1111111111111')
+                subdominio = "lacse"
+
+        # 3. SEGURO DE VIDA (Si nada coincidió, entregamos Mektia para que no truene)
+        if config is None:
+            app.logger.warning(f"⚠️ Host no reconocido: {raw_host}. Usando configuración default.")
+            config = NUMEROS_CONFIG['524495486824']
+            subdominio = "mektia"
+
+        # LA PIEZA CLAVE (Ahora sí se ejecuta siempre):
+        config['subdominio_actual'] = subdominio
         return config
             
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
+        # Retorno de emergencia para evitar el AttributeError: 'NoneType'
         return NUMEROS_CONFIG['524495486824']
 
 @app.route('/diagnostico')
