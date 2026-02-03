@@ -7704,33 +7704,47 @@ def enviar_notificacion_pedido_cita(numero, mensaje, analisis_pedido, config=Non
         return False
 
 def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
+    """Envía alerta de intervención humana unificada"""
     if config is None:
         config = obtener_configuracion_por_host()
 
-    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
-    if config is None:
-        app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return
-    
+    # Intentar obtener el nombre del cliente para que la alerta sea clara
     try:
         cliente_mostrado = obtener_nombre_mostrado_por_numero(numero_cliente, config)
     except Exception:
-        cliente_mostrado = numero_cliente
+        cliente_mostrado = "Cliente Nuevo"
 
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    mensaje += f"👤 *Cliente:* {cliente_mostrado}\n"
-    mensaje += f"📞 *Número:* {numero_cliente}\n"
-    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
-    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
-    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
-    mensaje += f"{contexto_consulta}\n\n"
-    mensaje += f"_________________________________________\n"
-    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    contexto_consulta = "No disponible"
+    try:
+        contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
+    except Exception:
+        pass
+
+    # Construcción del mensaje
+    mensaje = (
+        f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
+        f"👤 *Cliente:* {cliente_mostrado}\n"
+        f"📞 *Número:* {numero_cliente}\n"
+        f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
+        f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
+        f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
+        f"🎯 *PROYECTO:* {config.get('subdominio_actual', 'Desconocido')}\n"
+        f"🔍 *DETALLES:* {contexto_consulta}\n"
+        f"_________________________________________\n"
+        f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
+    )
     
-    enviar_mensaje(ALERT_NUMBER, mensaje, config)
-    enviar_mensaje('5214493432744', mensaje, config)
-    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} (mostrar: {cliente_mostrado}) desde {config.get('dominio')}")
+    # 🚀 ENVÍO A LOS ADMINISTRADORES
+    try:
+        # 1. Al número de alerta general (ALERT_NUMBER suele venir de una variable global)
+        enviar_mensaje(ALERT_NUMBER, mensaje, config)
+        
+        # 2. A tu número personal (Hardcoded para asegurar que te llegue)
+        enviar_mensaje('5214493432744', mensaje, config)
+        
+        app.logger.info(f"📤 Alerta humana enviada con éxito para {numero_cliente}")
+    except Exception as e:
+        app.logger.error(f"🔴 Falló el envío de la alerta: {e}")
 
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente (muestra nombre si existe)"""
@@ -8176,34 +8190,6 @@ def es_respuesta_a_pregunta(mensaje):
         return True
     
     return False
-
-def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
-    if config is None:
-        config = obtener_configuracion_por_host()
-
-    contexto_consulta = obtener_contexto_consulta(numero_cliente, config)
-    if config is None:
-        app.logger.error("🔴 Configuración no disponible para enviar alerta")
-        return
-    
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    """Envía alerta de intervención humana usando mensaje normal (sin template)"""
-    mensaje = f"🚨 *ALERTA: Intervención Humana Requerida*\n\n"
-    mensaje += f"👤 *Cliente:* {numero_cliente}\n"
-    mensaje += f"📞 *Número:* {numero_cliente}\n"
-    mensaje += f"💬 *Mensaje clave:* {mensaje_clave[:100]}{'...' if len(mensaje_clave) > 100 else ''}\n\n"
-    mensaje += f"📋 *Resumen:*\n{resumen[:800]}{'...' if len(resumen) > 800 else ''}\n\n"
-    mensaje += f"⏰ *Hora:* {datetime.now().strftime('%d/%m/%Y %H:%M')}\n"
-    mensaje += f"🎯 *INFORMACIÓN DEL PROYECTO/CONSULTA:*\n"
-    mensaje += f"{contexto_consulta}\n\n"
-    mensaje += f"_________________________________________\n"
-    mensaje += f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
-    
-    # Enviar mensaje normal (sin template) a tu número personal
-    enviar_mensaje(ALERT_NUMBER, mensaje, config)
-    enviar_mensaje('5214493432744', mensaje, config)#me quiero enviar un mensaje a mi mismo
-    app.logger.info(f"📤 Alerta humana enviada para {numero_cliente} desde {config['dominio']}")
 
 def enviar_informacion_completa(numero_cliente, config=None):
     """Envía toda la información del cliente a ambos números"""
