@@ -13778,7 +13778,7 @@ with app.app_context():
 if __name__ == "__main__":
     # 1. Arrancamos el scheduler modular justo antes de iniciar la App
     # Esto asegura que solo corra UNA vez.
-    start_followup_scheduler() 
+    start_followup_scheduler(NUMEROS_CONFIG) 
     print("⏰ [SISTEMA] Scheduler de seguimientos activado desde el módulo.")
 
     import argparse
