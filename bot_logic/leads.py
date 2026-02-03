@@ -6,24 +6,25 @@ import mysql.connector
 import requests
 import logging
 
-# Configurar logging
+# Configurar logging para ver qué pasa en la consola
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Zona horaria
 tz_mx = pytz.timezone('America/Mexico_City')
 
-print("🚀 [MODULAR] bot_logic/leads.py CARGADO: Funcionalidad completa (WA + Telegram + IA)")
+print("🚀 [MODULAR] bot_logic/leads.py: Corrigiendo rutas de importación...")
 
 def procesar_followups_automaticos(config):
-    """
-    Versión modular con TODA la funcionalidad original.
-    """
-    # Importamos herramientas de envío directamente para evitar círculos con app.py
-    from whatsapp import enviar_mensaje, enviar_plantilla_comodin
-    
+    # Importaciones de envío (usando la ruta completa para evitar errores)
     try:
-        # Conexión independiente a la base de datos
+        from whatsapp import enviar_mensaje, enviar_plantilla_comodin
+    except ImportError:
+        # Si falla la anterior, intentamos importación directa si están en el mismo nivel
+        import whatsapp
+        enviar_mensaje = whatsapp.enviar_mensaje
+        enviar_plantilla_comodin = whatsapp.enviar_plantilla_comodin
+
+    try:
         conn = mysql.connector.connect(
             host=config['db_host'],
             user=config['db_user'],
@@ -32,7 +33,6 @@ def procesar_followups_automaticos(config):
         )
         cursor = conn.cursor(dictionary=True)
         
-        # Query de candidatos
         query = """
             SELECT c.numero_telefono as numero, c.alias, c.nombre,
                    COALESCE(c.ultima_interaccion_usuario, c.timestamp) as ultima_msg,
@@ -52,15 +52,12 @@ def procesar_followups_automaticos(config):
             ultimo_estado_db = chat.get('estado_seguimiento')
             nombre_cliente = chat.get('alias') or chat.get('nombre') or 'Cliente'
 
-            # 1. Filtro de seguridad (Caliente no se toca)
             if ultimo_estado_db == 'Caliente': continue
 
-            # 2. Filtro de 23 horas (Evitar SPAM)
             if last_f:
                 if last_f.tzinfo is None: last_f = pytz.utc.localize(last_f).astimezone(tz_mx)
                 if (ahora - last_f).total_seconds() < 82800: continue
 
-            # 3. Cálculo de degradación de tiempo
             u_msg = chat['ultima_msg']
             if u_msg.tzinfo is None: u_msg = pytz.utc.localize(u_msg).astimezone(tz_mx)
             
@@ -72,80 +69,82 @@ def procesar_followups_automaticos(config):
             elif horas >= 15: tipo_calculado = 'frio'
             elif diff_minutos >= 30: tipo_calculado = 'tibio'
 
-            # 4. Filtro: Solo si el estado cambió
             if not tipo_calculado or tipo_calculado == ultimo_estado_db:
                 continue
 
-            # 5. Generación de mensaje con IA (DeepSeek)
-            # Como no podemos importar de app, hacemos la llamada aquí
+            # Usamos una función de texto más robusta
             texto_ia = _generar_texto_ia_leads(tipo_calculado, config)
             
-            if texto_ia:
-                enviado = False
-                
-                # SOPORTE TELEGRAM
-                if str(numero).startswith('tg_'):
-                    enviado = _send_telegram_direct(numero.replace('tg_', ''), texto_ia, config.get('telegram_token'))
-                
-                # SOPORTE WHATSAPP
+            enviado = False
+            if str(numero).startswith('tg_'):
+                enviado = _send_telegram_direct(numero.replace('tg_', ''), texto_ia, config.get('telegram_token'))
+            else:
+                if tipo_calculado == 'dormido':
+                    enviado = enviar_plantilla_comodin(numero, nombre_cliente, texto_ia, config)
                 else:
-                    if tipo_calculado == 'dormido':
-                        enviado = enviar_plantilla_comodin(numero, nombre_cliente, texto_ia, config)
-                    else:
-                        enviado = enviar_mensaje(numero, texto_ia, config)
+                    enviado = enviar_mensaje(numero, texto_ia, config)
 
-                if enviado:
-                    # Registrar en base de datos
-                    _registrar_followup_db(cursor, conn, numero, tipo_calculado, texto_ia)
-                    print(f"✅ Seguimiento {tipo_calculado} enviado a {numero}")
+            if enviado:
+                _registrar_followup_db(cursor, conn, numero, tipo_calculado, texto_ia)
+                logger.info(f"✅ Seguimiento {tipo_calculado} enviado a {numero}")
 
         cursor.close()
         conn.close()
     except Exception as e:
-        print(f"🔴 Error crítico en Leads Modular: {e}")
+        logger.error(f"🔴 Error en ciclo de leads: {e}")
 
 def _generar_texto_ia_leads(tipo, config):
-    """Llamada directa a DeepSeek para evitar importar de app.py"""
+    # Aquí puedes poner tu API KEY de DeepSeek directamente para que no falle al importar
+    api_key = "TU_DEEPSEEK_API_KEY_AQUI" 
     try:
-        prompt = f"Eres un asistente de ventas de {config.get('ia_nombre')}. El cliente está en estado '{tipo}'. Escribe un mensaje corto y amable para retomar la conversación."
+        prompt = f"Eres un asistente de ventas de {config.get('ia_nombre', 'la empresa')}. El cliente está en estado '{tipo}'. Escribe un mensaje corto para retomar la charla."
         payload = {
             "model": "deepseek-chat",
             "messages": [{"role": "system", "content": prompt}],
             "temperature": 0.7
         }
-        headers = {"Authorization": "Bearer YOUR_DEEPSEEK_KEY", "Content-Type": "application/json"}
-        r = requests.post("https://api.deepseek.com/v1/chat/completions", json=payload, headers=headers, timeout=10)
+        r = requests.post("https://api.deepseek.com/v1/chat/completions", 
+                         json=payload, 
+                         headers={"Authorization": f"Bearer {api_key}"}, 
+                         timeout=10)
         return r.json()['choices'][0]['message']['content']
     except:
-        return "Hola, ¿sigues interesado en nuestra información?"
+        return "¿Sigues interesado en la información que te enviamos? Quedo a tus órdenes."
 
 def _send_telegram_direct(chat_id, text, token):
-    """Enviador de Telegram independiente"""
     if not token: return False
     try:
-        url = f"https://api.telegram.org/bot{token}/sendMessage"
-        r = requests.post(url, json={"chat_id": chat_id, "text": text})
-        return r.status_code == 200
-    except:
-        return False
+        requests.post(f"https://api.telegram.org/bot{token}/sendMessage", 
+                      json={"chat_id": chat_id, "text": text}, timeout=10)
+        return True
+    except: return False
 
 def _registrar_followup_db(cursor, conn, numero, estado, texto):
-    """Guarda el historial y actualiza el meta"""
-    # Guardar en historial (mensajes_ia o similar)
-    cursor.execute("INSERT INTO mensajes_ia (numero, mensaje, tipo) VALUES (%s, %s, 'followup')", (numero, texto))
-    # Actualizar meta
-    cursor.execute("""
-        INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
-        VALUES (%s, NOW(), %s) ON DUPLICATE KEY UPDATE ultimo_followup = NOW(), estado_seguimiento = %s
-    """, (numero, estado, estado))
-    conn.commit()
+    try:
+        cursor.execute("INSERT INTO mensajes_ia (numero, mensaje, tipo) VALUES (%s, %s, 'followup')", (numero, texto))
+        cursor.execute("""
+            INSERT INTO chat_meta (numero, ultimo_followup, estado_seguimiento) 
+            VALUES (%s, NOW(), %s) ON DUPLICATE KEY UPDATE ultimo_followup = NOW(), estado_seguimiento = %s
+        """, (numero, estado, estado))
+        conn.commit()
+    except: pass
 
 def start_followup_scheduler():
     def _worker():
-        from settings import NUMEROS_CONFIG
+        # SOLUCIÓN AL ModuleNotFoundError: Importamos desde el path completo
+        try:
+            from app.config.settings import NUMEROS_CONFIG
+        except ImportError:
+            # Si falla, intentamos importar desde el objeto app si ya está cargado
+            from app import NUMEROS_CONFIG
+
+        print("⏰ Scheduler de Seguimiento INICIADO.")
         while True:
-            for tenant_key in NUMEROS_CONFIG:
-                procesar_followups_automaticos(NUMEROS_CONFIG[tenant_key])
+            try:
+                for tenant in NUMEROS_CONFIG:
+                    procesar_followups_automaticos(NUMEROS_CONFIG[tenant])
+            except Exception as e:
+                logger.error(f"Error en worker: {e}")
             time.sleep(1800)
     
     t = threading.Thread(target=_worker, daemon=True)
