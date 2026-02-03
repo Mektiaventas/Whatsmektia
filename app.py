@@ -11255,51 +11255,54 @@ def obtener_configuracion_por_host():
         from flask import has_request_context, request
         if not has_request_context():
             return NUMEROS_CONFIG['524495486824']  # Default
-
         host = request.headers.get('Host', '').lower()
-        
+        config = None
+        subdominio = "mektia" # Default
+        # DETECCIÓN UNILOVA
         if 'unilova' in host:
             app.logger.info("✅ Configuración detectada: Unilova")
             return NUMEROS_CONFIG['123']
-        
+            subdominio = "unilova"
         # DETECCIÓN PORFIRIANNA
-        if 'laporfirianna' in host:
+        elif 'laporfirianna' in host:
             app.logger.info("✅ Configuración detectada: La Porfirianna")
             return NUMEROS_CONFIG['524812372326']
-            
+            subdominio = "laporfirianna"
         # DETECCIÓN OFITODO
-        if 'ofitodo' in host:
+        elif 'ofitodo' in host:
             app.logger.info("✅ Configuración detectada: Ofitodo")
             return NUMEROS_CONFIG['524495486324']
-
+            subdominio = "ofitodo"
         # DETECCIÓN MAINDSTEEL
-        if 'maindsteel' in host:
+        elif 'maindsteel' in host:
             app.logger.info("✅ Configuración detectada: Maindsteel")
             return NUMEROS_CONFIG['1011']
-
+            subdominio = "maindsteel"
         # DETECCIÓN SUPAGPRUEBA
-        if 'supagprueba' in host:
+        elif 'supagprueba' in host:
             app.logger.info("✅ Configuración detectada: Supagprueba")
             return NUMEROS_CONFIG['000']
-
+            subdominio = "supagprueba"
         # DETECCIÓN SOIN3
-        if 'soin3' in host:
+        elif 'soin3' in host:
             app.logger.info("✅ Configuración detectada: Soin3")
             return NUMEROS_CONFIG['003']
-
+            subdominio = "soin3"
         # DETECCIÓN DRASGO
-        if 'drasgo' in host:
+        elif 'drasgo' in host:
             app.logger.info("✅ Configuración detectada: Drasgo")
             return NUMEROS_CONFIG['1012']
-
+            subdominio = "drasgo"
         # DETECCIÓN LACSE
-        if 'lacse' in host:
+        elif 'lacse' in host:
             app.logger.info("✅ Configuración detectada: Lacse")
             return NUMEROS_CONFIG['1111111111111']
-        
-        # DEFAULT MEKTIA
-        app.logger.info("✅ Configuración por defecto: Mektia")
-        return NUMEROS_CONFIG['524495486824']
+            subdominio = "lacse"
+        # LA PIEZA CLAVE:
+        if config:
+            config['subdominio_actual'] = subdominio
+            
+        return config
             
     except Exception as e:
         app.logger.error(f"🔴 Error en obtener_configuracion_por_host: {e}")
