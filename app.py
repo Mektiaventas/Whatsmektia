@@ -4322,10 +4322,13 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         """
         
         # Enviar a ambos números
-        enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-        enviar_mensaje('524491182201', mensaje_alerta, config)
-        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
-        
+        #En lugar de los dos envíos manuales, usa la config de la DB
+        admin_principal = config.get('transferencia_numero')
+        if admin_principal:
+            enviar_mensaje(admin_principal, mensaje_alerta, config)
+        else:
+            enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
+        app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a administradores, ID: {cita_id}")
     except Exception as e:
         app.logger.error(f"Error enviando alerta de {tipo_solicitud}: {e}")
 @app.route('/uploads/<filename>')
@@ -9935,7 +9938,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE DE INTRODUCCIÓN (ej: 'Aquí tienes las opciones'). NO describas los productos, el sistema enviará fichas técnicas.\n"
                 "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
                 "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n" # <--- ESTO
-                "6. SI EL USUARIO QUIERE AGENDAR, UNA CITA O RESERVAR, responde: AGENDAR_CITA\n\n" # <--- Tu punto 6
+                "6. SI EL USUARIO QUIERE AGENDAR UNA CITA: responde AGENDAR_CITA. Tu respuesta de texto debe ser solo: '¡Claro! Con gusto te ayudo. ¿Qué día y hora te gustaría?'\n\n" # <--- Tu punto 6
                 "Ejemplos:\n"
                 "- U: 'muéstrame el Sainz' -> SEARCH: Escritorio Sainz | SHOW: YES\n"
                 "- U: 'precio del escritorio' -> SEARCH: Escritorio | SHOW: NO\n"
@@ -9976,12 +9979,23 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.info(f"🔍 IA Search: '{contexto_busqueda}'")
                 except IndexError:
                     pass
-            elif "AGENDAR_CITA" in raw_ds.upper():
+            elif "AGENDAR_CITA" in raw_upper:
                 app.logger.info("📅 IA detectó: SOLICITUD DE CITA")
-                # SUSTITUYE 'tu_funcion_de_citas' por el nombre real de tu función
-                # Ejemplo: mandar_alerta_cita(numero, config=config)
-                enviar_alerta_humana(numero, config=config) 
-                enviar_mensaje(numero, "¡Perfecto! He notificado al área de admisiones para agendar tu cita. ¿En qué horario te gustaría?", config)
+                # 1. Sacamos el número del asesor desde la config de la DB (Multitenant)
+                numero_admin_db = config.get('transferencia_numero', ALERT_NUMBER)
+                # 2. Preparamos la info básica (lo poco que sabemos por ahora)
+                info_basica = {
+                    'nombre_cliente': config.get('usuario_nombre', 'Cliente de WhatsApp'),
+                    'telefono': numero,
+                    'servicio_solicitado': 'Interés General / Cita Admisiones',
+                    'fecha_sugerida': 'Pendiente por definir',
+                    'hora_sugerida': 'Pendiente por definir'
+                }
+                # 3. Disparamos la alerta (usando un ID genérico o timestamp para el ID)
+                cita_id_temp = datetime.now().strftime('%M%S')
+                enviar_alerta_cita_administrador(info_basica, cita_id_temp, config)
+                # 4. Le respondemos al usuario para que él nos de la fecha/hora
+                enviar_mensaje(numero, "¡Excelente! He avisado al área de admisiones. ¿Qué día y hora te gustaría para tu cita?", config)
                 return True
             elif "TRANSFERIR_ASESOR" in raw_ds.upper():
                 app.logger.info("📢 IA detectó solicitud de asesor. Ejecutando transferencia...")
@@ -9994,9 +10008,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             else:
                  m = re.search(r'\b(SI_APLICA|NO_APLICA)\b', raw_ds.upper())
                  if m: producto_aplica = m.group(1)
-
             app.logger.info(f"🔎 DeepSeek result -> {producto_aplica}")
-            
         except Exception as e:
             app.logger.warning(f"⚠️ DeepSeek error: {e}")
             if any(kw in (texto or "").lower() for kw in ['precio', 'foto', 'ver']):
