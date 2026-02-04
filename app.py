@@ -7737,17 +7737,26 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
         f"📊 Atiende desde el CRM o responde directamente por WhatsApp"
     )
     
-    # 🚀 ENVÍO A LOS ADMINISTRADORES
+    # 🚀 ENVÍO DINÁMICO AL ASESOR EN TURNO
     try:
-        # 1. Al número de alerta general (ALERT_NUMBER suele venir de una variable global)
-        enviar_mensaje(ALERT_NUMBER, mensaje, config)
+        # 1. Buscamos a quién le toca atender
+        asesor = obtener_siguiente_asesor(config)
         
-        # 2. A tu número personal (Hardcoded para asegurar que te llegue)
-        enviar_mensaje('524491182201', mensaje, config)
+        if asesor and asesor.get('telefono'):
+            telefono_asesor = asesor['telefono']
+            enviar_mensaje(telefono_asesor, mensaje, config)
+            app.logger.info(f"📤 Alerta enviada al asesor en turno: {telefono_asesor}")
         
-        app.logger.info(f"📤 Alerta humana enviada con éxito para {numero_cliente}")
+        # 2. Respaldo: Si no hay asesor, enviamos al número de alerta general
+        elif ALERT_NUMBER:
+            enviar_mensaje(ALERT_NUMBER, mensaje, config)
+            app.logger.warning(f"⚠️ Sin asesor configurado. Alerta enviada a ALERT_NUMBER ({ALERT_NUMBER})")
+        
+        else:
+            app.logger.error("❌ No hay asesor ni ALERT_NUMBER configurado para enviar la alerta")
+
     except Exception as e:
-        app.logger.error(f"🔴 Falló el envío de la alerta: {e}")
+        app.logger.error(f"🔴 Error crítico enviando la alerta: {e}")
 
 def resumen_rafa(numero, config=None):
     """Resumen más completo y eficiente (muestra nombre si existe)"""
