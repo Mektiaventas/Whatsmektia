@@ -13339,8 +13339,8 @@ def data_deletion():
 @app.route('/test-alerta')
 def test_alerta():
     config = obtener_configuracion_por_host()  # 🔥 OBTENER CONFIG PRIMERO
-    enviar_alerta_humana("Prueba", "524491182201", "Mensaje clave", "Resumen de prueba.", config)  # 🔥 AGREGAR config
-    return "🚀 Test alerta disparada."
+    enviar_alerta_humana("524491182201", "TEST-Navegador", "Esta es una prueba de Alerta", config)  # 🔥 AGREGAR config
+    return "🚀 Test alerta disparada correctamente."
 
 def obtener_chat_meta(numero, config=None):
         if config is None:
