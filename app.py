@@ -9750,11 +9750,18 @@ Formato JSON:
         if historial:
             for h in historial:
                 if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
-                if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
+                if h.get('assistant') or h.get('respuesta'): 
+                    # A veces el historial viene como 'respuesta' o como 'assistant'
+                    cont_resp = h.get('respuesta') or h.get('assistant')
+                    lista_mensajes.append({"role": "assistant", "content": cont_resp})
         
-        # Agregar mensaje actual con los productos encontrados
-        contenido_final_usuario = f"{texto}\n{contexto_productos}"
-        lista_mensajes.append({"role": "user", "content": contenido_final_usuario})
+        # --- MEJORA AQUÍ: Forzamos el contexto si existe catalog_list ---
+        if catalog_list and len(catalog_list) > 0:
+            info_para_ia = f"Pregunta del cliente: {texto}\n\nDATOS REALES DEL INVENTARIO:\n{contexto_productos}\nInstrucción: Usa los precios de arriba para responder."
+        else:
+            info_para_ia = texto
+
+        lista_mensajes.append({"role": "user", "content": info_para_ia})
 
         # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
