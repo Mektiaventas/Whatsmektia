@@ -8731,24 +8731,29 @@ def webhook():
         app.logger.error(traceback.format_exc())
         return 'Internal server error', 500
 
-def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False, respuesta_tipo='texto', respuesta_media_url=None):
+def registrar_respuesta_bot(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, incoming_saved=False, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
     """
-    Save the bot response in a way that avoids duplicating the incoming user message.
-    - If incoming_saved is True, try to update the existing incoming message row with respuesta using actualizar_respuesta().
-    - Otherwise insert a new row using guardar_conversacion().
-    Returns True on success, False otherwise.
+    Ahora acepta productos_data para guardar las fichas en la web.
     """
     try:
         if incoming_saved:
             try:
-                # Prefer updating the existing incoming message so we don't insert a duplicate user row
-                return actualizar_respuesta(numero, mensaje, respuesta, config, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
+                # PASAMOS productos_data a actualizar_respuesta
+                return actualizar_respuesta(numero, mensaje, respuesta, config, 
+                                          respuesta_tipo=respuesta_tipo, 
+                                          respuesta_media_url=respuesta_media_url,
+                                          productos_data=productos_data)
             except Exception as e:
-                app.logger.warning(f"⚠️ actualizar_respuesta failed, falling back to guardar_conversacion: {e}")
-                # fallback to insert if update fails
-                return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
+                app.logger.warning(f"⚠️ actualizar_respuesta failed: {e}")
+                return guardar_conversacion(numero, mensaje, respuesta, config, 
+                                          imagen_url=imagen_url, es_imagen=es_imagen, 
+                                          respuesta_tipo=respuesta_tipo, 
+                                          respuesta_media_url=respuesta_media_url,
+                                          productos_data=productos_data)
         else:
-            return guardar_conversacion(numero, mensaje, respuesta, config, imagen_url=imagen_url, es_imagen=es_imagen)
+            return guardar_conversacion(numero, mensaje, respuesta, config, 
+                                      imagen_url=imagen_url, es_imagen=es_imagen,
+                                      productos_data=productos_data)
     except Exception as e:
         app.logger.error(f"❌ registrar_respuesta_bot error: {e}")
         return False
