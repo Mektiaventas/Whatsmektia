@@ -9980,23 +9980,30 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 except IndexError:
                     pass
             elif "AGENDAR_CITA" in raw_upper:
-                app.logger.info("📅 IA detectó: SOLICITUD DE CITA")
-                # 1. Sacamos el número del asesor desde la config de la DB (Multitenant)
-                numero_admin_db = config.get('transferencia_numero', ALERT_NUMBER)
-                # 2. Preparamos la info básica (lo poco que sabemos por ahora)
-                info_basica = {
-                    'nombre_cliente': config.get('usuario_nombre', 'Cliente de WhatsApp'),
-                    'telefono': numero,
-                    'servicio_solicitado': 'Interés General / Cita Admisiones',
-                    'fecha_sugerida': 'Pendiente por definir',
-                    'hora_sugerida': 'Pendiente por definir'
+                app.logger.info("📅 IA detectó: SOLICITUD DE CITA. Ejecutando flujo unificado...")
+                
+                # 1. Preparamos un objeto save_cita básico con lo que detectó la IA de productos
+                # Si la IA ya sabía qué producto buscaba (SEARCH:), lo pasamos como servicio
+                save_cita_inicial = {
+                    'servicio_solicitado': contexto_busqueda if producto_aplica == "SI_APLICA" else None,
+                    'telefono': numero
                 }
-                # 3. Disparamos la alerta (usando un ID genérico o timestamp para el ID)
-                cita_id_temp = datetime.now().strftime('%M%S')
-                enviar_alerta_cita_administrador(info_basica, cita_id_temp, config)
-                # 4. Le respondemos al usuario para que él nos de la fecha/hora
-                enviar_mensaje(numero, "¡Excelente! He avisado al área de admisiones. ¿Qué día y hora te gustaría para tu cita?", config)
-                return True
+            
+                # 2. Llamamos a tu función unificada
+                # Esta función se encargará de: guardar, validar, pedir lo que falte y avisar al admin.
+                manejar_guardado_cita_unificado(
+                    save_cita=save_cita_inicial,
+                    intent="AGENDAR_CITA",
+                    numero=numero,
+                    texto=texto,
+                    historial=historial_objs, # El historial que ya sacaste arriba
+                    catalog_list=[], 
+                    respuesta_text=None, # Dejamos que la función genere su propio follow-up
+                    incoming_saved=incoming_saved,
+                    config=config
+                )
+                
+                return True # Finalizamos el flujo aquí
             elif "TRANSFERIR_ASESOR" in raw_ds.upper():
                 app.logger.info("📢 IA detectó solicitud de asesor. Ejecutando transferencia...")
                 pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
