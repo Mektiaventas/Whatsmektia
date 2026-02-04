@@ -9934,6 +9934,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 "2. Si la intención implica VER/RECIBIR el producto, agrega: | SHOW: YES\n"
                 "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE DE INTRODUCCIÓN (ej: 'Aquí tienes las opciones'). NO describas los productos, el sistema enviará fichas técnicas.\n"
                 "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
+                "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n" # <--- ESTO
                 "Ejemplos:\n"
                 "- U: 'muéstrame el Sainz' -> SEARCH: Escritorio Sainz | SHOW: YES\n"
                 "- U: 'precio del escritorio' -> SEARCH: Escritorio | SHOW: NO\n"
@@ -9974,6 +9975,12 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.info(f"🔍 IA Search: '{contexto_busqueda}'")
                 except IndexError:
                     pass
+            elif "TRANSFERIR_ASESOR" in raw_ds.upper():
+                app.logger.info("📢 IA detectó solicitud de asesor. Ejecutando transferencia...")
+                pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+                # Enviamos un mensaje de confirmación antes de salir
+                enviar_mensaje(numero, "Claro, te estoy transfiriendo con un asesor humano. En un momento te atenderán.", config)
+                return True # Finaliza el flujo aquí
             elif "SI_APLICA" in raw_ds:
                 producto_aplica = "SI_APLICA"
             else:
