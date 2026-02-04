@@ -9706,21 +9706,38 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         data_negocio = config.get('negocio') if isinstance(config.get('negocio'), dict) else config
         ia_nombre = data_negocio.get('ia_nombre') or "Asistente"
         negocio_nombre = data_negocio.get('negocio_nombre') or "la empresa"
+        que_hace = data_negocio.get('que_hace') or "Asistir a los clientes."
         
-        # 2. Prompt con lógica de Audio e Identidad
-        # Mantenemos el formato JSON estricto para que la lógica de 'procesar_mensaje_unificado' no rompa
+        # 2. Prompt con lógica de Audio, Identidad y Catálogo
         system_prompt = f"""
-        Eres {ia_nombre}, el asistente de {negocio_nombre}.
-        REGLA DE ORO: Si el usuario envió un audio (detectado en los metadatos), tu respuesta debe ser empática y lista para ser convertida a voz.
-        Responde SIEMPRE en formato JSON.
-        """
+Eres {ia_nombre}, el asistente de {negocio_nombre}.
+Instrucciones del negocio: {que_hace}
+
+REGLAS DE ORO:
+1) Si el usuario envió un audio, tu respuesta debe ser empática y lista para voz.
+2) Responde SIEMPRE en formato JSON.
+3) Si hay productos en el catálogo proporcionado, úsalos para responder.
+4) Campo 'respuesta_text': Máximo 3 líneas.
+
+JSON format:
+{{
+  "intent": "RESPONDER" | "PASAR_ASESOR",
+  "respuesta_text": "mensaje para el usuario",
+  "notify_asesor": false
+}}
+"""
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         for h in (historial or []):
             if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
             if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
         
-        lista_mensajes.append({"role": "user", "content": texto})
+        # Agregamos contexto de catálogo si aplica para que la IA no invente
+        mensaje_usuario_final = texto
+        if producto_aplica == "SI_APLICA" and catalog_list:
+            mensaje_usuario_final += f"\n\nContexto Catálogo: {json.dumps(catalog_list, ensure_ascii=False)}"
+            
+        lista_mensajes.append({"role": "user", "content": mensaje_usuario_final})
 
         # 3. Llamada a DeepSeek
         headers = {"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}", "Content-Type": "application/json"}
@@ -9729,18 +9746,26 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             "messages": lista_mensajes, 
             "response_format": {"type": "json_object"},
             "temperature": 0.3
-        }
+        }}
         
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
         decision = json.loads(resp.json()['choices'][0]['message']['content'])
 
-        # 4. EXTRACCIÓN DE VARIABLES (Estandarización para no romper el resto de la app)
-        respuesta_text = decision.get('respuesta_text', '')
+        # 4. EXTRACCIÓN DE VARIABLES Y PROTECCIÓN ANTI-VACÍO
+        respuesta_text = decision.get('respuesta_text') or decision.get('respuesta') or ""
+        
+        # --- PARCHE DE SEGURIDAD ---
+        # Si la IA devuelve texto vacío, generamos un fallback basado en si hay productos o no
+        if not respuesta_text.strip():
+            if producto_aplica == "SI_APLICA":
+                respuesta_text = "Claro, aquí tienes los detalles de lo que solicitaste:"
+            else:
+                respuesta_text = "Entiendo, ¿en qué más puedo apoyarte?"
+        
         intent = decision.get('intent', 'RESPONDER_TEXTO').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
         
-        # Estas son las variables que mencionaste que podrían tronar si faltan
         mensaje_para_cliente = respuesta_text 
         mensaje_respuesta_final = respuesta_text
 
@@ -9748,17 +9773,14 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         audio_url_publica = None
         if es_audio and respuesta_text:
             try:
-                from utils import texto_a_voz # Asegúrate de tener esta función en tus utils
+                from whatsapp import texto_a_voz # Cambiado de utils a whatsapp según tu mensaje previo
                 tono_configurado = config.get('tono_voz', 'nova')
                 filename = f"resp_{numero}_{int(time.time())}"
-                
-                # Generamos el audio
                 audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
                 
-                if audio_url_publica:
-                    # Aplicamos el Proxy para WhatsApp (para que no falle el reproductor)
-                    filename_only = os.path.basename(urlparse(audio_url_publica).path)
+                if audio_url_publica and "/proxy-audio/" not in audio_url_publica:
                     from flask import request
+                    filename_only = os.path.basename(audio_url_publica.split('?')[0])
                     audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
             except Exception as e:
                 app.logger.error(f"🔴 Error generando TTS: {e}")
@@ -9770,17 +9792,17 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             if not mensaje_para_cliente:
                 mensaje_para_cliente = "Un asesor humano te contactará en breve."
 
-        # 7. ENVÍO MULTICANAL (WhatsApp / Telegram)
+        # 7. ENVÍO MULTICANAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
         if audio_url_publica:
             enviar_mensaje_voz(numero, audio_url_publica, config)
-            # También enviamos el texto por si el usuario no puede escuchar el audio
             enviar_mensaje(numero, mensaje_para_cliente, config)
         else:
+            # Aquí ya es imposible que mensaje_para_cliente sea vacío por el paso 4
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. REGISTRO EN DB (Usando los parámetros que espera tu función de registro)
+        # 8. REGISTRO EN DB
         registrar_respuesta_bot(
             numero, 
             texto, 
@@ -9795,6 +9817,8 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
 
     except Exception as e:
         app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
 
