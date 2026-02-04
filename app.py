@@ -9743,26 +9743,27 @@ Formato JSON:
 }}
 """
 
-        # 4. PREPARAR MENSAJES PARA DEEPSEEK
+        # 4. PREPARAR MENSAJES PARA DEEPSEEK (CON DATOS REALES)
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
-        # Agregar historial (con corrección de nombres de llaves)
+        # Agregar historial
         if historial:
             for h in historial:
-                msg_user = h.get('mensaje') or h.get('user')
-                msg_bot = h.get('respuesta') or h.get('assistant')
-                if msg_user: lista_mensajes.append({"role": "user", "content": msg_user})
-                if msg_bot: lista_mensajes.append({"role": "assistant", "content": msg_bot})
+                u = h.get('mensaje') or h.get('user')
+                a = h.get('respuesta') or h.get('assistant')
+                if u: lista_mensajes.append({"role": "user", "content": u})
+                if a: lista_mensajes.append({"role": "assistant", "content": a})
         
-        # --- FORZAMOS EL CONTEXTO DE PRODUCTOS ---
-        texto_productos_ia = ""
+        # --- INYECCIÓN DE DATOS DE INVENTARIO ---
+        contexto_real = ""
         if catalog_list:
-            texto_productos_ia = "\n### INFORMACIÓN REAL DISPONIBLE (Usa esto para responder):\n"
+            contexto_real = "\n\nINFORMACIÓN REAL DEL CATÁLOGO (Usa estos precios obligatoriamente):\n"
             for p in catalog_list:
-                texto_productos_ia += f"- PRODUCTO: {p.get('nombre')} | PRECIO: ${p.get('precio_menudeo')} | DETALLES: {p.get('descripcion')[:100]}\n"
+                contexto_real += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
         
-        contenido_final_usuario = f"Pregunta: {texto}\n{texto_productos_ia}"
-        lista_mensajes.append({"role": "user", "content": contenido_final_usuario})
+        # El mensaje final que recibe la IA combina la pregunta con los datos reales
+        contenido_usuario = f"{texto}{contexto_real}"
+        lista_mensajes.append({"role": "user", "content": contenido_usuario})
 
         # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
@@ -9818,11 +9819,11 @@ Formato JSON:
         else:
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 10. REGISTRO EN BASE DE DATOS (ESTO ARREGLA LAS FICHAS EN WEB)
+        # 10. REGISTRO EN BASE DE DATOS (PARA QUE LA WEB MUESTRE FICHAS)
         try:
             func_registrar = globals().get('registrar_respuesta_bot')
             if func_registrar:
-                # Importante: pasamos catalog_list a productos_data
+                # IMPORTANTE: Enviamos catalog_list a productos_data
                 func_registrar(
                     numero, 
                     texto, 
@@ -9831,7 +9832,7 @@ Formato JSON:
                     incoming_saved=incoming_saved,
                     respuesta_tipo='audio' if audio_url_publica else 'texto',
                     respuesta_media_url=audio_url_publica,
-                    productos_data=catalog_list  # <--- ESTA LÍNEA ES LA QUE LLENA LAS FICHAS EN LA WEB
+                    productos_data=catalog_list  # <--- Esto es lo que jala la info a la web
                 )
             else:
                 print("⚠️ No se encontró la función registrar_respuesta_bot")
