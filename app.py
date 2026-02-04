@@ -9967,7 +9967,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             if isinstance(raw_ds, list):
                 raw_ds = "".join([(r.get('text') if isinstance(r, dict) else str(r)) for r in raw_ds])
             raw_ds = (raw_ds or "").strip()
-
+            # === AGREGA ESTA LÍNEA AQUÍ ===
+            raw_upper = raw_ds.upper() 
+            # ==============================
             if "SEARCH:" in raw_ds:
                 producto_aplica = "SI_APLICA"
                 try:
