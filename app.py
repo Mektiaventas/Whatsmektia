@@ -3262,8 +3262,8 @@ def obtener_numeros_a_excluir(config=None):
     if ALERT_NUMBER:
         numeros_a_excluir.add(ALERT_NUMBER)
         
-    numeros_a_excluir.add('5214493432744') # Tu número
-    numeros_a_excluir.add('5214491182201') # Otro número
+    #numeros_a_excluir.add('5214493432744') # Tu número
+    numeros_a_excluir.add('524491182201') # Otro número
 
     numeros_a_excluir.discard('')
     return tuple(numeros_a_excluir)
@@ -3289,8 +3289,8 @@ def dashboard_platform_data():
         if ALERT_NUMBER:
             numeros_a_excluir.add(ALERT_NUMBER)
         # Añadir tu número personal
-        numeros_a_excluir.add('5214493432744')
-        numeros_a_excluir.add('5214491182201')
+        #numeros_a_excluir.add('5214493432744')
+        numeros_a_excluir.add('524491182201')
         
         # Limpiar números vacíos
         numeros_a_excluir.discard('')
@@ -4323,7 +4323,7 @@ def enviar_alerta_cita_administrador(info_cita, cita_id, config=None):
         
         # Enviar a ambos números
         enviar_mensaje(ALERT_NUMBER, mensaje_alerta, config)
-        enviar_mensaje('5214493432744', mensaje_alerta, config)
+        enviar_mensaje('524491182201', mensaje_alerta, config)
         app.logger.info(f"✅ Alerta de {tipo_solicitud} enviada a ambos administradores, ID: {cita_id}")
         
     except Exception as e:
@@ -7740,7 +7740,7 @@ def enviar_alerta_humana(numero_cliente, mensaje_clave, resumen, config=None):
         enviar_mensaje(ALERT_NUMBER, mensaje, config)
         
         # 2. A tu número personal (Hardcoded para asegurar que te llegue)
-        enviar_mensaje('5214493432744', mensaje, config)
+        enviar_mensaje('524491182201', mensaje, config)
         
         app.logger.info(f"📤 Alerta humana enviada con éxito para {numero_cliente}")
     except Exception as e:
@@ -8067,7 +8067,7 @@ def detectar_intervencion_humana_ia(mensaje_usuario, numero, config=None):
             return False
     
     # ⚠️ EVITAR TU NÚMERO PERSONAL Y EL NÚMERO DE ALERTA
-    if numero == ALERT_NUMBER or numero in ['5214491182201', '524491182201', '5214493432744']:
+    if numero == ALERT_NUMBER or numero in ['']: #['524491182201']:
         return False
     
     mensaje_lower = mensaje_usuario.lower()
@@ -10862,7 +10862,7 @@ Devuelve SOLO JSON:
             # --- OPERACIÓN KANBAN Y ASESORES ---
             asesor = obtener_siguiente_asesor(config)
             destinatarios = [asesor['telefono']] if asesor else []
-            destinatarios.extend(['5214491182201', '5214493432744']) # Tus números de control
+            destinatarios.extend(['524491182201']) # Tus números de control
 
             for tel in set(destinatarios):
                 enviar_mensaje(tel, mensaje_alerta, config)
