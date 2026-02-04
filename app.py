@@ -9699,7 +9699,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 # ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
-        # Importaciones internas para evitar UnboundLocalError en hilos de Flask
+        # 1. IMPORTS INTERNOS (Para evitar errores de hilos y UnboundLocalError)
         import os
         import json
         import requests
@@ -9707,50 +9707,56 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         from flask import current_app as app, request
         from urllib.parse import urlparse
 
-        # 1. Configuración Inicial
+        # 2. CONFIGURACIÓN DE CONTEXTO
         if not config:
             from app import obtener_configuracion_por_host
             config = obtener_configuracion_por_host()
         
         data_negocio = config.get('negocio') if isinstance(config.get('negocio'), dict) else config
         ia_nombre = data_negocio.get('ia_nombre') or "Asistente"
-        negocio_nombre = data_negocio.get('negocio_nombre') or "la empresa"
+        negocio_nombre = data_negocio.get('negocio_nombre') or "Mektia"
         que_hace = data_negocio.get('que_hace') or "Asistir a los clientes."
         
-        # 2. Construcción del Prompt (Manteniendo Memoria y Contexto)
+        # 3. CONSTRUCCIÓN DEL CONTEXTO DE PRODUCTOS (Para que la IA sepa los precios)
+        contexto_productos = ""
+        if catalog_list:
+            contexto_productos = "\nPRODUCTOS ENCONTRADOS EN CATÁLOGO:\n"
+            for p in catalog_list:
+                nombre_p = p.get('nombre', 'Producto')
+                precio_p = p.get('precio_menudeo', 'Consultar')
+                contexto_productos += f"- {nombre_p}: Precio ${precio_p}\n"
+
         system_prompt = f"""
-Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}. 
-Instrucciones de personalidad: {que_hace}
+Eres {ia_nombre}, el asistente de {negocio_nombre}. 
+Misión: {que_hace}
 
-REGLAS DE ORO:
+REGLAS:
 1. Responde SIEMPRE en formato JSON.
-2. Si el usuario envió un audio, tu respuesta debe ser empática y breve para ser leída por voz.
-3. Si hay productos en el contexto, úsalos para dar detalles precisos.
-4. No saludes dos veces si ya lo hiciste en el historial.
+2. Si hay productos en el contexto, úsalos para dar precios exactos.
+3. Si el usuario pregunta costo y el producto está en la lista, dalo con confianza.
 
-Formato JSON esperado:
+Formato JSON:
 {{
-  "intent": "INFORMACION" | "PASAR_ASESOR",
-  "respuesta_text": "Tu mensaje aquí (máx 3 líneas)",
+  "intent": "INFORMACION",
+  "respuesta_text": "Tu respuesta breve aquí",
   "notify_asesor": false
 }}
 """
 
-        # Armar la lista de mensajes con el historial
+        # 4. PREPARAR MENSAJES PARA DEEPSEEK
         lista_mensajes = [{"role": "system", "content": system_prompt}]
-        for h in (historial or []):
-            if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
-            if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
         
-        # Agregar el mensaje actual y el catálogo (si aplica)
-        contenido_usuario = f"Usuario dice: {texto}"
-        if producto_aplica == "SI_APLICA" and catalog_list:
-            # Esto es vital para que la IA sepa qué productos encontró la búsqueda inteligente
-            contenido_usuario += f"\n\nContexto de productos encontrados: {json.dumps(catalog_list, ensure_ascii=False)}"
+        # Agregar historial
+        if historial:
+            for h in historial:
+                if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
+                if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
         
-        lista_mensajes.append({"role": "user", "content": contenido_usuario})
+        # Agregar mensaje actual con los productos encontrados
+        contenido_final_usuario = f"{texto}\n{contexto_productos}"
+        lista_mensajes.append({"role": "user", "content": contenido_final_usuario})
 
-        # 3. Llamada a la API de DeepSeek
+        # 5. LLAMADA A LA API
         api_key = os.getenv('DEEPSEEK_API_KEY')
         headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
@@ -9763,76 +9769,71 @@ Formato JSON esperado:
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
         
-        # 4. Parseo de la Decisión
+        # 6. PROCESAR RESPUESTA
         res_json = resp.json()['choices'][0]['message']['content']
         decision = json.loads(res_json)
         
-        # --- SEGURIDAD ANTI-VACÍO (Evita el error de WhatsApp) ---
-        respuesta_final = decision.get('respuesta_text') or decision.get('respuesta') or ""
-        
-        if not respuesta_final.strip():
-            if producto_aplica == "SI_APLICA":
-                respuesta_final = "He encontrado esta información para ti. ¿Te gustaría saber más detalles?"
-            else:
-                respuesta_final = "Entiendo. ¿En qué más puedo ayudarte hoy?"
-
+        mensaje_para_cliente = decision.get('respuesta_text') or "Claro, ¿en qué más te ayudo?"
         intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
-        
-        # Sincronizamos con las variables que el resto de tu app espera
-        mensaje_para_cliente = respuesta_final 
-        mensaje_respuesta_final = respuesta_final
 
-        # 5. Lógica de Audio (TTS)
+        # 7. LÓGICA DE AUDIO (TTS)
         audio_url_publica = None
-        if es_audio and respuesta_final:
+        if es_audio and mensaje_para_cliente:
             try:
                 from whatsapp import texto_a_voz
-                tono_configurado = config.get('tono_voz', 'nova')
+                tono = config.get('tono_voz', 'nova')
                 filename = f"resp_{numero}_{int(time.time())}"
-                audio_url_publica = texto_a_voz(respuesta_final, filename, config, voz=tono_configurado)
-                
+                audio_url_publica = texto_a_voz(mensaje_para_cliente, filename, config, voz=tono)
                 if audio_url_publica:
-                    # Aplicar Proxy para que WhatsApp pueda reproducir el archivo
                     filename_only = os.path.basename(urlparse(audio_url_publica).path)
                     audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
             except Exception as e:
-                print(f"🔴 Error generando TTS: {e}")
+                print(f"🔴 Error TTS: {e}")
 
-        # 6. Ejecución de Acciones (Asesor)
+        # 8. EJECUTAR ACCIÓN DE ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor:
-            from app import pasar_contacto_asesor
-            pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-            # No sobreescribimos mensaje_para_cliente para no perder la respuesta de la IA
+            try:
+                # Buscamos la función en el scope global para evitar el ImportError de 'app'
+                func_asesor = globals().get('pasar_contacto_asesor')
+                if func_asesor:
+                    func_asesor(numero, config=config, notificar_asesor=True)
+            except Exception as e:
+                print(f"🔴 Error al pasar a asesor: {e}")
 
-        # 7. Envío a WhatsApp
+        # 9. ENVÍO FINAL A WHATSAPP
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
         if audio_url_publica:
-            enviar_mensaje_voz(numero, audio_url_publica, config)
-            # Enviamos también el texto para accesibilidad
             enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
+            enviar_mensaje_voz(numero, audio_url_publica, config)
         else:
-            # Enviamos el mensaje de texto garantizado (nunca vacío)
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. Registro en Base de Datos (Con todos los parámetros)
-        from app import registrar_respuesta_bot
-        registrar_respuesta_bot(
-            numero, 
-            texto, 
-            mensaje_respuesta_final, 
-            config, 
-            incoming_saved=incoming_saved,
-            respuesta_tipo='audio' if audio_url_publica else 'texto',
-            respuesta_media_url=audio_url_publica
-        )
+        # 10. REGISTRO EN BASE DE DATOS (CORRECCIÓN CRÍTICA)
+        try:
+            # NO usamos 'from app import...', usamos globals() porque ya estamos en app.py
+            func_registrar = globals().get('registrar_respuesta_bot')
+            if func_registrar:
+                func_registrar(
+                    numero, 
+                    texto, 
+                    mensaje_para_cliente, 
+                    config, 
+                    incoming_saved=incoming_saved,
+                    respuesta_tipo='audio' if audio_url_publica else 'texto',
+                    respuesta_media_url=audio_url_publica
+                )
+            else:
+                print("⚠️ No se encontró la función registrar_respuesta_bot en el contexto global.")
+        except Exception as e_reg:
+            print(f"🔴 Error al registrar en DB: {e_reg}")
 
         return True
 
     except Exception as e:
         import traceback
-        print(f"🔴 ERROR CRÍTICO en generar_respuesta_deepseek: {e}")
+        print(f"🔴 ERROR EN generar_respuesta_deepseek: {e}")
         traceback.print_exc()
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
