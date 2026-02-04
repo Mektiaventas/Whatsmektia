@@ -10901,13 +10901,23 @@ Devuelve SOLO JSON:
                 f"✅ *Acción:* IA ha calificado este lead. Por favor contactar."
             )
 
-            # --- OPERACIÓN KANBAN Y ASESORES ---
+            # --- OPERACIÓN KANBAN Y ASESORES (PASO 2) ---
             asesor = obtener_siguiente_asesor(config)
-            destinatarios = [asesor['telefono']] if asesor else []
-            destinatarios.extend(['524491182201']) # Tus números de control
+            destinatarios = []
 
+            # 1. Añadimos al asesor que le toca
+            if asesor and asesor.get('telefono'):
+                destinatarios.append(asesor['telefono'])
+            
+            # 2. Añadimos al administrador del negocio (opcional, desde la DB)
+            tel_admin = config.get('telefono_notificaciones')
+            if tel_admin:
+                destinatarios.append(tel_admin)
+
+            # 3. Enviamos el mensaje (set() elimina duplicados si el admin es el mismo asesor)
             for tel in set(destinatarios):
-                enviar_mensaje(tel, mensaje_alerta, config)
+                if tel: # Validar que no esté vacío
+                    enviar_mensaje(tel, mensaje_alerta, config)
 
             # ACTUALIZACIÓN DE COLUMNA EN KANBAN (Columna 4 = Resueltos/Cotizados)
             try:
