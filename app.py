@@ -9696,6 +9696,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
 
 # ----------------- Generar Respuesta de Deepseek con TTS y Variables Sincronizadas -----------------
+
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
         # 1. Configuración Inicial
@@ -9732,7 +9733,6 @@ JSON format:
             if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
             if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
         
-        # Agregamos contexto de catálogo si aplica para que la IA no invente
         mensaje_usuario_final = texto
         if producto_aplica == "SI_APLICA" and catalog_list:
             mensaje_usuario_final += f"\n\nContexto Catálogo: {json.dumps(catalog_list, ensure_ascii=False)}"
@@ -9746,24 +9746,25 @@ JSON format:
             "messages": lista_mensajes, 
             "response_format": {"type": "json_object"},
             "temperature": 0.3
-        }}
+        }
         
+        import requests
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
+        
+        import json
         decision = json.loads(resp.json()['choices'][0]['message']['content'])
 
         # 4. EXTRACCIÓN DE VARIABLES Y PROTECCIÓN ANTI-VACÍO
         respuesta_text = decision.get('respuesta_text') or decision.get('respuesta') or ""
         
-        # --- PARCHE DE SEGURIDAD ---
-        # Si la IA devuelve texto vacío, generamos un fallback basado en si hay productos o no
         if not respuesta_text.strip():
             if producto_aplica == "SI_APLICA":
                 respuesta_text = "Claro, aquí tienes los detalles de lo que solicitaste:"
             else:
                 respuesta_text = "Entiendo, ¿en qué más puedo apoyarte?"
         
-        intent = decision.get('intent', 'RESPONDER_TEXTO').upper()
+        intent = (decision.get('intent') or 'RESPONDER').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
         
         mensaje_para_cliente = respuesta_text 
@@ -9773,24 +9774,25 @@ JSON format:
         audio_url_publica = None
         if es_audio and respuesta_text:
             try:
-                from whatsapp import texto_a_voz # Cambiado de utils a whatsapp según tu mensaje previo
+                from whatsapp import texto_a_voz
+                import time
+                import os
                 tono_configurado = config.get('tono_voz', 'nova')
                 filename = f"resp_{numero}_{int(time.time())}"
                 audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
                 
-                if audio_url_publica and "/proxy-audio/" not in audio_url_publica:
+                if audio_url_publica:
                     from flask import request
-                    filename_only = os.path.basename(audio_url_publica.split('?')[0])
+                    from urllib.parse import urlparse
+                    filename_only = os.path.basename(urlparse(audio_url_publica).path)
                     audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
             except Exception as e:
-                app.logger.error(f"🔴 Error generando TTS: {e}")
+                print(f"🔴 Error generando TTS: {e}")
 
         # 6. EJECUCIÓN DE ACCIONES
         if intent == "PASAR_ASESOR" or notify_asesor:
             from app import pasar_contacto_asesor
             pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-            if not mensaje_para_cliente:
-                mensaje_para_cliente = "Un asesor humano te contactará en breve."
 
         # 7. ENVÍO MULTICANAL
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
@@ -9799,10 +9801,10 @@ JSON format:
             enviar_mensaje_voz(numero, audio_url_publica, config)
             enviar_mensaje(numero, mensaje_para_cliente, config)
         else:
-            # Aquí ya es imposible que mensaje_para_cliente sea vacío por el paso 4
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
         # 8. REGISTRO EN DB
+        from app import registrar_respuesta_bot
         registrar_respuesta_bot(
             numero, 
             texto, 
@@ -9816,8 +9818,8 @@ JSON format:
         return True
 
     except Exception as e:
-        app.logger.error(f"🔴 Error en generar_respuesta_deepseek: {e}")
         import traceback
+        print(f"🔴 Error en generar_respuesta_deepseek: {e}")
         traceback.print_exc()
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
