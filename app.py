@@ -10595,33 +10595,30 @@ EJEMPLOS:
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
                 
-        if intent == "PASAR_ASESOR" or notify_asesor:
+        if intent == "PASAR_ASESOR" or notify_asesor is True or "asesor" in respuesta_text.lower():
+            app.logger.info(f"🚀 DISPARANDO ALERTA: Pasando {numero} a un asesor.")
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
-            mensaje_respuesta_final = respuesta_text or "El asistente pasó la conversación a un asesor humano."
+            # Si la IA no preparó un texto, ponemos uno por defecto para el cliente
+            mensaje_para_cliente = respuesta_text or "Claro, en un momento un asesor humano te contactará."
+            # mensaje_respuesta_final = respuesta_text or "El asistente pasó la conversación a un asesor humano."
+            
+            if numero.startswith('tg_'):
+                telegram_token = config.get('telegram_token')
+                if telegram_token:
+                    chat_id = numero.replace('tg_', '')
+                    send_telegram_message(chat_id, mensaje_respuesta_final, telegram_token) 
+                else:
+                    app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
+            else:
+                enviar_mensaje(numero, mensaje_para_cliente, config) 
             
             if sent:
-                app.logger.info(f"👤 Contacto {numero} pasado a asesor exitosamente. Respuesta: '{mensaje_respuesta_final}'")
+                app.logger.info(f"👤 Contacto {numero} pasado a asesor exitosamente. Respuesta: '{mensaje_para_cliente}'")
             else:
                 app.logger.warning(f"⚠️ Falló la acción de pasar a asesor para {numero}.")
-                
-            if mensaje_respuesta_final:
-                if numero.startswith('tg_'):
-                    telegram_token = config.get('telegram_token')
-                    if telegram_token:
-                        chat_id = numero.replace('tg_', '')
-                        send_telegram_message(chat_id, mensaje_respuesta_final, telegram_token) 
-                    else:
-                        app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-                else:
-                    enviar_mensaje(numero, mensaje_respuesta_final, config) 
-            
-            registrar_respuesta_bot(
-                numero, 
-                texto, 
-                mensaje_respuesta_final, 
-                config, 
-                incoming_saved=incoming_saved
-            )
+            # REGISTRAMOS EN BASE DE DATOS    
+            registrar_respuesta_bot(numero, texto, mensaje_respuesta_final, config, incoming_saved=incoming_saved)
+            app.logger.info(f"✅ Alerta enviada y cliente notificado.")
             return True
 
         if intent == "DATOS_TRANSFERENCIA":
