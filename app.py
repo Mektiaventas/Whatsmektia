@@ -9935,6 +9935,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 "3. Si SHOW: YES, tu respuesta de texto debe ser SOLO UNA FRASE DE INTRODUCCIÓN (ej: 'Aquí tienes las opciones'). NO describas los productos, el sistema enviará fichas técnicas.\n"
                 "4. Si NO hay imágenes (SHOW: NO), entonces sí explica precios y detalles.\n\n"
                 "5. SI EL USUARIO PIDE HABLAR CON UN ASESOR, HUMANO O PERSONA, responde: TRANSFERIR_ASESOR\n\n" # <--- ESTO
+                "6. SI EL USUARIO QUIERE AGENDAR, UNA CITA O RESERVAR, responde: AGENDAR_CITA\n\n" # <--- Tu punto 6
                 "Ejemplos:\n"
                 "- U: 'muéstrame el Sainz' -> SEARCH: Escritorio Sainz | SHOW: YES\n"
                 "- U: 'precio del escritorio' -> SEARCH: Escritorio | SHOW: NO\n"
@@ -9975,6 +9976,13 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                     app.logger.info(f"🔍 IA Search: '{contexto_busqueda}'")
                 except IndexError:
                     pass
+            elif "AGENDAR_CITA" in raw_ds.upper():
+                app.logger.info("📅 IA detectó: SOLICITUD DE CITA")
+                # SUSTITUYE 'tu_funcion_de_citas' por el nombre real de tu función
+                # Ejemplo: mandar_alerta_cita(numero, config=config)
+                enviar_alerta_humana(numero, config=config) 
+                enviar_mensaje(numero, "¡Perfecto! He notificado al área de admisiones para agendar tu cita. ¿En qué horario te gustaría?", config)
+                return True
             elif "TRANSFERIR_ASESOR" in raw_ds.upper():
                 app.logger.info("📢 IA detectó solicitud de asesor. Ejecutando transferencia...")
                 pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
