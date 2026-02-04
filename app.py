@@ -9696,9 +9696,17 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
         app.logger.error(f"🔴 Error notificando al asesor: {e}") 
 
 # ----------------- Generar Respuesta de Deepseek con TTS y Variables Sincronizadas -----------------
-
+# ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
+        # Importaciones internas para evitar UnboundLocalError en hilos de Flask
+        import os
+        import json
+        import requests
+        import time
+        from flask import current_app as app, request
+        from urllib.parse import urlparse
+
         # 1. Configuración Inicial
         if not config:
             from app import obtener_configuracion_por_host
@@ -9709,38 +9717,42 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         negocio_nombre = data_negocio.get('negocio_nombre') or "la empresa"
         que_hace = data_negocio.get('que_hace') or "Asistir a los clientes."
         
-        # 2. Prompt con lógica de Audio, Identidad y Catálogo
+        # 2. Construcción del Prompt (Manteniendo Memoria y Contexto)
         system_prompt = f"""
-Eres {ia_nombre}, el asistente de {negocio_nombre}.
-Instrucciones del negocio: {que_hace}
+Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}. 
+Instrucciones de personalidad: {que_hace}
 
 REGLAS DE ORO:
-1) Si el usuario envió un audio, tu respuesta debe ser empática y lista para voz.
-2) Responde SIEMPRE en formato JSON.
-3) Si hay productos en el catálogo proporcionado, úsalos para responder.
-4) Campo 'respuesta_text': Máximo 3 líneas.
+1. Responde SIEMPRE en formato JSON.
+2. Si el usuario envió un audio, tu respuesta debe ser empática y breve para ser leída por voz.
+3. Si hay productos en el contexto, úsalos para dar detalles precisos.
+4. No saludes dos veces si ya lo hiciste en el historial.
 
-JSON format:
+Formato JSON esperado:
 {{
-  "intent": "RESPONDER" | "PASAR_ASESOR",
-  "respuesta_text": "mensaje para el usuario",
+  "intent": "INFORMACION" | "PASAR_ASESOR",
+  "respuesta_text": "Tu mensaje aquí (máx 3 líneas)",
   "notify_asesor": false
 }}
 """
 
+        # Armar la lista de mensajes con el historial
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         for h in (historial or []):
             if h.get('mensaje'): lista_mensajes.append({"role": "user", "content": h['mensaje']})
             if h.get('respuesta'): lista_mensajes.append({"role": "assistant", "content": h['respuesta']})
         
-        mensaje_usuario_final = texto
+        # Agregar el mensaje actual y el catálogo (si aplica)
+        contenido_usuario = f"Usuario dice: {texto}"
         if producto_aplica == "SI_APLICA" and catalog_list:
-            mensaje_usuario_final += f"\n\nContexto Catálogo: {json.dumps(catalog_list, ensure_ascii=False)}"
-            
-        lista_mensajes.append({"role": "user", "content": mensaje_usuario_final})
+            # Esto es vital para que la IA sepa qué productos encontró la búsqueda inteligente
+            contenido_usuario += f"\n\nContexto de productos encontrados: {json.dumps(catalog_list, ensure_ascii=False)}"
+        
+        lista_mensajes.append({"role": "user", "content": contenido_usuario})
 
-        # 3. Llamada a DeepSeek
-        headers = {"Authorization": f"Bearer {os.getenv('DEEPSEEK_API_KEY')}", "Content-Type": "application/json"}
+        # 3. Llamada a la API de DeepSeek
+        api_key = os.getenv('DEEPSEEK_API_KEY')
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": "deepseek-chat", 
             "messages": lista_mensajes, 
@@ -9748,62 +9760,63 @@ JSON format:
             "temperature": 0.3
         }
         
-        import requests
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
         
-        import json
-        decision = json.loads(resp.json()['choices'][0]['message']['content'])
-
-        # 4. EXTRACCIÓN DE VARIABLES Y PROTECCIÓN ANTI-VACÍO
-        respuesta_text = decision.get('respuesta_text') or decision.get('respuesta') or ""
+        # 4. Parseo de la Decisión
+        res_json = resp.json()['choices'][0]['message']['content']
+        decision = json.loads(res_json)
         
-        if not respuesta_text.strip():
+        # --- SEGURIDAD ANTI-VACÍO (Evita el error de WhatsApp) ---
+        respuesta_final = decision.get('respuesta_text') or decision.get('respuesta') or ""
+        
+        if not respuesta_final.strip():
             if producto_aplica == "SI_APLICA":
-                respuesta_text = "Claro, aquí tienes los detalles de lo que solicitaste:"
+                respuesta_final = "He encontrado esta información para ti. ¿Te gustaría saber más detalles?"
             else:
-                respuesta_text = "Entiendo, ¿en qué más puedo apoyarte?"
-        
-        intent = (decision.get('intent') or 'RESPONDER').upper()
+                respuesta_final = "Entiendo. ¿En qué más puedo ayudarte hoy?"
+
+        intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
         
-        mensaje_para_cliente = respuesta_text 
-        mensaje_respuesta_final = respuesta_text
+        # Sincronizamos con las variables que el resto de tu app espera
+        mensaje_para_cliente = respuesta_final 
+        mensaje_respuesta_final = respuesta_final
 
-        # 5. LÓGICA DE AUDIO (TTS)
+        # 5. Lógica de Audio (TTS)
         audio_url_publica = None
-        if es_audio and respuesta_text:
+        if es_audio and respuesta_final:
             try:
                 from whatsapp import texto_a_voz
-                import time
-                import os
                 tono_configurado = config.get('tono_voz', 'nova')
                 filename = f"resp_{numero}_{int(time.time())}"
-                audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
+                audio_url_publica = texto_a_voz(respuesta_final, filename, config, voz=tono_configurado)
                 
                 if audio_url_publica:
-                    from flask import request
-                    from urllib.parse import urlparse
+                    # Aplicar Proxy para que WhatsApp pueda reproducir el archivo
                     filename_only = os.path.basename(urlparse(audio_url_publica).path)
                     audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
             except Exception as e:
                 print(f"🔴 Error generando TTS: {e}")
 
-        # 6. EJECUCIÓN DE ACCIONES
+        # 6. Ejecución de Acciones (Asesor)
         if intent == "PASAR_ASESOR" or notify_asesor:
             from app import pasar_contacto_asesor
             pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
+            # No sobreescribimos mensaje_para_cliente para no perder la respuesta de la IA
 
-        # 7. ENVÍO MULTICANAL
+        # 7. Envío a WhatsApp
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
         if audio_url_publica:
             enviar_mensaje_voz(numero, audio_url_publica, config)
-            enviar_mensaje(numero, mensaje_para_cliente, config)
+            # Enviamos también el texto para accesibilidad
+            enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
         else:
+            # Enviamos el mensaje de texto garantizado (nunca vacío)
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 8. REGISTRO EN DB
+        # 8. Registro en Base de Datos (Con todos los parámetros)
         from app import registrar_respuesta_bot
         registrar_respuesta_bot(
             numero, 
@@ -9819,7 +9832,7 @@ JSON format:
 
     except Exception as e:
         import traceback
-        print(f"🔴 Error en generar_respuesta_deepseek: {e}")
+        print(f"🔴 ERROR CRÍTICO en generar_respuesta_deepseek: {e}")
         traceback.print_exc()
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
