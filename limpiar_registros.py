@@ -1,37 +1,37 @@
-import os
 import mysql.connector
-from dotenv import load_dotenv
 
-load_dotenv()
+def limpiar_todo():
+    # Configuración de acceso
+    config = {
+        'host': '127.0.0.1',
+        'user': 'mektia',
+        'password': 'Mektia#2025'
+    }
+    
+    # Lista de bases de datos a limpiar
+    bases_de_datos = ['ofitodo', 'unilova']
+    
+    for bd in bases_de_datos:
+        print(f"--- Procesando base de datos: {bd} ---")
+        try:
+            # Conexión
+            conn = mysql.connector.connect(**config, database=bd)
+            cursor = conn.cursor()
 
-def limpiar_adjuntos_fantasma():
-    # Conexión a la base de datos (ajusta con tus variables de entorno)
-    db = mysql.connector.connect(
-        host=os.getenv("DB_HOST"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        database="ofitodo" # Lo haremos para ofitodo que es donde salieron los errores
-    )
-    cursor = db.cursor(dictionary=True)
-
-    # 1. Buscar mensajes que tienen algo en la columna 'archivo'
-    cursor.execute("SELECT id, archivo FROM mensajes WHERE archivo IS NOT NULL AND archivo != ''")
-    mensajes = cursor.fetchall()
-
-    borrados = 0
-    for m in mensajes:
-        ruta_archivo = os.path.join("/home/ubuntu/Whatsmektia", m['archivo'].lstrip('/'))
-        
-        # Si el registro dice que hay un archivo pero físicamente NO está
-        if not os.path.exists(ruta_archivo):
-            print(f"❌ Archivo no encontrado: {ruta_archivo}. Limpiando registro ID: {m['id']}")
-            cursor.execute("UPDATE mensajes SET archivo = NULL WHERE id = %s", (m['id'],))
-            borrados += 1
-
-    db.commit()
-    print(f"\n✅ Limpieza terminada. Se sanearon {borrados} registros en 'ofitodo'.")
-    cursor.close()
-    db.close()
+            # Query para limpiar registros que buscan audios donde no hay
+            query = "UPDATE mensajes SET archivo = NULL WHERE archivo LIKE '%uploads/audios/%'"
+            cursor.execute(query)
+            
+            filas = cursor.rowcount
+            conn.commit()
+            
+            print(f"✅ Éxito: Se limpiaron {filas} registros fantasma en {bd}.")
+            
+            cursor.close()
+            conn.close()
+        except mysql.connector.Error as err:
+            print(f"❌ Error en {bd}: {err}")
+        print("\n")
 
 if __name__ == "__main__":
-    limpiar_adjuntos_fantasma()
+    limpiar_todo()
