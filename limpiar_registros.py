@@ -1,37 +1,37 @@
 import mysql.connector
 
-def limpiar_todo():
-    # Configuración de acceso
+def limpiar_conversaciones():
+    # Configuración de acceso centralizada
     config = {
         'host': '127.0.0.1',
         'user': 'mektia',
         'password': 'Mektia#2025'
     }
     
-    # Lista de bases de datos a limpiar
+    # Lista de tus bases de datos actuales
     bases_de_datos = ['ofitodo', 'unilova']
     
     for bd in bases_de_datos:
-        print(f"--- Procesando base de datos: {bd} ---")
+        print(f"--- 🔍 Procesando: {bd} ---")
         try:
-            # Conexión
             conn = mysql.connector.connect(**config, database=bd)
             cursor = conn.cursor()
 
-            # Query para limpiar registros que buscan audios donde no hay
-            query = "UPDATE mensajes SET archivo = NULL WHERE archivo LIKE '%uploads/audios/%'"
-            cursor.execute(query)
+            # Ajustamos a tu tabla 'conversaciones'
+            # Ponemos en NULL la columna 'archivo' si apunta a la carpeta de audios
+            query = "UPDATE conversaciones SET archivo = NULL WHERE archivo LIKE '%uploads/audios/%'"
             
-            filas = cursor.rowcount
+            cursor.execute(query)
+            filas_afectadas = cursor.rowcount
             conn.commit()
             
-            print(f"✅ Éxito: Se limpiaron {filas} registros fantasma en {bd}.")
+            print(f"✅ Saneado: {filas_afectadas} registros limpiados en la tabla 'conversaciones'.")
             
             cursor.close()
             conn.close()
         except mysql.connector.Error as err:
             print(f"❌ Error en {bd}: {err}")
-        print("\n")
+        print("-" * 30 + "\n")
 
 if __name__ == "__main__":
-    limpiar_todo()
+    limpiar_conversaciones()
