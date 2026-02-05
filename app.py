@@ -7433,12 +7433,16 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Extraemos el dominio de la config para asegurar que no sea NULL
-    dominio_actual = config.get('dominio')
-        
+    # --- LIMPIEZA DE DOMINIO ---
+    dominio_raw = config.get('dominio', '')
+    # Forzamos a que solo guarde la primera parte (unilova)
+    dominio_actual = dominio_raw.split('.')[0] if dominio_raw else None
+    # ---------------------------
+
     if respuesta_media_url and not respuesta_media_url.startswith('http'):
-        subdominio = config.get('dominio')
-        respuesta_media_url = f"https://{subdominio}/uploads/productos/{respuesta_media_url}"
+        # Aquí usamos el dominio original para la URL de la imagen
+        subdominio_url = config.get('dominio')
+        respuesta_media_url = f"https://{subdominio_url}/uploads/productos/{respuesta_media_url}"
     
     try:
         actualizar_info_contacto(numero, config)
@@ -7447,7 +7451,7 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         
         mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         
-        # 1. Intentamos actualizar un registro que ya existe (el que guardó el mensaje del usuario)
+        # 1. Update (usando dominio_actual limpio)
         cursor.execute("""
             UPDATE conversaciones 
             SET respuesta = %s,
@@ -7462,10 +7466,8 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             LIMIT 1
         """, (respuesta, respuesta_tipo, respuesta_media_url, dominio_actual, numero, mensaje_limpio_para_buscar))
         
-        # 2. Si no se actualizó nada (rowcount == 0), es un mensaje nuevo (como las fichas técnicas)
+        # 2. Insert (usando dominio_actual limpio)
         if cursor.rowcount == 0:
-            app.logger.info(f"⚠️ TRACKING: Insertando registro nuevo con dominio: {dominio_actual}")
-            # AQUÍ ESTABA EL ERROR: Faltaba la columna 'dominio' en el INSERT
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, dominio, timestamp) 
                 VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
@@ -7475,7 +7477,6 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         cursor.close()
         conn.close()
         return True
-        
     except Exception as e:
         app.logger.error(f"❌ TRACKING: Error en actualizar_respuesta: {e}")
         return False
@@ -7876,17 +7877,15 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     if config is None:
         config = obtener_configuracion_por_host()
 
-    dominio_actual = config.get('dominio', '')
+    # --- LIMPIEZA DE DOMINIO ---
+    dominio_raw = config.get('dominio', '')
+    dominio_actual = dominio_raw.split('.')[0] if dominio_raw else ''
+    # ---------------------------
 
     try:
         mensaje_limpio = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         respuesta_limpia = sanitize_whatsapp_text(respuesta) if respuesta else respuesta
-
         actualizar_info_contacto(numero, config)
-
-        # Si no hay URL de imagen pero hay productos, guardamos un indicador o los datos
-        if not respuesta_media_url and productos_data:
-            respuesta_media_url = "Fichas enviadas (ver web)"
 
         conn = get_db_connection(config)
         cursor = conn.cursor()
@@ -7899,13 +7898,11 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
         conn.commit()
         cursor.close()
         conn.close()
-
-        app.logger.info(f"💾 Conversación guardada para {numero} en {dominio_actual}")
         return True
-
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
+        
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
