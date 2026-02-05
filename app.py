@@ -7430,13 +7430,12 @@ def serve_public_docs(relpath):
         abort(500)
 
 def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
-    """Actualiza la respuesta para un mensaje ya guardado. Ahora acepta productos_data."""
     if config is None:
         config = obtener_configuracion_por_host()
-        
-    # Si hay productos_data y no hay URL de medios, podríamos usarlo
-    # o simplemente aceptarlo para que la función no truene.
     
+    # Extraemos el dominio de la config para asegurar que no sea NULL
+    dominio_actual = config.get('dominio')
+        
     if respuesta_media_url and not respuesta_media_url.startswith('http'):
         subdominio = config.get('dominio')
         respuesta_media_url = f"https://{subdominio}/uploads/productos/{respuesta_media_url}"
@@ -7448,28 +7447,29 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
         
         mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
         
-        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para {numero}")
-        
-        # Ejecutar UPDATE
+        # 1. Intentamos actualizar un registro que ya existe (el que guardó el mensaje del usuario)
         cursor.execute("""
             UPDATE conversaciones 
             SET respuesta = %s,
                 respuesta_tipo_mensaje = %s,
                 respuesta_contenido_extra = %s,
+                dominio = %s,
                 timestamp = UTC_TIMESTAMP() 
             WHERE numero = %s 
               AND mensaje = %s 
               AND respuesta IS NULL 
             ORDER BY timestamp DESC 
             LIMIT 1
-        """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar))
+        """, (respuesta, respuesta_tipo, respuesta_media_url, dominio_actual, numero, mensaje_limpio_para_buscar))
         
+        # 2. Si no se actualizó nada (rowcount == 0), es un mensaje nuevo (como las fichas técnicas)
         if cursor.rowcount == 0:
-            app.logger.info(f"⚠️ TRACKING: Insertando nuevo registro (no se encontró el original)")
+            app.logger.info(f"⚠️ TRACKING: Insertando registro nuevo con dominio: {dominio_actual}")
+            # AQUÍ ESTABA EL ERROR: Faltaba la columna 'dominio' en el INSERT
             cursor.execute("""
-                INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
-                VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP())
-            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url))
+                INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, dominio, timestamp) 
+                VALUES (%s, %s, %s, %s, %s, %s, UTC_TIMESTAMP())
+            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url, dominio_actual))
         
         conn.commit()
         cursor.close()
