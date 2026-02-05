@@ -7429,35 +7429,28 @@ def serve_public_docs(relpath):
         app.logger.error(f"🔴 Error serving public doc {relpath}: {e}")
         abort(500)
 
-def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None):
-    """Actualiza la respuesta para un mensaje ya guardado"""
+def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
+    """Actualiza la respuesta para un mensaje ya guardado. Ahora acepta productos_data."""
     if config is None:
         config = obtener_configuracion_por_host()
         
-    # --- NUEVA LÓGICA DINÁMICA MULTITENANT ---
-    # Si recibimos un nombre de archivo (ej: imagen.png) en lugar de una URL completa (http...)
+    # Si hay productos_data y no hay URL de medios, podríamos usarlo
+    # o simplemente aceptarlo para que la función no truene.
+    
     if respuesta_media_url and not respuesta_media_url.startswith('http'):
         subdominio = config.get('dominio')
-        # Construimos la URL usando el dominio del tenant actual
         respuesta_media_url = f"https://{subdominio}/uploads/productos/{respuesta_media_url}"
-    # ------------------------------------------
     
     try:
-        # Asegurar que el contacto existe
         actualizar_info_contacto(numero, config)
-        
         conn = get_db_connection(config)
         cursor = conn.cursor()
         
-        # --- INICIO DE LA CORRECCIÓN ---
-        # Sanitizar el 'mensaje' para que coincida con lo guardado por 'guardar_mensaje_inmediato'
         mensaje_limpio_para_buscar = sanitize_whatsapp_text(mensaje) if mensaje else mensaje
-        # --- FIN DE LA CORRECCIÓN ---
         
-        # Log before update
-        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para mensaje de {numero}, timestamp: {datetime.now(tz_mx).isoformat()}")
+        app.logger.info(f"🔄 TRACKING: Actualizando respuesta para {numero}")
         
-        # Actualizar el registro más reciente que tenga este mensaje y respuesta NULL
+        # Ejecutar UPDATE
         cursor.execute("""
             UPDATE conversaciones 
             SET respuesta = %s,
@@ -7471,30 +7464,22 @@ def actualizar_respuesta(numero, mensaje, respuesta, config=None, respuesta_tipo
             LIMIT 1
         """, (respuesta, respuesta_tipo, respuesta_media_url, numero, mensaje_limpio_para_buscar))
         
-        # Log results of update
-        if cursor.rowcount > 0:
-            app.logger.info(f"✅ TRACKING: Respuesta actualizada para mensaje existente de {numero}")
-        else:
-            app.logger.info(f"⚠️ TRACKING: No se encontró mensaje para actualizar, insertando nuevo para {numero}")
+        if cursor.rowcount == 0:
+            app.logger.info(f"⚠️ TRACKING: Insertando nuevo registro (no se encontró el original)")
             cursor.execute("""
                 INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp) 
                 VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP())
-            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url)) # <-- Usar también la variable sanitizada aquí
+            """, (numero, mensaje_limpio_para_buscar, respuesta, respuesta_tipo, respuesta_media_url))
         
         conn.commit()
         cursor.close()
         conn.close()
-        
-        app.logger.info(f"💾 TRACKING: Operación completada para mensaje de {numero}")
         return True
         
     except Exception as e:
-        app.logger.error(f"❌ TRACKING: Error al actualizar respuesta: {e}")
-        # Fallback a guardar conversación normal
-        # Asegurarse de que el fallback también use el mensaje limpio
-        guardar_conversacion(numero, mensaje, respuesta, config, respuesta_tipo=respuesta_tipo, respuesta_media_url=respuesta_media_url)
+        app.logger.error(f"❌ TRACKING: Error en actualizar_respuesta: {e}")
         return False
-
+        
 def obtener_asesores_por_user(username, default=2, cap=20):
     """
     Retorna el número de asesores permitido para el usuario identificado por `username`.
@@ -7887,7 +7872,7 @@ def registrar_nueva_conversacion(numero, mensaje, config=None):
         if cursor: cursor.close()
         if conn: conn.close()
 
-def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, respuesta_tipo='texto', respuesta_media_url=None):
+def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=None, es_imagen=False, respuesta_tipo='texto', respuesta_media_url=None, productos_data=None):
     if config is None:
         config = obtener_configuracion_por_host()
 
@@ -7899,10 +7884,13 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
 
         actualizar_info_contacto(numero, config)
 
+        # Si no hay URL de imagen pero hay productos, guardamos un indicador o los datos
+        if not respuesta_media_url and productos_data:
+            respuesta_media_url = "Fichas enviadas (ver web)"
+
         conn = get_db_connection(config)
         cursor = conn.cursor()
 
-        # Agregamos columna 'dominio'
         cursor.execute("""
             INSERT INTO conversaciones (numero, mensaje, respuesta, respuesta_tipo_mensaje, respuesta_contenido_extra, timestamp, imagen_url, es_imagen, dominio)
             VALUES (%s, %s, %s, %s, %s, UTC_TIMESTAMP(), %s, %s, %s)
@@ -7918,7 +7906,6 @@ def guardar_conversacion(numero, mensaje, respuesta, config=None, imagen_url=Non
     except Exception as e:
         app.logger.error(f"❌ Error al guardar conversación: {e}")
         return False
-    
 def detectar_intencion_mejorado(mensaje, numero, historial=None, config=None):
     """
     Detección mejorada de intenciones con contexto
