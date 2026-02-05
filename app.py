@@ -2248,7 +2248,7 @@ def get_db_connection(config=None):
                 conn.reconnect(attempts=2, delay=0.5)
         except Exception:
             pass
-        app.logger.info(f"🗄️ Borrowed connection from pool for {config.get('db_name')}")
+        app.logger.debug(f"🗄️ Borrowed connection from pool for {config.get('db_name')}")
         return conn
 
     except Exception as pool_err:
