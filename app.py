@@ -727,7 +727,7 @@ def configuracion_precios_vaciar():
         # 1. Vaciar la Base de Datos
         cursor.execute("TRUNCATE TABLE precios") 
         # Si usas imagenes_productos también deberías vaciarla:
-        # cursor.execute("TRUNCATE TABLE imagenes_productos") 
+        cursor.execute("TRUNCATE TABLE imagenes_productos") 
         
         conn.commit()
         cursor.close()
