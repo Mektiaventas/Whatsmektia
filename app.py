@@ -11914,6 +11914,7 @@ def debug_db():
 @app.before_request
 def log_configuracion():
     if request.endpoint and request.endpoint != 'static':
+        if request.endpoint == 'obtener_datos_chat': return
         try:
             host = request.headers.get('Host', '').lower()
             referer = request.headers.get('Referer', '')
