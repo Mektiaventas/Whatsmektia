@@ -51,19 +51,14 @@ def determinar_extension(mime_type, filename):
 
 def extraer_imagenes_embedded_excel(filepath, output_dir=None, config=None):
     """
-    Extrae imágenes embebidas de un archivo Excel (.xlsx) y las guarda en output_dir.
-    Soporta multi-tenant: si no se pasa output_dir, usa get_productos_dir_for_config(config)
-    para guardar en uploads/productos/<tenant_slug>.
-    Retorna lista de dicts: {'filename','path','sheet','anchor','row','col'}
+    Versión CORREGIDA: Extrae imágenes vinculándolas estrictamente a su fila.
     """
     try:
-        # Determine tenant-aware output dir when none provided
         if output_dir is None:
             try:
                 productos_dir, tenant_slug = get_productos_dir_for_config(config)
                 output_dir = productos_dir
             except Exception as e:
-                # Fallback to legacy dir if tenant helper fails
                 logger.warning(f"⚠️ get_productos_dir_for_config falló, usando legacy. Error: {e}")
                 output_dir = os.path.join(UPLOAD_FOLDER, 'productos')
 
@@ -73,84 +68,58 @@ def extraer_imagenes_embedded_excel(filepath, output_dir=None, config=None):
         imagenes_extraidas = []
 
         for sheet in wb.worksheets:
+            # Importante: openpyxl guarda las imágenes en _images
             for idx, img in enumerate(getattr(sheet, '_images', [])):
                 try:
+                    # 1. Extraer la imagen real
                     img_obj = img.image
                     img_format = (img_obj.format or 'PNG').lower()
-                    img_filename = f"excel_img_{sheet.title}_{idx+1}_{int(time.time())}.{img_format}"
-                    img_path = os.path.join(output_dir, img_filename)
-
-                    # Guardar imagen en disco
-                    try:
-                        img_obj.save(img_path)
-                    except Exception as e:
-                        logger.warning(f"⚠️ No se pudo guardar imagen en disco {img_filename}: {e}")
-                        continue
-
-                    # Intentar leer la ancla (fila/col) de varias formas
+                    
+                    # 2. Determinar posición (Ancla)
                     row = None
                     col = None
-                    anchor = getattr(img, 'anchor', None)
+                    
+                    # Intentar obtener la fila de la forma más directa posible
                     try:
-                        marker = None
-                        # Common attribute names in different openpyxl versions
-                        for attr in ('_from', 'from', 'from_', 'anchor_from'):
-                            marker = getattr(anchor, attr, None)
-                            if marker:
-                                break
+                        if hasattr(img.anchor, '_from'):
+                            row = img.anchor._from.row + 1
+                            col = img.anchor._from.col + 1
+                        elif hasattr(img.anchor, 'row'): # Para otros tipos de ancla
+                            row = img.anchor.row
+                            col = img.anchor.col
+                    except:
+                        pass
 
-                        if marker:
-                            # marker usually tiene row, col (0-based)
-                            row_candidate = getattr(marker, 'row', None)
-                            col_candidate = getattr(marker, 'col', None)
-                            # Algunas versiones devuelven atributos como tuples o listas
-                            if row_candidate is None and hasattr(marker, '__len__') and len(marker) >= 1:
-                                # try tuple-like (col, row) or (row, col)
-                                try:
-                                    maybe = list(marker)
-                                    # buscar primer int
-                                    ints = [m for m in maybe if isinstance(m, int)]
-                                    if len(ints) >= 1:
-                                        row_candidate = ints[0]
-                                except Exception:
-                                    pass
+                    # Si no pudimos obtener la fila, no nos sirve para el catálogo
+                    if row is None:
+                        logger.warning(f"⏩ Imagen {idx} en {sheet.title} saltada: no se detectó fila (flotante).")
+                        continue
 
-                            if isinstance(row_candidate, int):
-                                row = int(row_candidate) + 1
-                            if isinstance(col_candidate, int):
-                                col = int(col_candidate) + 1
+                    # 3. Guardar con nombre único incluyendo la fila para evitar confusiones
+                    timestamp = int(time.time())
+                    img_filename = f"excel_fila_{row}_{idx+1}_{timestamp}.{img_format}"
+                    img_path = os.path.join(output_dir, img_filename)
 
-                        # Si anchor es string con coordenada (ej. "A2"), parsearla
-                        if row is None and isinstance(anchor, str):
-                            try:
-                                from openpyxl.utils.cell import coordinate_from_string, column_index_from_string
-                                col_letter, row_num = coordinate_from_string(anchor)
-                                col = column_index_from_string(col_letter)
-                                row = int(row_num)
-                            except Exception:
-                                pass
-                    except Exception:
-                        row = None
-                        col = None
+                    img_obj.save(img_path)
 
                     imagenes_extraidas.append({
                         'filename': img_filename,
                         'path': img_path,
                         'sheet': sheet.title,
-                        'anchor': anchor,
+                        'anchor': str(img.anchor),
                         'row': row,
                         'col': col
                     })
-                    logger.info(f"✅ Imagen extraída: {img_filename} (sheet={sheet.title} row={row} col={col}) tenant_dir={output_dir}")
+                    logger.info(f"✅ Imagen vinculada: {img_filename} -> FILA {row}")
+
                 except Exception as e:
-                    logger.warning(f"⚠️ Error extrayendo imagen en sheet {sheet.title} idx {idx}: {e}")
+                    logger.warning(f"⚠️ Error en imagen {idx}: {e}")
                     continue
 
         return imagenes_extraidas
 
     except Exception as e:
-        logger.error(f"🔴 Error en extraer_imagenes_embedded_excel: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"🔴 Error crítico en extraer_imagenes_embedded_excel: {e}")
         return []
 
 def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
