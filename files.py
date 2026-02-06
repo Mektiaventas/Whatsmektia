@@ -124,31 +124,43 @@ def extraer_imagenes_embedded_excel(filepath, output_dir=None, config=None):
 
 def _extraer_imagenes_desde_zip_xlsx(filepath, output_dir):
     """
-    Fallback: extrae imágenes desde el ZIP de un .xlsx leyendo xl/media/.
-    Retorna lista de dicts compatible con extraer_imagenes_embedded_excel.
+    Fallback CORREGIDO: Extrae imágenes ordenándolas numéricamente para evitar desfaces.
     """
+    import re # Necesario para el ordenamiento natural
     os.makedirs(output_dir, exist_ok=True)
     imagenes = []
     try:
         with zipfile.ZipFile(filepath, 'r') as z:
+            # 1. Filtramos los archivos de media
             media_files = [f for f in z.namelist() if f.startswith('xl/media/')]
+            
+            # 2. ORDENAMIENTO NATURAL: Esto asegura que image2 esté antes que image10
+            # y que image289 esté antes que image290
+            media_files.sort(key=lambda x: [int(c) if c.isdigit() else c for c in re.split(r'(\d+)', x)])
+            
             for idx, media_path in enumerate(media_files):
                 try:
                     ext = os.path.splitext(media_path)[1].lstrip('.').lower() or 'bin'
                     timestamp = int(time.time())
+                    
+                    # Usamos el nombre original del zip para debuguear si es necesario
+                    # pero mantenemos tu estructura de nombre excel_unzip_img_...
                     filename = f"excel_unzip_img_{idx+1}_{timestamp}.{ext}"
                     dest_path = os.path.join(output_dir, filename)
+                    
                     with z.open(media_path) as src, open(dest_path, 'wb') as dst:
                         shutil.copyfileobj(src, dst)
+                    
                     imagenes.append({
                         'filename': filename,
                         'path': dest_path,
                         'sheet': None,
                         'anchor': None,
                         'row': None,
-                        'col': None
+                        'col': None,
+                        'original_zip_name': media_path # Agregamos esto para saber cuál era en el ZIP
                     })
-                    logger.info(f"✅ Imagen (zip) extraída: {filename} from {media_path}")
+                    logger.info(f"✅ Imagen (zip) extraída: {filename} desde {media_path}")
                 except Exception as e:
                     logger.warning(f"⚠️ No se pudo extraer {media_path} desde zip: {e}")
     except zipfile.BadZipFile:
