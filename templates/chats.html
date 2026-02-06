@@ -2321,29 +2321,35 @@ function normalizeText(s) {
         console.debug('File upload functionality initialized - WhatsApp style');
     }
 /* ===================== VIGILANCIA DE IA ===================== */
-// Variable para contar cuántas burbujas hay en pantalla actualmente
-let cantidadMensajesActual = document.querySelectorAll('.message-bubble').length;
-
+/* ===================== VIGILANCIA DEFINITIVA (SIN LOOP) ===================== */
 function vigilarNuevosMensajes() {
     if (!selectedChatId || isEditingAlias) return;
 
-    // Ya no usamos el tiempo (after_ts) porque las zonas horarias fallan.
-    // Pedimos los mensajes y comparamos la cantidad.
-    fetch(`/chat/${selectedChatId}/messages?after_ts=0`) // Pedimos historial base
+    // 1. Contamos cuántas burbujas de mensaje hay físicas en el HTML ahora mismo
+    const burbujasEnPantalla = document.querySelectorAll('.message-bubble').length;
+
+    // 2. Preguntamos al servidor cuántos mensajes tiene en total (after_ts=0)
+    fetch(`/chat/${selectedChatId}/messages?after_ts=0`)
         .then(response => response.json())
         .then(data => {
-            if (data.messages && data.messages.length > 0) {
-                // Si el servidor tiene más mensajes que los que yo conté en mi pantalla...
-                if (data.messages.length > cantidadMensajesActual) {
-                    console.log("¡Diferencia detectada! Servidor: " + data.messages.length + " vs Pantalla: " + cantidadMensajesActual);
+            if (data.messages) {
+                const totalServidor = data.messages.length;
+
+                // 3. LA REGLA DE ORO: Solo refresca si el servidor tiene MÁS que yo
+                if (totalServidor > burbujasEnPantalla) {
+                    console.log("¡Sincronizando! Pantalla: " + burbujasEnPantalla + " | Servidor: " + totalServidor);
                     location.reload(); 
+                } else {
+                    // Si son iguales (ej. 10 y 10), no hace nada. Cero parpadeo.
+                    console.debug("Sin cambios. Mensajes: " + totalServidor);
                 }
             }
         })
-        .catch(err => console.error("Error en vigilancia por conteo:", err));
+        .catch(err => console.error("Error en vigilancia:", err));
 }
 
-// 15 segundos está perfecto
+// Asegúrate de que no haya OTRO setInterval de refresco en todo tu archivo.
+// Solo debe existir este:
 setInterval(vigilarNuevosMensajes, 15000);
 </script>
 {% endblock %}      
