@@ -2319,35 +2319,29 @@ function normalizeText(s) {
         console.debug('File upload functionality initialized - WhatsApp style');
     }
 /* ===================== VIGILANCIA DE IA ===================== */
+// Variable para contar cuántas burbujas hay en pantalla actualmente
+let cantidadMensajesActual = document.querySelectorAll('.message-bubble').length;
+
 function vigilarNuevosMensajes() {
     if (!selectedChatId || isEditingAlias) return;
 
-    const textarea = document.getElementById('mensaje-texto');
-    if (textarea && textarea.value.trim() !== "") return;
-
-    // Tomamos el timestamp, pero le restamos 2 segundos (2000ms) 
-    // de "margen de error" para atrapar mensajes que se guarden casi al mismo tiempo
-    let ts = (typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0) - 2000;
-
-    fetch(`/chat/${selectedChatId}/messages?after_ts=${ts}`)
+    // Ya no usamos el tiempo (after_ts) porque las zonas horarias fallan.
+    // Pedimos los mensajes y comparamos la cantidad.
+    fetch(`/chat/${selectedChatId}/messages?after_ts=0`) // Pedimos historial base
         .then(response => response.json())
         .then(data => {
-            // Si el servidor trae mensajes
             if (data.messages && data.messages.length > 0) {
-                // REGLA DE ORO: Solo refrescar si el ID del último mensaje 
-                // que trajo el servidor es DIFERENTE al que ya tenemos en pantalla.
-                // (Para esto comparamos si hay contenido nuevo real)
-                console.log("¡Mensajes detectados!");
-                location.reload(); 
+                // Si el servidor tiene más mensajes que los que yo conté en mi pantalla...
+                if (data.messages.length > cantidadMensajesActual) {
+                    console.log("¡Diferencia detectada! Servidor: " + data.messages.length + " vs Pantalla: " + cantidadMensajesActual);
+                    location.reload(); 
+                }
             }
         })
-        .catch(err => console.error("Error en vigilancia:", err));
+        .catch(err => console.error("Error en vigilancia por conteo:", err));
 }
 
-// Asegúrate de que esta línea esté AFUERA de la función, al final del script
-// Lo ponemos a 5 segundos para que sea muy ágil
-if (typeof motorVigilancia === 'undefined') {
-    var motorVigilancia = setInterval(vigilarNuevosMensajes, 15000);
-}
+// 15 segundos está perfecto
+setInterval(vigilarNuevosMensajes, 15000);
 </script>
 {% endblock %}      
