@@ -2320,29 +2320,40 @@ function normalizeText(s) {
     }
 /* ===================== VIGILANCIA DE IA ===================== */
 function vigilarNuevosMensajes() {
-    // 1. Si no hay chat seleccionado o estás escribiendo el alias, no molestamos
-    if (!selectedChatId || isEditingAlias) return;
+    // Si no hay chat seleccionado, terminamos
+    if (!selectedChatId) return;
 
-    // 2. Si el usuario está escribiendo un mensaje, evitamos el refresh para no borrarle el texto
-    const textarea = document.getElementById('mensaje-texto');
-    if (textarea && textarea.value.trim() !== "") return;
-
-    // 3. Usamos el timestamp del último mensaje que ya vemos en pantalla
+    // 1. Obtenemos el timestamp del último mensaje que vemos en pantalla
+    // lastMessageTimestamp DEBE ser actualizado por Jinja2 en cada carga de página
     let ts = typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0;
 
+    console.debug("Vigilando... buscando mensajes después de:", ts);
+
     fetch(`/chat/${selectedChatId}/messages?after_ts=${ts}`)
-        .then(response => response.json())
+        .then(response => {
+            if (!response.ok) throw new Error("Error en red");
+            return response.json();
+        })
         .then(data => {
-            // 4. Solo refresca si el servidor trae mensajes que no teníamos
+            // 2. Solo refrescamos si el servidor devuelve mensajes que NO tenemos
             if (data.messages && data.messages.length > 0) {
-                console.log("¡Mensajes nuevos de la IA detectados! Sincronizando...");
+                console.log("¡Se encontraron " + data.messages.length + " mensajes nuevos! Refrescando página...");
+                
+                // Antes de recargar, podrías guardar un marcador en sessionStorage
+                // para que sepas que acabas de actualizar
                 location.reload(); 
             }
         })
-        .catch(err => console.error("Error en vigilancia silenciosa:", err));
+        .catch(err => {
+            console.error("Error en vigilancia:", err);
+            // Si hay error, no detenemos el motor, el setInterval seguirá intentando
+        });
 }
 
-// Ejecutar cada 15 segundos
-setInterval(vigilarNuevosMensajes, 15000);
+// Asegúrate de que esta línea esté AFUERA de la función, al final del script
+// Lo ponemos a 5 segundos para que sea muy ágil
+if (typeof motorVigilancia === 'undefined') {
+    var motorVigilancia = setInterval(vigilarNuevosMensajes, 15000);
+}
 </script>
 {% endblock %}      
