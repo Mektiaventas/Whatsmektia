@@ -9841,8 +9841,9 @@ Formato JSON:
         try:
             func_registrar = globals().get('registrar_respuesta_bot')
             if func_registrar:
-                # Definimos el tipo de respuesta para que el CRM sepa qué renderizar
-                tipo_res = 'ficha' if catalog_list else ('audio' if audio_url_publica else 'texto')
+                # Si catalog_list tiene algo, el tipo DEBE ser 'ficha'
+                tipo_res = 'ficha' if (catalog_list and len(catalog_list) > 0) else 'texto'
+                if audio_url_publica: tipo_res = 'audio'
                 
                 func_registrar(
                     numero, 
@@ -9854,6 +9855,7 @@ Formato JSON:
                     respuesta_media_url=audio_url_publica,
                     productos_data=catalog_list  # <--- Esto vincula los productos a la web
                 )
+                app.logger.info(f"✅ Registro en DB completado como tipo: {tipo_res}")
             else:
                 print("⚠️ No se encontró la función registrar_respuesta_bot")
         except Exception as e_reg:
