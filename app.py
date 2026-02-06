@@ -9812,29 +9812,47 @@ Formato JSON:
             except Exception as e:
                 print(f"🔴 Error al pasar a asesor: {e}")
 
-        # 9. ENVÍO FINAL A WHATSAPP
+        # 9. ENVÍO FINAL (WHATSAPP + CRM WEB)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
+        # Primero enviamos a WhatsApp
         if audio_url_publica:
             enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
             enviar_mensaje_voz(numero, audio_url_publica, config)
         else:
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # 10. REGISTRO EN BASE DE DATOS (PARA QUE LA WEB MUESTRE FICHAS)
+        # Segundo: Notificamos al CRM Web por Sockets para que se vea la ficha
+        try:
+            from app import socketio
+            socketio.emit('nuevo_mensaje_crm', {
+                'wa_id': numero,
+                'texto': mensaje_para_cliente,
+                'type': 'ficha' if catalog_list else 'texto',
+                'productos': catalog_list,
+                'subdominio': subdominio,
+                'is_ia': True
+            }, room=numero)
+            app.logger.info(f"📡 Evento SocketIO enviado al CRM para {numero}")
+        except Exception as e:
+            print(f"🔴 Error SocketIO: {e}")
+
+        # 10. REGISTRO EN BASE DE DATOS (HISTORIAL)
         try:
             func_registrar = globals().get('registrar_respuesta_bot')
             if func_registrar:
-                # IMPORTANTE: Enviamos catalog_list a productos_data
+                # Definimos el tipo de respuesta para que el CRM sepa qué renderizar
+                tipo_res = 'ficha' if catalog_list else ('audio' if audio_url_publica else 'texto')
+                
                 func_registrar(
                     numero, 
                     texto, 
                     mensaje_para_cliente, 
                     config, 
                     incoming_saved=incoming_saved,
-                    respuesta_tipo='audio' if audio_url_publica else 'texto',
+                    respuesta_tipo=tipo_res,
                     respuesta_media_url=audio_url_publica,
-                    productos_data=catalog_list  # <--- Esto es lo que jala la info a la web
+                    productos_data=catalog_list  # <--- Esto vincula los productos a la web
                 )
             else:
                 print("⚠️ No se encontró la función registrar_respuesta_bot")
