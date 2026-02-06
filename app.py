@@ -10328,8 +10328,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         enviar_mensaje(numero, ficha_texto, config)
                         
                         # Registrar en historial
-                        actualizar_respuesta(numero, texto, f"Ficha enviada: {modelo}", config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                        # 1. Primero busca donde tienes los datos del producto (seguro tienes acceso a 'precio' y 'descripcion')
+                        # 2. Crea una variable con el texto completo (puedes usar <br> para saltos de línea en la web)
+                        texto_para_web = (
+                            f"<b>Ficha enviada: {modelo}</b><br>"
+                            f"💲 Precio: {precio}<br>"
+                            f"📝 {descripcion}"
+                        )
                         
+                        # 3. Modifica la línea 10331 para usar esa nueva variable en lugar del texto corto:
+                        actualizar_respuesta(numero, texto, texto_para_web, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
+                                                
                         envios_exitosos += 1
                         if envios_exitosos > 0: 
                             time.sleep(0.8) # Pausa para mantener el orden en WhatsApp
