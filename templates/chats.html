@@ -2318,5 +2318,26 @@ function normalizeText(s) {
 
         console.debug('File upload functionality initialized - WhatsApp style');
     }
+/* ===================== VIGILANCIA DE IA ===================== */
+function vigilarNuevosMensajes() {
+    if (!selectedChatId || isEditingAlias) return;
+
+    // Usamos el timestamp que ya tienes definido arriba en tu código
+    let ts = typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0;
+
+    fetch(`/chat/${selectedChatId}/messages?after_ts=${ts}`)
+        .then(response => response.json())
+        .then(data => {
+            // Si hay mensajes nuevos, refrescamos la página
+            if (data.messages && data.messages.length > 0) {
+                console.log("¡Mensajes nuevos detectados! Sincronizando...");
+                location.reload(); 
+            }
+        })
+        .catch(err => console.error("Error en vigilancia silenciosa:", err));
+}
+
+// Iniciamos el intervalo (15 segundos)
+setInterval(vigilarNuevosMensajes, 15000);
 </script>
 {% endblock %}      
