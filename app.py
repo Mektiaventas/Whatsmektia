@@ -10323,7 +10323,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         # 1. Enviar Imagen
                         url_completa = f"https://{request.host}/static/uploads/{img_url}"
                         enviar_imagen(numero, url_completa, config)
-                        
+                        # --- AUMENTAMOS EL DELAY AQUÍ ---
+                        # 2 segundos es el "sweet spot" para que WhatsApp procese la imagen 
+                        # y luego ponga el texto justo debajo.
+                        time.sleep(2.0)
                         # 2. Enviar Ficha Técnica (Texto)
                         enviar_mensaje(numero, ficha_texto, config)
                         
