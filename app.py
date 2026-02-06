@@ -10328,15 +10328,16 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                         enviar_mensaje(numero, ficha_texto, config)
                         
                         # Registrar en historial
-                        # 1. Primero busca donde tienes los datos del producto (seguro tienes acceso a 'precio' y 'descripcion')
-                        # 2. Crea una variable con el texto completo (puedes usar <br> para saltos de línea en la web)
+                        # Usamos las variables que ya tienes definidas arriba
                         texto_para_web = (
-                            f"<b>Ficha enviada: {modelo}</b><br>"
-                            f"💲 Precio: {precio}<br>"
-                            f"📝 {descripcion}"
+                            f"<b>{titulo_ficha}</b><br>"
+                            f"{precios_detalle}<br>"
+                            f"{texto_medidas}<br>"
+                            f"📝 {descripcion_corta}<br>"
+                            f"🆔 SKU: {sku_p}"
                         )
                         
-                        # 3. Modifica la línea 10331 para usar esa nueva variable en lugar del texto corto:
+                        # Guardamos en la base de datos
                         actualizar_respuesta(numero, texto, texto_para_web, config, respuesta_tipo='imagen', respuesta_media_url=img_url)
                                                 
                         envios_exitosos += 1
