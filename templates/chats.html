@@ -2321,35 +2321,47 @@ function normalizeText(s) {
         console.debug('File upload functionality initialized - WhatsApp style');
     }
 /* ===================== VIGILANCIA DE IA ===================== */
-/* ===================== VIGILANCIA DEFINITIVA (SIN LOOP) ===================== */
+/* ===================== VIGILANCIA POR ID (CERO PARPADEO) ===================== */
+// Variable global para guardar el último ID que vimos
+let ultimoIdVisto = 0;
+
 function vigilarNuevosMensajes() {
     if (!selectedChatId || isEditingAlias) return;
 
-    // 1. Contamos cuántas burbujas de mensaje hay físicas en el HTML ahora mismo
-    const burbujasEnPantalla = document.querySelectorAll('.message-bubble').length;
+    const textarea = document.getElementById('mensaje-texto');
+    if (textarea && textarea.value.trim() !== "") return;
 
-    // 2. Preguntamos al servidor cuántos mensajes tiene en total (after_ts=0)
     fetch(`/chat/${selectedChatId}/messages?after_ts=0`)
         .then(response => response.json())
         .then(data => {
-            if (data.messages) {
-                const totalServidor = data.messages.length;
+            if (data.messages && data.messages.length > 0) {
+                // Obtenemos el ID del último mensaje que tiene el servidor
+                const ultimoMsgServidor = data.messages[data.messages.length - 1];
+                const idServidor = ultimoMsgServidor.id;
 
-                // 3. LA REGLA DE ORO: Solo refresca si el servidor tiene MÁS que yo
-                if (totalServidor > burbujasEnPantalla) {
-                    console.log("¡Sincronizando! Pantalla: " + burbujasEnPantalla + " | Servidor: " + totalServidor);
+                // Si es la primera vez que corre, guardamos el ID y no refrescamos
+                if (ultimoIdVisto === 0) {
+                    ultimoIdVisto = idServidor;
+                    console.log("Vigilancia iniciada. ID actual:", ultimoIdVisto);
+                    return;
+                }
+
+                // SI EL ID DEL SERVIDOR ES MAYOR AL QUE TENÍAMOS... ¡HAY MENSAJE NUEVO!
+                if (idServidor > ultimoIdVisto) {
+                    console.log("¡NUEVO MENSAJE DETECTADO! ID Antiguo:", ultimoIdVisto, "ID Nuevo:", idServidor);
+                    ultimoIdVisto = idServidor; // Actualizamos
                     location.reload(); 
                 } else {
-                    // Si son iguales (ej. 10 y 10), no hace nada. Cero parpadeo.
-                    console.debug("Sin cambios. Mensajes: " + totalServidor);
+                    console.debug("Sin mensajes nuevos. ID sigue siendo:", ultimoIdVisto);
                 }
             }
         })
         .catch(err => console.error("Error en vigilancia:", err));
 }
 
-// Asegúrate de que no haya OTRO setInterval de refresco en todo tu archivo.
-// Solo debe existir este:
-setInterval(vigilarNuevosMensajes, 15000);
+// Intervalo de 15 segundos
+if (typeof motorVigilancia === 'undefined') {
+    var motorVigilancia = setInterval(vigilarNuevosMensajes, 15000);
+}
 </script>
 {% endblock %}      
