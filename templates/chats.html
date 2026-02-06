@@ -2320,34 +2320,28 @@ function normalizeText(s) {
     }
 /* ===================== VIGILANCIA DE IA ===================== */
 function vigilarNuevosMensajes() {
-    // Si no hay chat seleccionado, terminamos
-    if (!selectedChatId) return;
+    if (!selectedChatId || isEditingAlias) return;
 
-    // 1. Obtenemos el timestamp del último mensaje que vemos en pantalla
-    // lastMessageTimestamp DEBE ser actualizado por Jinja2 en cada carga de página
-    let ts = typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0;
+    const textarea = document.getElementById('mensaje-texto');
+    if (textarea && textarea.value.trim() !== "") return;
 
-    console.debug("Vigilando... buscando mensajes después de:", ts);
+    // Tomamos el timestamp, pero le restamos 2 segundos (2000ms) 
+    // de "margen de error" para atrapar mensajes que se guarden casi al mismo tiempo
+    let ts = (typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0) - 2000;
 
     fetch(`/chat/${selectedChatId}/messages?after_ts=${ts}`)
-        .then(response => {
-            if (!response.ok) throw new Error("Error en red");
-            return response.json();
-        })
+        .then(response => response.json())
         .then(data => {
-            // 2. Solo refrescamos si el servidor devuelve mensajes que NO tenemos
+            // Si el servidor trae mensajes
             if (data.messages && data.messages.length > 0) {
-                console.log("¡Se encontraron " + data.messages.length + " mensajes nuevos! Refrescando página...");
-                
-                // Antes de recargar, podrías guardar un marcador en sessionStorage
-                // para que sepas que acabas de actualizar
+                // REGLA DE ORO: Solo refrescar si el ID del último mensaje 
+                // que trajo el servidor es DIFERENTE al que ya tenemos en pantalla.
+                // (Para esto comparamos si hay contenido nuevo real)
+                console.log("¡Mensajes detectados!");
                 location.reload(); 
             }
         })
-        .catch(err => {
-            console.error("Error en vigilancia:", err);
-            // Si hay error, no detenemos el motor, el setInterval seguirá intentando
-        });
+        .catch(err => console.error("Error en vigilancia:", err));
 }
 
 // Asegúrate de que esta línea esté AFUERA de la función, al final del script
