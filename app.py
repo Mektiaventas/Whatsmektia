@@ -9701,10 +9701,23 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             from app import obtener_configuracion_por_host
             config = obtener_configuracion_por_host()
         
-        data_negocio = config.get('negocio') if isinstance(config.get('negocio'), dict) else config
-        ia_nombre = data_negocio.get('ia_nombre') or "Asistente"
-        negocio_nombre = data_negocio.get('negocio_nombre') or "Mektia"
-        que_hace = data_negocio.get('que_hace') or "Asistir a los clientes."
+        # --- SINCRONIZACIÓN DE IDENTIDAD REAL ---
+        try:
+            from app import load_config
+            db_data = load_config(config)
+            if db_data and 'negocio' in db_data:
+                # Forzamos los valores de la Base de Datos sobre el diccionario config
+                config.update(db_data.get('negocio', {}))
+                config.update(db_data.get('personalizacion', {}))
+        except Exception as e:
+            print(f"⚠️ Error al sincronizar identidad desde DB: {e}")
+
+        ia_nombre = config.get('ia_nombre') or "Asistente"
+        negocio_nombre = config.get('negocio_nombre') or "Negocio"
+        que_hace = config.get('que_hace') or "Asistir a los clientes."
+        # Extraemos el subdominio para las rutas de imágenes que usaremos después
+        subdominio = config.get('dominio', 'mektia').split('.')[0]
+        # ----------------------------------------
         
         # 3. CONSTRUCCIÓN DEL CONTEXTO DE PRODUCTOS (Para que la IA sepa los precios)
         contexto_productos = ""
