@@ -2320,24 +2320,29 @@ function normalizeText(s) {
     }
 /* ===================== VIGILANCIA DE IA ===================== */
 function vigilarNuevosMensajes() {
+    // 1. Si no hay chat seleccionado o estás escribiendo el alias, no molestamos
     if (!selectedChatId || isEditingAlias) return;
 
-    // Usamos el timestamp que ya tienes definido arriba en tu código
+    // 2. Si el usuario está escribiendo un mensaje, evitamos el refresh para no borrarle el texto
+    const textarea = document.getElementById('mensaje-texto');
+    if (textarea && textarea.value.trim() !== "") return;
+
+    // 3. Usamos el timestamp del último mensaje que ya vemos en pantalla
     let ts = typeof lastMessageTimestamp !== 'undefined' ? lastMessageTimestamp : 0;
 
     fetch(`/chat/${selectedChatId}/messages?after_ts=${ts}`)
         .then(response => response.json())
         .then(data => {
-            // Si hay mensajes nuevos, refrescamos la página
+            // 4. Solo refresca si el servidor trae mensajes que no teníamos
             if (data.messages && data.messages.length > 0) {
-                console.log("¡Mensajes nuevos detectados! Sincronizando...");
+                console.log("¡Mensajes nuevos de la IA detectados! Sincronizando...");
                 location.reload(); 
             }
         })
         .catch(err => console.error("Error en vigilancia silenciosa:", err));
 }
 
-// Iniciamos el intervalo (15 segundos)
+// Ejecutar cada 15 segundos
 setInterval(vigilarNuevosMensajes, 15000);
 </script>
 {% endblock %}      
