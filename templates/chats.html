@@ -1280,8 +1280,8 @@ function truncate(str, n) {
     }
 /* State */
 let chatAutoRefresh = true;
-let refreshIntervalMs = 5000;
-let messagePollIntervalMs = 2000;
+let refreshIntervalMs = 15000; // Cambiado de 5000 a 15000 (15 segundos para la lista)
+let messagePollIntervalMs = 5000; // Cambiado de 2000 a 5000 (5 segundos para los mensajes del chat abierto)
 let selectedChatId = {{ selected|tojson }}; 
 let lastChatsTimestamp = 0;
 let lastMessageTimestamp = {{ (mensajes[-1].timestamp.timestamp() * 1000) if mensajes else 0 }};
