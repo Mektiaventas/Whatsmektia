@@ -1988,9 +1988,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Start automatic chat-list refresh
     if (document.querySelector('.chat-items')) {
         actualizarListaChats();
-        if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
-            if (!document.hidden) actualizarListaChats();
-        }, refreshIntervalMs);
+        //if (!chatsIntervalHandle) chatsIntervalHandle = setInterval(() => {
+        //    if (!document.hidden) actualizarListaChats();
+        //}, refreshIntervalMs);
     }
 
     // Initialize message polling if chat is selected
@@ -2016,10 +2016,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (selectedChatId) {
         initMessagesStateFromDOM();
         if (!messagesIntervalHandle) {
-            pollSelectedMessages();
-            messagesIntervalHandle = setInterval(() => {
-                if (!document.hidden) pollSelectedMessages();
-            }, messagePollIntervalMs);
+            //pollSelectedMessages();
+            //messagesIntervalHandle = setInterval(() => {
+            //    if (!document.hidden) pollSelectedMessages();
+            //}, messagePollIntervalMs);
         }
     }
 
@@ -2028,6 +2028,7 @@ document.addEventListener('DOMContentLoaded', () => {
             chatAutoRefresh = false;
         } else {
             chatAutoRefresh = true;
+            /*
             if (!chatsIntervalHandle && document.querySelector('.chat-items')) {
                 chatsIntervalHandle = setInterval(() => {
                     if (!document.hidden) actualizarListaChats();
@@ -2039,6 +2040,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!document.hidden) pollSelectedMessages();
                 }, messagePollIntervalMs);
             }
+            */
         }
     });
 });
