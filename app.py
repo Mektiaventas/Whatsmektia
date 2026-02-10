@@ -10718,15 +10718,18 @@ EJEMPLOS:
             return True
 
         # --- BLOQUE CATALOGO / PDF ---
-        if intent in ["ENVIAR_CATALOGO", "ENVIAR_TEMARIO", "ENVIAR_FLYER", "ENVIAR_PDF"]:
+        # Añadimos ENVIAR_DOCUMENTO a la lista para que pase por aquí primero
+        if intent in ["ENVIAR_CATALOGO", "ENVIAR_TEMARIO", "ENVIAR_FLYER", "ENVIAR_PDF", "ENVIAR_DOCUMENTO"]:
             try:
                 # Intentamos enviar el PDF/Catálogo físico
                 sent_pdf = enviar_catalogo(numero, original_text=texto, config=config)
                 
                 if sent_pdf:
                     app.logger.info(f"✅ PDF enviado. Terminando flujo.")
-                    registrar_respuesta_bot(numero, texto, "Se envió el catálogo solicitado.", config, incoming_saved=incoming_saved)
-                    return True # <--- AQUÍ CORTAMOS. Si hubo PDF, ya no busca fichas.
+                    # Usamos una respuesta genérica que sirve para cualquier documento
+                    msg_confirmacion = "Te he enviado el documento solicitado."
+                    registrar_respuesta_bot(numero, texto, msg_confirmacion, config, incoming_saved=incoming_saved)
+                    return True # <--- AQUÍ CORTAMOS. Si hubo PDF, ya no busca fichas en la DB.
                 
                 app.logger.info(f"⚠️ No se encontró PDF. El código seguirá para buscar fichas en DB.")
             except Exception as e:
