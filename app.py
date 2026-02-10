@@ -9825,14 +9825,17 @@ Formato JSON:
         # 8. EJECUTAR ACCIÓN DE ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor is True:
             try:
+                # IMPORTACIÓN LOCAL INMEDIATA PARA EVITAR EL UNBOUNDLOCALERROR
+                from whatsapp import enviar_mensaje 
+                
                 app.logger.info(f"🚀 [ASESOR] Iniciando transferencia para {numero}")
                 func_asesor = globals().get('pasar_contacto_asesor')
                 
                 if func_asesor:
-                    # 1. Ejecutamos la transferencia en DB y mandamos la alerta al asesor
+                    # 1. Ejecutamos la transferencia en DB
                     func_asesor(numero, config=config, notificar_asesor=True)
                     
-                    # 2. Informamos al cliente (Corregido: usamos mensaje_para_cliente)
+                    # 2. Informamos al cliente
                     msg_cliente = mensaje_para_cliente if (mensaje_para_cliente and len(mensaje_para_cliente) > 5) else "He solicitado que un asesor humano te atienda. En breve se pondrán en contacto contigo."
                     enviar_mensaje(numero, msg_cliente, config)
                     
@@ -9842,7 +9845,7 @@ Formato JSON:
                         func_registrar(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
                     
                     app.logger.info(f"✅ [ASESOR] Cliente {numero} transferido y flujo detenido.")
-                    return True # Detenemos aquí para que NO mande fichas basura
+                    return True # <--- Esto evita que se sigan mandando fichas de IA o Excel
         
             except Exception as e:
                 import traceback
