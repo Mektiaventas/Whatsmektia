@@ -9815,12 +9815,24 @@ Formato JSON:
             except Exception as e:
                 print(f"🔴 Error TTS: {e}")
 
-        #7.1 Validación de seguridad: No pasar a asesor si el usuario solo dijo "hola" o "gracias"
+        # 7.1 Validación de seguridad extendida
         palabras_ruido = ["gracias", "ok", "hola", "buen día"]
+        
+        # REGLA A: Si es cortesía, NO pasar a asesor
         if any(p in texto.lower() for p in palabras_ruido) and intent == "PASAR_ASESOR":
-            app.logger.info("⚠️ Ignorando intento de pasar a asesor por ser mensaje de cortesía.")
-            intent = "SALUDO" # Forzamos el cambio de intención
+            app.logger.info("⚠️ Ignorando transferencia: Es un mensaje de cortesía.")
+            intent = "SALUDO"
+            notify_asesor = False
 
+        # REGLA B: Si encontramos productos (catalog_list), NO pasar a asesor 
+        # (A menos que el usuario lo pida explícitamente como "pásame a un humano")
+        if catalog_list and len(catalog_list) > 0:
+            usuario_pidio_humano = any(word in texto.lower() for word in ["asesor", "humano", "persona", "hablar con alguien"])
+            if not usuario_pidio_humano and (intent == "PASAR_ASESOR" or notify_asesor is True):
+                app.logger.info("🚫 Bloqueando transferencia: Se encontraron productos relevantes, la IA puede responder.")
+                intent = "INFORMACION"
+                notify_asesor = False
+                
         # Solo entramos si el intent es explícito o notify_asesor es True.
         # 8. EJECUTAR ACCIÓN DE ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor is True:
