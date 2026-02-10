@@ -9820,9 +9820,9 @@ Formato JSON:
         if any(p in texto.lower() for p in palabras_ruido) and intent == "PASAR_ASESOR":
             app.logger.info("⚠️ Ignorando intento de pasar a asesor por ser mensaje de cortesía.")
             intent = "SALUDO" # Forzamos el cambio de intención
-        # 8. EJECUTAR ACCIÓN DE ASESOR
-        # Eliminamos la búsqueda de "asesor" en el respuesta_text. 
+
         # Solo entramos si el intent es explícito o notify_asesor es True.
+        # 8. EJECUTAR ACCIÓN DE ASESOR
         if intent == "PASAR_ASESOR" or notify_asesor is True:
             try:
                 app.logger.info(f"🚀 [ASESOR] Iniciando transferencia para {numero}")
@@ -9832,18 +9832,22 @@ Formato JSON:
                     # 1. Ejecutamos la transferencia en DB y mandamos la alerta al asesor
                     func_asesor(numero, config=config, notificar_asesor=True)
                     
-                    # 2. Informamos al cliente (solo si no se le ha dicho nada antes)
-                    msg_cliente = respuesta_text if respuesta_text else "He solicitado que un asesor humano te atienda. En breve se pondrán en contacto contigo."
+                    # 2. Informamos al cliente (Corregido: usamos mensaje_para_cliente)
+                    msg_cliente = mensaje_para_cliente if (mensaje_para_cliente and len(mensaje_para_cliente) > 5) else "He solicitado que un asesor humano te atienda. En breve se pondrán en contacto contigo."
                     enviar_mensaje(numero, msg_cliente, config)
                     
                     # 3. Registramos la respuesta y CORTAMOS la ejecución
-                    registrar_respuesta_bot(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
+                    func_registrar = globals().get('registrar_respuesta_bot')
+                    if func_registrar:
+                        func_registrar(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
                     
                     app.logger.info(f"✅ [ASESOR] Cliente {numero} transferido y flujo detenido.")
-                    return True # <--- FUNDAMENTAL: Detiene todo para que no mande "basura" después
+                    return True # Detenemos aquí para que NO mande fichas basura
         
             except Exception as e:
+                import traceback
                 app.logger.error(f"🔴 Error al pasar a asesor: {e}")
+                app.logger.error(traceback.format_exc())
 
         # 9. ENVÍO FINAL (WHATSAPP + CRM WEB)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
