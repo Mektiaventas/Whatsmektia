@@ -9701,7 +9701,7 @@ def notificar_asesor_asignado(asesor, numero_cliente, config=None):
 # ----------------- Generar Respuesta de Deepseek FULL (Protegida) -----------------
 def generar_respuesta_deepseek(numero, texto, precios, historial, config, incoming_saved=False, es_audio=False, es_imagen=False, imagen_base64=None, transcripcion=None, catalog_list=None, texto_catalogo=None, producto_aplica="NO_APLICA"):
     try:
-        # 1. IMPORTS INTERNOS (Para evitar errores de hilos y UnboundLocalError)
+        # 1. IMPORTS INTERNOS
         import os
         import json
         import requests
@@ -9714,12 +9714,10 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
             from app import obtener_configuracion_por_host
             config = obtener_configuracion_por_host()
         
-        # --- SINCRONIZACIÓN DE IDENTIDAD REAL ---
         try:
             from app import load_config
             db_data = load_config(config)
             if db_data and 'negocio' in db_data:
-                # Forzamos los valores de la Base de Datos sobre el diccionario config
                 config.update(db_data.get('negocio', {}))
                 config.update(db_data.get('personalizacion', {}))
         except Exception as e:
@@ -9728,40 +9726,38 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         ia_nombre = config.get('ia_nombre') or "Asistente"
         negocio_nombre = config.get('negocio_nombre') or "Negocio"
         que_hace = config.get('que_hace') or "Asistir a los clientes."
-        # Extraemos el subdominio para las rutas de imágenes que usaremos después
         subdominio = config.get('dominio', 'mektia').split('.')[0]
-        # ----------------------------------------
-        
-        # 3. CONSTRUCCIÓN DEL CONTEXTO DE PRODUCTOS (Para que la IA sepa los precios)
-        contexto_productos = ""
-        if catalog_list:
-            contexto_productos = "\nPRODUCTOS ENCONTRADOS EN CATÁLOGO:\n"
-            for p in catalog_list:
-                nombre_p = p.get('nombre', 'Producto')
-                precio_p = p.get('precio_menudeo', 'Consultar')
-                contexto_productos += f"- {nombre_p}: Precio ${precio_p}\n"
 
+        # 3. REGLA DE ORO: Si hay productos en catalog_list, la IA debe saberlo ANTES de decidir
+        contexto_real = ""
+        hay_productos = False
+        if catalog_list and len(catalog_list) > 0:
+            hay_productos = True
+            contexto_real = "\n\nESTOS PRODUCTOS ESTÁN DISPONIBLES AHORA (Úsalos para responder):\n"
+            for p in catalog_list:
+                contexto_real += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
+
+        # 4. SYSTEM PROMPT REFORZADO
         system_prompt = f"""
-Eres {ia_nombre}, el asistente de {negocio_nombre}. 
+Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}.
 Misión: {que_hace}
 
-REGLAS:
-1. Responde SIEMPRE en formato JSON.
-2. Si hay productos en el contexto, úsalos para dar precios exactos.
-3. Si el usuario pregunta costo y el producto está en la lista, dalo con confianza.
+REGLAS CRÍTICAS:
+1. Si el usuario pide catálogo, temario o precios y hay productos en el contexto, descríbelos y di que los enviarás a continuación.
+2. NUNCA actives 'notify_asesor' si hay productos disponibles en el contexto que coincidan con la búsqueda.
+3. Solo usa 'notify_asesor': true si el usuario pide explícitamente hablar con un humano o si es una queja grave.
+4. Responde SIEMPRE en formato JSON.
 
 Formato JSON:
 {{
   "intent": "INFORMACION",
-  "respuesta_text": "Tu respuesta breve aquí",
+  "respuesta_text": "Tu respuesta aquí describiendo los productos hallados",
   "notify_asesor": false
 }}
 """
 
-        # 4. PREPARAR MENSAJES PARA DEEPSEEK (CON DATOS REALES)
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
-        # Agregar historial
         if historial:
             for h in historial:
                 u = h.get('mensaje') or h.get('user')
@@ -9769,14 +9765,6 @@ Formato JSON:
                 if u: lista_mensajes.append({"role": "user", "content": u})
                 if a: lista_mensajes.append({"role": "assistant", "content": a})
         
-        # --- INYECCIÓN DE DATOS DE INVENTARIO ---
-        contexto_real = ""
-        if catalog_list:
-            contexto_real = "\n\nINFORMACIÓN REAL DEL CATÁLOGO (Usa estos precios obligatoriamente):\n"
-            for p in catalog_list:
-                contexto_real += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
-        
-        # El mensaje final que recibe la IA combina la pregunta con los datos reales
         contenido_usuario = f"{texto}{contexto_real}"
         lista_mensajes.append({"role": "user", "content": contenido_usuario})
 
@@ -9793,13 +9781,22 @@ Formato JSON:
         resp = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=15)
         resp.raise_for_status()
         
-        # 6. PROCESAR RESPUESTA
         res_json = resp.json()['choices'][0]['message']['content']
         decision = json.loads(res_json)
         
-        mensaje_para_cliente = decision.get('respuesta_text') or "Claro, ¿en qué más te ayudo?"
+        mensaje_para_cliente = decision.get('respuesta_text') or "Claro, aquí tienes la información."
         intent = decision.get('intent', 'INFORMACION').upper()
         notify_asesor = bool(decision.get('notify_asesor'))
+
+        # 6. FILTRO DE PREVALENCIA: Bloqueamos al asesor si tenemos qué vender
+        palabras_humano = ["asesor", "humano", "persona", "hablar con alguien"]
+        usuario_quiere_humano = any(w in texto.lower() for w in palabras_humano)
+
+        if hay_productos and not usuario_quiere_humano:
+            if intent == "PASAR_ASESOR" or notify_asesor is True:
+                app.logger.info("🛡️ Bloqueando transferencia: IA tiene productos para mostrar.")
+                intent = "INFORMACION"
+                notify_asesor = False
 
         # 7. LÓGICA DE AUDIO (TTS)
         audio_url_publica = None
@@ -9815,117 +9812,67 @@ Formato JSON:
             except Exception as e:
                 print(f"🔴 Error TTS: {e}")
 
-        # 7.1 Validación de seguridad extendida
-        palabras_ruido = ["gracias", "ok", "hola", "buen día"]
-        
-        # REGLA A: Si es cortesía, NO pasar a asesor
-        if any(p in texto.lower() for p in palabras_ruido) and intent == "PASAR_ASESOR":
-            app.logger.info("⚠️ Ignorando transferencia: Es un mensaje de cortesía.")
-            intent = "SALUDO"
-            notify_asesor = False
-
-        # REGLA B: Si encontramos productos (catalog_list), NO pasar a asesor 
-        # (A menos que el usuario lo pida explícitamente como "pásame a un humano")
-        if catalog_list and len(catalog_list) > 0:
-            usuario_pidio_humano = any(word in texto.lower() for word in ["asesor", "humano", "persona", "hablar con alguien"])
-            if not usuario_pidio_humano and (intent == "PASAR_ASESOR" or notify_asesor is True):
-                app.logger.info("🚫 Bloqueando transferencia: Se encontraron productos relevantes, la IA puede responder.")
-                intent = "INFORMACION"
-                notify_asesor = False
-                
-        # Solo entramos si el intent es explícito o notify_asesor es True.
-        # 8. EJECUTAR ACCIÓN DE ASESOR
+        # 8. EJECUTAR ACCIÓN DE ASESOR (Solo si pasó los filtros)
         if intent == "PASAR_ASESOR" or notify_asesor is True:
             try:
-                # IMPORTACIÓN LOCAL INMEDIATA PARA EVITAR EL UNBOUNDLOCALERROR
                 from whatsapp import enviar_mensaje 
-                
                 app.logger.info(f"🚀 [ASESOR] Iniciando transferencia para {numero}")
                 func_asesor = globals().get('pasar_contacto_asesor')
-                
                 if func_asesor:
-                    # 1. Ejecutamos la transferencia en DB
                     func_asesor(numero, config=config, notificar_asesor=True)
-                    
-                    # 2. Informamos al cliente
-                    msg_cliente = mensaje_para_cliente if (mensaje_para_cliente and len(mensaje_para_cliente) > 5) else "He solicitado que un asesor humano te atienda. En breve se pondrán en contacto contigo."
+                    msg_cliente = mensaje_para_cliente if (len(mensaje_para_cliente) > 5) else "Un asesor humano te atenderá en breve."
                     enviar_mensaje(numero, msg_cliente, config)
                     
-                    # 3. Registramos la respuesta y CORTAMOS la ejecución
                     func_registrar = globals().get('registrar_respuesta_bot')
                     if func_registrar:
                         func_registrar(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
                     
-                    app.logger.info(f"✅ [ASESOR] Cliente {numero} transferido y flujo detenido.")
-                    return True # <--- Esto evita que se sigan mandando fichas de IA o Excel
-        
+                    return True # AQUÍ SÍ CORTA EL FLUJO
             except Exception as e:
-                import traceback
                 app.logger.error(f"🔴 Error al pasar a asesor: {e}")
-                app.logger.error(traceback.format_exc())
 
-        #8.5 --- NUEVA VALIDACIÓN DE SEGURIDAD ANTES DE ENVIAR FICHAS ---
-        # Si el intent cambió a PASAR_ASESOR en este hilo, o si notify_asesor es True,
-        # forzamos la salida una vez más por si el return anterior falló en el hilo.
-        if intent == "PASAR_ASESOR" or notify_asesor is True:
-            app.logger.info("🛑 [STOP] Abortando envío de fichas porque el usuario fue transferido.")
-            return True
-        # -----------------------------------------------------------
-        
-        # 9. ENVÍO FINAL (WHATSAPP + CRM WEB)
+        # 9. ENVÍO FINAL (SI NO HUBO ASESOR)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
-        # Primero enviamos a WhatsApp
         if audio_url_publica:
             enviar_mensaje(numero, f"*(Audio)* {mensaje_para_cliente}", config)
             enviar_mensaje_voz(numero, audio_url_publica, config)
         else:
             enviar_mensaje(numero, mensaje_para_cliente, config)
 
-        # Segundo: Notificamos al CRM Web por Sockets para que se vea la ficha
+        # Socket para el CRM
         try:
             from app import socketio
             socketio.emit('nuevo_mensaje_crm', {
                 'wa_id': numero,
                 'texto': mensaje_para_cliente,
-                'type': 'ficha' if catalog_list else 'texto',
+                'type': 'ficha' if hay_productos else 'texto',
                 'productos': catalog_list,
                 'subdominio': subdominio,
                 'is_ia': True
             }, room=numero)
-            app.logger.info(f"📡 Evento SocketIO enviado al CRM para {numero}")
-        except Exception as e:
-            print(f"🔴 Error SocketIO: {e}")
+        except: pass
 
-        # 10. REGISTRO EN BASE DE DATOS (HISTORIAL)
+        # 10. REGISTRO EN DB
         try:
             func_registrar = globals().get('registrar_respuesta_bot')
             if func_registrar:
-                # Si catalog_list tiene algo, el tipo DEBE ser 'ficha'
-                tipo_res = 'ficha' if (catalog_list and len(catalog_list) > 0) else 'texto'
+                tipo_res = 'ficha' if hay_productos else 'texto'
                 if audio_url_publica: tipo_res = 'audio'
                 
                 func_registrar(
-                    numero, 
-                    texto, 
-                    mensaje_para_cliente, 
-                    config, 
+                    numero, texto, mensaje_para_cliente, config, 
                     incoming_saved=incoming_saved,
                     respuesta_tipo=tipo_res,
                     respuesta_media_url=audio_url_publica,
-                    productos_data=catalog_list  # <--- Esto vincula los productos a la web
+                    productos_data=catalog_list
                 )
-                app.logger.info(f"✅ Registro en DB completado como tipo: {tipo_res}")
-            else:
-                print("⚠️ No se encontró la función registrar_respuesta_bot")
-        except Exception as e_reg:
-            print(f"🔴 Error al registrar en DB: {e_reg}")
+        except: pass
 
         return True
 
     except Exception as e:
         import traceback
-        print(f"🔴 ERROR EN generar_respuesta_deepseek: {e}")
         traceback.print_exc()
         return False
 #--------------- Fin de Generar Respuesta de Deepseek -----------------------------
