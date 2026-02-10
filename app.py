@@ -5190,7 +5190,10 @@ def enviar_catalogo(numero, original_text=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    tenant_slug = config.get('subdominio', 'default')
+    # --- CORRECCIÓN AQUÍ ---
+    # Intentamos sacar el slug de varias fuentes para que nunca sea 'default'
+    tenant_slug = config.get('subdominio') or config.get('bd_name') or 'default'
+    # -----------------------
     usuario_texto = original_text or "[Solicitud de catálogo]"
     
     try:
