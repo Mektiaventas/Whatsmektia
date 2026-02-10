@@ -5187,66 +5187,89 @@ def obtener_numeros_asesores_db(config=None):
         return tuple()
 
 def enviar_catalogo(numero, original_text=None, config=None):
+    """
+    Bypass para enviar documentos (catálogos, manuales, etc) 
+    buscando directamente en la base de datos por tenant_slug.
+    """
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # Extracción del tenant slug
+    # 1. Extraer el slug del tenant (subdominio) de forma robusta
     host_parts = request.host.split('.')
     tenant_slug = (config.get('subdominio') or 
                    config.get('bd_name') or 
                    (host_parts[0] if host_parts else 'default')).lower().strip()
 
-    app.logger.info(f"📂 [BYPASS] Buscando docs para: {tenant_slug}")
+    app.logger.info(f"⚡ [BYPASS CATALOGO] Buscando archivos para tenant: {tenant_slug}")
     
-    # Normalizar el texto del usuario para buscar coincidencias
+    # Normalizar el texto del usuario
     usuario_texto = (original_text or "catalogo").lower()
     
     try:
+        # 2. Conexión a la base de datos
+        from db import get_db_connection # Asegúrate de que esta importación sea correcta
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
         
-        # SQL exacto según tus columnas: filename, filepath, descripcion
-        query = "SELECT filename, filepath, descripcion FROM documents_publicos WHERE tenant_slug = %s"
+        # Consulta basada en tu estructura de Workbench
+        query = "SELECT filename, descripcion FROM documents_publicos WHERE tenant_slug = %s"
         cursor.execute(query, (tenant_slug,))
         docs = cursor.fetchall()
         
         if not docs:
-            app.logger.warning(f"⚠️ No hay documentos en DB para {tenant_slug}")
-            return enviar_fallback_catalogo(numero, config)
+            app.logger.warning(f"⚠️ No se encontraron documentos para {tenant_slug} en la DB.")
+            # Si tienes una función de fallback de texto, llámala aquí, si no, retorna False
+            return False 
 
-        # Buscar el mejor match entre lo que el usuario escribió y la descripción o nombre
+        # 3. Lógica de selección: Buscar el mejor match en descripción o nombre de archivo
         doc_a_enviar = None
+        palabras_usuario = usuario_texto.split()
+        
         for d in docs:
-            # Si el usuario dice "catalogo" y el archivo tiene "catalogo" en el nombre o descripción
-            if any(word in (d['descripcion'] or '').lower() or word in d['filename'].lower() 
-                   for word in usuario_texto.split()):
+            match_en_descripcion = any(p in (d['descripcion'] or '').lower() for p in palabras_usuario)
+            match_en_nombre = any(p in d['filename'].lower() for p in palabras_usuario)
+            
+            if match_en_descripcion or match_en_nombre:
                 doc_a_enviar = d
                 break
         
-        # Si no hay match, enviamos el primero por defecto
+        # Si no hay match específico (ej. el usuario solo puso "hola"), enviamos el primero
         if not doc_a_enviar:
             doc_a_enviar = docs[0]
 
-        # Construir la URL pública (asumiendo que /static/ apunta a /uploads)
+        # 4. Construcción de la URL y el nombre para WhatsApp
         filename = doc_a_enviar['filename']
+        # Usamos la estructura de carpetas que vimos: /uploads/docs/ofitodo/archivo.pdf
+        # Nota: Usamos /static/ para que Flask sirva el archivo correctamente
         url_documento = f"https://{request.host}/static/uploads/docs/{tenant_slug}/{filename}"
         
-        # Usamos la descripción de la DB como pie de foto
-        caption = doc_a_enviar['descripcion'] or "Aquí tienes el documento solicitado"
+        # Nombre amigable para que vea el usuario en WhatsApp (max 30-40 caracteres)
+        display_name = (doc_a_enviar['descripcion'] or "Catálogo").strip()[:40]
+        if not display_name.lower().endswith('.pdf') and filename.lower().endswith('.pdf'):
+            display_name += ".pdf"
         
-        app.logger.info(f"🚀 Enviando: {filename} | URL: {url_documento}")
-        
-        # Invocar el envío a WhatsApp
-        return enviar_documento(numero, url_documento, filename, caption, config)
+        app.logger.info(f"🚀 Enviando a {numero}: {filename}")
+        app.logger.debug(f"🔗 URL: {url_documento}")
+
+        # 5. Llamada a la función en whatsapp.py
+        from whatsapp import enviar_documento
+        return enviar_documento(
+            numero=numero, 
+            file_url=url_documento, 
+            filename=display_name, 
+            config=config
+        )
 
     except Exception as e:
-        app.logger.error(f"❌ Error en enviar_catalogo: {e}")
+        app.logger.error(f"❌ Error crítico en enviar_catalogo: {str(e)}")
+        import traceback
+        app.logger.error(traceback.format_exc())
         return False
     finally:
         if 'conn' in locals() and conn.is_connected():
             cursor.close()
             conn.close()
-
+            
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
