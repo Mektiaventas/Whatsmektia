@@ -5965,23 +5965,35 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
             else:
                 app.logger.warning(f"⚠️ Ningún producto cumple características exactas, devolviendo todos")
         
-        # ========== PASO 6: LOGGING Y RETORNO ==========
-        
+        # ========== PASO 6: FILTRO DE CALIDAD (EVITAR BASURA) ==========
         if resultados:
-            app.logger.info(f"✅ Encontrados {len(resultados)} productos")
-            # Log primeros 3 para debug
-            for idx, p in enumerate(resultados[:3]):
-                app.logger.info(f"  {idx+1}. {p.get('sku')} - {p.get('categoria')} {p.get('linea')} {p.get('modelo')} (relevancia: {p.get('relevancia', 0)})")
+            # 1. Obtenemos la relevancia del mejor producto encontrado
+            # Como la query tiene 'ORDER BY relevancia DESC', el primero es el mejor.
+            max_relevancia = resultados[0].get('relevancia', 0)
+            
+            # 2. Definimos un umbral: Solo productos que tengan al menos el 75% del puntaje del mejor
+            # Si el mejor (IA) tiene 180, el mínimo será 135. 
+            # Esto eliminará resultados "basura" que se colaron por coincidencia amplia.
+            umbral = max_relevancia * 0.75
+            
+            resultados_finales = [p for p in resultados if p.get('relevancia', 0) >= umbral]
+            
+            # 3. Limitamos a máximo 3 fichas para no saturar el WhatsApp
+            resultados = resultados_finales[:3]
+            
+            app.logger.info(f"🎯 Filtro de Calidad: De {len(resultados_finales)} candidatos, enviando los {len(resultados)} más relevantes (Umbral: {umbral})")
+        
+        # ========== PASO 7: LOGGING Y RETORNO ==========
+        if resultados:
+            app.logger.info(f"✅ Encontrados {len(resultados)} productos tras filtrado")
+            for idx, p in enumerate(resultados):
+                app.logger.info(f"  {idx+1}. {p.get('sku')} - {p.get('modelo')} (relevancia: {p.get('relevancia', 0)})")
         else:
-            app.logger.info(f"❌ No se encontraron productos")
+            app.logger.info(f"❌ No se encontraron productos que superen el filtro de calidad")
         
         cursor.close()
         conn.close()
         return resultados
-        
-    except Exception as e:
-        app.logger.error(f"❌ Error en búsqueda inteligente: {e}")
-        app.logger.error(traceback.format_exc())
         
         # FALLBACK: búsqueda simple
         try:
