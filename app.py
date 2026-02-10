@@ -9927,26 +9927,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
         return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
         
-    # =========================================================================
-    # NUEVO PUNTO 2.2: FILTRO DE DOCUMENTOS (BYPASS DE CATÁLOGOS/PLANES)
-    # =========================================================================
-    # Palabras clave que disparan el envío de documentos directamente
-    keywords_docs = [
-        "catalogo", "catálogo", "manual", "temario", "plan de estudio", 
-        "pdf", "informes", "brochure", "servicios", "precios", "lista",
-        "mecatronica", "mantenimiento", "industrial" # Agregamos tus carreras clave
-    ]
 
-    if not es_imagen and not es_audio and any(k in texto_norm for k in keywords_docs):
-        app.logger.info(f"⚡ [BYPASS DOCS] Solicitud de documento detectada: {texto_norm}")
-        
-        # Llamamos a la función "mini" que optimizamos antes
-        exito_doc = enviar_catalogo(numero, texto, config)
-        
-        if exito_doc:
-            # Si se envió con éxito, matamos el proceso aquí para que la IA no hable.
-            return True 
-    # =========================================================================
     # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO (NUEVO) ---
     # Si el usuario pide un humano o muestra frustración, cortamos el flujo de IA.
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
