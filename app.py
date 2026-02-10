@@ -9747,6 +9747,7 @@ REGLAS DE RESPUESTA:
 2. Aunque el usuario no use el nombre exacto, si hay algo relacionado (como "IA"), presenta lo que tenemos disponible.
 3. Si el usuario pide algo que NO existe del todo, di: "No tengo exactamente ese, pero mira lo que te puedo ofrecer:" y presenta tus productos reales.
 4. NUNCA inventes nombres de cursos que no estén en la lista.
+5. NUNCA digas que no puedes enviar imágenes. Si el sistema de fichas no se activa, simplemente describe el producto detalladamente y ofrece enviar más información con un asesor.
 
 Formato JSON:
 {{
