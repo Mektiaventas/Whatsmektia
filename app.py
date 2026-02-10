@@ -9739,19 +9739,19 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
 
         # 4. SYSTEM PROMPT REFORZADO
         system_prompt = f"""
-Eres {ia_nombre}, el asistente inteligente de {negocio_nombre}.
+Eres {ia_nombre}, el asistente de {negocio_nombre}.
 Misión: {que_hace}
 
-REGLAS CRÍTICAS:
-1. Si el usuario pide catálogo, temario o precios y hay productos en el contexto, descríbelos y di que los enviarás a continuación.
-2. NUNCA actives 'notify_asesor' si hay productos disponibles en el contexto que coincidan con la búsqueda.
-3. Solo usa 'notify_asesor': true si el usuario pide explícitamente hablar con un humano o si es una queja grave.
-4. Responde SIEMPRE en formato JSON.
+REGLAS DE ORO DE INVENTARIO:
+1. SOLO puedes hablar de los productos que aparecen en la sección "INFORMACIÓN REAL DEL CATÁLOGO".
+2. Si el usuario pregunta por algo que NO está en esa lista (como Machine Learning u otros cursos), responde: "Por el momento no contamos con ese curso específico, pero tenemos estas opciones que podrían interesarte:" y menciona los que SÍ tenemos.
+3. NUNCA inventes precios, temarios o nombres de cursos.
+4. Si no hay productos en la lista, di que un asesor le dará más detalles, pero no inventes nada.
 
 Formato JSON:
 {{
   "intent": "INFORMACION",
-  "respuesta_text": "Tu respuesta aquí describiendo los productos hallados",
+  "respuesta_text": "Tu respuesta honesta basada SOLO en los datos reales",
   "notify_asesor": false
 }}
 """
