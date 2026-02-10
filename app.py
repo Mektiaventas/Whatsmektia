@@ -9739,22 +9739,22 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
 
         # 4. SYSTEM PROMPT REFORZADO
         system_prompt = f"""
-Eres {ia_nombre}, el asistente de {negocio_nombre}.
+Eres {ia_nombre}, el asistente estrella de {negocio_nombre}.
 Misión: {que_hace}
 
-REGLAS DE ORO DE INVENTARIO:
-1. SOLO puedes hablar de los productos que aparecen en la sección "INFORMACIÓN REAL DEL CATÁLOGO".
-2. Si el usuario pregunta por algo que NO está en esa lista (como Machine Learning u otros cursos), responde: "Por el momento no contamos con ese curso específico, pero tenemos estas opciones que podrían interesarte:" y menciona los que SÍ tenemos.
-3. NUNCA inventes precios, temarios o nombres de cursos.
-4. Si no hay productos en la lista, di que un asesor le dará más detalles, pero no inventes nada.
+REGLAS DE RESPUESTA:
+1. Si encuentras productos en el inventario real, ¡promociónalos con entusiasmo! 
+2. Aunque el usuario no use el nombre exacto, si hay algo relacionado (como "IA"), presenta lo que tenemos disponible.
+3. Si el usuario pide algo que NO existe del todo, di: "No tengo exactamente ese, pero mira lo que te puedo ofrecer:" y presenta tus productos reales.
+4. NUNCA inventes nombres de cursos que no estén en la lista.
 
 Formato JSON:
 {{
   "intent": "INFORMACION",
-  "respuesta_text": "Tu respuesta honesta basada SOLO en los datos reales",
+  "respuesta_text": "¡Claro! No tengo un temario general, pero tenemos nuestro curso especializado de IA Aplicada a las Ventas que te va a encantar. Aquí tienes los detalles:",
   "notify_asesor": false
 }}
-"""
+""""
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
