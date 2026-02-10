@@ -9852,6 +9852,14 @@ Formato JSON:
                 app.logger.error(f"🔴 Error al pasar a asesor: {e}")
                 app.logger.error(traceback.format_exc())
 
+        #8.5 --- NUEVA VALIDACIÓN DE SEGURIDAD ANTES DE ENVIAR FICHAS ---
+        # Si el intent cambió a PASAR_ASESOR en este hilo, o si notify_asesor es True,
+        # forzamos la salida una vez más por si el return anterior falló en el hilo.
+        if intent == "PASAR_ASESOR" or notify_asesor is True:
+            app.logger.info("🛑 [STOP] Abortando envío de fichas porque el usuario fue transferido.")
+            return True
+        # -----------------------------------------------------------
+        
         # 9. ENVÍO FINAL (WHATSAPP + CRM WEB)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
         
