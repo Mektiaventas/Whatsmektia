@@ -10695,13 +10695,18 @@ EJEMPLOS:
             manejar_guardado_cita_unificado(save_cita, intent, numero, texto, historial, catalog_list, respuesta_text, incoming_saved, config)
             return True
 
-        if (intent == "ENVIAR_CATALOGO") or (intent == "ENVIAR_TEMARIO") or (intent == "ENVIAR_FLYER") or (intent == "ENVIAR_PDF"):
+        # --- BLOQUE CATALOGO / PDF ---
+        if intent in ["ENVIAR_CATALOGO", "ENVIAR_TEMARIO", "ENVIAR_FLYER", "ENVIAR_PDF"]:
             try:
                 sent = enviar_catalogo(numero, original_text=texto, config=config)
-                msg_resp = "Se envió el catálogo solicitado." if sent else "No se encontró un catálogo para enviar."
-                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
-                app.logger.info(f"DEBUG IA -> Intent: '{intent}', Image Field: '{image_field}'")
-                return True
+                if sent:
+                    app.logger.info(f"✅ Catálogo/PDF enviado con éxito para intent {intent}")
+                    # Registramos y cortamos ejecución para que no mande "basura" después
+                    registrar_respuesta_bot(numero, texto, "Se envió el catálogo solicitado.", config, incoming_saved=incoming_saved)
+                    return True 
+                else:
+                    app.logger.warning("⚠️ No se encontró PDF, el flujo continuará para buscar fichas de producto.")
+                    # Si no hay PDF, dejamos que el código siga bajando a ver si hay productos en DB
             except Exception as e:
                 app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
                 
