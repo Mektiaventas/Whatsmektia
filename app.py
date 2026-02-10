@@ -9754,7 +9754,7 @@ Formato JSON:
   "respuesta_text": "¡Claro! No tengo un temario general, pero tenemos nuestro curso especializado de IA Aplicada a las Ventas que te va a encantar. Aquí tienes los detalles:",
   "notify_asesor": false
 }}
-""""
+"""
 
         lista_mensajes = [{"role": "system", "content": system_prompt}]
         
