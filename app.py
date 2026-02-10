@@ -10718,17 +10718,17 @@ EJEMPLOS:
         # --- BLOQUE CATALOGO / PDF ---
         if intent in ["ENVIAR_CATALOGO", "ENVIAR_TEMARIO", "ENVIAR_FLYER", "ENVIAR_PDF"]:
             try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                if sent:
-                    app.logger.info(f"✅ Catálogo/PDF enviado con éxito para intent {intent}")
-                    # Registramos y cortamos ejecución para que no mande "basura" después
+                # Intentamos enviar el PDF/Catálogo físico
+                sent_pdf = enviar_catalogo(numero, original_text=texto, config=config)
+                
+                if sent_pdf:
+                    app.logger.info(f"✅ PDF enviado. Terminando flujo.")
                     registrar_respuesta_bot(numero, texto, "Se envió el catálogo solicitado.", config, incoming_saved=incoming_saved)
-                    return True 
-                else:
-                    app.logger.warning("⚠️ No se encontró PDF, el flujo continuará para buscar fichas de producto.")
-                    # Si no hay PDF, dejamos que el código siga bajando a ver si hay productos en DB
+                    return True # <--- AQUÍ CORTAMOS. Si hubo PDF, ya no busca fichas.
+                
+                app.logger.info(f"⚠️ No se encontró PDF. El código seguirá para buscar fichas en DB.")
             except Exception as e:
-                app.logger.error(f"🔴 Error sending catalog shortcut: {e}")
+                app.logger.error(f"🔴 Error en bloque catálogo: {e}")
                 
         if intent == "ENVIAR_IMAGEN" and image_field:
             try:
