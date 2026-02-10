@@ -5190,53 +5190,63 @@ def enviar_catalogo(numero, original_text=None, config=None):
     if config is None:
         config = obtener_configuracion_por_host()
     
-    # --- CORRECCIÓN AQUÍ ---
-    # Intentamos sacar el slug de varias fuentes para que nunca sea 'default'
-    tenant_slug = config.get('subdominio') or config.get('bd_name') or 'default'
-    # -----------------------
-    usuario_texto = original_text or "[Solicitud de catálogo]"
+    # Extracción del tenant slug
+    host_parts = request.host.split('.')
+    tenant_slug = (config.get('subdominio') or 
+                   config.get('bd_name') or 
+                   (host_parts[0] if host_parts else 'default')).lower().strip()
+
+    app.logger.info(f"📂 [BYPASS] Buscando docs para: {tenant_slug}")
+    
+    # Normalizar el texto del usuario para buscar coincidencias
+    usuario_texto = (original_text or "catalogo").lower()
     
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        # Solo buscamos documentos de ESTE cliente
-        cursor.execute("SELECT * FROM documents_publicos WHERE tenant_slug = %s", (tenant_slug,))
+        
+        # SQL exacto según tus columnas: filename, filepath, descripcion
+        query = "SELECT filename, filepath, descripcion FROM documents_publicos WHERE tenant_slug = %s"
+        cursor.execute(query, (tenant_slug,))
         docs = cursor.fetchall()
-        cursor.close(); conn.close()
+        
+        if not docs:
+            app.logger.warning(f"⚠️ No hay documentos en DB para {tenant_slug}")
+            return enviar_fallback_catalogo(numero, config)
 
-        if docs:
-            # 1. Tu lógica inteligente (la joya que encontramos)
-            mejor = seleccionar_mejor_doc(docs, usuario_texto)
-            
-            # Si no hay match claro (score bajo), enviamos el más reciente
-            if not mejor:
-                mejor = docs[0]
+        # Buscar el mejor match entre lo que el usuario escribió y la descripción o nombre
+        doc_a_enviar = None
+        for d in docs:
+            # Si el usuario dice "catalogo" y el archivo tiene "catalogo" en el nombre o descripción
+            if any(word in (d['descripcion'] or '').lower() or word in d['filename'].lower() 
+                   for word in usuario_texto.split()):
+                doc_a_enviar = d
+                break
+        
+        # Si no hay match, enviamos el primero por defecto
+        if not doc_a_enviar:
+            doc_a_enviar = docs[0]
 
-            filename = mejor.get('filename')
-            base_url = f"https://{config.get('dominio', '').rstrip('/')}"
-            
-            # 2. Construcción de URL para tu serve_public_docs
-            file_url = f"{base_url}/uploads/docs/{tenant_slug}/{filename}"
-
-            app.logger.info(f"✅ Enviando PDF: {filename} a {numero}")
-            sent = enviar_documento(numero, file_url, filename, config)
-            
-            # Guardamos en el historial para que la IA sepa que ya cumplió
-            actualizar_respuesta(numero, usuario_texto, f"Enviado PDF: {filename}", config)
-            return sent
-
-        else:
-            # PLAN C: Si no hay documentos subir, enviamos resumen de productos en texto
-            app.logger.warning(f"⚠️ No hay PDFs para {tenant_slug}, usando fallback de texto.")
-            precios = obtener_todos_los_precios(config) or []
-            texto_catalogo = build_texto_catalogo(precios, limit=20)
-            enviar_mensaje(numero, texto_catalogo, config)
-            actualizar_respuesta(numero, usuario_texto, "Enviado catálogo en texto", config)
-            return True
+        # Construir la URL pública (asumiendo que /static/ apunta a /uploads)
+        filename = doc_a_enviar['filename']
+        url_documento = f"https://{request.host}/static/uploads/docs/{tenant_slug}/{filename}"
+        
+        # Usamos la descripción de la DB como pie de foto
+        caption = doc_a_enviar['descripcion'] or "Aquí tienes el documento solicitado"
+        
+        app.logger.info(f"🚀 Enviando: {filename} | URL: {url_documento}")
+        
+        # Invocar el envío a WhatsApp
+        return enviar_documento(numero, url_documento, filename, caption, config)
 
     except Exception as e:
-        app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
+        app.logger.error(f"❌ Error en enviar_catalogo: {e}")
         return False
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
