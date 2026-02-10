@@ -5230,8 +5230,11 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
         # 4. Construcción de URL y Nombre
         filename = doc_a_enviar['filename']
-        # Usamos la ruta física que confirmamos con 'ls'
-        url_documento = f"https://{request.host}/static/uploads/docs/{tenant_slug}/{filename}"
+        # En lugar de /static/uploads/docs/... 
+        # Vamos a usar la ruta que tu servidor YA reconoce para logos y productos
+        url_documento = f"https://{request.host}/uploads/docs/{tenant_slug}/{filename}"
+        # Si usas un puerto específico o una ruta base distinta, asegúrate de que 
+        # esta URL sea la misma que ves en los logos que SÍ funcionan.
         
         # Limpiar el nombre para que WhatsApp lo muestre bonito
         display_name = (doc_a_enviar['descripcion'] or "Catálogo").strip()[:40]
