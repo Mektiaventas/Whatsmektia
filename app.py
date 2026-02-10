@@ -5216,29 +5216,43 @@ def enviar_catalogo(numero, original_text=None, config=None):
 
         # 3. Lógica de selección por coincidencia de palabras
         # --- NUEVA LÓGICA DE BÚSQUEDA ---
+        # --- LÓGICA DE BÚSQUEDA AVANZADA ---
         doc_a_enviar = None
         max_coincidencias = 0
-        palabras_usuario = set(usuario_texto.split())
+        usuario_texto_limpio = usuario_texto.lower().strip()
         
-        # Palabras que no nos sirven para filtrar (ignorar)
-        stop_words = {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'tu', 'mi', 'me', 'mándame', 'enviame', 'temario', 'catalogo'}
+        # Diccionario de sinónimos para términos técnicos
+        sinonimos = {
+            'ia': 'inteligencia artificial',
+            'excel': 'ofimática herramientas digitales',
+            'mantenimiento': 'mantenimiento industrial'
+        }
+        
+        # Expandir el texto del usuario con sinónimos
+        for corto, largo in sinonimos.items():
+            if corto in usuario_texto_limpio.split():
+                usuario_texto_limpio += f" {largo}"
+
+        palabras_usuario = set(usuario_texto_limpio.split())
+        stop_words = {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'tu', 'mi', 'me', 'mándame', 'enviame', 'temario', 'catalogo', 'de'}
         palabras_clave_usuario = palabras_usuario - stop_words
 
         for d in docs:
-            # Texto donde buscar: descripción + nombre de archivo
-            texto_documento = f"{(d['descripcion'] or '').lower()} {d['filename'].lower()}"
+            texto_doc = f"{(d['descripcion'] or '').lower()} {d['filename'].lower()}"
+            # Puntuamos: match exacto de palabra clave vale más
+            coincidencias = sum(2 for p in palabras_clave_usuario if p in texto_doc)
             
-            # Contar cuántas palabras clave del usuario están en este documento
-            coincidencias = sum(1 for palabra in palabras_clave_usuario if palabra in texto_documento)
-            
-            # Si este documento tiene más coincidencias que el anterior, lo elegimos
             if coincidencias > max_coincidencias:
                 max_coincidencias = coincidencias
                 doc_a_enviar = d
 
-        # Si no hubo match de palabras clave, usamos el fallback (primer doc)
-        if not doc_a_enviar and docs:
-            doc_a_enviar = docs[0]
+        # --- VALIDACIÓN DE RESULTADO ---
+        if max_coincidencias == 0:
+            # En lugar de enviar cualquiera, listamos lo que sí tenemos
+            opciones = ", ".join([d['descripcion'] or d['filename'] for d in docs[:5]])
+            mensaje_error = f"Lo siento, no encontré un temario de '{usuario_texto}'.\n\nContamos con: \n* {opciones.replace(', ', '\n* ')}"
+            enviar_mensaje_texto(to_number, mensaje_error) # Asumiendo que tienes esta función
+            return True
         # --- FIN DE LÓGICA DE BÚSQUEDA ---
 
         # 4. Construcción de URL y Nombre
