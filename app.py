@@ -5993,27 +5993,13 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
         
         cursor.close()
         conn.close()
-        return resultados
+        return resultados # <--- LA FUNCIÓN TERMINA AQUÍ
+
+    except Exception as e:
+        app.logger.error(f"❌ Error en búsqueda inteligente: {e}")
+        app.logger.error(traceback.format_exc())
+        return []
         
-        # FALLBACK: búsqueda simple
-        try:
-            conn = get_db_connection(config)
-            cursor = conn.cursor(dictionary=True)
-            texto_norm = normalizar_texto_busqueda(texto_limpio)
-            
-            cursor.execute(
-                """SELECT * FROM precios 
-                   WHERE LOWER(descripcion) LIKE %s 
-                   OR LOWER(categoria) LIKE %s
-                   LIMIT %s""",
-                (f"%{texto_norm}%", f"%{texto_norm}%", min(50, limite))
-            )
-            productos = cursor.fetchall()
-            cursor.close()
-            conn.close()
-            return productos
-        except:
-            return []
 
 # Agrega esta función también (es solo lectura, no modifica BD)
 def detectar_categoria_del_mensaje(mensaje):
