@@ -5215,18 +5215,31 @@ def enviar_catalogo(numero, original_text=None, config=None):
             return False 
 
         # 3. Lógica de selección por coincidencia de palabras
+        # --- NUEVA LÓGICA DE BÚSQUEDA ---
         doc_a_enviar = None
-        palabras_usuario = usuario_texto.split()
-        for d in docs:
-            # Buscar en descripción o en el nombre del archivo
-            if any(p in (d['descripcion'] or '').lower() or p in d['filename'].lower() 
-                   for p in palabras_usuario):
-                doc_a_enviar = d
-                break
+        max_coincidencias = 0
+        palabras_usuario = set(usuario_texto.split())
         
-        # Fallback: enviar el primer documento si no hay match específico
-        if not doc_a_enviar:
+        # Palabras que no nos sirven para filtrar (ignorar)
+        stop_words = {'el', 'la', 'los', 'las', 'un', 'una', 'de', 'del', 'tu', 'mi', 'me', 'mándame', 'enviame', 'temario', 'catalogo'}
+        palabras_clave_usuario = palabras_usuario - stop_words
+
+        for d in docs:
+            # Texto donde buscar: descripción + nombre de archivo
+            texto_documento = f"{(d['descripcion'] or '').lower()} {d['filename'].lower()}"
+            
+            # Contar cuántas palabras clave del usuario están en este documento
+            coincidencias = sum(1 for palabra in palabras_clave_usuario if palabra in texto_documento)
+            
+            # Si este documento tiene más coincidencias que el anterior, lo elegimos
+            if coincidencias > max_coincidencias:
+                max_coincidencias = coincidencias
+                doc_a_enviar = d
+
+        # Si no hubo match de palabras clave, usamos el fallback (primer doc)
+        if not doc_a_enviar and docs:
             doc_a_enviar = docs[0]
+        # --- FIN DE LÓGICA DE BÚSQUEDA ---
 
         # 4. Construcción de URL y Nombre
         filename = doc_a_enviar['filename']
