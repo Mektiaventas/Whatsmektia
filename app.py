@@ -5187,99 +5187,53 @@ def obtener_numeros_asesores_db(config=None):
         return tuple()
 
 def enviar_catalogo(numero, original_text=None, config=None):
-    """
-    Intenta enviar el PDF público más relevante (documents_publicos),
-    si no existe envía un resumen textual del catálogo (primeros 20 productos).
-    Usa la descripción del PDF para decidir cuál enviar.
-    """
-    app.logger.info(f"🎯 DEBUG enviar_catalogo llamado para '{numero}' con texto: '{original_text}'")
-    app.logger.info(f"🎯 DEBUG Query contiene 'mecatronica': {'mecatronica' in str(original_text).lower()}")
-    app.logger.info(f"🎯 DEBUG Query contiene 'mantenimiento': {'mantenimiento' in str(original_text).lower()}")
-    from flask import has_request_context, request
     if config is None:
         config = obtener_configuracion_por_host()
+    
+    tenant_slug = config.get('subdominio', 'default')
+    usuario_texto = original_text or "[Solicitud de catálogo]"
+    
     try:
         conn = get_db_connection(config)
         cursor = conn.cursor(dictionary=True)
-        cursor.execute("SHOW TABLES LIKE 'documents_publicos'")
-        if cursor.fetchone():
-            cursor.execute("""
-                SELECT id, filename, filepath, descripcion, uploaded_by, created_at, tenant_slug
-                FROM documents_publicos
-                ORDER BY created_at DESC
-                LIMIT 20
-            """)
-            docs = cursor.fetchall()
-        else:
-            docs = []
+        # Solo buscamos documentos de ESTE cliente
+        cursor.execute("SELECT * FROM documents_publicos WHERE tenant_slug = %s", (tenant_slug,))
+        docs = cursor.fetchall()
         cursor.close(); conn.close()
 
-        usuario_texto = original_text or "[Solicitud de catálogo]"
-
         if docs:
-            # Seleccionar el doc más relevante usando descripción/filename
+            # 1. Tu lógica inteligente (la joya que encontramos)
             mejor = seleccionar_mejor_doc(docs, usuario_texto)
+            
+            # Si no hay match claro (score bajo), enviamos el más reciente
             if not mejor:
                 mejor = docs[0]
 
             filename = mejor.get('filename')
-            descripcion = mejor.get('descripcion') or ''
+            base_url = f"https://{config.get('dominio', '').rstrip('/')}"
+            
+            # 2. Construcción de URL para tu serve_public_docs
+            file_url = f"{base_url}/uploads/docs/{tenant_slug}/{filename}"
 
-            # Build tenant-aware file_url
-            base = None
-            try:
-                if has_request_context():
-                    base = request.url_root.rstrip('/')
-                else:
-                    dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-                    base = dominio if dominio.startswith('http') else f"https://{dominio}"
-            except Exception:
-                dominio = config.get('dominio', os.getenv('MI_DOMINIO', 'localhost')).rstrip('/')
-                base = dominio if dominio.startswith('http') else f"https://{dominio}"
-
-            tenant_slug = mejor.get('tenant_slug') or (config.get('dominio') or '').split('.')[0] or 'default'
-            # Usamos el proxy para que WhatsApp pueda descargar el archivo sin bloqueos
-            file_url = f"{base}/proxy-audio/{filename}"
-            app.logger.info(f"📚 Enviar catálogo seleccionado -> file_url: {file_url} (descripcion: {descripcion[:120]})")
-
+            app.logger.info(f"✅ Enviando PDF: {filename} a {numero}")
             sent = enviar_documento(numero, file_url, filename, config)
-            respuesta_text = (f"Te envío el catálogo: {descripcion}" if descripcion else f"Te envío el catálogo: {filename}") if sent else f"Intenté enviar el catálogo pero no fue posible. Puedes descargarlo aquí: {file_url}"
-
-            # Actualizar la fila de mensaje entrante con la respuesta para evitar duplicados
-            try:
-                actualizar_respuesta(numero, usuario_texto, respuesta_text, config)
-            except Exception as e:
-                app.logger.warning(f"⚠️ actualizar_respuesta falló, fallback a guardar_conversacion: {e}")
-                guardar_conversacion(numero, usuario_texto, respuesta_text, config, imagen_url=file_url if sent else file_url, es_imagen=False)
-
+            
+            # Guardamos en el historial para que la IA sepa que ya cumplió
+            actualizar_respuesta(numero, usuario_texto, f"Enviado PDF: {filename}", config)
             return sent
+
         else:
-            # Fallback a texto resumen del catálogo
+            # PLAN C: Si no hay documentos subir, enviamos resumen de productos en texto
+            app.logger.warning(f"⚠️ No hay PDFs para {tenant_slug}, usando fallback de texto.")
             precios = obtener_todos_los_precios(config) or []
             texto_catalogo = build_texto_catalogo(precios, limit=20)
             enviar_mensaje(numero, texto_catalogo, config)
-            try:
-                actualizar_respuesta(numero, usuario_texto, texto_catalogo, config)
-            except Exception as e:
-                app.logger.warning(f"⚠️ actualizar_respuesta falló en fallback textual: {e}")
-                guardar_conversacion(numero, usuario_texto, texto_catalogo, config)
+            actualizar_respuesta(numero, usuario_texto, "Enviado catálogo en texto", config)
             return True
 
     except Exception as e:
         app.logger.error(f"🔴 Error en enviar_catalogo: {e}")
-        try:
-            precios = obtener_todos_los_precios(config) or []
-            texto_catalogo = build_texto_catalogo(precios, limit=10)
-            enviar_mensaje(numero, texto_catalogo, config)
-            try:
-                actualizar_respuesta(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
-            except:
-                guardar_conversacion(numero, original_text or "[Solicitud de catálogo]", texto_catalogo, config)
-            return True
-        except Exception as ex:
-            app.logger.error(f"🔴 Fallback también falló: {ex}")
-            return False
-
+        return False
 @app.route('/autorizar-google')
 def autorizar_google():
     """Endpoint para autorizar manualmente con Google"""
@@ -9912,6 +9866,26 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         
         return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
         
+    # =========================================================================
+    # NUEVO PUNTO 2.2: FILTRO DE DOCUMENTOS (BYPASS DE CATÁLOGOS/PLANES)
+    # =========================================================================
+    # Palabras clave que disparan el envío de documentos directamente
+    keywords_docs = [
+        "catalogo", "catálogo", "manual", "temario", "plan de estudio", 
+        "pdf", "informes", "brochure", "servicios", "precios", "lista",
+        "mecatronica", "mantenimiento", "industrial" # Agregamos tus carreras clave
+    ]
+
+    if not es_imagen and not es_audio and any(k in texto_norm for k in keywords_docs):
+        app.logger.info(f"⚡ [BYPASS DOCS] Solicitud de documento detectada: {texto_norm}")
+        
+        # Llamamos a la función "mini" que optimizamos antes
+        exito_doc = enviar_catalogo(numero, texto, config)
+        
+        if exito_doc:
+            # Si se envió con éxito, matamos el proceso aquí para que la IA no hable.
+            return True 
+    # =========================================================================
     # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO (NUEVO) ---
     # Si el usuario pide un humano o muestra frustración, cortamos el flujo de IA.
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
