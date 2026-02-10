@@ -5974,10 +5974,10 @@ def obtener_productos_por_palabra_clave(palabra_clave, config=None, limite=150, 
             # 2. Definimos un umbral: Solo productos que tengan al menos el 75% del puntaje del mejor
             # Si el mejor (IA) tiene 180, el mínimo será 135. 
             # Esto eliminará resultados "basura" que se colaron por coincidencia amplia.
-            umbral = max_relevancia * 0.75
-            
+            # Subimos al 90% para que si hay algo muy bueno (180), 
+            # no se cuele nada que tenga menos de 162.
+            umbral = max_relevancia * 0.9
             resultados_finales = [p for p in resultados if p.get('relevancia', 0) >= umbral]
-            
             # 3. Limitamos a máximo 3 fichas para no saturar el WhatsApp
             resultados = resultados_finales[:3]
             
