@@ -9817,15 +9817,35 @@ Formato JSON:
             except Exception as e:
                 print(f"🔴 Error TTS: {e}")
 
+        #7.1 Validación de seguridad: No pasar a asesor si el usuario solo dijo "hola" o "gracias"
+        palabras_ruido = ["gracias", "ok", "hola", "buen día"]
+        if any(p in texto.lower() for p in palabras_ruido) and intent == "PASAR_ASESOR":
+            app.logger.info("⚠️ Ignorando intento de pasar a asesor por ser mensaje de cortesía.")
+            intent = "SALUDO" # Forzamos el cambio de intención
         # 8. EJECUTAR ACCIÓN DE ASESOR
-        if intent == "PASAR_ASESOR" or notify_asesor:
+        # Eliminamos la búsqueda de "asesor" en el respuesta_text. 
+        # Solo entramos si el intent es explícito o notify_asesor es True.
+        if intent == "PASAR_ASESOR" or notify_asesor is True:
             try:
-                # Buscamos la función en el scope global para evitar el ImportError de 'app'
+                app.logger.info(f"🚀 [ASESOR] Iniciando transferencia para {numero}")
                 func_asesor = globals().get('pasar_contacto_asesor')
+                
                 if func_asesor:
+                    # 1. Ejecutamos la transferencia en DB y mandamos la alerta al asesor
                     func_asesor(numero, config=config, notificar_asesor=True)
+                    
+                    # 2. Informamos al cliente (solo si no se le ha dicho nada antes)
+                    msg_cliente = respuesta_text if respuesta_text else "He solicitado que un asesor humano te atienda. En breve se pondrán en contacto contigo."
+                    enviar_mensaje(numero, msg_cliente, config)
+                    
+                    # 3. Registramos la respuesta y CORTAMOS la ejecución
+                    registrar_respuesta_bot(numero, texto, msg_cliente, config, incoming_saved=incoming_saved)
+                    
+                    app.logger.info(f"✅ [ASESOR] Cliente {numero} transferido y flujo detenido.")
+                    return True # <--- FUNDAMENTAL: Detiene todo para que no mande "basura" después
+        
             except Exception as e:
-                print(f"🔴 Error al pasar a asesor: {e}")
+                app.logger.error(f"🔴 Error al pasar a asesor: {e}")
 
         # 9. ENVÍO FINAL (WHATSAPP + CRM WEB)
         from whatsapp import enviar_mensaje, enviar_mensaje_voz
