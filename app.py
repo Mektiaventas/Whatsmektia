@@ -10697,17 +10697,7 @@ EJEMPLOS:
                     enviar_mensaje(numero, cotizar_text, config) 
                 registrar_respuesta_bot(numero, texto, cotizar_text, config, incoming_saved=incoming_saved)
                 return True
-
-        if intent == "ENVIAR_DOCUMENTO" and not document_field:
-            app.logger.info("📚 IA requested ENVIAR_DOCUMENTO without document_field -> attempting enviar_catalogo()")
-            try:
-                sent = enviar_catalogo(numero, original_text=texto, config=config)
-                msg_resp = "Te envié el catálogo solicitado." if sent else "No encontré catálogo publicado."
-                registrar_respuesta_bot(numero, texto, msg_resp, config, incoming_saved=incoming_saved)
-                return True
-            except Exception as e:
-                app.logger.error(f"🔴 Fallback enviar_catalogo() falló: {e}")
-                
+              
         if intent == "COMPRAR_PRODUCTO":
             comprar_producto_text = comprar_producto(numero, config=config)
             if comprar_producto_text:
