@@ -163,6 +163,18 @@ NUMEROS_CONFIG = {
         'messenger_page_id_env': 'OFITODO_MESSENGER_PAGE_ID',
         'messenger_token_env': 'OFITODO_PAGE_ACCESS_TOKEN'
     },
+        '524495547200': {  # Número de Starto
+        'phone_number_id': os.getenv("STRATO_PHONE_NUMBER_ID"),  
+        'whatsapp_token': os.getenv("STRATO_WHATSAPP_TOKEN"),    
+        'db_host': os.getenv("STRATO_DB_HOST"),                  
+        'db_user': os.getenv("STRATO_DB_USER"),                  
+        'db_password': os.getenv("STRATO_DB_PASSWORD"),          
+        'db_name': os.getenv("STRATO_DB_NAME"),                  
+        'dominio': 'strato.mektia.com',
+        # Claves de Messenger (usando el prefijo STRATO según tu .env)
+        'messenger_page_id_env': 'STRATO_MESSENGER_PAGE_ID',
+        'messenger_token_env': 'STRATO_PAGE_ACCESS_TOKEN'
+    },
     '1011': {  # Número de Maindsteel
         'phone_number_id': os.getenv("MAINDSTEEL_PHONE_NUMBER_ID"),  
         'whatsapp_token': os.getenv("MAINDSTEEL_WHATSAPP_TOKEN"),    
@@ -11445,6 +11457,9 @@ def obtener_configuracion_por_host():
             elif 'lacse' in raw_host:
                 config = NUMEROS_CONFIG.get('1111111111111')
                 subdominio = "lacse"
+            elif 'strato' in raw_host:
+                config = NUMEROS_CONFIG.get('524495547200')
+                subdominio = "strato"
 
         # 3. SEGURO DE VIDA (Si nada coincidió, entregamos Mektia para que no truene)
         if config is None:
