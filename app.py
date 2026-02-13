@@ -9738,7 +9738,8 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         ia_nombre = config.get('ia_nombre') or "Asistente"
         negocio_nombre = config.get('negocio_nombre') or "Negocio"
         que_hace = config.get('que_hace') or "Asistir a los clientes."
-        subdominio = config.get('dominio', 'mektia').split('.')[0]
+        # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
+        subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
         # 3. REGLA DE ORO: Si hay productos en catalog_list, la IA debe saberlo ANTES de decidir
         contexto_real = ""
@@ -10251,9 +10252,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             # ============================================================
             # ESTO DEBE SALIR SI O SI EN EL LOG
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-            app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {config.keys() if config else 'CONFIG ES NONE'}")
-            app.logger.error(f"🏢 SUBDOMINIO: {subdominio if 'subdominio' in locals() else 'NO DEFINIDO'}")
-            app.logger.error(f"🚨 DEBUG IDENTIDAD: {config.get('ia_nombre') if config else 'SIN CONFIG'}")
+            app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {list(config.keys()) if config else 'CONFIG ES NONE'}")
+            app.logger.error(f"🏢 SUBDOMINIO DETECTADO: {subdominio}") # <--- Quita el 'if in locals'
+            app.logger.error(f"🚨 DEBUG IDENTIDAD IA: {config.get('ia_nombre', 'Sin Nombre')}")
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
             app.logger.info(f"📦 Consulta general (Charla/Identidad), llamando a IA...")
