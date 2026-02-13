@@ -10253,8 +10253,10 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             # ESTO DEBE SALIR SI O SI EN EL LOG
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             app.logger.error(f"🚨 DEBUG COMPLETO CONFIG: {list(config.keys()) if config else 'CONFIG ES NONE'}")
-            app.logger.error(f"🏢 SUBDOMINIO DETECTADO: {subdominio}") # <--- Quita el 'if in locals'
-            app.logger.error(f"🚨 DEBUG IDENTIDAD IA: {config.get('ia_nombre', 'Sin Nombre')}")
+            # Usamos config.get para que si no existe, al menos no rompa el código
+            subdominio_log = config.get('subdominio_actual', 'desconocido') 
+            app.logger.error(f"🏢 SUBDOMINIO DETECTADO: {subdominio_log}")
+            app.logger.error(f"🚨 DEBUG IDENTIDAD: {config.get('ia_nombre', 'Sin nombre')}")
             app.logger.error("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
             app.logger.info(f"📦 Consulta general (Charla/Identidad), llamando a IA...")
