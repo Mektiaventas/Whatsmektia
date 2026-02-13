@@ -9741,31 +9741,34 @@ def generar_respuesta_deepseek(numero, texto, precios, historial, config, incomi
         # Intentamos obtener el subdominio de 3 formas para que NUNCA sea "NO DEFINIDO"
         subdominio = config.get('subdominio_actual') or config.get('dominio', 'mektia').split('.')[0]
 
-        # 3. REGLA DE ORO: Si hay productos en catalog_list, la IA debe saberlo ANTES de decidir
+        # 3. REGLA DE ORO: Inyectar contexto de "Qué hace" si no hay productos específicos
         contexto_real = ""
         hay_productos = False
+        
         if catalog_list and len(catalog_list) > 0:
             hay_productos = True
             contexto_real = "\n\nESTOS PRODUCTOS ESTÁN DISPONIBLES AHORA (Úsalos para responder):\n"
             for p in catalog_list:
                 contexto_real += f"- {p.get('nombre')}: ${p.get('precio_menudeo')}\n"
+        else:
+            # SI NO HAY PRODUCTOS BUSCADOS, DALE SU LISTA GENERAL DE QUÉ HACE
+            contexto_real = f"\n\nINFORMACIÓN GENERAL DE LO QUE OFRECEMOS EN {negocio_nombre}:\n{que_hace}"
 
-        # 4. SYSTEM PROMPT REFORZADO
+        # 4. SYSTEM PROMPT REFORZADO (Añadimos instrucción de precios)
         system_prompt = f"""
 Eres {ia_nombre}, el asistente estrella de {negocio_nombre}.
 Misión: {que_hace}
 
 REGLAS DE RESPUESTA:
-1. Si encuentras productos en el inventario real, ¡promociónalos con entusiasmo! 
-2. Aunque el usuario no use el nombre exacto, si hay algo relacionado (como "IA"), presenta lo que tenemos disponible.
-3. Si el usuario pide algo que NO existe del todo, di: "No tengo exactamente ese, pero mira lo que te puedo ofrecer:" y presenta tus productos reales.
-4. NUNCA inventes nombres de cursos que no estén en la lista.
-5. NUNCA digas que no puedes enviar imágenes. Si el sistema de fichas no se activa, simplemente describe el producto detalladamente y ofrece enviar más información con un asesor.
+1. Si el usuario pregunta qué ofreces o pide precios, usa ESTRICTAMENTE esta información: {contexto_real}
+2. NUNCA menciones a 'Mektia' ni servicios de otras empresas. Tu mundo es {negocio_nombre}.
+3. Si el usuario es vago (ej. "Hola"), saluda y menciona brevemente 2 cosas que haces según el contexto proporcionado.
+4. Siempre que menciones un precio, asegúrate que sea el que aparece en la lista.
 
 Formato JSON:
 {{
   "intent": "INFORMACION",
-  "respuesta_text": "¡Claro! No tengo un temario general, pero tenemos nuestro curso especializado de IA Aplicada a las Ventas que te va a encantar. Aquí tienes los detalles:",
+  "respuesta_text": "En {negocio_nombre} ofrecemos...",
   "notify_asesor": false
 }}
 """
