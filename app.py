@@ -9893,10 +9893,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
     # Si el texto está vacío (a veces pasa en webhooks), intentamos sacarlo del objeto msg
     if not texto_norm and msg and 'text' in msg:
         texto_norm = msg['text'].get('body', "").strip().lower()
-
     # Usamos Regex para detectar la raíz de las palabras (ignora comas, signos y variaciones)
     patron_contacto = r"(ubic|direcc|donde\s*(estan|se\s*encuentran|se\s*ubican|es))"
-    
     if not es_imagen and not es_audio and re.search(patron_contacto, texto_norm):
         app.logger.info(f"🚀 [VIA RAPIDA] Solicitud de contacto detectada: {texto_norm}")
         
@@ -9909,22 +9907,17 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         registrar_respuesta_bot(numero, texto, respuesta_contacto, config, incoming_saved=incoming_saved)
         
         return True # DETIENE LA EJECUCIÓN AQUÍ (No gasta tokens de IA ni procesa Kanban)
-        
-
     # 2.5 --- INTERCEPCIÓN POR ASESOR HUMANO (NUEVO) ---
     # Si el usuario pide un humano o muestra frustración, cortamos el flujo de IA.
     if detectar_intervencion_humana_ia(texto_norm, numero, config):
         app.logger.info(f"⚠️ [HUMANO] El usuario {numero} requiere atención de un asesor.")
-        
         # Esta función asigna al asesor (1 o 2), mueve el Kanban y manda el WhatsApp de alerta
         exito_paso = pasar_contacto_asesor(numero, config=config)
-        
         if exito_paso:
             mensaje_confirmacion = "Entiendo. He solicitado que uno de nuestros asesores humanos tome el control de la conversación. Te contactarán por este medio a la brevedad. 👨‍💼"
             enviar_mensaje(numero, mensaje_confirmacion, config)
             registrar_respuesta_bot(numero, texto, mensaje_confirmacion, config, incoming_saved=incoming_saved)
             return True # DETIENE TODO: No entra a la IA ni manda fichas.
-            
     # 3. --- FLUJO NORMAL (KANBAN E IA) ---
     try:
         # Lógica de Kanban
@@ -10014,10 +10007,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # ================================================================
         # INICIO DEL BLOQUE - IA TOTAL CON FORMATO "FICHA DE PRODUCTO"
         # ================================================================
-        
         # Llamamos a la nueva función que contiene toda la lógica anterior
         return fichas_ia_total(numero, texto, es_audio, config, incoming_saved)
-        
         # ================================================================
         # FIN DEL BLOQUE - IA TOTAL
         # ================================================================
@@ -10032,10 +10023,8 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 modelo = (p.get('modelo') or '').strip()
                 subcategoria = (p.get('subcategoria') or '').strip()
                 descripcion = (p.get('descripcion') or '').strip()
-                
                 # Construir nombre de servicio descriptivo
                 servicio_descriptivo = f"{categoria} {linea} {modelo}".strip()
-                
                 # Si está vacío, usar fallback
                 if not servicio_descriptivo:
                     servicio_descriptivo = modelo or subcategoria or categoria or ''
@@ -10043,9 +10032,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 # Limpiar descripción (remover URLs)
                 descripcion_limpia = descripcion
                 if 'http://' in descripcion_limpia or 'https://' in descripcion_limpia:
-                    
                     descripcion_limpia = re.sub(r'https?://\S+', '', descripcion_limpia).strip()
-                
                 catalog_list.append({
                     "sku": (p.get('sku') or '').strip(),
                     "categoria": categoria,           # NUEVO
@@ -10063,7 +10050,6 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
             except Exception as e:
                 app.logger.error(f"Error construyendo catalog_list item: {e}")
                 continue
-
         transferencia = obtener_datos_de_transferencia(config) or []
         transfer_list = []
         for t in transferencia:
@@ -10075,9 +10061,7 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
                 })
             except Exception:
                 continue
-        
         asesores_block = format_asesores_block(cfg_full)
-        
         try:
             negocio_cfg = (cfg_full.get('negocio') or {})
             negocio_descripcion = (negocio_cfg.get('descripcion') or '').strip()
@@ -10089,14 +10073,12 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         except Exception:
             negocio_descripcion_short = ""
             negocio_que_hace_short = ""
-        
         try:
             ia_nombre = (cfg_full.get('negocio') or {}).get('ia_nombre') or (cfg_full.get('negocio') or {}).get('app_nombre') or "Asistente"
             negocio_nombre = (cfg_full.get('negocio') or {}).get('negocio_nombre') or ""
         except Exception:
             ia_nombre = "Asistente"
             negocio_nombre = ""
-        
         multimodal_info = ""
         if es_imagen:
             multimodal_info += "El mensaje incluye una imagen enviada por el usuario.\n"
@@ -10113,11 +10095,9 @@ def procesar_mensaje_unificado(msg, numero, texto, es_imagen, es_audio, config,
         # --- LÓGICA DE MEMORIA PARA EVITAR REPETICIONES ---
         # Analizamos si la IA ya respondió antes para que no se vuelva a presentar
         ia_ya_respondio = any(m.get('role') == 'assistant' for m in historial)
-
         # Si ya respondió, limpiamos la identidad para que no la repita
         identidad_dinamica = f'Tu nombre es "{ia_nombre}" y el negocio se llama "{negocio_nombre}".' if not ia_ya_respondio else "Ya te presentaste. NO repitas tu nombre."
         info_negocio_dinamica = f'Descripción: {negocio_descripcion_short} | Rol: {negocio_que_hace_short}' if not ia_ya_respondio else "Responde directo a la duda sin dar descripciones del negocio."
-
         # --- System prompt (REEMPLAZO COMPLETO) ---
         print(f"DEBUG 3 (IA TOTAL): ia_nombre={config.get('ia_nombre')}, negocio={config.get('negocio_nombre')}")
         system_prompt = f"""
@@ -10216,7 +10196,6 @@ EJEMPLOS:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(user_content, ensure_ascii=False)}
         ]
-
         headers = {"Authorization": f"Bearer {DEEPSEEK_API_KEY}", "Content-Type": "application/json"}
         payload = {"model": "deepseek-chat", "messages": payload_messages, "temperature": 0.2, "max_tokens": 800}
 
@@ -10247,15 +10226,12 @@ EJEMPLOS:
                 registrar_respuesta_bot(numero, texto, fallback_text, config, incoming_saved=incoming_saved)
                 return True
             return False
-
         try:
             decision = json.loads(match.group(1))
         except Exception as e:
             app.logger.error(f"🔴 Error parseando JSON IA: {e} -- raw snippet: {match.group(1)[:500]}")
             return False
-
         intent = (decision.get('intent') or 'NO_ACTION').upper()
-        
         # --- NUEVO: Recalcular interés basado en contexto IA ---
         nivel_interes_ia = (decision.get('nivel_interes') or 'BAJO').upper()
         try:
@@ -10264,7 +10240,6 @@ EJEMPLOS:
         except Exception as e:
             app.logger.error(f"Error recalculando interés: {e}")
         # ------------------------------------------------------
-
         respuesta_text = decision.get('respuesta_text') or ""
         image_field = decision.get('image')
         document_field = decision.get('document')
@@ -10272,9 +10247,7 @@ EJEMPLOS:
         notify_asesor = bool(decision.get('notify_asesor'))
         followups = decision.get('followups') or []
         source = decision.get('source') or "none"
-        
         # --- Lógica de Intenciones (SIN CAMBIOS EN LA LÓGICA DE ENVÍO) ---
-        
         if source == "catalog" and decision.get('save_cita'):
             svc = decision['save_cita'].get('servicio_solicitado') or ""
             svc_lower = svc.strip().lower()
@@ -10338,14 +10311,12 @@ EJEMPLOS:
             try:
                 # Intentamos enviar el PDF/Catálogo físico
                 sent_pdf = enviar_catalogo(numero, original_text=texto, config=config)
-                
                 if sent_pdf:
                     app.logger.info(f"✅ PDF enviado. Terminando flujo.")
                     # Usamos una respuesta genérica que sirve para cualquier documento
                     msg_confirmacion = "Te he enviado el documento solicitado."
                     registrar_respuesta_bot(numero, texto, msg_confirmacion, config, incoming_saved=incoming_saved)
                     return True # <--- AQUÍ CORTAMOS. Si hubo PDF, ya no busca fichas en la DB.
-                
                 app.logger.info(f"⚠️ No se encontró PDF. El código seguirá para buscar fichas en DB.")
             except Exception as e:
                 app.logger.error(f"🔴 Error en bloque catálogo: {e}")
@@ -10374,8 +10345,6 @@ EJEMPLOS:
                     config=config,
                     respuesta_tipo='imagen',           # <--- Para que el JS sepa que es imagen
                     respuesta_media_url=bot_media_url_to_save # <--- La URL de la silla
-
-            
                 # registrar_respuesta_bot(
                 #    numero, texto, respuesta_text, config,
                 #    incoming_saved=incoming_saved,
@@ -10385,7 +10354,6 @@ EJEMPLOS:
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando imagen: {e}")
-
         if intent == "ENVIAR_DOCUMENTO" and document_field:
             try:
                 if numero.startswith('tg_'):
@@ -10400,23 +10368,19 @@ EJEMPLOS:
                     # --- CAMBIO AQUÍ: Usar la lógica inteligente en lugar de confiar en document_field ---
                     app.logger.info(f"📚 Usando enviar_catalogo para validar documento: {document_field}")
                     sent = enviar_catalogo(numero, original_text=texto, config=config)
-                    
                     if not sent:
                         # Si falló enviar el PDF, al menos enviamos el texto que preparó la IA
                         enviar_mensaje(numero, respuesta_text, config)
-                
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, imagen_url=document_field, es_imagen=False, incoming_saved=incoming_saved)
                 return True
             except Exception as e:
                 app.logger.error(f"🔴 Error enviando documento: {e}")
-                
         if intent == "PASAR_ASESOR" or notify_asesor is True or "asesor" in respuesta_text.lower():
             app.logger.info(f"🚀 DISPARANDO ALERTA: Pasando {numero} a un asesor.")
             sent = pasar_contacto_asesor(numero, config=config, notificar_asesor=True)
             # Si la IA no preparó un texto, ponemos uno por defecto para el cliente
             mensaje_para_cliente = respuesta_text or "Claro, en un momento un asesor humano te contactará."
             # mensaje_respuesta_final = respuesta_text or "El asistente pasó la conversación a un asesor humano."
-            
             if numero.startswith('tg_'):
                 telegram_token = config.get('telegram_token')
                 if telegram_token:
@@ -10435,7 +10399,6 @@ EJEMPLOS:
             registrar_respuesta_bot(numero, texto, mensaje_respuesta_final, config, incoming_saved=incoming_saved)
             app.logger.info(f"✅ Alerta enviada y cliente notificado.")
             return True
-
         if intent == "DATOS_TRANSFERENCIA":
             sent = enviar_datos_transferencia(numero, config=config)
             if not sent:
@@ -10457,13 +10420,10 @@ EJEMPLOS:
         # RESPUESTA TEXTUAL (Y DE AUDIO) POR DEFECTO
         if respuesta_text:
             respuesta_text = aplicar_restricciones(respuesta_text, numero, config)
-            
             audio_url_publica = None
             audio_path_local = None
             is_telegram_client = numero.startswith('tg_')
-
             should_respond_with_voice = es_audio 
-            
             if should_respond_with_voice and respuesta_text:
                 # AGREGAR ESTO:
                 print(f"🖨️ PRINT ======== SECCIÓN AUDIO ========")
@@ -10481,34 +10441,27 @@ EJEMPLOS:
                     filename = f"respuesta_{numero}_{int(time.time())}"
                     print(f"🖨️ PRINT - filename: {filename}")
                     audio_url_publica = texto_a_voz(respuesta_text, filename, config, voz=tono_configurado)
-                    
                     print(f"🖨️ PRINT - audio_url_publica retornado: {audio_url_publica}")
                     print(f"🖨️ PRINT - Tipo: {type(audio_url_publica)}")
-                    
                     if audio_url_publica and not urlparse(audio_url_publica).scheme in ('file', ''):
                         filename_only = basename(urlparse(audio_url_publica).path)    
                         audio_path_local = os.path.join(UPLOAD_FOLDER, filename_only)
                         app.logger.info(f"💾 Audio Ruta Local deducida: {audio_path_local}")
-                    
                 except Exception as e:
                     app.logger.error(f"🔴 Error al procesar respuesta de audio: {e}")
                     audio_url_publica = None 
-            
             if is_telegram_client:
                 telegram_token = config.get('telegram_token')
                 chat_id = numero.replace('tg_', '')
                 sent_audio = False
-                
                 if telegram_token and audio_path_local and os.path.exists(audio_path_local): 
                     app.logger.info(f"🔊 TELEGRAM: Intentando enviar audio. Ruta Local Verificada: {audio_path_local}") 
-                    
                     sent_audio = send_telegram_voice(
                         chat_id=chat_id, 
                         audio_file_path=audio_path_local, 
                         token_bot=telegram_token, 
                         caption=respuesta_text
                     )
-
                     if sent_audio:
                         app.logger.info(f"✅ TELEGRAM: Respuesta de audio enviada a {numero}")
                         registrar_respuesta_bot(
@@ -10525,7 +10478,6 @@ EJEMPLOS:
                     send_telegram_message(chat_id, respuesta_text, telegram_token) 
                 else:
                     app.logger.error(f"❌ TELEGRAM: No se encontró token para el tenant {config['dominio']}")
-                
                 registrar_respuesta_bot(
                     numero, texto, respuesta_text, config, 
                     incoming_saved=incoming_saved, 
@@ -10533,7 +10485,6 @@ EJEMPLOS:
                     respuesta_media_url=None   
                 )
                 return True
-            
             else:
                 # Es WhatsApp o Messenger
                 sent_audio = False
@@ -10542,33 +10493,25 @@ EJEMPLOS:
                     # --- CORRECCIÓN DE ENVÍO ---
                     # Extraemos el nombre del archivo (ej: respuesta_123.ogg)
                     filename_only = os.path.basename(urlparse(audio_url_publica).path)
-                    
                     # Forzamos la URL para que use nuestro PROXY (esto arregla el reproductor en WA)
                     audio_url_publica = f"{request.url_root.rstrip('/')}/proxy-audio/{filename_only}"
-                    
                     app.logger.info(f"🔗 URL Proxy enviada a WhatsApp: {audio_url_publica}")
-                    
                     # Enviamos el audio con la URL del proxy
                     sent_audio = enviar_mensaje_voz(numero, audio_url_publica, config)
-                    
                     if sent_audio:
                          app.logger.info(f"✅ Audio (WA) enviado a {numero}")
-                         
                          if respuesta_text:
                              enviar_mensaje(numero, respuesta_text, config) # Envía texto a WA/FB
                              app.logger.info(f"✅ Texto de respuesta adjunto enviado.")
-                             
                          registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='audio', respuesta_media_url=audio_url_publica)
                          return True
                     else:
                          app.logger.error(f"🔴 DEBUG - texto_a_voz retornó None o falló")
                          app.logger.warning("⚠️ Envío de audio falló. Enviando como texto.")
-                        
                 # Fallback a texto (WhatsApp y Messenger)
                 enviar_mensaje(numero, respuesta_text, config) 
                 registrar_respuesta_bot(numero, texto, respuesta_text, config, incoming_saved=incoming_saved, respuesta_tipo='texto', respuesta_media_url=None)
                 return True
-
     except requests.exceptions.RequestException as e:
         app.logger.error(f"🔴 Error llamando a la API de IA: {e}")
         if hasattr(e, 'response') and e.response is not None:
@@ -10578,7 +10521,7 @@ EJEMPLOS:
         app.logger.error(f"🔴 Error inesperado en procesar_mensaje_unificado: {e}")
         app.logger.error(traceback.format_exc())
         return False
-
+        
 def fichas_ia_total(numero, texto, es_audio, config, incoming_saved):
     """
     Función extraída: Mantiene la lógica EXACTA de producción.
