@@ -102,7 +102,7 @@ def _ensure_precios_subscription_columns(config=None):
     except Exception as e:
         logger.warning(f"⚠️ _ensure_precios_subscription_columns failed: {e}")
 
-def obtener_conexion_db(config):
+def obtener_conexion_db_VIEJA2(config):
     """
     Helper for special heuristics you previously had: returns a direct connection using config.
     Kept for backward compatibility with existing callers that expect obtener_conexion_db(config).
